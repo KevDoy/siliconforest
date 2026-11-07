@@ -13,3 +13,8 @@ result-*
 *.dmg
 *.kc
 .DS_Store
+.source-cache/
+.build/
+*.o
+*.exe
+*.bundle
