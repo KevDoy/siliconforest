@@ -27,6 +27,7 @@ def command(args: list[str], timeout: int=60) -> dict:
 def main(argv: list[str]|None=None)->int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sanitize',action='store_true')
+    parser.add_argument('--cross',action='store_true',help='Also compile our core for Darwin ARM64 and Linux AArch64; no target execution')
     parser.add_argument('--cc',default=None)
     parser.add_argument('--report',type=Path,default=ROOT/'.build/checks.json')
     a=parser.parse_args(argv)
@@ -37,31 +38,47 @@ def main(argv: list[str]|None=None)->int:
     unit={"run":result.testsRun,"failures":len(result.failures),"errors":len(result.errors),"skipped":len(result.skipped),"passed":result.wasSuccessful()}
     print(log.getvalue(),end='')
     cc=a.cc or shutil.which('clang') or shutil.which('cc')
-    c_results=[]; compiler=None; c_count=0
+    c_results=[]; compiler=None; c_count=0; c_suites=[]
     if cc:
         compiler=command([cc,'--version'])
         flags=['-std=c11','-Wall','-Wextra','-Werror','-Wpedantic','-O1','-g']
         if a.sanitize:flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
-        binary=build/('buffer-lifetime-tests.exe' if os.name=='nt' else 'buffer-lifetime-tests')
-        compile_result=command([cc,*flags,'-Icontracts','contracts/buffer_lifetime.c','tests/c/test_buffer_lifetime.c','-o',str(binary)])
-        c_results.append(compile_result)
-        if compile_result['returncode']==0:
-            run=command([str(binary)])
-            c_results.append(run)
-            match=re.search(r'^1\.\.(\d+)$',run['stdout'],re.M)
-            c_count=int(match.group(1)) if match else 0
+        suites=[
+            ('buffer-lifetime',['contracts/buffer_lifetime.c','tests/c/test_buffer_lifetime.c']),
+            ('backing-store',['contracts/buffer_lifetime.c','core/backing_store.c','tests/c/test_backing_store.c']),
+        ]
+        for name, sources in suites:
+            binary=build/(name+('-tests.exe' if os.name=='nt' else '-tests'))
+            compile_result=command([cc,*flags,'-Icontracts','-Icore',*sources,'-o',str(binary)])
+            c_results.append(compile_result)
+            groups=0
+            if compile_result['returncode']==0:
+                run=command([str(binary)])
+                c_results.append(run)
+                match=re.search(r'^1\.\.(\d+)$',run['stdout'],re.M)
+                groups=int(match.group(1)) if match and run['returncode']==0 else 0
+            c_count+=groups
+            c_suites.append({'name':name,'passed_groups':groups})
         # Freestanding compile only. Compiler runtime helpers may still be emitted.
-        c_results.append(command([cc,'-std=c11','-ffreestanding','-fno-builtin','-Wall','-Wextra','-Werror','-Icontracts','-c','contracts/buffer_lifetime.c','-o',str(build/'lifetime-freestanding.o')]))
+        for src in ('contracts/buffer_lifetime.c','core/backing_store.c'):
+            c_results.append(command([cc,'-std=c11','-ffreestanding','-fno-builtin','-Wall','-Wextra','-Werror',
+                '-Icontracts','-Icore','-c',src,'-o',str(build/(Path(src).stem+'-freestanding.o'))]))
+    cross=None
+    if a.cross:
+        cross_command=command([sys.executable,str(ROOT/'tools/cross_abi.py'),'--report',str(build/'cross-abi.json')])
+        c_results.append(cross_command)
+        if (build/'cross-abi.json').is_file():
+            cross=json.loads((build/'cross-abi.json').read_text())
     for item in c_results:
         print('$',' '.join(item['command'])); print(item['stdout'],end=''); print(item['stderr'],end='',file=sys.stderr)
-    passed=bool(result.wasSuccessful() and not result.skipped and cc and c_count and all(x['returncode']==0 for x in c_results))
-    source_files=sorted({p for folder in ('tools','tests','contracts') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in {'.py','.c','.h'}})
+    passed=bool(result.wasSuccessful() and not result.skipped and cc and len(c_suites)==2 and all(x['passed_groups']>0 for x in c_suites) and all(x['returncode']==0 for x in c_results))
+    source_files=sorted({p for folder in ('tools','tests','contracts','core') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in {'.py','.c','.h'}})
     source_hashes={p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files}
     report={"schema_version":1,"tested_source_sha256":source_hashes,"started_at":started,"host":{"system":platform.system(),"machine":platform.machine(),"python":platform.python_version()},
             "status":"PASSED_LOCAL_TOOLING" if passed else "FAILED_OR_INCOMPLETE", "unit_tests":unit,
-            "native_c_test_groups":c_count,"sanitizers_requested":a.sanitize,"compiler":compiler,"c_commands":c_results,
+            "native_c_test_groups":c_count,"native_c_suites":c_suites,"cross_requested":a.cross,"cross_compilation":cross,"sanitizers_requested":a.sanitize,"compiler":compiler,"c_commands":c_results,
             "os_built":False,"xnu_booted":False,"gpu_tested":False,"hardware_accessed":False,
-            "limits":["Native tests exercise an original policy model, not the Omacom or PureDarwin driver.",
+            "limits":["Native tests exercise original policy/coordinator code and a host allocator, not Omacom or PureDarwin drivers.",
                       "Synthetic C layout tests do not establish Darwin or Asahi ABI compatibility.",
                       "No live network acquisition or GitHub publication is tested by this command."]}
     a.report.parent.mkdir(parents=True,exist_ok=True)
