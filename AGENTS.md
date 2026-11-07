@@ -61,3 +61,19 @@ operations need common serialization. DRAINED does not mean callback threads or
 kernel pager teardown have finished. Never free/reuse a ticket or unload its code
 until the real producer is detached/joined; no such kernel mechanism exists here.
 Source observations of the pager are partial inspections, not full-byte proofs.
+
+## Experimental XNU RAM probe (increment 004)
+
+The IOKit C++ candidate is NOT kernel-compiled. Do not claim that native C tests
+or target relocatable objects compile this adapter. `stage_puredarwin.py` only
+applies source with explicit opt-in to an exact clean checkout; no Nix/build/boot
+backend is added. Candidate source is privileged VM-only research code.
+
+Mapped kernel-provider backing is intentionally quarantined until reboot. The
+capability for safe mapped reclamation is absent and must not be enabled based
+on host tests. Exit 77 from the device exerciser means BLOCKED, never PASS. The
+host POSIX control opens an unlinked temporary file; it is not a fake device.
+
+New local checks:
+`python3 tools/check_mutations.py --suite memory-probe` and
+`python3 tools/cross_abi.py --spec specs/probe-protocol-layout-probe.json`.

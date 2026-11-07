@@ -4,7 +4,7 @@ This is a future checklist, not a request to interrupt the Btrfs repair. Do not 
 
 ## 1. Put the preparation bundle in a healthy workspace
 
-Run the offline helper tests. Record Python/OS/tool versions used. Initialize a Git repository only when its destination and publication policy are chosen. This bundle has not created a remote repository.
+Run the offline helper tests. Record Python/OS/tool versions used. The bundle already contains committed Git history. Verify the checkpoint and keep the baseline checkout separate from the experimental integration checkout. No remote repository has been created.
 
 ## 2. Validate the candidate source registry
 
@@ -29,3 +29,17 @@ Record the actual m1n1 revision, known-good target, kernel/firmware profile, pro
 Test transport discovery, exclusive access, logging, failure handling and recovery against the existing known-good procedure before replacing the guest kernel. Do not enable blind reboot loops. Then attempt one independently built XNU payload with explicit approval and preserved output.
 
 Documentation references and dates are in `docs/SOURCES.md`. None of these setup or hardware steps was executed when creating this bundle.
+
+## 6. Build-gate the RAM-only integration candidate
+
+After the unmodified ARM64 VM baseline, follow `docs/XNU_RAM_PROBE.md` in a
+separate checkout. Use the stage tool's dry run first. It does not create a Nix
+output or prove kernel-collection inclusion/startup. Compile the candidate against
+the pinned SDK and fix actual diagnostics without successful substitutes for
+missing kernel APIs. Cross-build the userspace exerciser with that same SDK.
+
+The first device criterion is the **unmapped** allocation/close/reclaim test. The
+mapped test deliberately cannot yet pass final backing reclamation: the kernel
+provider quarantines exported pages pending a real finalization proof. Record a
+BLOCKED result accurately. Do not connect the M5 or enable GPU DMA to work around
+this VM-only memory-lifetime gate.
