@@ -1,42 +1,113 @@
-# Darwin Apple Silicon: pre-development starter
+# Darwin Lab
 
-Prepared for Chris Kearney on November 7, 2026. This is a local starter bundle, not a published GitHub repository or a bootable OS. The directory name is a working label, not a product-name decision.
+An experimental Apple Silicon Darwin/XNU project, with Omacom's m1n1,
+Linux Aurora and Mesa integration branches as the primary hardware references,
+and Chonkstep as the intended desktop. `darwin-lab` is a working repository
+name, not a final OS brand.
 
-## What exists
+**Implemented now:** source acquisition/verification tooling, a lexical driver
+inventory, enum comparison and C layout probes, and an executable buffer-lifetime
+policy with regression tests. **Not implemented:** a working XNU platform port,
+a GPU driver, a Darwin Chonkstep backend, or hardware boot automation.
 
-A candidate source registry imported from the earlier audit; proposed architecture and milestones; a target inventory template; porting contracts; a task backlog; and a small, standard-library-only Python utility with offline tests. The original audit and manifest are preserved in `archive/`.
+The recovering Linux machine has not been used. The M5 remains the future
+USB/debug controller. No target model is assumed.
 
-The utility validates metadata, prints a blocked hardware-test plan, hashes regular files, and summarizes synthetic or explicitly unverified log observations. It has no network, SSH, USB, flashing, boot, source-checkout, or subprocess execution implementation.
+## Run the actual tests
 
-**No XNU, m1n1, Mesa, PureDarwin, or Chonkstep build has been run for this bundle. No real target has been booted. Source pins were imported, not independently revalidated.** A passing helper test is not an operating-system milestone.
-
-## Machine roles
-
-The repaired Linux machine will build and run development tests. The M5 Mac remains the USB/proxy/debug controller. A separate Apple Silicon target remains unspecified. Nothing here requires writing to or accessing the Btrfs filesystem under repair.
-
-## Offline quick start
-
-Use an existing Python 3.10+ interpreter on a healthy machine. These commands require no package installation:
+Python 3.10+ and a native C11 compiler are sufficient. There are no Python package
+dependencies. On a healthy Linux or macOS workspace:
 
 ```sh
-python3 -m unittest discover -s tests -v
+python3 tools/check.py --sanitize
 python3 tools/lab.py validate
 python3 tools/lab.py plan
-python3 tools/lab.py inspect-log fixtures/entry-console.jsonl --run-id fixture-run --kind fixture
-python3 tools/lab.py hash README.md
 ```
 
-`validate` checks syntax and local metadata consistency, not remote repository existence. `plan` returns `BLOCKED`, intentionally. `inspect-log` reports observations, never a hardware PASS. All commands print JSON or test output and do not modify an existing machine configuration.
+The first command compiles and executes **our C reference policy and synthetic
+ABI fixtures**, not upstream driver code. The last command remains `BLOCKED` and
+has no hardware backend. Omit `--sanitize` only when your compiler lacks the
+sanitizer runtime; that is a weaker test run and is recorded accordingly.
 
-## Start reading
+See `reports/checks.json` and its adjacent test log for the completed local run.
+GitHub Actions is configured but **has not run on GitHub**.
 
-- `docs/PREPARATION_PLAN.md`: work possible now and work that must wait.
-- `docs/ARCHITECTURE.md`: working decisions and unresolved choices.
-- `docs/FIRST_LINUX_SESSION.md`: future setup sequence, after recovery.
-- `specs/BOOT_CONTRACT.md`: boot handoff and test-controller boundaries.
-- `specs/GRAPHICS_CONTRACT.md`: memory and ABI acceptance tests.
-- `docs/EXPERIENCE_BRIEF.md`: product goals and application milestones.
-- `planning/tasks.json`: ordered tasks and acceptance criteria.
-- `AGENTS.md`: contributor and coding-agent constraints.
+## Useful commands
 
-No third-party driver implementation, SDK, firmware, or API credentials are bundled. Project licensing and redistribution decisions remain open; do not infer license clearance from this scaffold.
+```sh
+# No network: review pinned file acquisition.
+python3 tools/acquire_sources.py plan --repo omacom/linux-aurora
+
+# Explicit network opt-in, on a healthy machine. Downloads source only.
+# Fails rather than accept a hash mismatch or overwrite a corrupt cached file.
+python3 tools/acquire_sources.py fetch --allow-network --repo omacom/linux-aurora
+
+# Lexical inventory, not compiler/type analysis.
+python3 tools/source_inventory.py path/to/driver.rs path/to/gem.rs
+
+# Exit 0: enum values match; exit 1: difference; exit 2: unsupported/input error.
+python3 tools/uapi_contract.py enum kernel/asahi_drm.h mesa/asahi_drm.h
+
+# Generate a real SDK-specific sizeof/alignof/offsetof/constant probe.
+python3 tools/uapi_contract.py generate-probe specs/pd-dri-layout-probe.json > probe.c
+```
+
+Compile a generated probe separately with each reviewed target toolchain and
+header set. Never label a Linux-host layout result as a Darwin ARM64 result.
+`specs/pd-dri-layout-probe.json` intentionally labels its existing capture
+`linux-x86_64-host-only`.
+
+## GitHub publication
+
+This repository was created and committed locally. The connected GitHub toolset
+in the development session exposed reads only. **No remote repository, issue,
+PR, push, or CI run was created.** Intended destination:
+`chriskearney/darwin-lab`, private.
+
+The ZIP includes `.git` history and has no remotes. After extraction, inspect the
+code, authenticate `gh` through its normal login flow, and run:
+
+```sh
+python3 tools/publish_github.py           # Plan only; no subprocess or network.
+python3 tools/publish_github.py --execute # Creates a private repo and pushes.
+```
+
+The publisher checks the account, clean main branch, and absence of existing
+remotes. It never force-pushes or deletes a repository. It verifies visibility
+and the remote commit after pushing. A partial failure must be inspected rather
+than blindly retried. Its write-path unit tests use mocks; no live publication
+was possible in the development session.
+
+Using the separate Git bundle instead of the ZIP:
+
+```sh
+git clone --origin imported-bundle --branch main /path/to/darwin-lab-2026-11-07.bundle darwin-lab
+cd darwin-lab
+git remote remove imported-bundle
+```
+
+## Start here
+
+- `docs/SPRINT_001.md`: what was built, tested, and deliberately not claimed.
+- `docs/PORTING_MAP.md`: selected Linux dependencies and XNU adapter obligations.
+- `specs/BUFFER_LIFETIME.md`: executable policy and integration limits.
+- `docs/SOURCE_VERIFICATION.md`: provenance levels and how to obtain full sources.
+- `planning/sprint-001.json`: local completion evidence and next tasks.
+- `planning/issues/`: issue drafts, not created GitHub issues.
+- `AGENTS.md`: boundaries for later coding agents.
+
+## Repository layout
+
+```text
+contracts/   Freestanding C reference policy, not kernel-integrated code
+specs/       Boot/graphics/policy contracts and a real-header layout probe spec
+tools/       Tested Python CLI tools; live actions require explicit opt-in
+tests/      Python tests and compiled C regression/adversarial tests
+reports/     Results from this development session, with scope and limitations
+archive/     Original audit, candidate pins, and old scaffold evidence
+planning/    Work items and unpublished issue drafts
+```
+
+Downloaded sources, firmware, credentials, binaries, private logs, and build
+outputs are excluded. Upstream code is not redistributed in this package.
+No project-wide distribution license has been selected; see `LICENSE_STATUS.md`.

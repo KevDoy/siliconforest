@@ -1,0 +1,24 @@
+name: Offline laboratory contracts
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test Python tools and C contracts with sanitizers
+        run: python3 tools/check.py --sanitize
+      - name: Validate metadata and ensure hardware execution remains blocked
+        run: |
+          python3 tools/lab.py validate
+          python3 tools/lab.py plan > .build/hardware-plan.json
+          python3 -c 'import json; p=json.load(open(".build/hardware-plan.json")); assert p["execution_permitted"] is False'
+# No self-hosted runners, firmware, secrets, network source fetch, or boot tests.
