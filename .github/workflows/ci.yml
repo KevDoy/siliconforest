@@ -9,13 +9,24 @@ jobs:
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: clang
+            flags: --sanitize --cross
+          - cc: gcc
+            flags: ""
     steps:
       - name: Check out project
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
       - name: Test Python tools and C contracts with sanitizers
-        run: python3 tools/check.py --sanitize
+        run: python3 tools/check.py --cc ${{ matrix.cc }} ${{ matrix.flags }}
+      - name: Check deliberately broken variants
+        if: matrix.cc == 'clang'
+        run: python3 tools/check_mutations.py --cc clang
       - name: Validate metadata and ensure hardware execution remains blocked
         run: |
           python3 tools/lab.py validate

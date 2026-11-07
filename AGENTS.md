@@ -32,7 +32,8 @@ or passing policy tests as a kernel boot, working GPU, ABI proof or app support.
 ## Required local checks
 
 ```sh
-python3 tools/check.py --sanitize
+python3 tools/check.py --sanitize --cross
+python3 tools/check_mutations.py
 python3 tools/lab.py validate
 python3 tools/lab.py plan
 python3 tools/acquire_sources.py plan
@@ -43,3 +44,11 @@ The final two commands are dry runs, not downloads or publication. Do not add
 self-hosted hardware runners to pull-request CI. A later hardware backend needs
 an explicit target profile, tested recovery, matching pinned m1n1 host/target,
 artifact hashes and host-enforced authorization separate from guest output.
+
+## New backing-store boundary
+
+`core/backing_store` requires caller serialization and explicit collection from
+a context permitting blocking destruction. Providers must honor atomic failure
+contracts. Do not turn simulated acknowledgements into claimed device facts.
+The cross-ABI tool measures our original types with compiler builtins, not a
+Darwin SDK or Asahi runtime. No target executable is run.

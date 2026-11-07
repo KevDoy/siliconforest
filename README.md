@@ -5,9 +5,11 @@ Linux Aurora and Mesa integration branches as the primary hardware references,
 and Chonkstep as the intended desktop. `darwin-lab` is a working repository
 name, not a final OS brand.
 
-**Implemented now:** source acquisition/verification tooling, a lexical driver
-inventory, enum comparison and C layout probes, and an executable buffer-lifetime
-policy with regression tests. **Not implemented:** a working XNU platform port,
+**Implemented now:** verified-source tooling, a lexical driver inventory,
+enum/layout probes, an executable lifetime policy, and a provider-backed memory
+coordinator with real host-allocation tests. Compile-only checks emit ARM64
+Mach-O and AArch64 ELF objects and measure our selected C layouts. These are
+portable components, not a native XNU driver. **Not implemented:** a working XNU platform port,
 a GPU driver, a Darwin Chonkstep backend, or hardware boot automation.
 
 The recovering Linux machine has not been used. The M5 remains the future
@@ -19,17 +21,19 @@ Python 3.10+ and a native C11 compiler are sufficient. There are no Python packa
 dependencies. On a healthy Linux or macOS workspace:
 
 ```sh
-python3 tools/check.py --sanitize
+python3 tools/check.py --sanitize --cross
 python3 tools/lab.py validate
 python3 tools/lab.py plan
 ```
 
-The first command compiles and executes **our C reference policy and synthetic
-ABI fixtures**, not upstream driver code. The last command remains `BLOCKED` and
+The first command compiles and executes **our C policy, backing-store coordinator
+and host test provider**, not upstream driver code. Its `--cross` step emits
+foreign object files but never executes them; that step requires Clang. The last command remains `BLOCKED` and
 has no hardware backend. Omit `--sanitize` only when your compiler lacks the
 sanitizer runtime; that is a weaker test run and is recorded accordingly.
 
-See `reports/checks.json` and its adjacent test log for the completed local run.
+See `reports/sprint-002/checks.json`, `cross-abi.json` and `mutations.json` for
+the latest completed local checks. The prior sprint reports remain historical.
 GitHub Actions is configured but **has not run on GitHub**.
 
 ## Useful commands
@@ -81,14 +85,17 @@ was possible in the development session.
 Using the separate Git bundle instead of the ZIP:
 
 ```sh
-git clone --origin imported-bundle --branch main /path/to/darwin-lab-2026-11-07.bundle darwin-lab
+git clone --origin imported-bundle --branch main /path/to/darwin-lab-sprint-002-2026-11-07.bundle darwin-lab
 cd darwin-lab
 git remote remove imported-bundle
 ```
 
 ## Start here
 
-- `docs/SPRINT_001.md`: what was built, tested, and deliberately not claimed.
+- `docs/SPRINT_002.md`: latest implementation and execution evidence.
+- `docs/BACKING_STORE.md`: ownership, provider contract and missing XNU integration.
+- `docs/CROSS_ABI.md`: compile-only methodology and target limitations.
+- `docs/SPRINT_001.md`: previous development increment.
 - `docs/PORTING_MAP.md`: selected Linux dependencies and XNU adapter obligations.
 - `specs/BUFFER_LIFETIME.md`: executable policy and integration limits.
 - `docs/SOURCE_VERIFICATION.md`: provenance levels and how to obtain full sources.
@@ -99,6 +106,7 @@ git remote remove imported-bundle
 ## Repository layout
 
 ```text
+core/        Portable provider-backed coordinator, not an XNU driver
 contracts/   Freestanding C reference policy, not kernel-integrated code
 specs/       Boot/graphics/policy contracts and a real-header layout probe spec
 tools/       Tested Python CLI tools; live actions require explicit opt-in
