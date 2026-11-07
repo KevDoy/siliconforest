@@ -10,7 +10,11 @@ enum/layout probes, an executable lifetime policy, and a provider-backed memory
 coordinator with real host-allocation tests, plus a source-traced pager-release
 handoff with threaded notification tests. Compile-only checks emit ARM64
 Mach-O and AArch64 ELF objects and measure our selected C layouts. These are
-portable components, not a native XNU driver. **Not implemented:** a working XNU platform port,
+portable components, not a working native XNU driver. Increment 004 adds a
+bounded RAM-probe engine, a real POSIX lifetime exerciser, and a **source-only
+IOKit/PDDRMDri integration candidate**. That C++ adapter has NOT been compiled
+against XNU, linked, loaded or booted. It intentionally quarantines mapped backing
+until the final VM teardown/reuse boundary is verified. **Not implemented:** a working XNU platform port,
 a GPU driver, a Darwin Chonkstep backend, or hardware boot automation.
 
 The recovering Linux machine has not been used. The M5 remains the future
@@ -33,8 +37,8 @@ foreign object files but never executes them; that step requires Clang. The last
 has no hardware backend. Omit `--sanitize` only when your compiler lacks the
 sanitizer runtime; that is a weaker test run and is recorded accordingly.
 
-See `reports/sprint-003/checks.json`, `mapping-abi.json`, `tsan.json` and the mutation reports for
-the latest completed local checks. The prior sprint reports remain historical.
+See `reports/sprint-004/checks-clang.json`, `checks-gcc.json`, `probe-protocol-abi.json`
+and the three mutation reports for the latest completed local checks. The prior sprint reports remain historical.
 GitHub Actions is configured but **has not run on GitHub**.
 
 ## Useful commands
@@ -86,14 +90,16 @@ was possible in the development session.
 Using the separate Git bundle instead of the ZIP:
 
 ```sh
-git clone --origin imported-bundle --branch main /path/to/darwin-lab-sprint-003-2026-11-07.bundle darwin-lab
+git clone --origin imported-bundle --branch main /path/to/darwin-lab-sprint-004-2026-11-07.bundle darwin-lab
 cd darwin-lab
 git remote remove imported-bundle
 ```
 
 ## Start here
 
-- `docs/SPRINT_003.md`: latest implementation and execution evidence.
+- `docs/SPRINT_004.md`: latest implementation and execution evidence.
+- `docs/XNU_RAM_PROBE.md`: candidate kernel integration, staging, acceptance gates.
+- `docs/SPRINT_003.md`: previous mapping-handoff increment.
 - `docs/MAPPING_HANDOFF.md`: inspected pager boundary, ticket lifetime and remaining kernel work.
 - `docs/SPRINT_002.md`: preceding coordinator/cross-compilation increment.
 - `docs/BACKING_STORE.md`: ownership, provider contract and missing XNU integration.
@@ -109,6 +115,9 @@ git remote remove imported-bundle
 ## Repository layout
 
 ```text
+integrations/ Source-only XNU adapter, not a kernel build result
+probe/       Tested RAM-probe protocol/engine, not a physical driver
+userspace/   Actual POSIX control and future explicit device exerciser
 core/        Portable provider-backed coordinator, not an XNU driver
 contracts/   Freestanding C reference policy, not kernel-integrated code
 specs/       Boot/graphics/policy contracts and a real-header layout probe spec
