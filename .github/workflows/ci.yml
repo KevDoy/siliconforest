@@ -26,7 +26,10 @@ jobs:
         run: python3 tools/check.py --cc ${{ matrix.cc }} ${{ matrix.flags }}
       - name: Check deliberately broken variants
         if: matrix.cc == 'clang'
-        run: python3 tools/check_mutations.py --cc clang
+        run: |
+          python3 tools/check_mutations.py --cc clang
+          python3 tools/check_mutations.py --cc clang --suite mapping-ticket --build-dir .build/mapping-mutations --report .build/mapping-mutations.json
+          python3 tools/cross_abi.py --spec specs/mapping-layout-probe.json --build-dir .build/mapping-abi --report .build/mapping-abi.json
       - name: Validate metadata and ensure hardware execution remains blocked
         run: |
           python3 tools/lab.py validate

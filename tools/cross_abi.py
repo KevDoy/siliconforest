@@ -148,7 +148,7 @@ def perform(clang: str, spec: dict[str, Any], build: Path) -> dict[str, Any]:
     if not resource.is_dir(): raise SourceError('Missing compiler builtin headers')
     generated=build/'layout_probe.c'; generated.write_text(generate(spec),encoding='utf-8')
     profiles={}
-    files=['contracts/buffer_lifetime.h','contracts/buffer_lifetime.c','core/backing_store.h','core/backing_store.c']
+    files=['contracts/buffer_lifetime.h','contracts/buffer_lifetime.c','core/backing_store.h','core/backing_store.c','core/mapping_ticket.h','core/mapping_ticket.c']
     for profile,triple in PROFILES.items():
         flags=[clang,'--target='+triple,'-std=c11','-ffreestanding','-nostdinc','-isystem',str(resource),
                '-Wall','-Wextra','-Wpedantic','-Werror','-Icontracts','-Icore']
@@ -160,7 +160,7 @@ def perform(clang: str, spec: dict[str, Any], build: Path) -> dict[str, Any]:
         if profile=='linux-aarch64' and not parsed['target_triple'].startswith('aarch64-unknown-linux-'):
             raise SourceError('Compiler target does not match Linux AArch64 profile')
         objects=[]
-        for src in (files[1],files[3]):
+        for src in (files[1],files[3],files[5]):
             dest=build/(profile+'-'+Path(src).stem+'.o')
             run_command([*flags,'-c',src,'-o',str(dest)],commands)
             data=dest.read_bytes()

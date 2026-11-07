@@ -46,10 +46,11 @@ def main(argv: list[str]|None=None)->int:
         suites=[
             ('buffer-lifetime',['contracts/buffer_lifetime.c','tests/c/test_buffer_lifetime.c']),
             ('backing-store',['contracts/buffer_lifetime.c','core/backing_store.c','tests/c/test_backing_store.c']),
+            ('mapping-ticket',['contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c','tests/c/test_mapping_ticket.c']),
         ]
         for name, sources in suites:
             binary=build/(name+('-tests.exe' if os.name=='nt' else '-tests'))
-            compile_result=command([cc,*flags,'-Icontracts','-Icore',*sources,'-o',str(binary)])
+            compile_result=command([cc,*flags,*(['-pthread'] if name=='mapping-ticket' else []),'-Icontracts','-Icore',*sources,'-o',str(binary)])
             c_results.append(compile_result)
             groups=0
             if compile_result['returncode']==0:
@@ -60,7 +61,7 @@ def main(argv: list[str]|None=None)->int:
             c_count+=groups
             c_suites.append({'name':name,'passed_groups':groups})
         # Freestanding compile only. Compiler runtime helpers may still be emitted.
-        for src in ('contracts/buffer_lifetime.c','core/backing_store.c'):
+        for src in ('contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c'):
             c_results.append(command([cc,'-std=c11','-ffreestanding','-fno-builtin','-Wall','-Wextra','-Werror',
                 '-Icontracts','-Icore','-c',src,'-o',str(build/(Path(src).stem+'-freestanding.o'))]))
     cross=None
@@ -71,7 +72,7 @@ def main(argv: list[str]|None=None)->int:
             cross=json.loads((build/'cross-abi.json').read_text())
     for item in c_results:
         print('$',' '.join(item['command'])); print(item['stdout'],end=''); print(item['stderr'],end='',file=sys.stderr)
-    passed=bool(result.wasSuccessful() and not result.skipped and cc and len(c_suites)==2 and all(x['passed_groups']>0 for x in c_suites) and all(x['returncode']==0 for x in c_results))
+    passed=bool(result.wasSuccessful() and not result.skipped and cc and len(c_suites)==3 and all(x['passed_groups']>0 for x in c_suites) and all(x['returncode']==0 for x in c_results))
     source_files=sorted({p for folder in ('tools','tests','contracts','core') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in {'.py','.c','.h'}})
     source_hashes={p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files}
     report={"schema_version":1,"tested_source_sha256":source_hashes,"started_at":started,"host":{"system":platform.system(),"machine":platform.machine(),"python":platform.python_version()},
