@@ -52,3 +52,12 @@ a context permitting blocking destruction. Providers must honor atomic failure
 contracts. Do not turn simulated acknowledgements into claimed device facts.
 The cross-ABI tool measures our original types with compiler builtins, not a
 Darwin SDK or Asahi runtime. No target executable is run.
+
+## Mapping callback boundary
+
+Mapping tickets are caller-owned, stable-address, zero-initialized and single-use.
+Only the atomic callback notification may run concurrently. All control/store
+operations need common serialization. DRAINED does not mean callback threads or
+kernel pager teardown have finished. Never free/reuse a ticket or unload its code
+until the real producer is detached/joined; no such kernel mechanism exists here.
+Source observations of the pager are partial inspections, not full-byte proofs.

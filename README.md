@@ -7,7 +7,8 @@ name, not a final OS brand.
 
 **Implemented now:** verified-source tooling, a lexical driver inventory,
 enum/layout probes, an executable lifetime policy, and a provider-backed memory
-coordinator with real host-allocation tests. Compile-only checks emit ARM64
+coordinator with real host-allocation tests, plus a source-traced pager-release
+handoff with threaded notification tests. Compile-only checks emit ARM64
 Mach-O and AArch64 ELF objects and measure our selected C layouts. These are
 portable components, not a native XNU driver. **Not implemented:** a working XNU platform port,
 a GPU driver, a Darwin Chonkstep backend, or hardware boot automation.
@@ -32,7 +33,7 @@ foreign object files but never executes them; that step requires Clang. The last
 has no hardware backend. Omit `--sanitize` only when your compiler lacks the
 sanitizer runtime; that is a weaker test run and is recorded accordingly.
 
-See `reports/sprint-002/checks.json`, `cross-abi.json` and `mutations.json` for
+See `reports/sprint-003/checks.json`, `mapping-abi.json`, `tsan.json` and the mutation reports for
 the latest completed local checks. The prior sprint reports remain historical.
 GitHub Actions is configured but **has not run on GitHub**.
 
@@ -85,14 +86,16 @@ was possible in the development session.
 Using the separate Git bundle instead of the ZIP:
 
 ```sh
-git clone --origin imported-bundle --branch main /path/to/darwin-lab-sprint-002-2026-11-07.bundle darwin-lab
+git clone --origin imported-bundle --branch main /path/to/darwin-lab-sprint-003-2026-11-07.bundle darwin-lab
 cd darwin-lab
 git remote remove imported-bundle
 ```
 
 ## Start here
 
-- `docs/SPRINT_002.md`: latest implementation and execution evidence.
+- `docs/SPRINT_003.md`: latest implementation and execution evidence.
+- `docs/MAPPING_HANDOFF.md`: inspected pager boundary, ticket lifetime and remaining kernel work.
+- `docs/SPRINT_002.md`: preceding coordinator/cross-compilation increment.
 - `docs/BACKING_STORE.md`: ownership, provider contract and missing XNU integration.
 - `docs/CROSS_ABI.md`: compile-only methodology and target limitations.
 - `docs/SPRINT_001.md`: previous development increment.
