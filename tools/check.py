@@ -47,10 +47,11 @@ def main(argv: list[str]|None=None)->int:
             ('buffer-lifetime',['contracts/buffer_lifetime.c','tests/c/test_buffer_lifetime.c']),
             ('backing-store',['contracts/buffer_lifetime.c','core/backing_store.c','tests/c/test_backing_store.c']),
             ('mapping-ticket',['contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c','tests/c/test_mapping_ticket.c']),
+            ('memory-probe',['contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c','probe/memory_probe.c','tests/c/test_memory_probe.c']),
         ]
         for name, sources in suites:
             binary=build/(name+('-tests.exe' if os.name=='nt' else '-tests'))
-            compile_result=command([cc,*flags,*(['-pthread'] if name=='mapping-ticket' else []),'-Icontracts','-Icore',*sources,'-o',str(binary)])
+            compile_result=command([cc,*flags,*(['-pthread'] if name=='mapping-ticket' else []),'-Icontracts','-Icore','-Iprobe',*sources,'-o',str(binary)])
             c_results.append(compile_result)
             groups=0
             if compile_result['returncode']==0:
@@ -61,9 +62,14 @@ def main(argv: list[str]|None=None)->int:
             c_count+=groups
             c_suites.append({'name':name,'passed_groups':groups})
         # Freestanding compile only. Compiler runtime helpers may still be emitted.
-        for src in ('contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c'):
+        for src in ('contracts/buffer_lifetime.c','core/backing_store.c','core/mapping_ticket.c','probe/memory_probe.c'):
             c_results.append(command([cc,'-std=c11','-ffreestanding','-fno-builtin','-Wall','-Wextra','-Werror',
-                '-Icontracts','-Icore','-c',src,'-o',str(build/(Path(src).stem+'-freestanding.o'))]))
+                '-Icontracts','-Icore','-Iprobe','-c',src,'-o',str(build/(Path(src).stem+'-freestanding.o'))]))
+        smoke=build/'memory-probe-smoke'
+        smoke_build=command([cc,*flags,'-Iprobe','userspace/memory_probe_smoke.c','-o',str(smoke)])
+        c_results.append(smoke_build)
+        if smoke_build['returncode']==0:
+            c_results.append(command([str(smoke),'--posix-control']))
     cross=None
     if a.cross:
         cross_command=command([sys.executable,str(ROOT/'tools/cross_abi.py'),'--report',str(build/'cross-abi.json')])
@@ -72,15 +78,17 @@ def main(argv: list[str]|None=None)->int:
             cross=json.loads((build/'cross-abi.json').read_text())
     for item in c_results:
         print('$',' '.join(item['command'])); print(item['stdout'],end=''); print(item['stderr'],end='',file=sys.stderr)
-    passed=bool(result.wasSuccessful() and not result.skipped and cc and len(c_suites)==3 and all(x['passed_groups']>0 for x in c_suites) and all(x['returncode']==0 for x in c_results))
-    source_files=sorted({p for folder in ('tools','tests','contracts','core') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in {'.py','.c','.h'}})
+    passed=bool(result.wasSuccessful() and not result.skipped and cc and len(c_suites)==4 and all(x['passed_groups']>0 for x in c_suites) and all(x['returncode']==0 for x in c_results))
+    source_files=sorted({p for folder in ('tools','tests','contracts','core','probe','integrations','userspace') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in {'.py','.c','.h','.cpp'}})
     source_hashes={p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files}
     report={"schema_version":1,"tested_source_sha256":source_hashes,"started_at":started,"host":{"system":platform.system(),"machine":platform.machine(),"python":platform.python_version()},
             "status":"PASSED_LOCAL_TOOLING" if passed else "FAILED_OR_INCOMPLETE", "unit_tests":unit,
             "native_c_test_groups":c_count,"native_c_suites":c_suites,"cross_requested":a.cross,"cross_compilation":cross,"sanitizers_requested":a.sanitize,"compiler":compiler,"c_commands":c_results,
-            "os_built":False,"xnu_booted":False,"gpu_tested":False,"hardware_accessed":False,
+            "xnu_cpp_adapter_compiled":False,"posix_control_is_not_xnu":True,"os_built":False,"xnu_booted":False,"gpu_tested":False,"hardware_accessed":False,
             "limits":["Native tests exercise original policy/coordinator code and a host allocator, not Omacom or PureDarwin drivers.",
                       "Synthetic C layout tests do not establish Darwin or Asahi ABI compatibility.",
+                      "The experimental IOKit C++ adapter is source-only, not compiled or run by these checks.",
+                      "The POSIX control uses real host mappings with a temporary file, not XNU.",
                       "No live network acquisition or GitHub publication is tested by this command."]}
     a.report.parent.mkdir(parents=True,exist_ok=True)
     a.report.write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')

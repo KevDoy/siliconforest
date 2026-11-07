@@ -30,6 +30,8 @@ jobs:
           python3 tools/check_mutations.py --cc clang
           python3 tools/check_mutations.py --cc clang --suite mapping-ticket --build-dir .build/mapping-mutations --report .build/mapping-mutations.json
           python3 tools/cross_abi.py --spec specs/mapping-layout-probe.json --build-dir .build/mapping-abi --report .build/mapping-abi.json
+          python3 tools/check_mutations.py --cc clang --suite memory-probe --build-dir .build/probe-mutations --report .build/probe-mutations.json
+          python3 tools/cross_abi.py --spec specs/probe-protocol-layout-probe.json --build-dir .build/probe-protocol-abi --report .build/probe-protocol-abi.json
       - name: Validate metadata and ensure hardware execution remains blocked
         run: |
           python3 tools/lab.py validate

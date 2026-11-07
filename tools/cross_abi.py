@@ -148,10 +148,10 @@ def perform(clang: str, spec: dict[str, Any], build: Path) -> dict[str, Any]:
     if not resource.is_dir(): raise SourceError('Missing compiler builtin headers')
     generated=build/'layout_probe.c'; generated.write_text(generate(spec),encoding='utf-8')
     profiles={}
-    files=['contracts/buffer_lifetime.h','contracts/buffer_lifetime.c','core/backing_store.h','core/backing_store.c','core/mapping_ticket.h','core/mapping_ticket.c']
+    files=['contracts/buffer_lifetime.h','contracts/buffer_lifetime.c','core/backing_store.h','core/backing_store.c','core/mapping_ticket.h','core/mapping_ticket.c','probe/memory_probe.c','probe/memory_probe.h','probe/memory_probe_protocol.h']
     for profile,triple in PROFILES.items():
         flags=[clang,'--target='+triple,'-std=c11','-ffreestanding','-nostdinc','-isystem',str(resource),
-               '-Wall','-Wextra','-Wpedantic','-Werror','-Icontracts','-Icore']
+               '-Wall','-Wextra','-Wpedantic','-Werror','-Icontracts','-Icore','-Iprobe']
         ir=build/(profile+'.ll')
         run_command([*flags,'-S','-emit-llvm',str(generated),'-o',str(ir)],commands)
         parsed=parse_ir(ir.read_text(),spec)
@@ -160,7 +160,7 @@ def perform(clang: str, spec: dict[str, Any], build: Path) -> dict[str, Any]:
         if profile=='linux-aarch64' and not parsed['target_triple'].startswith('aarch64-unknown-linux-'):
             raise SourceError('Compiler target does not match Linux AArch64 profile')
         objects=[]
-        for src in (files[1],files[3],files[5]):
+        for src in (f for f in files if f.endswith('.c')):
             dest=build/(profile+'-'+Path(src).stem+'.o')
             run_command([*flags,'-c',src,'-o',str(dest)],commands)
             data=dest.read_bytes()

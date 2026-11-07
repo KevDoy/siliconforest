@@ -60,5 +60,10 @@ int dl_store_inspect(const dl_store *, dl_buffer, dl_view *out);
 /* Never called implicitly by close, completion, unmap or quiescence callbacks.
  * Run from a caller-selected context that permits blocking destruction. */
 int dl_store_collect(dl_store *, dl_collection *out);
+/* Synchronous, serialized borrow of retained backing. Requires at least one
+ * live host/device lease. The visitor must not retain the cookie or reenter the
+ * store; no backing is released during the visit. */
+typedef int (*dl_backing_visitor)(void *arg, void *cookie, uint64_t bytes);
+int dl_store_visit_backing(dl_store *, dl_buffer, dl_backing_visitor, void *arg);
 int dl_store_check_invariants(const dl_store *);
 #endif

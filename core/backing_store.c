@@ -132,3 +132,20 @@ int dl_store_check_invariants(const dl_store *s) {
     }
     return sum == s->resident_bytes && sum <= s->byte_limit ? DL_OK : DL_BAD_STATE;
 }
+
+int dl_store_visit_backing(dl_store *s, dl_buffer b, dl_backing_visitor visit,
+                           void *arg) {
+    int status = ready(s);
+    if (status != DL_OK) return status;
+    if (!visit) return DL_INVALID;
+    dl_view view;
+    status = dl_inspect(&s->policy, b, &view);
+    if (status != DL_OK) return status;
+    if (!view.host && !view.device) return DL_BUSY;
+    dl_backing_slot *slot = &s->backing[b.index];
+    if (!slot->occupied || !slot->cookie) return DL_BAD_STATE;
+    s->in_callback = true;
+    status = visit(arg, slot->cookie, view.bytes);
+    s->in_callback = false;
+    return status;
+}

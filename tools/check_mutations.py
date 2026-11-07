@@ -41,14 +41,31 @@ MAPPING_MUTATIONS=[
 ]
 
 
+PROBE_MUTATIONS=[
+    ('ignore_version','if(version!=DLMP_VERSION || flags) return DL_INVALID;',
+     'if(flags) return DL_INVALID; (void)version;'),
+    ('forget_binding','s->bound=true;', 's->bound=false;'),
+    ('forget_export_quarantine','if(v->export_only) v->p->ops.exported(v->p->context,cookie);',
+     'if(v->export_only) { /* deliberately omit provider notification */ }'),
+    ('hide_release_failure','v.backend_failures=c.backend_failures;', 'v.backend_failures=0;'),
+    ('leak_failed_mapping_hold','if(status!=DL_OK) { (void)dl_map_abort(t); return status; }\n    v.export_only=true;',
+     'if(status!=DL_OK) { return status; }\n    v.export_only=true;'),
+    ('forget_owner_close','status = dl_store_close_owner(&p->store, s->buffer);', 'status = DL_OK;'),
+]
+
+
 def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
     directory.mkdir(parents=True,exist_ok=True)
-    source_path='core/mapping_ticket.c' if suite=='mapping-ticket' else 'core/backing_store.c'
-    test_path='tests/c/test_mapping_ticket.c' if suite=='mapping-ticket' else 'tests/c/test_backing_store.c'
-    mutations=MAPPING_MUTATIONS if suite=='mapping-ticket' else MUTATIONS
+    configs={
+        'backing-store':('core/backing_store.c','tests/c/test_backing_store.c',MUTATIONS,[]),
+        'mapping-ticket':('core/mapping_ticket.c','tests/c/test_mapping_ticket.c',MAPPING_MUTATIONS,['core/backing_store.c']),
+        'memory-probe':('probe/memory_probe.c','tests/c/test_memory_probe.c',PROBE_MUTATIONS,['core/backing_store.c','core/mapping_ticket.c']),
+    }
+    if suite not in configs: raise ValueError('Unknown mutation suite')
+    source_path,test_path,mutations,dependencies=configs[suite]
     source=(ROOT/source_path).read_text()
     results=[]
-    flags=['-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Icontracts','-Icore']
+    flags=['-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Icontracts','-Icore','-Iprobe']
     # The unmodified baseline MUST pass using the same compiler/flags/tests.
     for name,before,after in [('unmodified',None,None),*mutations]:
         path=directory/(name+'.c'); binary=directory/name
@@ -57,7 +74,7 @@ def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
         content=source if before is None else source.replace(before,after,1)
         path.write_text(content)
         command=[cc,*flags,*(['-pthread'] if suite=='mapping-ticket' else []),'contracts/buffer_lifetime.c',
-                 *(['core/backing_store.c'] if suite=='mapping-ticket' else []),str(path),test_path,'-o',str(binary)]
+                 *dependencies,str(path),test_path,'-o',str(binary)]
         build=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=30)
         item={'name':name,'compile_command':command,'compile_returncode':build.returncode,'compile_stderr':build.stderr}
         if build.returncode==0:
@@ -79,7 +96,7 @@ def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
 
 def main(argv=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--suite',choices=['backing-store','mapping-ticket'],default='backing-store')
+    p.add_argument('--suite',choices=['backing-store','mapping-ticket','memory-probe'],default='backing-store')
     p.add_argument('--cc');p.add_argument('--report',type=Path,default=ROOT/'.build/mutations.json')
     p.add_argument('--build-dir',type=Path,default=ROOT/'.build/mutations')
     a=p.parse_args(argv)
