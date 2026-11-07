@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+sources/
+artifacts/
+runs/
+private/
+config/lab.local.json
+result
+result-*
+*.im4p
+*.ipsw
+*.dmg
+*.kc
+.DS_Store
