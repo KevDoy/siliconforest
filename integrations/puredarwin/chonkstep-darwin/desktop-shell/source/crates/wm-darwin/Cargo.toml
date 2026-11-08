@@ -1,0 +1,34 @@
+[package]
+name = "wm-darwin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Experimental Chonkstep CPU Wayland compositor for PureDarwin PDGOP"
+
+[features]
+default = []
+darwin-backend = ["dep:smithay", "dep:wm-core", "dep:wm-theme", "dep:wm-theme-api", "dep:tiny-skia", "dep:libc"]
+desktop-shell = ["darwin-backend", "dep:chonk-shell", "dep:wm-config"]
+# Root links the frozen, reviewed-source C object explicitly. This does not
+# enable a desktop CLI or establish Darwin FD-whitelist runtime admission.
+native-managed-spawn = ["desktop-shell"]
+
+[dependencies]
+smithay = { version = "0.7", default-features = false, features = ["wayland_frontend"], optional = true }
+wm-core = { path = "../wm-core", optional = true }
+wm-theme = { path = "../wm-theme", optional = true }
+wm-theme-api = { path = "../wm-theme-api", optional = true }
+tiny-skia = { version = "0.11", optional = true }
+libc = { version = "0.2", optional = true }
+chonk-shell = { path = "../chonk-shell", optional = true }
+wm-config = { path = "../wm-config", optional = true }
+
+[dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+tempfile = "3"
+
+[[bin]]
+name = "chonkstep-darwin"
+path = "src/main.rs"
+required-features = ["darwin-backend"]

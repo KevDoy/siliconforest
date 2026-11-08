@@ -1,0 +1,197 @@
+name: release GitHub Arch packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "preview-v*"
+
+permissions:
+  actions: read
+  contents: read
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: github-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validation-status:
+    name: find validation for this exact revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      reusable: ${{ steps.proof.outputs.reusable }}
+      package_run_id: ${{ steps.proof.outputs.package_run_id }}
+      package_artifact_ids: ${{ steps.proof.outputs.package_artifact_ids }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate release identity even when reusing packages
+        run: bash scripts/release-metadata.sh
+      - name: Check recent main-branch CI and packages
+        id: proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release-validation.sh
+
+  validation:
+    name: validate the release revision
+    needs: validation-status
+    if: needs.validation-status.outputs.reusable != 'true'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      checks: write
+      attestations: write
+      id-token: write
+
+  package:
+    name: build packages when none can be reused
+    needs: validation-status
+    if: needs.validation-status.outputs.package_run_id == ''
+    uses: ./.github/workflows/package.yml
+
+  publish-preview:
+    name: verify packages and publish tagged releases
+    if: >-
+      always() && !cancelled() &&
+      needs.validation-status.result == 'success' &&
+      (needs.package.result == 'success' ||
+       (needs.package.result == 'skipped' && needs.validation-status.outputs.package_run_id != '')) &&
+      (needs.validation.result == 'success' ||
+       (needs.validation.result == 'skipped' && needs.validation-status.outputs.reusable == 'true'))
+    needs: [validation-status, validation, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download the verified packages from main
+        if: needs.validation-status.outputs.package_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.validation-status.outputs.package_run_id }}
+          artifact-ids: ${{ needs.validation-status.outputs.package_artifact_ids }}
+          path: dist
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Download freshly built packages
+        if: needs.validation-status.outputs.package_run_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: chonkstep-package-*
+          path: dist
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Verify package identity and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/verify-release-assets.sh dist
+
+      - name: Verify the assembled release and publish it
+        if: startsWith(github.ref, 'refs/tags/preview-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
+          package_release=$(sed -n 's/^pkgrel=//p' packaging/arch/PKGBUILD-release | head -n1)
+          cd dist
+          test -f "chonkstep-$version-$package_release-x86_64.pkg.tar.zst"
+          test -f "chonkstep-$version-$package_release-aarch64.pkg.tar.zst"
+          # The symbol packages are assets in their own right: without
+          # them a crash report from an installed package symbolises as
+          # `??`, and Arch's debuginfod serves only official packages.
+          # Asserted rather than globbed for, so losing one is a failed
+          # release rather than a quieter one.
+          test -f "chonkstep-debug-$version-$package_release-x86_64.pkg.tar.zst"
+          test -f "chonkstep-debug-$version-$package_release-aarch64.pkg.tar.zst"
+          # The glob takes all four; `chonkstep-debug-*` matches
+          # `chonkstep-*` too, so SHA256SUMS and the asset list below
+          # need no separate entry.
+          LC_ALL=C sha256sum chonkstep-*.pkg.tar.zst | sort -k2 > SHA256SUMS
+
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Native Arch packages for ChonkStep $version while AUR account registration is unavailable.
+
+          See the [ChonkStep $version release notes](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/releases/$version.md) for changes, validation and known limitations.
+
+          The LCOS workflow also attaches an amd64 X11 package and its checksum
+          to this release. See [LCOS installation](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/releases/$version.md#installing-on-lcos)
+          for download and verification instructions.
+
+          Install on x86-64 or ARM64/AArch64 Arch with:
+
+          \`\`\`sh
+          chonkstep_dir="\$(mktemp -d)"
+          chonkstep_arch="\$(uname -m)"
+          chonkstep_pkg="chonkstep-$version-$package_release-\$chonkstep_arch.pkg.tar.zst"
+          curl -fL -o "\$chonkstep_dir/\$chonkstep_pkg" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/\$chonkstep_pkg"
+          curl -fL -o "\$chonkstep_dir/SHA256SUMS" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/SHA256SUMS"
+          (cd "\$chonkstep_dir" && sha256sum --ignore-missing --check SHA256SUMS)
+          sudo pacman -U "\$chonkstep_dir/\$chonkstep_pkg"
+          omarchy install desktop-chonkstep
+          \`\`\`
+
+          Downloading first is required on systems whose pacman configuration
+          requires repository-style signatures for remote package URLs. This
+          preview path uses the checksum above and GitHub build provenance.
+
+          Supported package architectures are \`x86_64\` and \`aarch64\`. The
+          AArch64 package is built natively against Arch Linux ARM; upstream
+          Omarchy itself does not yet provide an official ARM64 installation.
+
+          Verify a downloaded package's GitHub build provenance with:
+
+          \`\`\`sh
+          gh attestation verify "\$chonkstep_dir/\$chonkstep_pkg" --repo $GITHUB_REPOSITORY \
+            --signer-workflow $GITHUB_REPOSITORY/.github/workflows/package.yml
+          \`\`\`
+
+          Each architecture also has a \`chonkstep-debug-\` package. It is not
+          needed to run the desktop, and installing it changes nothing about
+          how the desktop behaves. It carries the debug symbols, so install it
+          before reporting a crash — without it every ChonkStep frame in a
+          coredump reads as \`??\`, and Arch's debuginfod does not carry
+          symbols for packages installed this way:
+
+          \`\`\`sh
+          chonkstep_debug_pkg="chonkstep-debug-$version-$package_release-\$chonkstep_arch.pkg.tar.zst"
+          curl -fL -o "\$chonkstep_dir/\$chonkstep_debug_pkg" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/\$chonkstep_debug_pkg"
+          sudo pacman -U "\$chonkstep_dir/\$chonkstep_debug_pkg"
+          coredumpctl gdb chonkstep-wayland   # now shows file:line, not ??
+          \`\`\`
+
+          \`SHA256SUMS\` covers all four package files, and every one of them
+          carries GitHub build provenance. This is a prerelease distribution
+          path; the eventual stable \`v$version\` tag will also publish the
+          source recipe to the AUR.
+          EOF
+
+          assets=(chonkstep-*.pkg.tar.zst SHA256SUMS)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "ChonkStep $version preview packages (r$package_release)" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --prerelease
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "ChonkStep $version preview packages (r$package_release)" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --prerelease
+          fi
