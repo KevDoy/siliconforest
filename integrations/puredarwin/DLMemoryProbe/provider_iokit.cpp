@@ -27,17 +27,23 @@ void *allocate(void *, uint64_t bytes, uint64_t alignment) {
         if (!candidate.descriptor) { slot = &candidate; break; }
     if (!slot) return nullptr;
     // Kernel allocations are wired by default. No pageable/purgeable option.
-    auto descriptor = IOBufferMemoryDescriptor::inTaskWithOptions(
+    // The pinned default OSPtr API returns one caller-owned raw reference.
+    IOBufferMemoryDescriptor *descriptor = IOBufferMemoryDescriptor::inTaskWithOptions(
         kernel_task, kIODirectionInOut | kIOMemoryKernelUserShared | kIOMemoryMapperNone,
         static_cast<vm_size_t>(bytes), static_cast<vm_offset_t>(alignment));
-    if (!descriptor || descriptor->getLength() < bytes ||
-        !descriptor->getBytesNoCopy()) return nullptr;
-    if (descriptor->prepare(kIODirectionInOut) != kIOReturnSuccess) return nullptr;
+    if (!descriptor) return nullptr;
+    if (descriptor->getLength() < bytes || !descriptor->getBytesNoCopy()) {
+        descriptor->release();
+        return nullptr;
+    }
+    if (descriptor->prepare(kIODirectionInOut) != kIOReturnSuccess) {
+        descriptor->release();
+        return nullptr;
+    }
     // No fallible operations after successful prepare. Zero ALL rounded bytes.
     bzero(descriptor->getBytesNoCopy(), static_cast<size_t>(bytes));
-    auto *raw = descriptor.get();
-    raw->retain(); // one persistent reference after local OSPtr destruction
-    *slot = Allocation{raw, bytes, false, false};
+    // Transfer exactly the factory reference to the persistent allocation slot.
+    *slot = Allocation{descriptor, bytes, false, false};
     return slot;
 }
 

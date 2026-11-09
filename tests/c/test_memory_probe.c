@@ -1,5 +1,8 @@
 #include "memory_probe.h"
 #include "mapping_ticket.h"
+#ifdef NDEBUG
+#error "memory probe tests require active assertions"
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,43 +12,72 @@
 static unsigned tests;
 typedef struct { void *bytes; bool exported; } block;
 typedef struct {
-    unsigned allocs,frees,live,enumerations,exports;
-    bool fail_alloc,fail_pages,fail_release,quarantine,reenter;
+    unsigned allocs,frees,live,enumerations,exports,releases,reentries;
+    bool fail_alloc,fail_pages,fail_release,quarantine,reenter,ignore_export;
     dl_probe *probe;
+    uint64_t owner;
+    block *blocks[DL_BUFFER_CAPACITY];
 } host;
 typedef struct { host h; dl_probe *p; void *storage; uint64_t control,owner; } fixture;
+static void reentry_checks(host *h) {
+    if(!h->reenter) return;
+    ++h->reentries;
+    uint64_t id=0;
+    IS(dl_probe_open(h->probe,&id),DL_BAD_STATE);assert(!id);
+    IS(dl_probe_close(h->probe,h->owner),DL_BAD_STATE);
+    struct dlmp_collect c={.version=DLMP_VERSION};
+    IS(dl_probe_command(h->probe,h->owner,DLMP_OP_COLLECT,&c,sizeof c),DL_BAD_STATE);
+    uint32_t page=0;void (*fn)(void *)=NULL;void *cookie=NULL;
+    IS(dl_probe_map(h->probe,h->owner,0,4096,1,&page,1,&fn,&cookie),DL_BAD_STATE);
+    assert(!page&&!fn&&!cookie);
+}
 static void *allocate(void *arg,uint64_t bytes,uint64_t align) {
     host *h=arg; ++h->allocs;
+    reentry_checks(h);
     if(h->fail_alloc) return NULL;
     block *b=calloc(1,sizeof *b); assert(b);
     b->bytes=aligned_alloc((size_t)align,(size_t)bytes); assert(b->bytes);
     memset(b->bytes,0,(size_t)bytes); ++h->live;
-    if(h->reenter) { uint64_t id=0; IS(dl_probe_open(h->probe,&id),DL_BAD_STATE); }
+    unsigned i=0;while(i<DL_BUFFER_CAPACITY && h->blocks[i]) ++i;
+    assert(i<DL_BUFFER_CAPACITY);h->blocks[i]=b;
     return b;
+}
+static void destroy_block(host *h,block *b) {
+    unsigned i=0;while(i<DL_BUFFER_CAPACITY && h->blocks[i]!=b) ++i;
+    assert(i<DL_BUFFER_CAPACITY);h->blocks[i]=NULL;
+    free(b->bytes);free(b);++h->frees;--h->live;
 }
 static bool release(void *arg,void *cookie,uint64_t bytes) {
     host *h=arg; block *b=cookie; (void)bytes;
+    ++h->releases;reentry_checks(h);
     if(h->fail_release || (h->quarantine && b->exported)) return false;
-    free(b->bytes); free(b); ++h->frees; --h->live; return true;
+    destroy_block(h,b);return true;
 }
 static int pages(void *arg,void *cookie,uint64_t offset,uint64_t bytes,
                  uint64_t page,uint32_t *out,size_t count) {
     host *h=arg; (void)cookie;(void)offset; ++h->enumerations;
-    if(h->reenter) { uint64_t id=0; IS(dl_probe_open(h->probe,&id),DL_BAD_STATE); }
-    if(h->fail_pages) return DL_STORE_BACKEND_ERROR;
+    reentry_checks(h);
+    if(h->fail_pages) { if(count) out[0]=123; return DL_STORE_BACKEND_ERROR; }
     assert(count==bytes/page);
     /* Synthetic page numbers only. No claim of physical host addresses. */
     for(size_t i=0;i<count;i++) out[i]=(uint32_t)(4096+i);
     return DL_OK;
 }
 static void exported(void *arg,void *cookie) {
-    host *h=arg; ((block *)cookie)->exported=true; ++h->exports;
+    host *h=arg;++h->exports;reentry_checks(h);
+    if(!h->ignore_export) ((block *)cookie)->exported=true;
 }
-static void setup(fixture *f,uint64_t page,uint64_t budget) {
+static void setup_caps(fixture *f,uint64_t page,uint64_t budget,uint64_t capabilities) {
     *f=(fixture){0};f->storage=calloc(1,dl_probe_size());assert(f->storage);
-    dl_probe_ops ops={{allocate,release},pages,exported,DLMP_CAP_RAM_ONLY|DLMP_CAP_MAPPED_RECLAIM};
+    dl_probe_ops ops={{allocate,release},pages,exported,capabilities};
     OK(dl_probe_init(f->storage,dl_probe_size(),page,budget,ops,&f->h,&f->p));
     f->h.probe=f->p; OK(dl_probe_open(f->p,&f->control)); OK(dl_probe_open(f->p,&f->owner));
+    f->h.owner=f->owner;
+}
+static void setup(fixture *f,uint64_t page,uint64_t budget) {
+    /* Host-only synthetic producer: each callback returns synchronously before
+     * storage destruction. This capability provides no kernel teardown proof. */
+    setup_caps(f,page,budget,DLMP_CAP_RAM_ONLY|DLMP_CAP_MAPPED_RECLAIM);
 }
 static struct dlmp_alloc alloc_for(fixture *f,uint64_t id,uint64_t bytes) {
     struct dlmp_alloc a={.version=DLMP_VERSION,.bytes=bytes};
@@ -64,6 +96,20 @@ static void finish(fixture *f,const char *label) {
     collect(f);assert(!f->h.live);OK(dl_probe_close(f->p,f->control));
     free(f->storage);printf("ok %u - %s\n",++tests,label);
 }
+static void finish_quarantined(fixture *f,unsigned retained,const char *label) {
+    if(f->owner) OK(dl_probe_close(f->p,f->owner));
+    struct dlmp_collect c=collect(f);struct dlmp_stats s=stats(f);
+    assert(c.quarantined==retained&&c.backend_failures==retained&&!c.reclaimed);
+    assert(c.retained==retained&&s.quarantined_buffers==retained&&f->h.live==retained);
+    assert(!s.pending_maps);OK(dl_probe_close(f->p,f->control));
+    /* Fixture destruction only: all synthetic producers returned and are now
+     * detached. Destroy the service before freeing host allocations directly.
+     * There is deliberately no engine/API override for permanent quarantine. */
+    free(f->storage);
+    for(unsigned i=0;i<DL_BUFFER_CAPACITY;i++)
+        if(f->h.blocks[i]) destroy_block(&f->h,f->h.blocks[i]);
+    assert(!f->h.live);printf("ok %u - %s\n",++tests,label);
+}
 static void basic(void) {
     fixture f;setup(&f,16384,DLMP_BUDGET);
     struct dlmp_info i={.version=DLMP_VERSION};
@@ -72,6 +118,9 @@ static void basic(void) {
     assert(!(i.capabilities&DLMP_CAP_KERNEL_BACKEND));
     struct dlmp_alloc a=alloc_for(&f,f.owner,1);assert(a.bytes==16384 && a.object_id);
     assert(stats(&f).resident_bytes==16384);
+    struct dlmp_alloc again={.version=DLMP_VERSION,.bytes=1};
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_ALLOC,&again,sizeof again),DL_BUSY);
+    assert(!again.object_id && again.bytes==1 && f.h.allocs==1);
     finish(&f,"allocation rounding, typed info and real host backing");
 }
 static void handoff(void) {
@@ -110,6 +159,18 @@ static void malformed(void) {
     a.object_id=0;a.bytes=UINT64_MAX;
     IS(dl_probe_command(f.p,f.owner,DLMP_OP_ALLOC,&a,sizeof a),DL_INVALID);
     a.bytes=0;IS(dl_probe_command(f.p,f.owner,DLMP_OP_ALLOC,&a,sizeof a),DL_INVALID);
+    struct dlmp_stats s={.version=DLMP_VERSION};struct dlmp_collect c={.version=DLMP_VERSION};
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_STATS,&s,80),DL_INVALID);
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_COLLECT,&c,40),DL_INVALID);
+    s.version=99;c.version=99;
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_STATS,&s,sizeof s),DL_INVALID);
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_COLLECT,&c,sizeof c),DL_INVALID);
+    s.version=DLMP_VERSION;c.version=DLMP_VERSION;s.flags=1;c.flags=1;
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_STATS,&s,sizeof s),DL_INVALID);
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_COLLECT,&c,sizeof c),DL_INVALID);
+    s.flags=0;c.flags=0;
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_STATS,&s,sizeof s+1),DL_INVALID);
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_COLLECT,&c,sizeof c+1),DL_INVALID);
     assert(!f.h.allocs);finish(&f,"version, reserved fields, command sizes and allocation limits");
 }
 static void invalid_maps(void) {
@@ -129,7 +190,7 @@ static void failed_pages(void) {
     fixture f;setup(&f,16384,DLMP_BUDGET);alloc_for(&f,f.owner,16384);f.h.fail_pages=true;
     uint32_t p;void (*fn)(void *)=NULL;void *arg=NULL;
     IS(dl_probe_map(f.p,f.owner,0,16384,1,&p,1,&fn,&arg),DL_STORE_BACKEND_ERROR);
-    assert(!fn&&!arg&&!f.h.exports);assert(!stats(&f).published_maps);
+    assert(p==123&&!fn&&!arg&&!f.h.exports);assert(!stats(&f).published_maps);
     finish(&f,"page-enumeration failure aborts hold without publishing callback");
 }
 static void quarantine(void) {
@@ -139,10 +200,86 @@ static void quarantine(void) {
     OK(dl_probe_close(f.p,f.owner));f.owner=0;fn(arg);
     struct dlmp_collect c=collect(&f);
     assert(c.backend_failures==1&&c.retained==1&&!c.reclaimed&&stats(&f).resident_bytes==16384);
+    assert(!c.quarantined&&!stats(&f).quarantined_buffers&&f.h.releases==1);
     assert(collect(&f).backend_failures==1);
     /* Host-only cleanup after the synthetic callback producer has returned. */
     f.h.quarantine=false;assert(collect(&f).reclaimed==1);
-    finish(&f,"kernel-style quarantine reports blocked reclamation rather than a pass");
+    finish(&f,"provider quarantine remains independent of engine quarantine");
+}
+static void engine_quarantine(void) {
+    fixture f;setup_caps(&f,16384,DLMP_BUDGET,DLMP_CAP_RAM_ONLY);
+    f.h.ignore_export=true;f.h.reenter=true;alloc_for(&f,f.owner,16384);
+    struct dlmp_info info={.version=DLMP_VERSION};
+    OK(dl_probe_command(f.p,f.owner,DLMP_OP_INFO,&info,sizeof info));
+    assert(info.capabilities==DLMP_CAP_RAM_ONLY);
+    uint32_t page;void (*a)(void *),(*b)(void *);void *aa,*bb;
+    OK(dl_probe_map(f.p,f.owner,0,16384,1,&page,1,&a,&aa));
+    OK(dl_probe_map(f.p,f.owner,0,16384,3,&page,1,&b,&bb));
+    struct dlmp_stats s=stats(&f);
+    assert(s.quarantined_buffers==1&&s.pending_maps==2&&s.published_maps==2);
+    assert(f.h.exports==2&&!f.h.blocks[0]->exported&&f.h.reentries==5);
+    struct dlmp_collect c=collect(&f);
+    assert(c.retained==1&&!c.quarantined&&!c.backend_failures&&!c.drained);
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;
+    a(aa);c=collect(&f);s=stats(&f);
+    assert(c.drained==1&&!c.quarantined&&!c.backend_failures&&s.pending_maps==1);
+    assert(s.quarantined_buffers==1&&s.resident_bytes==16384);
+    b(bb);c=collect(&f);s=stats(&f);
+    assert(c.drained==1&&c.quarantined==1&&c.backend_failures==1&&c.retained==1&&!c.reclaimed);
+    assert(s.quarantined_buffers==1&&!s.pending_maps&&s.drained_maps==2&&!s.reclaimed_buffers);
+    a(aa);b(bb);c=collect(&f);
+    assert(!c.drained&&c.quarantined==1&&c.backend_failures==1&&!f.h.releases&&!f.h.frees);
+    uint64_t extra;OK(dl_probe_open(f.p,&extra));alloc_for(&f,extra,16384);
+    OK(dl_probe_map(f.p,extra,0,16384,1,&page,1,&a,&aa));a(aa);
+    OK(dl_probe_close(f.p,extra));c=collect(&f);s=stats(&f);
+    assert(c.drained==1&&c.quarantined==2&&c.backend_failures==2&&c.retained==2);
+    assert(s.quarantined_buffers==2&&s.resident_bytes==32768&&!f.h.releases&&!f.h.frees);
+    finish_quarantined(&f,2,"RAM_ONLY engine quarantines exports despite a no-op provider notification");
+}
+static void ram_only_failures_and_reuse(void) {
+    fixture f;setup_caps(&f,4096,DLMP_BUDGET,DLMP_CAP_RAM_ONLY);f.h.reenter=true;
+    f.h.fail_alloc=true;struct dlmp_alloc request={.version=DLMP_VERSION,.bytes=4096};
+    IS(dl_probe_command(f.p,f.owner,DLMP_OP_ALLOC,&request,sizeof request),DL_STORE_BACKEND_ERROR);
+    assert(!request.object_id&&!stats(&f).live_buffers&&!stats(&f).quarantined_buffers);
+    f.h.fail_alloc=false;uint64_t first=alloc_for(&f,f.owner,4096).object_id;
+    f.h.fail_pages=true;uint32_t page=0;void (*fn)(void *)=NULL;void *arg=NULL;
+    IS(dl_probe_map(f.p,f.owner,0,4096,1,&page,1,&fn,&arg),DL_STORE_BACKEND_ERROR);
+    assert(page==123&&!fn&&!arg&&!f.h.exports&&!stats(&f).quarantined_buffers);
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;f.h.fail_release=true;
+    struct dlmp_collect c=collect(&f);
+    assert(c.backend_failures==1&&!c.quarantined&&c.retained==1&&!c.reclaimed);
+    f.h.fail_release=false;c=collect(&f);
+    assert(c.reclaimed==1&&!c.quarantined&&!c.backend_failures&&!stats(&f).live_buffers);
+    OK(dl_probe_open(f.p,&f.owner));f.h.owner=f.owner;
+    uint64_t second=alloc_for(&f,f.owner,4096).object_id;assert(second>first);
+    assert(!stats(&f).quarantined_buffers);
+    f.h.fail_pages=false;f.h.ignore_export=true;
+    OK(dl_probe_map(f.p,f.owner,0,4096,1,&page,1,&fn,&arg));
+    fn(arg);c=collect(&f);assert(c.drained==1&&!c.quarantined&&c.retained==1);
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;c=collect(&f);
+    assert(c.quarantined==1&&c.backend_failures==1&&!c.reclaimed&&f.h.releases==2);
+    /* A fresh unexported generation in another slot still releases normally. */
+    uint64_t extra;OK(dl_probe_open(f.p,&extra));alloc_for(&f,extra,4096);
+    OK(dl_probe_close(f.p,extra));c=collect(&f);
+    assert(c.reclaimed==1&&c.quarantined==1&&c.backend_failures==1&&c.retained==1);
+    assert(stats(&f).quarantined_buffers==1&&stats(&f).reclaimed_buffers==2);
+    finish_quarantined(&f,1,"RAM_ONLY allocation/page/release failures and reused slots retain exact accounting");
+}
+static void mapped_generation_reuse(void) {
+    fixture f;setup(&f,4096,DLMP_BUDGET);
+    uint64_t first=alloc_for(&f,f.owner,4096).object_id;
+    uint32_t page;void (*old)(void *),(*now)(void *);void *oa,*na;
+    OK(dl_probe_map(f.p,f.owner,0,4096,1,&page,1,&old,&oa));
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;old(oa);
+    assert(collect(&f).reclaimed==1&&!stats(&f).quarantined_buffers);
+    OK(dl_probe_open(f.p,&f.owner));assert(alloc_for(&f,f.owner,4096).object_id>first);
+    OK(dl_probe_map(f.p,f.owner,0,4096,1,&page,1,&now,&na));
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;old(oa);
+    struct dlmp_collect c=collect(&f);
+    assert(!c.drained&&!c.reclaimed&&!c.quarantined&&c.retained==1&&stats(&f).pending_maps==1);
+    now(na);c=collect(&f);assert(c.drained==1&&c.reclaimed==1&&!c.quarantined);
+    assert(stats(&f).reclaimed_buffers==2&&!stats(&f).quarantined_buffers);
+    finish(&f,"host reclaim capability permits new generations without stale callback interference");
 }
 static void failed_allocation(void) {
     fixture f;setup(&f,16384,DLMP_BUDGET);f.h.fail_alloc=true;
@@ -192,7 +329,10 @@ static void reentry(void) {
     fixture f;setup(&f,16384,DLMP_BUDGET);f.h.reenter=true;alloc_for(&f,f.owner,1);
     uint32_t p;void (*fn)(void *);void *arg;
     OK(dl_probe_map(f.p,f.owner,0,16384,1,&p,1,&fn,&arg));fn(arg);collect(&f);
-    finish(&f,"allocation and page callbacks cannot reenter service metadata");
+    assert(f.h.reentries==3);
+    OK(dl_probe_close(f.p,f.owner));f.owner=0;assert(collect(&f).reclaimed==1);
+    assert(f.h.reentries==4);
+    finish(&f,"allocate/pages/export/release callbacks reject reentrant open/close/map/collect");
 }
 static int visitor(void *arg,void *cookie,uint64_t bytes) {
     dl_store *s=arg;assert(cookie&&bytes==4096);dl_buffer b;
@@ -219,6 +359,7 @@ static void initialization(void) {
 }
 int main(void) {
     basic();handoff();multiple_maps();malformed();invalid_maps();failed_pages();quarantine();
+    engine_quarantine();ram_only_failures_and_reuse();mapped_generation_reuse();
     failed_allocation();failed_release();stale();capacity();ticket_capacity();budget();reentry();borrowing();initialization();
     printf("1..%u\n",tests);return 0;
 }

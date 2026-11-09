@@ -10,6 +10,7 @@
 #include <mach/mach_types.h>
 #include <mach/vm_param.h>
 #include <mach/vm_prot.h>
+#include <vm/memory_types.h>
 #include <machine/memory_types.h>
 #include <pexpert/pexpert.h>
 #include <sys/errno.h>
@@ -23,7 +24,7 @@ static bool published;
 struct Handle { uint64_t id; };
 static_assert(sizeof(ppnum_t) == sizeof(uint32_t), "PDDRMDri page-number ABI changed");
 static_assert(sizeof(dlmp_info) == 32 && sizeof(dlmp_alloc) == 40 &&
-              sizeof(dlmp_stats) == 80 && sizeof(dlmp_collect) == 40,
+              sizeof(dlmp_stats) == 88 && sizeof(dlmp_collect) == 48,
               "probe protocol layout changed");
 
 static int as_errno(int status) {

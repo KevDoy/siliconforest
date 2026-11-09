@@ -6,5 +6,5 @@
     {"name":"dl_map_ticket","fields":["store","buffer","hold","request","phase","release_notified"]},
     {"name":"dl_map_handoff","fields":["release","release_arg"]}
   ],
-  "constants": ["DL_MAP_READ","DL_MAP_WRITE","DL_MAP_DRAINED","ATOMIC_BOOL_LOCK_FREE"]
+  "constants": ["DL_MAP_READ","DL_MAP_WRITE","DL_MAP_DRAINED","DL_MAP_ATOMIC_BOOL_LOCK_FREE"]
 }

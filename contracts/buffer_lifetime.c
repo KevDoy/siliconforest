@@ -20,8 +20,16 @@ static dl_status lease_check(const dl_domain *d, dl_lease h) {
 }
 dl_status dl_init(dl_domain *d, uint64_t session) {
     if (!d || !session) return DL_INVALID;
-    /* Compound initialization is valid in freestanding C; no heap required. */
-    *d = (dl_domain){.session=session, .next_buffer=1, .next_lease=1};
+    /* Avoid a domain-sized automatic temporary in unoptimized kernel builds. */
+    d->session=session;
+    d->next_buffer=1;
+    d->next_lease=1;
+    d->reset_sequence=0;
+    d->device_lost=false;
+    for (unsigned i=0; i<DL_BUFFER_CAPACITY; ++i)
+        d->buffers[i]=(dl_buffer_slot){0};
+    for (unsigned i=0; i<DL_LEASE_CAPACITY; ++i)
+        d->leases[i]=(dl_lease_slot){0};
     return DL_OK;
 }
 dl_status dl_allocate(dl_domain *d, uint64_t bytes, uint64_t page, dl_buffer *out) {

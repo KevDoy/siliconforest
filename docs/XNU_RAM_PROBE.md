@@ -3,14 +3,47 @@
 ## What is real and what is not
 
 The C probe engine and POSIX exerciser are implemented and executed on the host.
-The C++ adapter in `integrations/puredarwin/DLMemoryProbe` is **source-only**:
-no actual XNU SDK compile, kernel link, KC inclusion, load, or VM run has occurred.
-The stage tool was executed against disposable fixture Git repositories, not a
-PureDarwin checkout. The fixtures test patch application, not kernel semantics.
+The C++ adapter in `integrations/puredarwin/DLMemoryProbe` has now built with the
+pinned ARM64 SDK in increment 006. The experimental kernel collection contains
+both PDDRMDri and DLMemoryProbe as observed `LC_FILESET_ENTRY` records. Build and
+inclusion records are in `reports/sprint-006`; they do not establish activation
+or device behavior. The stage tool was applied to a separate checkout at the
+exact baseline pin, preserving the clean unmodified baseline.
 
 The intended first kernel tests do not use the Apple GPU, DART, RTKit, firmware,
 physical target, or M5. Run in a disposable ARM64 PureDarwin VM only, after an
 unmodified baseline is reproducible. Never target the filesystem under repair.
+
+## Host hardening after increment 004
+
+The engine now records export by buffer index and allocation serial and refuses
+to release exported backing without `DLMP_CAP_MAPPED_RECLAIM`, independently of
+the provider's export notification. The IOKit provider keeps its separate
+quarantine. Neither layer adds a capability or permits a runtime override.
+
+The unshipped v1 protocol appends `quarantined_buffers` to STATS (88 bytes) and
+`quarantined` to COLLECT (48 bytes). Rebuild the exerciser and candidate together;
+the earlier 80/40-byte captures remain historical. STATS counts current exported
+allocations without reclamation capability, including those still held by owners
+or mappings. COLLECT counts only engine refusals reached after owner and lease
+checks. These refusals are included in `backend_failures`; other provider errors
+must remain failures rather than expected quarantine.
+
+Host regression tests can check this policy and the exerciser's result
+classification. They cannot establish the real pager notification timing,
+or every descriptor failure path. A new trace of the exact XNU source shows that
+ordinary ioctl/mmap operations retain fileproc I/O references until provider
+calls return, and normal close drains those references before freeing the file
+cookie. This excludes the ordinary close-versus-queued-operation race raised
+during the initial partial review; forced shutdown and direct kernel callers are
+outside that trace. That review preceded the increment 006 SDK build. See
+`reports/sprint-005/pinned-source-review.json` for scoped evidence.
+
+The provider now uses the pinned default raw-pointer `OSPtr` API explicitly. It
+releases the factory reference on validation/prepare failure and transfers that
+one reference into its persistent slot on success. The prior `.get()` call
+assumed a shared-pointer mode the candidate never enabled. This correction is
+based on real pinned declarations and subsequently compiled with the pinned SDK.
 
 ## Components
 
@@ -25,8 +58,9 @@ unmodified baseline is reproducible. Never target the filesystem under repair.
   and enumerates host physical segments with the no-mapper option. No physical
   contiguity assumption and no DMA mappings. Unexposed buffers pair successful
   prepare with complete and release. A completion error is permanently retained,
-  not retried into uncertain descriptor state. All this still needs the real SDK
-  and runtime to confirm the selected APIs, behavior, cache mode and build flags.
+  not retried into uncertain descriptor state. Increment 006 compiled these APIs
+  with the real SDK and exercised the two device modes in ARM64 virt. That scoped
+  run does not establish every failure path, cache mode or target environment.
 - `DLMemoryProbe.cpp`: candidate `pd_dri_ops` provider. Reuses PureDarwin's clone
   minors and page-pager bridge. Uses a sleeping mutex, root-only opens, architecture
   cache constants, exact ioctl sizes and initial read/write-only mapping requests.
@@ -51,10 +85,13 @@ The mapped device test must therefore produce `BLOCKED_MAPPED_RECLAMATION`
 (exit 77) after observing correct map/close/child-exit behavior, not `PASS`.
 If any earlier step fails, it reports `FAILED`, not an expected block.
 
-The no-mapping device test may eventually pass once the adapter builds and runs:
-allocate, close, collect unexposed backing exactly once, verify zero resident
-bytes. **Neither device test has been run.** Host tests simulate notifications and
-provider teardown permission; they do not satisfy this gate.
+Increment 006 ran both device modes in one experimental ARM64 virt boot. The
+unmapped test reported `PASSED_KERNEL_UNMAPPED` (11 checks, exit 0): allocate,
+close, reclaim unexposed backing exactly once, and verify zero resident bytes.
+The mapped test reported `BLOCKED_MAPPED_RECLAMATION` (34 checks, exit 77).
+See `reports/sprint-006/vm-device-runtime.json` for the host-captured serial and
+artifact identities. These guest observations do not satisfy the finalization
+gate. Host tests simulate notifications and provider permission separately.
 
 A later, separate review must trace the final device-pager/VM-object/page lifetime
 and then either prove the existing release point sufficient or supply a proper
@@ -87,6 +124,16 @@ filters, but that is **not** proof that this bundle is selected into the desired
 kernel collection or that its start routine executes. Verify CMake target, XNU
 private headers, symbols, library dependency and collection/startup selection.
 No guessed `nix build .#DLMemoryProbe` attribute is promised by this repository.
+
+The full pinned checkout now confirms additional integration work is required:
+both `DLMemoryProbe.kext` and `PDDRMDri.kext` are absent from the explicit ARM64
+`buildTargets` and `installKextNames` in `nix/arm64.nix`, and from the KC kext
+selection in `nix/pkgs/toolchain/kc-arm64.nix`. Adding a CMake subdirectory does
+not select any of these. The minimal image uses the DEBUG KC. Neither KC
+registration nor `OSBundleRequired=Root` establishes that this personality-free
+candidate starts; an explicit activation path is still required. The existing
+`pdkext boot` also returns before reading its load list when no auxiliary KC is
+present. Verify those separate build/install/KC/startup steps before device use.
 
 ## Userspace build and modes
 

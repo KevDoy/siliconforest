@@ -1,6 +1,33 @@
-# First Linux session, after filesystem recovery
+# First Linux build session
 
-This is a future checklist, not a request to interrupt the Btrfs repair. Do not place source, build stores, logs or large artifacts on the affected filesystem until recovery and data safety have been resolved.
+The user confirmed on November 7, 2026 that this Linux machine has been rebuilt
+and `/home/chrisk/src` is healthy. The earlier filesystem-recovery deferral is
+resolved for this workspace. The first unmodified image build and interactive
+ARM64 VM boot have now been observed; adapter and hardware gates remain separate.
+Increment 006 also built the experimental adapter and KC, loaded both modules
+in a separate ARM64 virt VM, and observed unmapped PASS (exit 0) followed by
+mapped BLOCKED (exit 77). See `reports/sprint-006/vm-device-runtime.json`.
+Mapped reclamation and Apple hardware remain unproven.
+
+## Current local preparation
+
+The exact PureDarwin candidate was acquired at
+`e7aa00a60f0b56ef35aa24252e81467787bf71ea`, with corecrypto at its recorded
+gitlink. Nix 2.34.9 is installed from the official binary archive with its
+published SHA-256 checked. `nix flake show --no-write-lock-file` completed for
+that source snapshot with submodules included. It confirms the
+`packages.x86_64-linux.image-arm64-virt-minimal` image and
+`apps.x86_64-linux.arm64-virt` runner. The subsequent minimal image built and
+reached an interactive Darwin 25.5.0 `DEBUG_ARM64_VIRT` shell. `uname -a`, `id`,
+`pwd`, and a child process returning status 7 were observed over serial.
+Two disposable cold boots reached a shell; neither modified the base image.
+See `reports/sprint-005/vm-baseline-build.json` and `vm-baseline-boot.json` for
+those execution scopes, and
+`reports/puredarwin-baseline-inputs-2026-11-07.json` for hashes and input details.
+
+Branch comparison confirms the selected XNU 12377 branch contains `main` and is
+333 commits ahead. The older `20-5-oss` branch has one unique commit under
+separate review; no automatic branch update or cherry-pick was performed.
 
 ## 1. Put the preparation bundle in a healthy workspace
 

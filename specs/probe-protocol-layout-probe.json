@@ -38,7 +38,8 @@
         "drained_maps",
         "reclaimed_buffers",
         "own_object",
-        "own_bytes"
+        "own_bytes",
+        "quarantined_buffers"
       ]
     },
     {
@@ -50,7 +51,8 @@
         "reclaimed",
         "retained",
         "backend_failures",
-        "drained"
+        "drained",
+        "quarantined"
       ]
     }
   ],

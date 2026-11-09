@@ -5,7 +5,14 @@
 #ifndef DARWIN_LAB_MAPPING_TICKET_H
 #define DARWIN_LAB_MAPPING_TICKET_H
 #include "backing_store.h"
-#include <stdatomic.h>
+
+/* Compiler-owned C11 storage, independent of a hosted/kernel stdatomic.h.
+ * The implementation uses only Clang/GCC lock-free compiler primitives. */
+#if !defined(__clang__) && !defined(__GNUC__)
+#error "Mapping notifications require Clang or GCC atomic primitives"
+#endif
+typedef _Atomic(bool) dl_map_atomic_bool;
+#define DL_MAP_ATOMIC_BOOL_LOCK_FREE __GCC_ATOMIC_BOOL_LOCK_FREE
 
 /* Our internal policy bits, NOT Darwin/Linux PROT_* values. */
 #define DL_MAP_READ  1u
@@ -26,7 +33,7 @@ typedef struct {
     dl_map_request request;
     dl_map_phase phase;
     /* Only this member is accessed by the asynchronous release callback. */
-    atomic_bool release_notified;
+    dl_map_atomic_bool release_notified;
 } dl_map_ticket;
 typedef struct {
     void (*release)(void *);

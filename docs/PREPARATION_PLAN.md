@@ -1,5 +1,10 @@
 # Work before the Linux machine is ready
 
+Historical preparation plan: on November 7, 2026 the user confirmed the Linux
+machine had been rebuilt and `/home/chrisk/src` was healthy. Recovery-based
+deferrals below no longer block source acquisition or local build preparation
+in this workspace. Follow `docs/FIRST_LINUX_SESSION.md` for the next build gates.
+
 ## Highest-value work now
 
 **Make the project portable before making it boot.** Keep this work in the provided bundle or a healthy workspace. Leave the recovering filesystem out of the workflow.

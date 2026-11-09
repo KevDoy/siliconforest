@@ -28,9 +28,22 @@ struct dlmp_stats {
     uint64_t resident_bytes, live_buffers, open_sessions, published_maps;
     uint64_t pending_maps, drained_maps, reclaimed_buffers;
     uint64_t own_object, own_bytes;
+    /* Current exported backing slots without MAPPED_RECLAIM, even while held. */
+    uint64_t quarantined_buffers;
 };
 struct dlmp_collect {
     uint32_t version, flags;
     uint64_t reclaimed, retained, backend_failures, drained;
+    /* Engine quarantine refusals in this collection, included in backend_failures. */
+    uint64_t quarantined;
 };
+#ifdef __cplusplus
+static_assert(sizeof(dlmp_info) == 32 && sizeof(dlmp_alloc) == 40 &&
+              sizeof(dlmp_stats) == 88 && sizeof(dlmp_collect) == 48,
+              "probe protocol layout changed");
+#else
+_Static_assert(sizeof(struct dlmp_info) == 32 && sizeof(struct dlmp_alloc) == 40 &&
+               sizeof(struct dlmp_stats) == 88 && sizeof(struct dlmp_collect) == 48,
+               "probe protocol layout changed");
+#endif
 #endif

@@ -10,15 +10,34 @@ enum/layout probes, an executable lifetime policy, and a provider-backed memory
 coordinator with real host-allocation tests, plus a source-traced pager-release
 handoff with threaded notification tests. Compile-only checks emit ARM64
 Mach-O and AArch64 ELF objects and measure our selected C layouts. These are
-portable components, not a working native XNU driver. Increment 004 adds a
-bounded RAM-probe engine, a real POSIX lifetime exerciser, and a **source-only
-IOKit/PDDRMDri integration candidate**. That C++ adapter has NOT been compiled
-against XNU, linked, loaded or booted. It intentionally quarantines mapped backing
-until the final VM teardown/reuse boundary is verified. **Not implemented:** a working XNU platform port,
-a GPU driver, a Darwin Chonkstep backend, or hardware boot automation.
+portable components. Increment 004 added a bounded RAM-probe engine, a real
+POSIX lifetime exerciser, and an IOKit/PDDRMDri integration candidate. Increment
+006 compiled the candidate with the pinned ARM64 SDK and observed both bundles
+in the experimental kernel collection. Runtime evidence is recorded separately
+in `reports/sprint-006`. It intentionally quarantines mapped backing
+until the final VM teardown/reuse boundary is verified. Increment 008 now has a
+working M5-controlled M1 diagnostic workflow: three consecutive unattended
+XNU entry/park/reset/Linux-return cycles, plus deliberate host-timeout recovery.
+See [the runtime record](reports/sprint-008/three-unattended-cycles.json) and
+[the controller instructions](docs/M1_KERNEL_CYCLE.md).
+Increment 009 has now mounted a RAM root filesystem and run an interactive
+Darwin 25.5.0 arm64 single-user shell on that real M1 CPU under m1n1 HV. A fresh
+console challenge and Linux recovery were independently audited; see
+[the shell evidence](reports/sprint-009/hardware-attempt-008.json) and
+[the independent review](reports/sprint-009/attempt008-shell-independent-review.json).
+**Not implemented:** a complete Apple Silicon XNU platform port, GPU driver,
+Darwin Chonkstep backend, or bare-metal boot.
 
-The recovering Linux machine has not been used. The M5 remains the future
-USB/debug controller. No target model is assumed.
+Earlier increments avoided the Linux filesystem under repair. The user has since
+confirmed this machine was rebuilt and `/home/chrisk/src` is healthy; source
+verification and build preparation can proceed here. The M5 is the USB/debug
+controller and the selected 13-inch M1 MacBook Pro is J293/T8103. The original
+preparation is preserved in `docs/M1_FIRST_BOOT.md`; actual M1 execution and its
+limits are recorded in [increment 008](docs/SPRINT_008.md). That fixed diagnostic
+parks before VM initialization. The separate increment 009 candidate continues
+through VM, IOKit, BSD, root mount and userspace. It is a one-CPU DEBUG guest
+without CTRR/PPL protection; the physical panel can retain an early frame while
+the serial console continues. Linux fallback and external M5 recovery remain.
 
 ## Run the actual tests
 
@@ -37,8 +56,21 @@ foreign object files but never executes them; that step requires Clang. The last
 has no hardware backend. Omit `--sanitize` only when your compiler lacks the
 sanitizer runtime; that is a weaker test run and is recorded accordingly.
 
-See `reports/sprint-004/checks-clang.json`, `checks-gcc.json`, `probe-protocol-abi.json`
-and the three mutation reports for the latest completed local checks. The prior sprint reports remain historical.
+Increment 005 adds engine-enforced export quarantine and a host-tested result
+classifier that rejects premature release and unauthorized reclamation. See
+`reports/sprint-005/checks-clang.json`, `checks-gcc.json`, `probe-protocol-abi.json`
+and the four mutation reports for that checkpoint. Increment 006 adds the real
+SDK/KC work and compiler-atomic portability fix, with 142 Python tests, 77 C
+groups and 27 detected mutations in `reports/sprint-006`. The prior
+sprint reports remain historical. The unmodified PureDarwin VM image build is
+tracked separately in `reports/sprint-005/vm-baseline-build.json`. That image
+built and reached an interactive Darwin 25.5.0 ARM64 shell in QEMU, with raw
+transcript and artifact identities in `reports/sprint-005/vm-baseline-boot.json`.
+This establishes the upstream virt baseline, not our adapter or Apple hardware.
+The separate increment 006 experimental VM loaded our RAM-only probe and returned
+unmapped PASS (exit 0), then mapped BLOCKED (exit 77), with backing quarantined.
+See `reports/sprint-006/vm-device-runtime.json`. Safe mapped reclamation and
+native Apple driver support remain unproven.
 GitHub Actions is configured but **has not run on GitHub**.
 
 ## Useful commands
@@ -97,7 +129,11 @@ git remote remove imported-bundle
 
 ## Start here
 
-- `docs/SPRINT_004.md`: latest implementation and execution evidence.
+- `docs/SPRINT_007.md`: native M1 diagnostic build and M5 offline packet preparation.
+- `docs/M1_FIRST_BOOT.md`: bounded first-entry scope and physical handoff conditions.
+- `docs/SPRINT_006.md`: actual SDK builds, KC inclusion and experimental VM status.
+- `docs/SPRINT_005.md`: rebuilt-host baseline boots and probe hardening.
+- `docs/SPRINT_004.md`: earlier implementation and execution evidence.
 - `docs/XNU_RAM_PROBE.md`: candidate kernel integration, staging, acceptance gates.
 - `docs/SPRINT_003.md`: previous mapping-handoff increment.
 - `docs/MAPPING_HANDOFF.md`: inspected pager boundary, ticket lifetime and remaining kernel work.
@@ -115,7 +151,7 @@ git remote remove imported-bundle
 ## Repository layout
 
 ```text
-integrations/ Source-only XNU adapter, not a kernel build result
+integrations/ Experimental SDK-compiled XNU adapter and guest build recipe
 probe/       Tested RAM-probe protocol/engine, not a physical driver
 userspace/   Actual POSIX control and future explicit device exerciser
 core/        Portable provider-backed coordinator, not an XNU driver

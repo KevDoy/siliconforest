@@ -2,14 +2,39 @@
 
 /* Reject targets on which this callback could acquire an atomic-runtime lock.
  * A kernel port must also validate its compiler/interrupt-context guarantees. */
-_Static_assert(ATOMIC_BOOL_LOCK_FREE == 2, "lock-free bool atomics required");
+_Static_assert(DL_MAP_ATOMIC_BOOL_LOCK_FREE == 2, "lock-free bool atomics required");
+
+static void notification_init(dl_map_atomic_bool *flag) {
+    /* Called before publishing the ticket, with no concurrent accesses. */
+#if defined(__clang__)
+    __c11_atomic_init(flag, false);
+#else
+    __atomic_store_n(flag, false, __ATOMIC_RELAXED);
+#endif
+}
+
+static void notification_store_release(dl_map_atomic_bool *flag) {
+#if defined(__clang__)
+    __c11_atomic_store(flag, true, __ATOMIC_RELEASE);
+#else
+    __atomic_store_n(flag, true, __ATOMIC_RELEASE);
+#endif
+}
+
+static bool notification_load_acquire(const dl_map_atomic_bool *flag) {
+#if defined(__clang__)
+    return __c11_atomic_load(flag, __ATOMIC_ACQUIRE);
+#else
+    return __atomic_load_n(flag, __ATOMIC_ACQUIRE);
+#endif
+}
 
 static void pager_release(void *arg) {
     dl_map_ticket *ticket = arg;
     /* The producer promises a valid, live ticket. Deliberately no allocation,
      * store access, refcount destruction, locks or scheduling calls here.
      * Notifications are idempotent while THIS ticket remains alive. */
-    atomic_store_explicit(&ticket->release_notified, true, memory_order_release);
+    notification_store_release(&ticket->release_notified);
 }
 
 int dl_map_prepare(dl_store *store, dl_buffer buffer, dl_map_request request,
@@ -36,7 +61,7 @@ int dl_map_prepare(dl_store *store, dl_buffer buffer, dl_map_request request,
     ticket->buffer = buffer;
     ticket->hold = hold;
     ticket->request = request;
-    atomic_init(&ticket->release_notified, false);
+    notification_init(&ticket->release_notified);
     ticket->phase = DL_MAP_PREPARED;
     return DL_OK;
 }
@@ -64,7 +89,7 @@ int dl_map_drain(dl_map_ticket *ticket) {
     if (ticket->phase == DL_MAP_DRAINED || ticket->phase == DL_MAP_ABORTED)
         return DL_STALE;
     if (ticket->phase != DL_MAP_PUBLISHED) return DL_BAD_STATE;
-    if (!atomic_load_explicit(&ticket->release_notified, memory_order_acquire))
+    if (!notification_load_acquire(&ticket->release_notified))
         return DL_BUSY;
     int status = dl_store_release_host(ticket->store, ticket->hold);
     if (status != DL_OK) return status;

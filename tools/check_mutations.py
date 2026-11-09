@@ -29,15 +29,15 @@ MUTATIONS=[
 ]
 
 MAPPING_MUTATIONS=[
-    ('ignore_notification','if (!atomic_load_explicit(&ticket->release_notified, memory_order_acquire))',
-     'if (false && !atomic_load_explicit(&ticket->release_notified, memory_order_acquire))'),
+    ('ignore_notification','if (!notification_load_acquire(&ticket->release_notified))',
+     'if (false && !notification_load_acquire(&ticket->release_notified))'),
     ('wrong_lease_kind','dl_store_hold(store, buffer, DL_CPU_MAP, &hold)',
      'dl_store_hold(store, buffer, DL_IN_FLIGHT, &hold)'),
     ('skip_range_end','request.bytes > view.bytes - request.offset','false'),
     ('skip_permissions','(request.requested_access & ~request.allowed_access)','false'),
     ('truncate_page_number','if (number > UINT32_MAX) return DL_OVERFLOW;','/* deliberate truncation */'),
-    ('drop_notification','&ticket->release_notified, true, memory_order_release',
-     '&ticket->release_notified, false, memory_order_release'),
+    ('drop_notification','notification_store_release(&ticket->release_notified);',
+     'notification_init(&ticket->release_notified); (void)notification_store_release;'),
 ]
 
 
@@ -51,6 +51,30 @@ PROBE_MUTATIONS=[
     ('leak_failed_mapping_hold','if(status!=DL_OK) { (void)dl_map_abort(t); return status; }\n    v.export_only=true;',
      'if(status!=DL_OK) { return status; }\n    v.export_only=true;'),
     ('forget_owner_close','status = dl_store_close_owner(&p->store, s->buffer);', 'status = DL_OK;'),
+    ('forget_engine_export','p->exported_serial[s->buffer.index]=s->buffer.serial;',
+     '/* deliberately omit engine export tracking */'),
+    ('ignore_engine_quarantine','if (slot->cookie == cookie && quarantined(p, slot))',
+     'if (false && slot->cookie == cookie && quarantined(p, slot))'),
+    ('hide_engine_quarantine','v.quarantined=p->collection_quarantined;',
+     'v.quarantined=0;'),
+]
+
+RESULT_MUTATIONS=[
+    ('ignore_copyout_sessions',
+     'return dlmp_result_stats_valid(s) && s->open_sessions==2 &&',
+     'return dlmp_result_stats_valid(s) && s->open_sessions<=2 &&'),
+    ('ignore_pending_count','s->pending_maps==published-drained;', 'true;'),
+    ('invent_reclaim_capability',
+     'const bool can_reclaim=(capabilities & DLMP_CAP_MAPPED_RECLAIM)!=0;',
+     'const bool can_reclaim=true;'),
+    ('ignore_live_checkpoints','if(checkpoints!=DLMP_CHECK_COMPLETE || !bytes ||',
+     'if((checkpoints & 0u) || !bytes ||'),
+    ('confuse_provider_error_with_quarantine',
+     'c->quarantined!=1 || c->backend_failures!=1 ||',
+     'false || false ||'),
+    ('ignore_quarantined_byte_charge',
+     'c->quarantined!=1 || c->backend_failures!=1 ||\n           s->resident_bytes!=bytes || s->live_buffers!=1)',
+     'c->quarantined!=1 || c->backend_failures!=1 ||\n           false || s->live_buffers!=1)'),
 ]
 
 
@@ -60,6 +84,7 @@ def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
         'backing-store':('core/backing_store.c','tests/c/test_backing_store.c',MUTATIONS,[]),
         'mapping-ticket':('core/mapping_ticket.c','tests/c/test_mapping_ticket.c',MAPPING_MUTATIONS,['core/backing_store.c']),
         'memory-probe':('probe/memory_probe.c','tests/c/test_memory_probe.c',PROBE_MUTATIONS,['core/backing_store.c','core/mapping_ticket.c']),
+        'memory-probe-result':('userspace/memory_probe_result.h','tests/c/test_memory_probe_result.c',RESULT_MUTATIONS,[]),
     }
     if suite not in configs: raise ValueError('Unknown mutation suite')
     source_path,test_path,mutations,dependencies=configs[suite]
@@ -68,13 +93,19 @@ def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
     flags=['-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Icontracts','-Icore','-Iprobe']
     # The unmodified baseline MUST pass using the same compiler/flags/tests.
     for name,before,after in [('unmodified',None,None),*mutations]:
-        path=directory/(name+'.c'); binary=directory/name
+        header_only=Path(source_path).suffix=='.h'
+        if header_only:
+            variant=directory/name; variant.mkdir(exist_ok=True)
+            path=variant/Path(source_path).name; binary=variant/'test'
+        else:
+            path=directory/(name+'.c'); binary=directory/name
         if before is not None and source.count(before)!=1:
             raise ValueError(f'{name}: mutation anchor is no longer unique')
         content=source if before is None else source.replace(before,after,1)
         path.write_text(content)
-        command=[cc,*flags,*(['-pthread'] if suite=='mapping-ticket' else []),'contracts/buffer_lifetime.c',
-                 *dependencies,str(path),test_path,'-o',str(binary)]
+        sources=[test_path] if header_only else ['contracts/buffer_lifetime.c',*dependencies,str(path),test_path]
+        command=[cc,*(['-I'+str(path.parent),'-Iuserspace'] if header_only else []),
+                 *flags,*(['-pthread'] if suite=='mapping-ticket' else []),*sources,'-o',str(binary)]
         build=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=30)
         item={'name':name,'compile_command':command,'compile_returncode':build.returncode,'compile_stderr':build.stderr}
         if build.returncode==0:
@@ -89,14 +120,14 @@ def run(cc: str, directory: Path, suite: str = 'backing-store') -> dict:
             'suite':suite,'source_path':source_path,'source_sha256':hashlib.sha256(source.encode()).hexdigest(),
             'test_sha256':hashlib.sha256((ROOT/test_path).read_bytes()).hexdigest(),
             'detected':sum(r['status']=='DETECTED_AT_RUNTIME' for r in results),'mutations':len(mutations),'results':results,
-            'limits':['Six deliberate source mutations are examples, not exhaustive correctness proof.',
+            'limits':['Deliberate source mutations are examples, not exhaustive correctness proof.',
                       'All execution is native host code with simulated device events, not an XNU driver.',
                       'A failing test process is expected for each mutated program.']}
 
 
 def main(argv=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--suite',choices=['backing-store','mapping-ticket','memory-probe'],default='backing-store')
+    p.add_argument('--suite',choices=['backing-store','mapping-ticket','memory-probe','memory-probe-result'],default='backing-store')
     p.add_argument('--cc');p.add_argument('--report',type=Path,default=ROOT/'.build/mutations.json')
     p.add_argument('--build-dir',type=Path,default=ROOT/'.build/mutations')
     a=p.parse_args(argv)

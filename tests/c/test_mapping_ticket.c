@@ -1,10 +1,21 @@
 #include "mapping_ticket.h"
+#ifdef NDEBUG
+#error "These tests require assertions, including side-effecting checks"
+#endif
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sched.h>
+#include <stdatomic.h>
+
+/* Keep the original C11 atomic_bool representation without importing the
+ * host's stdatomic.h into production code. */
+_Static_assert(__builtin_types_compatible_p(dl_map_atomic_bool, atomic_bool),
+               "notification storage must retain its original C11 type");
+_Static_assert(sizeof(dl_map_atomic_bool) == sizeof(atomic_bool), "atomic size");
+_Static_assert(_Alignof(dl_map_atomic_bool) == _Alignof(atomic_bool), "atomic alignment");
 
 #define OK(x) assert((x) == DL_OK)
 #define IS(x,y) assert((x) == (y))
@@ -194,10 +205,33 @@ static void concurrent(void) {
     IS(dl_map_drain(&t),DL_STALE);
     done(&s,&h,"400000 threaded notifications race with one serialized drain without duplicate release");
 }
+
+typedef struct { dl_map_handoff h; unsigned words[3]; } publication;
+static void *publish_payload(void *arg) {
+    publication *p=arg;
+    p->words[0]=17; p->words[1]=42; p->words[2]=99;
+    p->h.release(p->h.release_arg);
+    return NULL;
+}
+static void callback_publication(void) {
+    dl_store s; host h; dl_buffer b=setup(&s,&h,16384); dl_map_ticket t={0};
+    publication p={.h=prepare(&s,b,&t)};
+    OK(dl_store_close_owner(&s,b));
+    pthread_t thread; assert(pthread_create(&thread,NULL,publish_payload,&p)==0);
+    int status;
+    do { status=dl_map_drain(&t); if(status==DL_BUSY)sched_yield(); } while(status==DL_BUSY);
+    assert(status==DL_OK);
+    /* Read BEFORE join: the ticket's release/acquire notification must publish
+     * the preceding writes. Thread join must not supply the synchronization. */
+    assert(p.words[0]==17 && p.words[1]==42 && p.words[2]==99);
+    assert(pthread_join(thread,NULL)==0);
+    collect(&s,1);
+    done(&s,&h,"acquire drain observes data published before the release callback");
+}
 int main(void) {
     close_before_unmap(); abort_before_publish(); failure_after_publish();
     duplicate_notification(); reused_buffer(); multiple_maps(); timeout_preserves_map();
     callback_during_loss(); range_checks(); permissions(); capacity(); bad_state();
-    page_numbers(); concurrent();
+    page_numbers(); concurrent(); callback_publication();
     printf("1..%u\n",tests); return 0;
 }

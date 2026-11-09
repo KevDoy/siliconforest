@@ -1,4 +1,7 @@
 #include "buffer_lifetime.h"
+#ifdef NDEBUG
+#error "These tests require assertions, including side-effecting checks"
+#endif
 #include <assert.h>
 #include <stdio.h>
 

@@ -5,6 +5,8 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "memory_probe_ioctl.h"
+#include "memory_probe_result.h"
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -14,6 +16,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,14 +44,30 @@ static int stats(int fd,struct dlmp_stats *s) {
     *s=(struct dlmp_stats){.version=DLMP_VERSION};
     return ioctl(fd,DLMP_STATS,s);
 }
+static void diagnose(const char *stage,const struct dlmp_stats *baseline,
+                     const struct dlmp_stats *s,const struct dlmp_collect *c,
+                     uint64_t total_drained,uint64_t total_reclaimed) {
+    fprintf(stderr,"%s: baseline published=%" PRIu64 " drained=%" PRIu64 " reclaimed=%" PRIu64
+            "; stats sessions=%" PRIu64 " bytes=%" PRIu64 " live=%" PRIu64
+            " published=%" PRIu64 " pending=%" PRIu64 " drained=%" PRIu64
+            " reclaimed=%" PRIu64 " quarantined=%" PRIu64
+            "; collect drained=%" PRIu64 " reclaimed=%" PRIu64 " retained=%" PRIu64
+            " failures=%" PRIu64 " quarantined=%" PRIu64
+            "; totals drained=%" PRIu64 " reclaimed=%" PRIu64 "\n",
+            stage,baseline->published_maps,baseline->drained_maps,baseline->reclaimed_buffers,
+            s->open_sessions,s->resident_bytes,s->live_buffers,s->published_maps,s->pending_maps,
+            s->drained_maps,s->reclaimed_buffers,s->quarantined_buffers,c->drained,c->reclaimed,
+            c->retained,c->backend_failures,c->quarantined,total_drained,total_reclaimed);
+}
 static int run(const char *device,int control,int unmapped) {
     int result=1,fd=-1,monitor=-1,child_to_parent[2]={-1,-1},parent_to_child[2]={-1,-1};
     pid_t child=-1;
     unsigned char *a=MAP_FAILED,*b=MAP_FAILED;
     size_t bytes=0;
-    uint64_t capabilities=0;
-    struct dlmp_stats s;
-    struct dlmp_collect c;
+    uint64_t capabilities=0,total_drained=0,total_reclaimed=0;
+    unsigned checkpoints=0;
+    struct dlmp_stats s={0},baseline={0};
+    struct dlmp_collect c={0};
     const char *backend=control?"posix-control":"experimental-xnu-device";
     if(control) {
         char path[]="/tmp/darwin-lab-control-XXXXXX";
@@ -62,40 +81,65 @@ static int run(const char *device,int control,int unmapped) {
         monitor=open(device,O_RDWR|O_CLOEXEC);REQUIRE(monitor>=0,"open monitor session");
         struct dlmp_info i={.version=DLMP_VERSION};
         REQUIRE(ioctl(fd,DLMP_INFO,&i)==0,"query probe identity");
-        REQUIRE(i.version==DLMP_VERSION &&
-                (i.capabilities&(DLMP_CAP_RAM_ONLY|DLMP_CAP_KERNEL_BACKEND))==
-                (DLMP_CAP_RAM_ONLY|DLMP_CAP_KERNEL_BACKEND),"kernel RAM-probe identity");
+        REQUIRE(i.version==DLMP_VERSION && !i.flags && dlmp_result_capabilities(i.capabilities),
+                "kernel RAM-probe identity");
         REQUIRE(i.page_size==4096||i.page_size==16384||i.page_size==65536,"supported page size");
         capabilities=i.capabilities;bytes=(size_t)i.page_size*2;
-        REQUIRE(stats(monitor,&s)==0 && !s.resident_bytes && !s.live_buffers,"clean VM probe baseline");
-        struct dlmp_alloc request={.version=DLMP_VERSION,.bytes=bytes};
-        REQUIRE(ioctl(fd,DLMP_ALLOC,&request)==0 && request.object_id && request.bytes==bytes,"allocate real kernel backing");
+        REQUIRE(stats(monitor,&baseline)==0 && dlmp_result_baseline(&baseline),
+                "clean baseline with two copied-out sessions");
+        struct dlmp_alloc request={.version=DLMP_VERSION,.bytes=i.page_size+1};
+        REQUIRE(ioctl(fd,DLMP_ALLOC,&request)==0 && request.version==DLMP_VERSION &&
+                !request.flags && request.object_id && request.bytes==bytes,
+                "allocate and round page-plus-one kernel backing");
+        REQUIRE(stats(monitor,&s)==0 && dlmp_result_allocated(bytes,&baseline,&s),
+                "allocated backing and historical counters");
+        struct dlmp_stats owner={0};
+        REQUIRE(stats(fd,&owner)==0 && owner.version==DLMP_VERSION && !owner.flags &&
+                owner.own_object==request.object_id && owner.own_bytes==bytes,
+                "owner session is bound to the returned allocation");
         if(unmapped) {
             REQUIRE(close(fd)==0,"close unmapped owner");fd=-1;
-            REQUIRE(collect(monitor,&c)==0 && c.reclaimed==1 && !c.backend_failures,"reclaim unexposed backing");
-            REQUIRE(stats(monitor,&s)==0 && !s.resident_bytes && !s.live_buffers,"zero resident backing");
+            REQUIRE(collect(monitor,&c)==0 && stats(monitor,&s)==0 &&
+                    dlmp_result_unmapped(&baseline,&s,&c),"reclaim exactly one unexposed allocation");
             result=0;goto cleanup;
         }
         void *invalid=mmap(NULL,bytes,PROT_READ,MAP_SHARED,fd,(off_t)bytes);
+        int rejection_errno=errno;
         if(invalid!=MAP_FAILED) munmap(invalid,bytes);
-        REQUIRE(invalid==MAP_FAILED,"reject out-of-range mapping");
+        REQUIRE(invalid==MAP_FAILED && rejection_errno==EINVAL,"reject out-of-range mapping with EINVAL");
         invalid=mmap(NULL,bytes,PROT_READ|PROT_EXEC,MAP_SHARED,fd,0);
+        rejection_errno=errno;
         if(invalid!=MAP_FAILED) munmap(invalid,bytes);
-        REQUIRE(invalid==MAP_FAILED,"reject initially executable mapping");
+        REQUIRE(invalid==MAP_FAILED && rejection_errno==EINVAL,"reject initially executable mapping with EINVAL");
         invalid=mmap(NULL,bytes,PROT_READ,MAP_PRIVATE,fd,0);
+        rejection_errno=errno;
         if(invalid!=MAP_FAILED) munmap(invalid,bytes);
-        REQUIRE(invalid==MAP_FAILED,"reject private mapping");
+        REQUIRE(invalid==MAP_FAILED && rejection_errno==ENODEV,"reject private mapping with ENODEV");
+        REQUIRE(stats(monitor,&s)==0 && dlmp_result_allocated(bytes,&baseline,&s),
+                "rejected mappings publish no tickets or exports");
     }
     a=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
     REQUIRE(a!=MAP_FAILED,"first shared mapping");
     b=mmap(NULL,bytes,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
     REQUIRE(b!=MAP_FAILED,"second shared mapping");
-    for(size_t j=0;j<bytes;j++) REQUIRE(a[j]==0&&b[j]==0,"zero all rounded bytes");
+    int all_zero=1;
+    for(size_t j=0;j<bytes;j++) if(a[j]!=0 || b[j]!=0) all_zero=0;
+    REQUIRE(all_zero,"zero all rounded bytes");
     for(size_t j=0;j<bytes;j++) a[j]=(unsigned char)(j*17+23);
-    for(size_t j=0;j<bytes;j++) REQUIRE(b[j]==(unsigned char)(j*17+23),"alias coherence");
+    int coherent=1;
+    for(size_t j=0;j<bytes;j++) if(b[j]!=(unsigned char)(j*17+23)) coherent=0;
+    REQUIRE(coherent,"alias coherence");
     REQUIRE(close(fd)==0,"close allocating file while both mappings live");fd=-1;
     b[bytes-1]=91;REQUIRE(a[bytes-1]==91,"mapping survives file close");
-    if(!control) REQUIRE(collect(monitor,&c)==0 && !c.reclaimed && c.retained>=1,"no early collection");
+    if(!control) {
+        REQUIRE(collect(monitor,&c)==0 && stats(monitor,&s)==0,"observe parent-live mappings");
+        bool parent_live=dlmp_result_live(capabilities,bytes,&baseline,&s,&c);
+        if(!parent_live)
+            diagnose("parent-live mismatch",&baseline,&s,&c,0,0);
+        REQUIRE(parent_live,
+                "two pending maps and no drains after owner close");
+        checkpoints|=parent_live?DLMP_CHECK_PARENT_LIVE:0;
+    }
     REQUIRE(pipe(child_to_parent)==0 && pipe(parent_to_child)==0,"create child synchronization pipes");
     child=fork();REQUIRE(child>=0,"fork mapped child");
     if(child==0) {
@@ -115,21 +159,39 @@ static int run(const char *device,int control,int unmapped) {
     REQUIRE(a[0]==0x5a && b[0]==0x5a,"cross-process shared write");
     REQUIRE(munmap(a,bytes)==0,"unmap parent first alias");a=MAP_FAILED;
     REQUIRE(munmap(b,bytes)==0,"unmap parent second alias");b=MAP_FAILED;
-    if(!control) REQUIRE(collect(monitor,&c)==0&&!c.reclaimed&&c.retained>=1,"child mappings retain backing after parent unmaps");
+    if(!control) {
+        REQUIRE(collect(monitor,&c)==0 && stats(monitor,&s)==0,"observe child-live mappings");
+        bool child_live=dlmp_result_live(capabilities,bytes,&baseline,&s,&c);
+        if(!child_live)
+            diagnose("child-live mismatch",&baseline,&s,&c,0,0);
+        REQUIRE(child_live,
+                "two pending maps and no drains while child retains mappings");
+        checkpoints|=child_live?DLMP_CHECK_CHILD_LIVE:0;
+    }
     REQUIRE(byte_write(parent_to_child[1],'x')==0,"release child to exit");
     int child_status=0;pid_t waited;
     do{waited=waitpid(child,&child_status,0);}while(waited<0&&errno==EINTR);
     child=-1;
-    REQUIRE(waited>0&&WIFEXITED(child_status)&&WEXITSTATUS(child_status)==0,"child exit cleanup");
+    bool child_exited=waited>0&&WIFEXITED(child_status)&&WEXITSTATUS(child_status)==0;
+    REQUIRE(child_exited,"child exit cleanup");
     if(!control) {
+        checkpoints|=child_exited?DLMP_CHECK_CHILD_EXITED:0;
         for(unsigned attempt=0;attempt<30;attempt++) {
             REQUIRE(collect(monitor,&c)==0 && stats(monitor,&s)==0,"collect and inspect after child exit");
-            if(c.backend_failures && !(capabilities&DLMP_CAP_MAPPED_RECLAIM) && !s.pending_maps) {
-                result=77;goto cleanup; // explicit expected safety gate, NOT a pass
+            REQUIRE(c.drained<=2-total_drained && c.reclaimed<=1-total_reclaimed,
+                    "bounded collection totals");
+            total_drained+=c.drained;total_reclaimed+=c.reclaimed;
+            enum dlmp_result decision=dlmp_result_mapped(capabilities,bytes,&baseline,&s,&c,
+                                                       total_drained,total_reclaimed,checkpoints);
+            if(decision==DLMP_RESULT_FAILED)
+                diagnose("final lifecycle mismatch",&baseline,&s,&c,total_drained,total_reclaimed);
+            REQUIRE(decision!=DLMP_RESULT_FAILED,"consistent final mapping lifecycle");
+            if(decision==DLMP_RESULT_BLOCKED || decision==DLMP_RESULT_PASSED) {
+                result=(int)decision;goto cleanup;
             }
-            if(!s.resident_bytes && !s.live_buffers && s.reclaimed_buffers==1) {result=0;goto cleanup;}
             struct timespec delay={0,100000000};nanosleep(&delay,NULL);
         }
+        diagnose("collection timeout",&baseline,&s,&c,total_drained,total_reclaimed);
         REQUIRE(0,"bounded collection timeout");
     }
     result=0;
@@ -142,8 +204,10 @@ cleanup:
     for(unsigned n=0;n<2;n++) {if(child_to_parent[n]>=0)close(child_to_parent[n]);if(parent_to_child[n]>=0)close(parent_to_child[n]);}
     const char *status=result==77?"BLOCKED_MAPPED_RECLAMATION":result?"FAILED":
                        control?"PASSED_POSIX_CONTROL":unmapped?"PASSED_KERNEL_UNMAPPED":"PASSED_KERNEL_MAPPED";
-    printf("{\"status\":\"%s\",\"backend\":\"%s\",\"checks\":%u,\"xnu_claim\":%s}\n",
-           status,backend,checks,(!control&&result==0)?"true":"false");
+    printf("{\"status\":\"%s\",\"backend\":\"%s\",\"checks\":%u,\"xnu_claim\":%s,"
+           "\"evidence\":\"%s\",\"host_verified\":false}\n",
+           status,backend,checks,(!control&&result==0)?"true":"false",
+           control?"host_posix_control":"guest_self_report");
     return result;
 }
 int main(int argc,char **argv) {

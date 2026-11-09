@@ -4,6 +4,23 @@ The archived audit is historical. `config/source-registry.json` deliberately
 retains candidate/unverified entries. It is not promoted by matching an enum or
 successfully compiling our own tests.
 
+## Rebuilt-host observations
+
+New evidence is recorded separately from the inherited registry. The rebuilt
+host fetched and byte-checked 12 selected PureDarwin files, acquired an exact
+clean PureDarwin checkout and its corecrypto gitlink, and evaluated the pinned
+flake with Nix 2.34.9 without changing its lock file. See
+`reports/host-source-verification-2026-11-07.json` and
+`reports/puredarwin-baseline-inputs-2026-11-07.json` for those successive scopes.
+The selected source trace in `reports/sprint-005/pinned-source-review.json`
+records full-file hashes independently of its narrower semantic review.
+
+`reports/primary-commit-observations-2026-11-07.json` records remote commit,
+signature-status and root-tree observations for the three primary Omacom pins.
+It does not establish recursively verified local trees or builds for them.
+The acquisition and execution limits below describe the earlier increments;
+they must not erase or silently promote the newer observations.
+
 ## What acquisition verifies
 
 `tools/acquire_sources.py plan` does no networking. `fetch --allow-network`

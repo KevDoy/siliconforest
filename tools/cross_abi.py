@@ -151,7 +151,7 @@ def perform(clang: str, spec: dict[str, Any], build: Path) -> dict[str, Any]:
     files=['contracts/buffer_lifetime.h','contracts/buffer_lifetime.c','core/backing_store.h','core/backing_store.c','core/mapping_ticket.h','core/mapping_ticket.c','probe/memory_probe.c','probe/memory_probe.h','probe/memory_probe_protocol.h']
     for profile,triple in PROFILES.items():
         flags=[clang,'--target='+triple,'-std=c11','-ffreestanding','-nostdinc','-isystem',str(resource),
-               '-Wall','-Wextra','-Wpedantic','-Werror','-Icontracts','-Icore','-Iprobe']
+               '-Wall','-Wextra','-Wpedantic','-Werror','-Wframe-larger-than=1024','-Icontracts','-Icore','-Iprobe']
         ir=build/(profile+'.ll')
         run_command([*flags,'-S','-emit-llvm',str(generated),'-o',str(ir)],commands)
         parsed=parse_ir(ir.read_text(),spec)

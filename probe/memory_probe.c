@@ -9,6 +9,9 @@ struct dl_probe {
     void *context;
     struct session sessions[DLMP_SESSION_CAPACITY];
     dl_map_ticket tickets[DLMP_TICKET_CAPACITY];
+    /* Index alone can refer to a later allocation. Only this serial is exported. */
+    uint64_t exported_serial[DL_BUFFER_CAPACITY];
+    uint64_t collection_quarantined;
     unsigned used_tickets;
     bool in_provider;
 };
@@ -17,6 +20,28 @@ size_t dl_probe_alignment(void) { return _Alignof(dl_probe); }
 static int ready(dl_probe *p) {
     if (!p || p->magic != DLMP_MAGIC) return DL_INVALID;
     return p->in_provider || p->store.in_callback ? DL_BAD_STATE : DL_OK;
+}
+static bool quarantined(const dl_probe *p, const dl_backing_slot *slot) {
+    return !(p->ops.capabilities & DLMP_CAP_MAPPED_RECLAIM) && slot->occupied &&
+           p->exported_serial[slot->buffer.index] == slot->buffer.serial;
+}
+static void *allocate_backing(void *arg, uint64_t bytes, uint64_t alignment) {
+    dl_probe *p = arg;
+    return p->ops.backing.allocate(p->context, bytes, alignment);
+}
+static bool release_backing(void *arg, void *cookie, uint64_t bytes) {
+    dl_probe *p = arg;
+    /* The store calls this under serialization with its slot still occupied.
+     * Match the current index AND generation, independently of provider state.
+     * Check all matching slots rather than assuming provider cookies are unique. */
+    for (unsigned i=0; i<DL_BUFFER_CAPACITY; ++i) {
+        const dl_backing_slot *slot = &p->store.backing[i];
+        if (slot->cookie == cookie && quarantined(p, slot)) {
+            ++p->collection_quarantined;
+            return false; /* store retains ownership and its entire byte charge */
+        }
+    }
+    return p->ops.backing.release(p->context, cookie, bytes);
 }
 int dl_probe_init(void *memory, size_t size, uint64_t page, uint64_t budget,
                   dl_probe_ops ops, void *context, dl_probe **out) {
@@ -30,8 +55,12 @@ int dl_probe_init(void *memory, size_t size, uint64_t page, uint64_t budget,
                               DLMP_CAP_KERNEL_BACKEND))) return DL_INVALID;
     dl_probe *p = memory;
     if (p->magic) return DL_BAD_STATE; /* caller supplies fresh zeroed storage */
-    *p = (dl_probe){.next_session=1, .page_size=page, .ops=ops, .context=context};
-    int status = dl_store_init(&p->store, 1, page, budget, ops.backing, context);
+    /* Initialize in place: a compound literal here can create a ticket-array-
+     * sized temporary on a kernel stack, especially in unoptimized builds. */
+    __builtin_memset(p, 0, sizeof(*p));
+    p->next_session=1; p->page_size=page; p->ops=ops; p->context=context;
+    dl_backing_ops backing = {allocate_backing, release_backing};
+    int status = dl_store_init(&p->store, 1, page, budget, backing, p);
     if (status != DL_OK) return status;
     p->magic = DLMP_MAGIC;
     *out = p;
@@ -72,7 +101,11 @@ static int stats(dl_probe *p, struct session *s, struct dlmp_stats *out) {
     struct dlmp_stats v = {.version=DLMP_VERSION, .resident_bytes=p->store.resident_bytes,
                            .reclaimed_buffers=p->reclaimed};
     for (unsigned i=0;i<DLMP_SESSION_CAPACITY;i++) if(p->sessions[i].id) ++v.open_sessions;
-    for (unsigned i=0;i<DL_BUFFER_CAPACITY;i++) if(p->store.backing[i].occupied) ++v.live_buffers;
+    for (unsigned i=0;i<DL_BUFFER_CAPACITY;i++) {
+        const dl_backing_slot *slot=&p->store.backing[i];
+        if(slot->occupied) ++v.live_buffers;
+        if(quarantined(p,slot)) ++v.quarantined_buffers;
+    }
     for (unsigned i=0;i<p->used_tickets;i++) {
         if(p->tickets[i].phase == DL_MAP_PUBLISHED) { ++v.published_maps; ++v.pending_maps; }
         if(p->tickets[i].phase == DL_MAP_DRAINED) { ++v.published_maps; ++v.drained_maps; }
@@ -95,9 +128,11 @@ static int collect(dl_probe *p, struct dlmp_collect *out) {
         else if(status!=DL_BUSY) return status;
     }
     dl_collection c;
+    p->collection_quarantined=0;
     int status=dl_store_collect(&p->store,&c);
     if(status!=DL_OK && status!=DL_STORE_BACKEND_ERROR) return status;
     v.reclaimed=c.reclaimed; v.retained=c.retained; v.backend_failures=c.backend_failures;
+    v.quarantined=p->collection_quarantined;
     p->reclaimed += c.reclaimed;
     *out=v;
     return DL_OK; /* caller must inspect backend_failures; never hidden */
@@ -175,6 +210,10 @@ int dl_probe_map(dl_probe *p,uint64_t id,uint64_t offset,uint64_t bytes,unsigned
     status=dl_store_visit_backing(&p->store,s->buffer,visit,&v);
     if(status!=DL_OK) { (void)dl_map_abort(t); return status; }
     v.export_only=true;
+    /* Latch engine ownership before any possible exposure. A no-op provider
+     * notification cannot authorize reclamation. Unexpected later failures
+     * conservatively retain this generation; no API clears the export mark. */
+    p->exported_serial[s->buffer.index]=s->buffer.serial;
     status=dl_store_visit_backing(&p->store,s->buffer,visit,&v);
     if(status!=DL_OK) { (void)dl_map_abort(t); return status; }
     dl_map_handoff h;

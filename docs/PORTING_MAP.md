@@ -27,14 +27,14 @@ archived manifest. Prefix captures are not full-file hash verification.
 |---|---|---|---|
 | `kernel::device::{Core,DeviceContext}`, `platform`, `of` | Target identity, device discovery, resource acquisition | Exact board/firmware admission; reject missing resources | Not implemented |
 | `kernel::dma::{Device,DmaMask}` | DMA addressability and IOMMU mappings | Invalid range, guard-page and unmap-completion tests | Not implemented |
-| `drm::gem::shmem`, `ARef`, `VMapOwned` | Buffer ownership plus CPU/kernel mappings | Owner death cannot free held pages; last mapping controls release | Reference policy implemented; no VM backend |
-| `filp->f_mapping` and Linux mapping flags | Native backing-store pin/migration/reclaim rules | Reclaim blocked by real GPU/firmware aliases and in-flight work | No XNU backing-store implementation |
-| `kernel_mappings`, `memacct::Charge` | Alias accounting and memory-pressure policy | Accounting does not prematurely purge live backing | Metadata model only; accounting backend absent |
-| `Mutex`, `Arc`, `SpinLock`, `new_mutex` | Synchronization, lifetimes and execution contexts | Lock ordering and interrupt/thread restrictions under concurrency | Not tested by single-threaded model |
+| `drm::gem::shmem`, `ARef`, `VMapOwned` | Buffer ownership plus CPU/kernel mappings | Owner death cannot free held pages; last mapping controls release | RAM-only XNU probe exercised in ARM64 virt; graphics backend absent |
+| `filp->f_mapping` and Linux mapping flags | Native backing-store pin/migration/reclaim rules | Reclaim blocked by real GPU/firmware aliases and in-flight work | IOBufferMemoryDescriptor RAM probe implemented; exported backing remains quarantined |
+| `kernel_mappings`, `memacct::Charge` | Alias accounting and memory-pressure policy | Accounting does not prematurely purge live backing | Probe byte/object counters exercised; GPU charges and memory-pressure policy absent |
+| `Mutex`, `Arc`, `SpinLock`, `new_mutex` | Synchronization, lifetimes and execution contexts | Lock ordering and interrupt/thread restrictions under concurrency | Threaded host notification tests and serialized XNU probe path; broader CPU/IRQ stress pending |
 | `kernel::bindings::*`, `prelude::*`, kernel macros | Explicit dependency inventory or narrow replacement | Expand hidden APIs and macros in selected configuration | Lexical inventory only |
 | `declare_drm_ioctls!`, `uapi` | Render-node dispatch and user/kernel copying | Structure layouts, ioctl encodings, sizes, zero-padding, error behavior | Enum/probe tooling implemented; full ABI test absent |
-| `PD_DRI` callbacks | Native file/device and mapping lifetime integration | Last-map release callback exactly once, process exit, mmap offsets | Header hash verified; callback runtime not exercised |
-| G17/M3/legacy `ProbeConfig` paths | Separate hardware/firmware backends | One selected board/firmware, never broad generation assumptions | Target still unspecified |
+| `PD_DRI` callbacks | Native file/device and mapping lifetime integration | Last-map release callback exactly once, process exit, mmap offsets | CPU map/fork/exit checkpoints and drains observed; final backing reuse remains BLOCKED |
+| G17/M3/legacy `ProbeConfig` paths | Separate hardware/firmware backends | One selected board/firmware, never broad generation assumptions | J293/T8103 selected and observed by SSH; proxy, recovery and first-entry qualification pending |
 
 ### Critical ownership observation
 
@@ -43,16 +43,19 @@ reference count. It changes Linux address-space mapping flags and memory charges
 A Darwin implementation must preserve backing lifetime while respecting its own
 VM mechanisms, not copy Linux object layouts.
 
-Our C model tests the decision policy around those lifetimes. It does not wire
-pages, make mappings, clean caches, invalidate TLBs, or communicate with firmware.
+Our C model tests the decision policy around those lifetimes. The separate C++
+probe now allocates nonpageable backing and exposes real CPU mappings through
+XNU in ARM64 virt. That does not establish cache/TLB finalization, DMA safety or
+firmware integration. See `reports/sprint-006/vm-device-runtime.json`.
 
-### A concrete bridge worth testing next
+### The bridge exercised in increment 006
 
 PureDarwin's verified header exposes `pd_dri_ops.mmap_pages` with a release
-callback and release argument, documented to run when the final mapping is gone.
-That is a useful boundary for testing CPU-map ownership. Its page-number width,
-page-granule assumptions and WIMG cache constants still require ARM64 validation.
-The host probe result cannot answer those questions.
+callback and release argument. The real SDK compiled the page-number width and
+architecture cache definitions, and the device exerciser observed CPU aliasing,
+file close, fork and child exit through this bridge. The existing callback runs
+before complete VM-object finalization; mapped backing remains quarantined. The
+observed run does not prove cache/TLB teardown or make it a GPU driver.
 
 ## Source references
 

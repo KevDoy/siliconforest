@@ -10,7 +10,15 @@ int dl_store_init(dl_store *s, uint64_t session, uint64_t page,
                   uint64_t limit, dl_backing_ops ops, void *context) {
     if (!s || !session || !page || (page & (page - 1)) || limit < page ||
         !ops.allocate || !ops.release) return DL_INVALID;
-    *s = (dl_store){.ops=ops, .context=context, .page_size=page, .byte_limit=limit};
+    /* Initialize in place rather than materializing the entire store on stack. */
+    s->ops=ops;
+    s->context=context;
+    s->page_size=page;
+    s->byte_limit=limit;
+    s->resident_bytes=0;
+    s->in_callback=false;
+    for (unsigned i=0; i<DL_BUFFER_CAPACITY; ++i)
+        s->backing[i]=(dl_backing_slot){0};
     return dl_init(&s->policy, session);
 }
 
