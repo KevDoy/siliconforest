@@ -14,7 +14,8 @@
 #                               the CPU renderer for comparison; WMBENCH lines
 #   WM_GL_STEP=session          darwin-wm-gl-session.in: the shared-shell desktop with two
 #                               terminals on the GL renderer (or, without input nodes, the bare
-#                               compositor with the SHM test client); WMSTAT lines
+#                               compositor with the SHM test client), driven unattended by the
+#                               compositor's own synthetic input script; WMSTAT and WMAUTO lines
 #   WM_GL_BIN=<path>            desktop binary (default: the wm-darwin-gl desktop build)
 #   WM_GL_BARE_BIN=<path>       bare compositor binary, staged for the session step
 #   WM_GL_ASSEMBLE_ONLY=1       stop after the offline assemble (RAM root staged and checked,
@@ -25,7 +26,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
-KC=${2:-/nix/store/cszdgfpi4rx7j7rp0d4srn6wzznjkg5w-puredarwin-kc-arm64-0.1}
+KC=${2:-/nix/store/1dka66ysaspm6lgwhxyzncb5ih912cn6-puredarwin-kc-arm64-0.1}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}
@@ -65,4 +66,4 @@ if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
   exit 0
 fi
 DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

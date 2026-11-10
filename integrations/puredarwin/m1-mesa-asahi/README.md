@@ -639,18 +639,96 @@ DCP_TEST=kms [DCP_KMS_REF=panel-linux-kms.fp] tools/dcp_boot.sh <name> <kc-store
 Not handled: the demo does not restore the text console after the last flip; what the panel
 shows after the card node is closed is the display driver's business.
 
+## 10. GPU-rendered Wayland clients (ticket G7, client side)
+
+Not run on the target. What the compositor must provide is in `WAYLAND-NEEDS.md`
+(`zwp_linux_dmabuf_v1` version 3 with `modifier` events for XR24/AR24 linear is enough).
+
+- `mesa-darwin-wayland.nix`: the same Mesa with `-Dplatforms=wayland` (EGL platforms
+  `wayland surfaceless`), built against the flake's Darwin libwayland 1.25.0
+  (`wayland-arm64`), its `wayland-protocols` 1.48 and nixpkgs' `wayland-scanner` on the build
+  machine. `mesa-darwin.nix` is unchanged (same derivation as before; both now call
+  `mesa-darwin-build.nix`). `libgallium` and `libEGL` differ between the two builds,
+  `libGLESv2` does not.
+- Two more patches, applied only to the Wayland build:
+
+  | File | Lines | Reason |
+  |---|---|---|
+  | `0006-egl-wayland-open-render-node-without-feedback.patch` | 37 | with a linux-dmabuf v3 server (no feedback, and `wl_drm` is not built) Mesa has no device and falls back to software; on Darwin it now opens the first DRM device with a render node, found through libdrm's sysctl enumeration |
+  | `0007-loader-wayland-ppoll-for-darwin.patch` | 31 | `ppoll` for Mesa's Wayland dispatch helper, as PureDarwin's own Mesa recipe shims it |
+
+- `test/agx-wl-demo.c` (`agx-wl-demo.nix`): xdg-shell toplevel, `wl_egl_window`,
+  `eglCreateWindowSurface`, GLES3, the three scenes at 800x600 (or the size the compositor
+  configures), one frame per `wl_surface.frame` callback with swap interval 0, `--seconds`
+  (default 10) split over the scenes. It includes `agx-panel-demo.c` as source for the scenes.
+  It fails unless it is a hardware client handing over dma-bufs: the compositor must advertise
+  `zwp_linux_dmabuf_v1`, the renderer must not be a software one, and libwayland's own
+  protocol log of the process (`WAYLAND_DEBUG`, captured in a temporary file) must show
+  `create_immed` requests and no `wl_shm.create_pool`.
+
+```
+AGXWL_INFO globals wl_compositor=4 xdg_wm_base=1 zwp_linux_dmabuf_v1=3 wl_shm=1 wp_presentation=0
+AGXWL_INFO GL_RENDERER="Apple M1 (G13G B1)" GL_VERSION="..." size=800x600 config_alpha=0 native_visual=XR24 software=0 egl_dma_buf_import=1
+AGXWLCHECK scene=plasma frame=7 size=800x600 window_vs_fbo=equal|different differ_px=.. over8_px=.. max_diff=.. blocks_differ=.. flat=0 sha256=.. result=ok|FAIL
+AGXWL scene=plasma frames=.. seconds=.. fps=.. render_ms_median=.. render_ms_p99=.. frame_interval_ms_median=.. frame_interval_ms_max=..
+  ... quads, mesh ...
+AGXWL_BUFFERS counted=1 dmabuf_create_immed=N shm_create_pool=0 surface_attach=.. buffer_release=.. callback_done=..
+AGXWL_DONE status=ok gl_error=0x0
+```
+
+  `AGXWLCHECK` compares the fixed frame in the window's back buffer with the same frame in a
+  framebuffer object; up to 0.1 % of pixels may differ by more than 8/255 (the window's
+  framebuffer is y-inverted inside the driver; llvmpipe differs in a few pixels by 1).
+  `AGXWL_FAIL call="..."` names what went wrong (no connection, no dmabuf global, no
+  configure within 5 s, no frame callback within 2 s, software renderer, shm fallback).
+
+- Bundle (`agx-wl-demo.nix`), in a prefix of its own because its `libEGL`/`libgallium` are not
+  the ones of the other bundle (33 MB):
+
+```
+usr/local/bin/agx-wl-demo
+usr/local/lib/mesa-asahi-wl/{libEGL.1,libGLESv2.2,libgallium-26.3.0-devel,libdrm.2,libwayland-client.0,libwayland-egl.1}.dylib
+```
+
+  Run inside the session: `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` as for the other clients, then
+  `agx-wl-demo --require-renderer "Apple M1"`. `/tmp` must be writable for the protocol log.
+
+- Linux reference on the M1 (both source files in one directory):
+
+```
+X=$(pkg-config --variable=pkgdatadir wayland-protocols)/stable/xdg-shell/xdg-shell.xml
+wayland-scanner client-header $X xdg-shell-client-protocol.h
+wayland-scanner private-code $X xdg-shell-protocol.c
+cc -O2 -I. -o agx-wl-demo agx-wl-demo.c xdg-shell-protocol.c \
+   $(pkg-config --cflags --libs wayland-client wayland-egl egl glesv2 libdrm) -lm
+./agx-wl-demo --require-renderer "Apple M1" | tee agx-wl-linux.txt
+```
+
+- Checked on the builder (`agx-wl-demo-linux.nix`, `run-weston-test`, nixpkgs Mesa 26.1.5 and
+  a headless weston, software rendering): connection, xdg-shell configure, EGL window
+  surface, frame-callback pacing (60 fps), the window-versus-FBO check, the protocol-log
+  counting (`shm_create_pool=1`, `dmabuf_create_immed=0`), and that without
+  `--allow-software` the demo refuses (`AGXWL_FAIL call="zwp_linux_dmabuf_v1"`). Not
+  checkable here: anything with dma-bufs, patch 0006 (Darwin-only code), the Darwin
+  libwayland at run time, and Mesa's own v3 path against a real server.
+
 ## Files
 
 ```
 common.nix                     flake pin, Mesa source pin
 mesa-native.nix                build-machine tools, Linux asahi + drm-shim
 mesa-darwin.nix                arm64 Darwin Mesa (asahi, softpipe, surfaceless EGL, GLES2/3)
+mesa-darwin-wayland.nix        the same with the Wayland EGL platform (both call mesa-darwin-build.nix)
+agx-wl-demo.nix                arm64 Darwin Wayland client bundle
+agx-wl-demo-linux.nix          builder-side build of it and a headless weston run
 agx-offscreen-test.nix         arm64 Darwin bundle: both programs and the libraries
 agx-offscreen-test-linux.nix   builder-side builds of both programs, tracer, run-shim, run-sw
 patches/                       5 source patches
 compat/sys/sysmacros.h         include shim
 test/agx-offscreen-test.c      the test
 test/agx-panel-demo.c          on-screen demo and benchmark
+test/agx-wl-demo.c             GPU-rendered Wayland client
+WAYLAND-NEEDS.md               what a Mesa Wayland client needs from the compositor
 supervisor/                    guest scripts (darwin-agx-panel-demo.in is the demo's)
 KERNEL-NEEDS.md                kernel-side gaps met by the Mesa work, with call sites
 trace/ioctl-trace.c            LD_PRELOAD ioctl/mmap logger
