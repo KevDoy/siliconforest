@@ -130,6 +130,13 @@ every free pool chunk to xnu (pd_linux_page_trim()). The seam half (pdos_pressur
 in patch 0002's files, the pool half in 0011's.
 UPSTREAM: yes.
 """, []),
+ "0016-scoped-guard-labels-are-unique": ("""linuxkpi: two scoped_guard() in one function no longer define the same label
+
+linux/cleanup.h built the label as `___label_ ## __COUNTER__`; the paste keeps __COUNTER__
+from expanding, so every scoped_guard() used the label ___label___COUNTER__ and a function
+with two of them did not compile (drivers/gpu/drm/apple has 16 such functions).
+UPSTREAM: yes (FreeBSD LinuxKPI).
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -151,6 +158,7 @@ def topic(path, hunk, lineno):
     if path.endswith("pd_lkpi_kern.c"): return "0009-physmem-is-the-machines"
     if path.endswith(("bus_dma.cpp", "dma-mapping.h")): return "0010-dma-map-sg-for-platform-devices"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
+    if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"
     if path.endswith("pd_linux_of.c"): return "0006-of-text-properties-named-by-the-node"
     if path.endswith("lock.h"): return "0003-haiku-locks-embed-the-xnu-lock"
