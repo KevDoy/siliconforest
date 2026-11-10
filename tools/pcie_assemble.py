@@ -40,6 +40,10 @@ if WIFI:
  # This M1's own firmware, private and never committed.
  for f in sorted((ROOT/'private/firmware/brcm').iterdir()):
   mapping.append({'source':str(f),'destination':'/Library/Firmware/brcm/'+f.name,'executable':False})
+# Extra or replacement files: PCIE_EXTRA_FILES="source=/destination;source=/destination"
+for item in filter(None,os.environ.get('PCIE_EXTRA_FILES','').split(';')):
+ src,dst=item.split('=',1);src=str(Path(src).resolve());assert Path(src).is_file(),src
+ mapping=[e for e in mapping if e['destination']!=dst]+[{'source':src,'destination':dst,'executable':True}]
 save(OUT/'mapping.json',{'files':mapping})
 with(OUT/'stage.log').open('x')as f:subprocess.run([sys.executable,'-B',str(STAGER),'--base',str(ORIGINAL),'--mapping',str(OUT/'mapping.json'),'--output',str(OUT/'ramdisk.img')],stdout=f,stderr=subprocess.STDOUT,check=True)
 ram=load(OUT/'ramdisk.record.json');assert ram['e2fsck_exit_code']==0
