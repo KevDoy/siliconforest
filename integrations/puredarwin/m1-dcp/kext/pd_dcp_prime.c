@@ -42,6 +42,7 @@ struct pd_dcp_import {
 	struct device *dma_dev;
 	dma_addr_t dma;
 	unsigned int npages;
+	u64 first_phys, last_phys;
 };
 
 static LIST_HEAD(pd_dcp_imports);
@@ -76,6 +77,8 @@ pd_dcp_import_free(struct drm_gem_object *obj)
 		kprintf("PDDcp: prime: freeing an import without a record\n");
 		return;
 	}
+	/* the DART's state (error register included) while the mapping still exists */
+	pd_dcp_iommu_report(imp->dma_dev, "before an imported buffer is released");
 	/* the display must not reach the pages once the exporter may reuse them */
 	pd_dma_unmap_phys_pages(imp->dma_dev, imp->dma, imp->npages);
 	pd_dcp_import_unpin(imp->exp);
@@ -183,15 +186,36 @@ pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	mutex_lock(&pd_dcp_import_lock);
 	list_add(&imp->link, &pd_dcp_imports);
 	mutex_unlock(&pd_dcp_import_lock);
-	kvfree(phys);
+	imp->first_phys = phys[0];
+	imp->last_phys = phys[npages - 1];
 	{
+		/*
+		 * What was mapped, checked against the DART itself: every page's device address
+		 * is translated back through the tables and compared with the exporter's page.
+		 * (Boot pr01's line printed the device address under the label "phys".)
+		 */
+		struct iommu_domain *dom = iommu_get_domain_for_dev(imp->dma_dev);
+		unsigned int wrong = 0;
+		u64 hash = 1469598103934665603ULL;
 		static int said;
 
-		if (said++ < 4)
-			kprintf("PDDcp: prime: imported %u pages of another device's buffer at display address 0x%llx "
-			    "(first page phys 0x%llx)\n", npages, (unsigned long long)imp->dma,
-			    (unsigned long long)sg_dma_address(sgt->sgl));
+		for (i = 0; i < npages; i++) {
+			u64 back = dom != NULL ? iommu_iova_to_phys(dom, imp->dma + ((u64)i << PAGE_SHIFT)) : 0;
+
+			hash = (hash ^ (phys[i] >> PAGE_SHIFT)) * 1099511628211ULL;
+			if (back != phys[i])
+				wrong++;
+		}
+		if (said++ < 8 || wrong != 0)
+			kprintf("PDDcp: prime: imported %u pages at display address 0x%llx: exporter pages phys "
+			    "0x%llx .. 0x%llx (page-frame hash %016llx); DART translates the first back to 0x%llx; "
+			    "%u of %u pages translate wrongly%s\n", npages, (unsigned long long)imp->dma,
+			    (unsigned long long)phys[0], (unsigned long long)phys[npages - 1],
+			    (unsigned long long)hash,
+			    (unsigned long long)(dom != NULL ? iommu_iova_to_phys(dom, imp->dma) : 0), wrong, npages,
+			    wrong != 0 ? " FAILED" : "");
 	}
+	kvfree(phys);
 	return obj;
 
 err_unmap:

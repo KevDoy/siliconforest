@@ -490,6 +490,26 @@ int main(int argc, char **argv)
 	}
 	double elapsed = (double)(last - start) / 1e9;
 
+	/*
+	 * The buffers, read back through the mapping they were written through (for
+	 * --prime-from: the render node's), must still hold what was written: the display
+	 * only reads them.
+	 */
+	for (int k = 0; k < 2; k++) {
+		uint32_t want = k == 0 ? 0x00203080 : 0x00804020, bad = 0;
+
+		for (uint32_t y = 64; y < mode.vdisplay; y++) {
+			const uint32_t *row = (const uint32_t *)((const uint8_t *)bufs[k].map + (size_t)y * bufs[k].pitch);
+
+			for (uint32_t x = 0; x < mode.hdisplay; x++)
+				bad += row[x] != want;
+		}
+		out(P "readback of buffer %d below the nonce rows: %u pixels differ from 0x%06x%s\n", k, bad, want,
+		    bad ? " FAILED" : "");
+		if (bad)
+			return 1;
+	}
+
 	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms, %u EBUSY retries\n", flips,
 	       elapsed, elapsed > 0 ? flips / elapsed : 0.0, flips > 1 ? min_iv / 1e6 : 0.0,
 	       flips > 1 ? max_iv / 1e6 : 0.0, busy_retries);
