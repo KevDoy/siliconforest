@@ -6,7 +6,7 @@ N=${1:?candidate number}; RUNTIME=${2:-120}
 export PATH=$HOME/.nix-profile/bin:$PATH
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 SRC=integrations/puredarwin/m1-apcie-host; RUN=runs/m1-desktop-010
-NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007; M5=chriskearney@${M5_HOST:-10.1.1.93}
+NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007; M5=chriskearney@${M5_HOST:-10.1.1.70}
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
 if [ "${PCIE_SKIP_BUILD:-0}" = 1 ]; then
   echo "reusing the existing kernel collection and tools"
