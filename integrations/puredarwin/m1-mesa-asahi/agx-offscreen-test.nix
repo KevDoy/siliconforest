@@ -2,6 +2,7 @@
 # on, laid out as a self-contained bundle that does not touch the image's own /usr/lib Mesa:
 #
 #   usr/local/bin/agx-offscreen-test
+#   usr/local/bin/agx-panel-demo        (GPU scenes shown on the panel through PDGOP, timings)
 #   usr/local/lib/mesa-asahi/{libEGL.1,libGLESv2.2,libgallium-26.3.0-devel,libdrm.2}.dylib
 #
 #   nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix
@@ -13,6 +14,8 @@ let
   libSystem = p.libsystem-arm64;
   tc = p.arm64-cross-toolchain;
   prefix = "/usr/local/lib/mesa-asahi";
+  # the compositor's static PDGOP + matching static IOKit (not libIOKitCF, see that recipe)
+  pdgop = import ../chonkstep-darwin/build-pdgop.nix;
 in pkgs.stdenv.mkDerivation {
   name = "darwin-lab-agx-offscreen-test-arm64-darwin";
   dontUnpack = true;
@@ -26,19 +29,30 @@ in pkgs.stdenv.mkDerivation {
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains \
       -lEGL -lGLESv2 -ldrm -lSystem -o agx-offscreen-test
+    # The PDGOP archives carry no symbol table ld64 accepts (rustc, their other user, takes the
+    # members itself), so link the members: all of both archives, as the compositor does.
+    mkdir pdgop && (cd pdgop && ${tc}/bin/${triple}-ar x ${pdgop}/lib/libPDGOP.a && ${tc}/bin/${triple}-ar x ${pdgop}/lib/libIOKit.a)
+    ${tc}/bin/${triple}-clang -std=gnu11 -O2 -Wall -Wextra -DHAVE_PDGOP \
+      -isysroot ${sdkRoot} -mmacosx-version-min=26.5 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+      -fno-stack-protector -I${libSystem}/usr/include -I${mesa}/usr/include -I${pdgop}/include \
+      ${./test/agx-panel-demo.c} pdgop/*.o \
+      -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib -L${mesa}/usr/lib \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains \
+      -lEGL -lGLESv2 -lSystem -o agx-panel-demo
   '';
   installPhase = ''
     INT=${tc}/bin/${triple}-install_name_tool
     OTOOL=${tc}/bin/${triple}-otool
     lib=$out${prefix}
     mkdir -p $out/usr/local/bin $lib
-    cp agx-offscreen-test $out/usr/local/bin/
+    cp agx-offscreen-test agx-panel-demo $out/usr/local/bin/
     cp ${mesa}/usr/lib/libEGL.1.dylib ${mesa}/usr/lib/libGLESv2.2.dylib \
        ${mesa}/usr/lib/libgallium-*.dylib ${libdrm}/lib/libdrm.2.dylib $lib/
     chmod u+w $lib/* $out/usr/local/bin/*
     # every reference to one of the bundled libraries, whatever directory it was recorded with,
     # becomes ${prefix}/<name>
-    for f in $lib/*.dylib $out/usr/local/bin/agx-offscreen-test; do
+    for f in $lib/*.dylib $out/usr/local/bin/*; do
       case "$f" in *.dylib) "$INT" -id "${prefix}/$(basename "$f")" "$f";; esac
       for d in $lib/*.dylib; do
         b=$(basename "$d")
@@ -47,7 +61,7 @@ in pkgs.stdenv.mkDerivation {
         done
       done
     done
-    { echo "# otool -L after relocation"; for f in $out/usr/local/bin/agx-offscreen-test $lib/*.dylib; do "$OTOOL" -L "$f"; done; } > $out/LINKAGE.txt
+    { echo "# otool -L after relocation"; for f in $out/usr/local/bin/* $lib/*.dylib; do "$OTOOL" -L "$f"; done; } > $out/LINKAGE.txt
   '';
   dontFixup = true;
   dontStrip = true;

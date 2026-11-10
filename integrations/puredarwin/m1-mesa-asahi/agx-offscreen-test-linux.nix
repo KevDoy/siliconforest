@@ -14,11 +14,13 @@ in pkgs.stdenv.mkDerivation {
   buildPhase = ''
     cc -O2 -Wall -Wextra -I${mesa}/include $(pkg-config --cflags libdrm) ${./test/agx-offscreen-test.c} \
       -L${mesa}/lib -Wl,-rpath,${mesa}/lib -lEGL -lGLESv2 $(pkg-config --libs libdrm) -o agx-offscreen-test
+    cc -O2 -Wall -Wextra -I${mesa}/include ${./test/agx-panel-demo.c} \
+      -L${mesa}/lib -Wl,-rpath,${mesa}/lib -lEGL -lGLESv2 -lm -o agx-panel-demo
     cc -O2 -Wall -shared -fPIC ${./trace/ioctl-trace.c} -ldl -o libagx-ioctl-trace.so
   '';
   installPhase = ''
     mkdir -p $out/bin $out/lib
-    cp agx-offscreen-test $out/bin/
+    cp agx-offscreen-test agx-panel-demo $out/bin/
     cp libagx-ioctl-trace.so $out/lib/
     cat > $out/bin/run-shim <<EOF
     #!/bin/sh

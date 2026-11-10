@@ -56,7 +56,7 @@ UPSTREAM: yes (fixes the leak for all LinuxKPI/DRM kexts).
  #ifdef __cplusplus
 --- a/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
 +++ b/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
-@@ -583,27 +585,39 @@
+@@ -583,27 +624,39 @@
  
  // mutexes, recursive locks and rw locks
  
@@ -109,7 +109,7 @@ UPSTREAM: yes (fixes the leak for all LinuxKPI/DRM kexts).
  	lock->holder = -1;
  	lock->flags = 0;
  }
-@@ -617,9 +631,8 @@
+@@ -617,9 +670,8 @@
  void
  mutex_destroy(mutex *lock)
  {
@@ -121,7 +121,7 @@ UPSTREAM: yes (fixes the leak for all LinuxKPI/DRM kexts).
  }
  
  status_t
-@@ -715,27 +728,19 @@
+@@ -715,27 +767,19 @@
  	return -1;
  }
  
@@ -154,7 +154,7 @@ UPSTREAM: yes (fixes the leak for all LinuxKPI/DRM kexts).
  	lock->holder = -1;
  	lock->owner_count = 0;
  }
-@@ -749,9 +754,7 @@
+@@ -749,9 +793,7 @@
  void
  rw_lock_destroy(rw_lock *lock)
  {

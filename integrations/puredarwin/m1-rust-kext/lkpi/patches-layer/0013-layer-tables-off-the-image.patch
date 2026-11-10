@@ -8,18 +8,7 @@ UPSTREAM: yes (saves 850 KiB of collection space per LinuxKPI kext).
 
 --- a/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
 +++ b/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
-@@ -193,7 +193,9 @@
- 	void			*fbsd_thread;	// linuxkpi's struct thread, made on first use
- };
- 
--static pd_thread sThreads[PD_THREAD_SLOTS];
-+// pd_tables: allocated when the kext loads, not part of the image. As .bss these two tables
-+// were 850 KiB of every kext that carries the layer, in a collection with 16 MiB for all kexts.
-+static pd_thread *sThreads;
- static spinlock sThreadLock;
- static int32 sNextThreadID = 1;
- 
-@@ -910,7 +923,18 @@
+@@ -910,7 +962,18 @@
  
  enum { AREA_FREE = 0, AREA_CONTIG, AREA_PHYS };
  

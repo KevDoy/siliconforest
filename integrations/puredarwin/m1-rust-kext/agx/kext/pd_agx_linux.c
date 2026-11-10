@@ -22,6 +22,8 @@
 #include <linux/dma-mapping.h>
 #include <linux/gfp.h>
 #include <linux/ktime.h>
+#include <linux/compat.h>
+#include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
 #include <linux/vmalloc.h>
@@ -80,6 +82,54 @@ pd_agx_preflight_stats(const char *when)
 	    (long long)pdos_malloc_nowait_retried());
 }
 
+/* the layer's memory-pressure path, called directly (xnu is not under pressure at boot) */
+void pd_linux_page_pressure(void);
+void pd_linux_page_pressure_stats(unsigned long *runs, unsigned long *trimmed, long long *xnu_events);
+
+static void
+pd_agx_preflight_pressure(void)
+{
+	unsigned long runs, trimmed;
+	long long events;
+
+	pd_linux_page_pressure();
+	pd_linux_page_pressure_stats(&runs, &trimmed, &events);
+	kprintf("PDAgx: diag: pressure path run by hand: %lu runs, %lu chunks returned to xnu in all; "
+	    "pressure events from xnu so far: %lld\n", runs, trimmed, events);
+	pd_agx_preflight_stats("after the pressure run");
+}
+
+/*
+ * Thread slots: PD_AGX_DIAG_THREADS kernel threads, one after another, each enters the layer
+ * (takes a slot and a task_struct) and exits. xnu reuses the thread_t addresses; the slot
+ * count must not grow by the number of threads, and the layer must have noticed the reuse.
+ */
+#define PD_AGX_DIAG_THREADS	512
+void pd_thread_slot_stats(int *used, long long *recycled);
+int pd_agx_thread_churn(int count, void (*enter)(void));	/* PDAgxHost.cpp */
+
+static void
+pd_agx_diag_enter(void)
+{
+	linux_set_current(curthread);
+	(void)current->pid;
+}
+
+static void
+pd_agx_preflight_threads(void)
+{
+	int used0, used1, started;
+	long long rec0, rec1;
+
+	pd_thread_slot_stats(&used0, &rec0);
+	started = pd_agx_thread_churn(PD_AGX_DIAG_THREADS, pd_agx_diag_enter);
+	pd_thread_slot_stats(&used1, &rec1);
+	kprintf("PDAgx: diag: thread slots: %d threads entered the layer and exited; slots in use "
+	    "%d -> %d, slots taken over from a dead thread %lld -> %lld%s\n", started, used0, used1,
+	    rec0, rec1, started == PD_AGX_DIAG_THREADS && used1 - used0 < PD_AGX_DIAG_THREADS / 4 &&
+	    rec1 > rec0 ? "" : " FAILED");
+}
+
 /* 64 MiB as 64 objects of 1 MiB, the size of the driver's allocator blocks; then all freed */
 #define PD_AGX_BULK_OBJECTS	64
 #define PD_AGX_BULK_PAGES	((1UL << 20) / PAGE_SIZE)
@@ -122,6 +172,8 @@ pd_agx_preflight_bulk(void)
 	kvfree(pages);
 	kprintf("PDAgx: diag: bulk free: %lu pages in %llu ms\n", got, (unsigned long long)(t2 - t1) / 1000000);
 	pd_agx_preflight_stats("after the bulk test");
+	pd_agx_preflight_pressure();
+	pd_agx_preflight_threads();
 }
 
 static void
@@ -185,31 +237,46 @@ pd_agx_preflight(struct device *dev)
 		dma_unmap_sgtable(dev, &sgt, DMA_BIDIRECTIONAL, 0);
 	sg_free_table(&sgt);
 
-	va = vmap(pages, n, VM_MAP, PAGE_KERNEL);
-	if (va != NULL) {
-		volatile u32 *last = (volatile u32 *)((char *)va + ((size_t)(n - 1) << PAGE_SHIFT));
-		u32 *direct = page_address(pages[n - 1]);
+	/*
+	 * The pages in reverse order: consecutive pool pages are adjacent in kernel memory, and
+	 * vmap() returns that existing address without mapping anything (boot hd01: both
+	 * counters below read 0). Reversed, it has to build a mapping.
+	 */
+	{
+		struct page **rev = kvmalloc_array(n, sizeof(*rev), GFP_KERNEL);
+		int64_t maps0, fail0, maps1, fail1;
 
-		*last = 0x50444167;
-		kprintf("PDAgx: diag: preflight 5/5 vmap %d pages at %p: wrote the last page, reads back 0x%x "
-		    "through the page's own address%s\n", n, va, direct != NULL ? *direct : 0,
-		    direct != NULL && *direct == 0x50444167 ? "" : " FAILED");
-		vunmap(va);
-	} else {
-		kprintf("PDAgx: diag: preflight 5/5 vmap of %d pages FAILED\n", n);
+		if (rev != NULL) {
+			for (i = 0; i < n; i++)
+				rev[i] = pages[n - 1 - i];
+			pdos_map_owned_stats(&maps0, &fail0);
+			va = vmap(rev, n, VM_MAP, PAGE_KERNEL);
+			pdos_map_owned_stats(&maps1, &fail1);
+			if (va != NULL) {
+				/* rev[n - 1] is pages[0] */
+				volatile u32 *last = (volatile u32 *)((char *)va + ((size_t)(n - 1) << PAGE_SHIFT));
+				u32 *direct = page_address(pages[0]);
+
+				*last = 0x50444167;
+				kprintf("PDAgx: diag: preflight 5/5 vmap %d scattered pages at %p: wrote the last "
+				    "page, reads back 0x%x through the page's own address%s\n", n, va,
+				    direct != NULL ? *direct : 0,
+				    direct != NULL && *direct == 0x50444167 ? "" : " FAILED");
+				vunmap(va);
+			} else {
+				kprintf("PDAgx: diag: preflight 5/5 vmap of %d pages FAILED\n", n);
+			}
+			kprintf("PDAgx: diag: that vmap went through the owning descriptors: %lld, was refused "
+			    "by xnu (physical fallback): %lld%s\n", (long long)(maps1 - maps0),
+			    (long long)(fail1 - fail0), maps1 - maps0 == 1 && fail1 == fail0 ? "" : " FAILED");
+			kvfree(rev);
+		}
 	}
 
 out_pages:
 	for (i = 0; i < n; i++)
 		__free_page(pages[i]);
 	kvfree(pages);
-	{
-		int64_t maps, failures;
-
-		pdos_map_owned_stats(&maps, &failures);
-		kprintf("PDAgx: diag: vmap through the owning descriptors: %lld, refused by xnu (physical "
-		    "fallback): %lld%s\n", (long long)maps, (long long)failures, failures == 0 && maps > 0 ? "" : " FAILED");
-	}
 	pd_agx_preflight_stats("after the 600-page test");
 	pd_agx_preflight_bulk();
 }

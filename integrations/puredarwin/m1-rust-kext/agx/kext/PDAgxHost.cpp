@@ -29,3 +29,41 @@ pd_agx_host_of_nub(void *nub)
 	it->release();
 	return found;
 }
+
+// pdagx_diag: `count` kernel threads, one at a time; each calls enter() and terminates.
+// Returns how many ran. For the layer's thread-slot test (pd_agx_linux.c).
+#include <kern/thread.h>
+#include <libkern/OSAtomic.h>
+
+static void (*sChurnEnter)(void);
+static volatile SInt32 sChurnDone;
+
+static void
+pd_agx_churn_thread(void *arg, wait_result_t wr)
+{
+	sChurnEnter();
+	OSIncrementAtomic(&sChurnDone);
+	thread_terminate(current_thread());
+}
+
+extern "C" int
+pd_agx_thread_churn(int count, void (*enter)(void))
+{
+	int started = 0;
+
+	sChurnEnter = enter;
+	sChurnDone = 0;
+	for (int i = 0; i < count; i++) {
+		thread_t thread;
+
+		if (kernel_thread_start(pd_agx_churn_thread, NULL, &thread) != KERN_SUCCESS)
+			break;
+		thread_deallocate(thread);
+		started++;
+		// one at a time, and gone before the next starts, so that xnu can reuse the thread_t
+		for (int spin = 0; sChurnDone < started && spin < 2000; spin++)
+			IOSleep(1);
+		IOSleep(1);
+	}
+	return sChurnDone;
+}

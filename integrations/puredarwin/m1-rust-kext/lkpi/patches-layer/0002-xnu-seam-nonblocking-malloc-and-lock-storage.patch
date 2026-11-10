@@ -7,7 +7,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/pd_fbsd_os.h
 +++ b/src/Kernel/fbsdkpi/pd_fbsd_os.h
-@@ -26,7 +26,23 @@
+@@ -26,7 +26,26 @@
  void pdos_sleep_us(uint64_t us);
  
  // memory, sizes are remembered by the backend
@@ -26,12 +26,15 @@ UPSTREAM: yes.
 +int64_t pdos_malloc_nowait_retried(void);
 +void *pdos_pages_alloc(size_t count, uint64_t *phys, void **cookie);
 +void pdos_pages_free(void *cookie);
++uint64_t pdos_thread_tid(void *thread);
++int pdos_pressure_start(void (*fn)(void));
++int64_t pdos_pressure_events(void);
 +void *pdos_map_owned_pages(void *const *cookies, const uint32_t *index, size_t count, int uncached);
 +void pdos_map_owned_stats(int64_t *maps, int64_t *failures);
  void pdos_free(void *ptr);
  size_t pdos_malloc_size(void *ptr);
  void *pdos_malloc_contig(size_t size, size_t align, uint64_t maxaddr, uint64_t *phys);
-@@ -50,6 +66,16 @@
+@@ -50,6 +69,16 @@
  int pdos_dma_has_mapper(void *pcidev);
  
  // sleepable mutexes, kernel thread context only
@@ -403,3 +406,61 @@ UPSTREAM: yes.
  	lck_rw_free((lck_rw_t *)rw, sGroup);
  }
  
+@@ -991,6 +1232,57 @@
+ 	return thread;
+ }
+ 
++// xnu's unique thread id: differs when a thread_t address is reused by a new thread
++uint64_t
++pdos_thread_tid(void *thread)
++{
++	return thread_tid((thread_t)thread);
++}
++
++// Memory pressure: one kernel thread per kext waits in mach_vm_pressure_monitor() (exported
++// to kexts, com.apple.kpi.mach) and calls `fn` each time the pageout daemon is working, at
++// most once a second. The callback runs the Linux shrinkers and trims the page pool.
++extern "C" kern_return_t mach_vm_pressure_monitor(boolean_t wait_for_pressure,
++	unsigned int nsecs_monitored, unsigned int *pages_reclaimed_p, unsigned int *pages_wanted_p);
++static void (*sPressureFn)(void);
++static volatile int64_t sPressureEvents;
++
++static void
++pressure_thread(void *arg, wait_result_t wr)
++{
++	for (;;) {
++		unsigned int reclaimed = 0, wanted = 0;
++		kern_return_t kr = mach_vm_pressure_monitor(TRUE, 1, &reclaimed, &wanted);
++		if (kr == KERN_SUCCESS && wanted != 0) {
++			OSAddAtomic64(1, (SInt64 *)&sPressureEvents);
++			sPressureFn();
++		}
++		IOSleep(1000);
++	}
++}
++
++int
++pdos_pressure_start(void (*fn)(void))
++{
++	thread_t thread;
++
++	if (sPressureFn != NULL)
++		return 0;
++	sPressureFn = fn;
++	if (kernel_thread_start(pressure_thread, NULL, &thread) != KERN_SUCCESS) {
++		sPressureFn = NULL;
++		return -1;
++	}
++	thread_deallocate(thread);
++	return 0;
++}
++
++int64_t
++pdos_pressure_events(void)
++{
++	return sPressureEvents;
++}
++
+ void *
+ pdos_thread_current(void)
+ {

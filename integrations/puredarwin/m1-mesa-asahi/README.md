@@ -1,9 +1,10 @@
 # m1-mesa-asahi: Mesa's asahi driver for the PureDarwin M1 guest (SF-G items G1, G5)
 
-Build and link evidence only. Nothing here has run on the target, and nothing here claims that
-anything renders. The one thing that did run is the test program on this x86-64 Linux builder:
-on llvmpipe and softpipe (to validate the test's expectations) and on Mesa's own asahi drm-shim
-(the real asahi driver with no GPU behind it, to record its kernel calls).
+Everything in this directory is produced as build and link evidence on the x86-64 Linux
+builder. The off-screen test (section 3) has since been run on the M1 by the lead, under Linux
+and under Darwin; those results are in `reports/sprint-010/gpu-first-render-001.md`, not here.
+The panel demo (section 6) has **not** run on the target: it has only run on the builder, on
+llvmpipe and on Mesa's asahi drm-shim (the real asahi driver with no GPU behind it).
 
 ## 1. Findings
 
@@ -95,8 +96,8 @@ nix-build $F agx-offscreen-test-linux.nix --no-out-link # builder-side test + io
 | Host tools `mesa_clc`, `vtn_bindgen2`, `asahi_clc`; Linux x86-64 asahi + llvmpipe + softpipe, surfaceless EGL, `libasahi_noop_drm_shim.so` | builds, links, runs on the builder | `/nix/store/3x55f3rsqbhnx90a4fxk89vpix187c6z-darwin-lab-mesa-asahi-native-26.3.0-devel-147a62f6190` |
 | `src/asahi` (isa, genxml, libagx, compiler, clc, layout, lib) for arm64 Darwin | builds | part of the next row |
 | Gallium `asahi` + `softpipe`, winsys, EGL (surfaceless), GLES2/3: `libgallium-26.3.0-devel.dylib` (31 MB), `libEGL.1.dylib`, `libGLESv2.2.dylib` | builds, links (1203 ninja steps, 5 patches) | `/nix/store/xz1bzz7vr50xvqygzksk9zvx1s7r885a-darwin-lab-mesa-asahi-arm64-darwin-26.3.0-devel-147a62f6190` |
-| `agx-offscreen-test` Mach-O arm64 + relocated library bundle | builds, links | `/nix/store/m65fq4aa5wsb65vadffy74g6vy55vg1w-darwin-lab-agx-offscreen-test-arm64-darwin` |
-| Builder-side test, tracer, `run-shim`, `run-sw` | builds, runs | `/nix/store/gl0rwzf0g3fhdwc826zgw91f04n6dlz0-darwin-lab-agx-offscreen-test-linux` |
+| `agx-offscreen-test` and `agx-panel-demo` Mach-O arm64 + relocated library bundle | builds, links | `/nix/store/jmq22ikc80xv8ffyqhca9xlmxpnmixhk-darwin-lab-agx-offscreen-test-arm64-darwin` |
+| Builder-side test, panel demo, tracer, `run-shim`, `run-sw` | builds, runs | `/nix/store/22k517ii7vlaz5ri0i42755bbviavqsv-darwin-lab-agx-offscreen-test-linux` |
 | GBM, Vulkan (honeykrisp), Wayland/X11 platforms | not attempted (`-Dgbm=disabled`, no Vulkan drivers, `-Dplatforms=`) | |
 
 The Darwin test is dynamically linked; that is how PureDarwin's own Mesa is used
@@ -105,8 +106,9 @@ directly. The bundle keeps clear of the image's `/usr/lib` Mesa:
 
 ```
 usr/local/bin/agx-offscreen-test
+usr/local/bin/agx-panel-demo           # section 6; PDGOP and its IOKit linked in statically
 usr/local/lib/mesa-asahi/{libEGL.1,libGLESv2.2,libgallium-26.3.0-devel,libdrm.2}.dylib
-LINKAGE.txt        # otool -L of all five after relocation
+LINKAGE.txt        # otool -L of all six after relocation
 ```
 
 It also needs `/usr/lib/libSystem.B.dylib`, `libc++.1.dylib`, `libc++abi.dylib` and
@@ -329,17 +331,206 @@ show it. `GEM_MADVISE` can appear from the BO cache on longer runs (code).
 11. **Pin drift.** `sources/gpu-plan/mesa` (`a1969111`) is not the commit built here or
     running on the M1; anyone reading that tree is reading a different driver.
 
+## 6. On-screen demo and benchmark: `test/agx-panel-demo.c`
+
+GLES3 on surfaceless EGL, rendering into FBOs at panel resolution, shown on the built-in panel
+through the same CPU path the compositor uses: `PDGOPOpen` (64-byte `PDGOPFramebuffer`,
+2560x1600, stride 10240, x2r10g10b10), stores into the mapping, no `PDGOPPresent` (that call is
+for the VirtIO service only). The mapping is read exactly once, to save the console image; the
+image is put back after every present run and at exit, and the program prints only while it is
+back, as `wm-darwin`'s benchmark does. `SIGINT`/`SIGTERM` stop the run and still restore. If
+PDGOP does not open, or is not a directly mapped x2r10g10b10 framebuffer, the present step
+writes to a heap buffer of the same layout and says `sink=heap`.
+
+| Scene | Content |
+|---|---|
+| `plasma` | one full-screen triangle, procedural fragment shader (four `sin`, one `sqrt` per pixel) |
+| `quads` | 10000 textured, alpha-blended quads from a 256x256 atlas, one indexed draw call; about 17 layers of overdraw at 2560x1600 |
+| `mesh` | nine tori (16384 triangles each), per-pixel diffuse + specular lighting, 24-bit depth buffer |
+
+| Mode | One frame is |
+|---|---|
+| `render` | draw, `glFinish` |
+| `readback` | draw, `glReadPixels` of the whole target |
+| `present` | draw, `glReadPixels`, rows into the panel mapping |
+
+| Path | Target and present step |
+|---|---|
+| `rgba8` | RGBA8 target in GL orientation. Present converts each pixel to x2r10g10b10 and reverses the row order on the CPU, a row at a time through a 10 KiB buffer (the compositor's shape of work) |
+| `rgb10` | RGB10_A2 target; the shaders flip y and swap red and blue, so a `GL_RGBA`/`GL_UNSIGNED_INT_2_10_10_10_REV` readback is already the panel's word (`r<<20 \| g<<10 \| b`), top row first. Present is one 16 MB copy |
+| `direct` | as `rgb10`, but `glReadPixels` writes straight into the panel mapping (present mode only): no second copy |
+
+asahi supports the 10-bit path as far as the builder can tell: on the drm-shim the driver
+reports `GL_IMPLEMENTATION_COLOR_READ_FORMAT/TYPE` = `GL_RGBA`/`GL_UNSIGNED_INT_2_10_10_10_REV`
+for an RGB10_A2 target (`AIL_FMT(R10G10B10A2_UNORM, ...)` in `src/asahi/layout/formats.c`), and
+all 21 runs complete without a GL error. The program asks at run time and drops the `rgb10` and
+`direct` paths if the answer differs.
+
+Each scene runs render/readback/present on `rgba8`, the same on `rgb10`, then present on
+`direct`: 7 runs per scene, 21 in all. A run is `--frames` frames (default 30) after one
+untimed warm-up frame, cut short after 2 s (never below 5 frames); `--budget` seconds (default
+50) after start, remaining runs are skipped with an `AGXBENCH_SKIP` line. Frames depend on the
+frame index only, never on the clock.
+
+### Output
+
+```
+agx-panel-demo: GL_RENDERER=Apple M1 (G13G B1)
+agx-panel-demo: GL_VERSION=OpenGL ES 3.2 Mesa 26.3.0-devel
+agx-panel-demo: RGB10_A2 read format 0x1908 type 0x8368: 10-bit path on
+agx-panel-demo: size=2560x1600 frames=30 budget_s=40 sink=panel stride=10240 setup_ms=...
+AGXHASH scene=plasma target=rgba8 frame=7 size=2560x1600 sha256=<64 hex>
+AGXHASH scene=plasma target=rgb10 frame=7 size=2560x1600 sha256=<64 hex>
+AGXCHECK scene=plasma differ_px=0 of=4096000 max_diff=3 flat=0 result=ok
+AGXBENCH scene=plasma mode=render frames=30 median_us=.. min_us=.. max_us=.. fps=.. path=rgba8 sink=none read_us=.. copy_us=0
+AGXBENCH scene=plasma mode=readback frames=30 ... path=rgba8 sink=none read_us=.. copy_us=0
+AGXBENCH scene=plasma mode=present frames=30 ... path=rgba8 sink=panel read_us=.. copy_us=..
+AGXBENCH scene=plasma mode=render ... path=rgb10 ...
+AGXBENCH scene=plasma mode=readback ... path=rgb10 ...
+AGXBENCH scene=plasma mode=present ... path=rgb10 sink=panel ...
+AGXBENCH scene=plasma mode=present ... path=direct sink=panel read_us=.. copy_us=0
+  ... the same 10 lines for quads and for mesh ...
+AGXBENCH_DONE status=ok skipped=0 seconds=..
+```
+
+The first eight fields of an `AGXBENCH` line are the requested ones; `path`, `sink`
+(`panel`, `heap` or `none`), `read_us` (median time from the start of the frame to the end of
+`glFinish`/`glReadPixels`) and `copy_us` (median of the CPU convert/copy that follows) are
+appended. `fps` is 10^6 / `median_us`. Exit status 0 only for `status=ok`.
+
+- `AGXHASH`: SHA-256 of frame 7 as read back, per scene and target. Comparable only between
+  runs of the same driver at the same size (Linux asahi on this M1 against Darwin asahi).
+- `AGXCHECK` needs no reference: it converts the `rgba8` frame exactly as the present step
+  does and compares it with the `rgb10` frame, so the flip, the channel swap and the
+  conversion are checked against each other; it fails if more than 2 % of pixels differ by
+  more than 16/1023 in a channel, or if the frame is a single flat colour. On llvmpipe at
+  640x400 the largest difference is 3, 13 and 3 (plasma, quads, mesh) and no pixel exceeds 16.
+
+### Linux reference (for the lead, on the M1's Linux)
+
+```
+cc -O2 -o agx-panel-demo agx-panel-demo.c $(pkg-config --cflags --libs egl glesv2) -lm
+./agx-panel-demo --require-renderer "Apple M1" --frames 30 | tee agx-panel-linux.txt
+./agx-panel-demo --require-renderer "Apple M1" --frames 30 --no-present    # without the heap present runs
+```
+
+There is no panel access in the Linux build: `present` runs write to a heap buffer
+(`sink=heap`), which measures readback plus conversion without the cost of the panel mapping.
+`--dump prefix` writes frame 7 of each scene as `prefix-<scene>.ppm` for a look at the picture.
+The six `AGXHASH` lines are the reference for Darwin.
+
+### On PureDarwin
+
+Bundle: `nix-build $F agx-offscreen-test.nix --no-out-link` (store path in section 2); the four
+libraries and `agx-offscreen-test` are byte-identical to the bundle that passed on hardware,
+only `usr/local/bin/agx-panel-demo` is new. Staging list, with `T` that store path:
+
+```
+$T/usr/local/bin/agx-panel-demo=/usr/local/bin/agx-panel-demo
+$T/usr/local/bin/agx-offscreen-test=/usr/local/bin/agx-offscreen-test
+$T/usr/local/lib/mesa-asahi/libEGL.1.dylib=/usr/local/lib/mesa-asahi/libEGL.1.dylib
+$T/usr/local/lib/mesa-asahi/libGLESv2.2.dylib=/usr/local/lib/mesa-asahi/libGLESv2.2.dylib
+$T/usr/local/lib/mesa-asahi/libgallium-26.3.0-devel.dylib=/usr/local/lib/mesa-asahi/libgallium-26.3.0-devel.dylib
+$T/usr/local/lib/mesa-asahi/libdrm.2.dylib=/usr/local/lib/mesa-asahi/libdrm.2.dylib
+```
+
+`tools/agx_boot.sh` builds its own `PCIE_EXTRA_FILES` from this recipe and lists only
+`agx-offscreen-test` and the libraries; it needs the first line above added (that file is
+outside this directory). Guest script: `supervisor/darwin-agx-panel-demo.in`
+(`AGX_TEMPLATE=...`), prefix `DL42_`, runs
+`agx-panel-demo --require-renderer "Apple M1" --frames 30 --budget 40 --hold-ms 250`
+and prints `DL42_PANEL_RC=<rc> seconds=<n>`. `--hold-ms` leaves the last frame of each
+present run on the panel for that long before the console comes back (9 runs, 2.25 s in all).
+Expected wall time: at most 40 s of runs plus the run in progress (2 s cap plus its warm-up
+frame), the holds and set-up; the 2 s cap bounds 21 runs to about 42 s even if every frame
+were slow, so on a slow target the last runs are skipped rather than the script overrunning.
+
+### What the demo adds to the kernel's workload (from the drm-shim trace, 5 frames per run)
+
+Same request set as section 4 plus `DRM_IOCTL_ASAHI_GEM_MADVISE` (once, from the BO cache).
+Objects of 16 MB (`0xfa0000`, `0xfe0000`) are created and mapped. Render submissions carry two
+attachments (`SET_FRAGMENT_ATTACHMENTS:48`, colour and depth); every `glReadPixels` is one
+`COMPUTE` submission; every `glFinish` is the sync-file export/import/wait sequence. A full
+default run is about 1100 submissions (651 render, about 470 compute) in under a minute.
+
+### Risks of the demo
+
+1. **The panel is left showing a frame if the process dies.** A crash or `SIGKILL` between a
+   present and the restore leaves the last GPU frame up; the text console repaints as it
+   scrolls. The serial log is unaffected.
+2. **Static IOKit next to libIOKitCF.** The demo links PDGOP's `libIOKit.a` members into the
+   executable while `libdrm.2.dylib` (loaded through `libEGL`) depends on
+   `/usr/lib/libIOKitCF.dylib`, which exports functions of the same names with other
+   signatures. Two-level namespace binding keeps them apart, and libdrm's `/dev/dri` path makes
+   no IOKit calls; this combination has not run.
+3. **Direct readback into a write-combined mapping** relies on Mesa only writing to the
+   destination. It is the path most likely to be slow or wrong on the target; it is last in
+   each scene, and the other two present paths do not depend on it.
+4. **Readback cost is unknown.** On Linux `glReadPixels` of 16 MB from this driver is a
+   compute job plus a CPU copy out of a GPU buffer mapping; if PureDarwin maps that buffer
+   uncached or write-combined the copy is far slower than on Linux. `read_us` minus the
+   `render` median shows it.
+5. **GLES3 and 16 MB objects are new on the target**: the hardware-proven test used a GLES2
+   context and a 256x256 target.
+6. **Timer resolution**: libSystem's `CLOCK_MONOTONIC` is derived from `gettimeofday`
+   (microseconds, and it moves if wall time is set during the run).
+
+## 7. Using the GPU from the compositor (on paper)
+
+State today: `wm-darwin` is Smithay's Wayland front end with a tiny-skia CPU renderer, `wl_shm`
+clients only, PDGOP stores as the only output. Direct scanout is out of scope until the display
+controller driver (SF-H); every option below ends in a readback and a copy to the panel.
+
+**Option 1: GL renderer in the compositor, FBO plus readback (what section 6 measures).**
+
+- Mesa: nothing new. Surfaceless EGL, GLES2/3 and asahi are in the bundle.
+- Kernel: nothing new beyond what the demo already uses.
+- Compositor: a second implementation of its renderer trait on GLES. Client buffers stay
+  `wl_shm` and are uploaded with `glTexSubImage2D` for damaged regions; the scene is drawn
+  into an RGB10_A2 FBO with the flip and channel swap of the `rgb10` path; output is
+  `glReadPixels` of the damaged rows into the PDGOP mapping. Smithay's GLES renderer expects
+  an EGL display from a native display type; a surfaceless one has to be supplied (not
+  checked against Smithay 0.7's API).
+- Cost per full frame is the demo's `present` line for `rgb10` or `direct`; with damage
+  tracking only the damaged rows are read back. If that line is not clearly below the CPU
+  compositor's 24 ms write plus 9 ms convert, this option only pays for scenes the CPU cannot
+  draw in time (blur, scaling, many surfaces), not for a terminal.
+- Size: 2 to 3 weeks (ticket G6). No dependency on G3/G4.
+
+**Option 2: zero-copy clients (GPU clients hand dma-bufs to the compositor).** Builds on
+option 1; it removes the client-side readback and the `wl_shm` upload, not the final copy.
+
+| Piece | State | Work |
+|---|---|---|
+| Mesa GBM (`-Dgbm=enabled`) | builds and links for Darwin with the five patches here and nothing else (`libgbm.1.dylib`, `dri_gbm.dylib`; tried in a scratch tree, not in a recipe) | a recipe flag; where `libgbm` looks for its backend at run time is untested |
+| Mesa EGL Wayland platform for clients (`-Dplatforms=wayland`) | not attempted; needs the flake's `wayland-arm64`, `wayland-protocols`, a host `wayland-scanner`, and the `ppoll` shim PureDarwin's `mesa.nix` adds for `loader_wayland_helper.c` | 2 to 3 days |
+| `EGL_EXT_image_dma_buf_import` (+ `_modifiers`) in the compositor's EGL | Mesa enables it when the kernel answers `DRM_CAP_PRIME` (patch 0004 makes Darwin ask) and the driver can import; asahi can | check the extension string on the target |
+| Compositor protocol: `linux-dmabuf` v4 with feedback (Smithay has the state objects); legacy `wl_drm` is not needed by current Mesa clients | missing | about 1 week with the import path |
+| Kernel: PRIME handle to fd and fd to handle across two DRM files | DRM core `drm_prime.c` + `pd_dma_buf.c`; unexercised by asahi so far (0 PRIME calls in both traces) | test first |
+| Kernel: dma-buf fds over a Unix socket (`SCM_RIGHTS`) | missing: the file type is not sendable (ticket G3) | 1 week with the item below |
+| Kernel: `poll`/kqueue on sync files and DRM fds | missing or level-only (G3) | Wayland clients block on these |
+| Kernel: `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` / `IMPORT_SYNC_FILE` | missing (G4). asahi calls both for every shared buffer on every submission; when they fail it falls back to waiting on the CPU, so this is a performance item, not a correctness one | 1 week |
+| Kernel: dma-buf `mmap` | missing (G4); the GL import path does not need it, CPU fallbacks and screenshots do | with the above |
+| Device identity for clients | `linux-dmabuf` feedback sends a `dev_t`; open DRM nodes here are clones with a different minor than the node. libdrm's patch compares the low byte, Mesa calls `drmGetDeviceFromDevId` | test with the first client |
+
+Order: run section 6 and read the numbers; option 1; then G3 (fd passing and wake-ups), the
+Mesa GBM/Wayland build and `linux-dmabuf` in the compositor, with G4 for speed; Vulkan and
+scanout later. Option 2 is about 4 to 5 weeks on top of option 1, most of it kernel file
+plumbing that does not need the GPU driver.
+
 ## Files
 
 ```
 common.nix                     flake pin, Mesa source pin
 mesa-native.nix                build-machine tools, Linux asahi + drm-shim
 mesa-darwin.nix                arm64 Darwin Mesa (asahi, softpipe, surfaceless EGL, GLES2/3)
-agx-offscreen-test.nix         arm64 Darwin test bundle
-agx-offscreen-test-linux.nix   builder-side test, tracer, run-shim, run-sw
+agx-offscreen-test.nix         arm64 Darwin bundle: both programs and the libraries
+agx-offscreen-test-linux.nix   builder-side builds of both programs, tracer, run-shim, run-sw
 patches/                       5 source patches
 compat/sys/sysmacros.h         include shim
 test/agx-offscreen-test.c      the test
+test/agx-panel-demo.c          on-screen demo and benchmark
+supervisor/                    guest scripts (darwin-agx-panel-demo.in is the demo's)
 trace/ioctl-trace.c            LD_PRELOAD ioctl/mmap logger
 trace/summarize.py             condenses a log
 trace/shim-g13g-trace.txt      recorded log

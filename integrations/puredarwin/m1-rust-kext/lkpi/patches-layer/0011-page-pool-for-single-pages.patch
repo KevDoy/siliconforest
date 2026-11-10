@@ -20,7 +20,11 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
 +++ b/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
-@@ -11,7 +11,9 @@
+@@ -8,10 +8,13 @@
+ #include <linux/vmalloc.h>
+ #include <linux/device.h>
+ #include <linux/page.h>
++#include <linux/compat.h>
  
  #include "../../pd_fbsd_os.h"
  
@@ -31,7 +35,7 @@ UPSTREAM: yes.
  // the offset bits in a page. linux/page.h makes PAGE_MASK the linux one, the page bits
  #define PD_PAGE_OFFSET	((vm_paddr_t)PAGE_SIZE - 1)
  
-@@ -23,9 +25,25 @@
+@@ -23,9 +26,25 @@
  	// joined kernel mappings still reaching these pages, and a free that waits for them
  	int vmaps;
  	bool freed;
@@ -57,7 +61,7 @@ UPSTREAM: yes.
  // a joined mapping and the page runs it keeps alive
  struct pd_vmap {
  	struct pd_vmap *next;
-@@ -38,7 +56,8 @@
+@@ -38,7 +57,8 @@
  
  static void pd_page_flush(struct page *page);
  
@@ -67,7 +71,7 @@ UPSTREAM: yes.
  static struct mtx pd_page_lock;
  
  static inline unsigned
-@@ -81,8 +100,10 @@
+@@ -81,8 +101,10 @@
  	unsigned long i;
  
  	run = malloc(sizeof(*run) + npages * sizeof(struct vm_page), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -79,7 +83,7 @@ UPSTREAM: yes.
  
  	run->phys = phys;
  	run->kva = kva;
-@@ -147,6 +168,153 @@
+@@ -147,6 +169,206 @@
  	return page->pd_kva;
  }
  
@@ -215,6 +219,59 @@ UPSTREAM: yes.
 +	}
 +}
 +
++// pd_pool under memory pressure: every fully free, unmapped chunk goes back to xnu, the
++// reserve included. Returns the number of chunks released.
++unsigned long
++pd_linux_page_trim(void)
++{
++	struct pd_page_run *run, *next, *victims = NULL;
++	unsigned long n = 0;
++
++	mtx_lock(&pd_page_lock);
++	for (run = pd_pool_partial; run != NULL; run = next) {
++		next = run->pnext;
++		if (run->freemask != ~0ULL || run->vmaps != 0)
++			continue;
++		pd_pool_unlink(run);
++		pd_page_run_unhash(run);
++		pd_pool_free -= PD_CHUNK_PAGES;
++		pd_pool_chunks--;
++		pd_pool_chunk_frees++;
++		run->pnext = victims;
++		victims = run;
++	}
++	mtx_unlock(&pd_page_lock);
++	for (run = victims; run != NULL; run = next) {
++		next = run->pnext;
++		pdos_pages_free(run->cookie);
++		free(run, M_DEVBUF);
++		n++;
++	}
++	return n;
++}
++
++// what the seam's pressure thread calls (and a kext's diagnostics may): Linux shrinkers
++// first, so that what they free can leave with the trim
++void pd_lkpi_lowmem(void);
++static unsigned long pd_pool_pressure_runs, pd_pool_pressure_trimmed;
++
++void
++pd_linux_page_pressure(void)
++{
++	linux_set_current(curthread);
++	pd_lkpi_lowmem();
++	pd_pool_pressure_trimmed += pd_linux_page_trim();
++	pd_pool_pressure_runs++;
++}
++
++void
++pd_linux_page_pressure_stats(unsigned long *runs, unsigned long *trimmed, long long *xnu_events)
++{
++	*runs = pd_pool_pressure_runs;
++	*trimmed = pd_pool_pressure_trimmed;
++	*xnu_events = pdos_pressure_events();
++}
++
 +// for a kext's diagnostics: pool state and why allocations failed
 +void
 +pd_linux_page_stats(unsigned long *chunks, unsigned long *free_pages, unsigned long *chunk_allocs,
@@ -233,7 +290,7 @@ UPSTREAM: yes.
  struct page *
  linux_alloc_pages(gfp_t flags, unsigned int order)
  {
-@@ -155,10 +323,16 @@
+@@ -155,10 +377,16 @@
  	uint64_t phys;
  	void *kva;
  
@@ -251,7 +308,7 @@ UPSTREAM: yes.
  	if ((flags & M_ZERO) != 0)
  		memset(kva, 0, size);
  
-@@ -184,6 +358,10 @@
+@@ -184,6 +412,10 @@
  	}
  
  	run = page->pd_run;
@@ -262,7 +319,7 @@ UPSTREAM: yes.
  	for (unsigned long i = 0; i < run->npages; i++) {
  		if (run->pages[i].pd_kva_cached != NULL) {
  			pdos_unmap_pages(run->pages[i].pd_kva);
-@@ -279,17 +457,43 @@
+@@ -279,17 +511,43 @@
  	if (i == count)
  		return pages[0]->pd_kva;
  
@@ -315,13 +372,15 @@ UPSTREAM: yes.
  	if (va == NULL)
  		return NULL;
  
-@@ -427,6 +631,9 @@
+@@ -427,6 +685,11 @@
  lkpi_page_init(void *arg)
  {
  	mtx_init(&pd_page_lock, "lkpi pages", NULL, MTX_DEF);
 +	pd_page_hash = pdos_malloc(sizeof(*pd_page_hash) * PD_PAGE_HASH, 1, 1);
 +	if (pd_page_hash == NULL)
 +		panic("lkpi: no memory for the page hash");
++	if (pdos_pressure_start(pd_linux_page_pressure) != 0)
++		printf("lkpi: no memory-pressure thread, shrinkers will not run\n");
  }
  SYSINIT(lkpi_page, SI_SUB_LOCK, SI_ORDER_ANY, lkpi_page_init, NULL);
  
