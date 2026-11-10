@@ -33,4 +33,21 @@
  */
 IOReturn PDApcieT8103LinkBringUp(IORegistryEntry *apcie, OSArray *regs, UInt32 *linksts);
 
+/*
+ * The reverse: port 0 and the PHY are stopped and, with kPDApcieShutdownRadioOff, the radio's
+ * power is switched off through the SMC (not with pdapciesmc=0). See Link::shutdown() in
+ * PDApcieT8103Link.cpp for the order. Nothing calls this during a normal boot. The caller
+ * must have stopped every use of the devices behind the port; afterwards their BARs and
+ * config space must not be touched until PDApcieT8103LinkBringUp() succeeded again.
+ *
+ * *portDown is set once the port is down (also when it already was). The return value is
+ * that of the last step, so a failed radio power write is reported with the port down.
+ *
+ * UNTESTED on hardware, and the SMC "off" value (PD_SMC_RADIO_POWER_OFF) is unverified.
+ */
+enum {
+    kPDApcieShutdownRadioOff = 1u << 0,
+};
+IOReturn PDApcieT8103PortShutdown(IORegistryEntry *apcie, OSArray *regs, UInt32 flags, bool *portDown);
+
 #endif

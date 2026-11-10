@@ -98,8 +98,27 @@ struct bwfm_bus_ops {
 	int (*bs_preinit)(struct bwfm_softc *);
 	void (*bs_stop)(struct bwfm_softc *);
 	int (*bs_txcheck)(struct bwfm_softc *);
-	int (*bs_txdata)(struct bwfm_softc *, struct mbuf *);
+	/* PDBwfm: the mbuf by reference, the bus may replace a chain */
+	int (*bs_txdata)(struct bwfm_softc *, struct mbuf **);
 	int (*bs_txctl)(struct bwfm_softc *, void *);
+	/*
+	 * PDBwfm lifecycle, all optional. bs_halt: chip reset, everything of
+	 * the firmware bring-up released, the next init loads the firmware
+	 * again. bs_sleep: the same after telling the firmware (D3 inform).
+	 * bs_dead: the firmware stopped answering. bs_gone: no register
+	 * access while gone (1: about to lose power, 2: found dead, 0: back).
+	 */
+	void (*bs_halt)(struct bwfm_softc *);
+	int (*bs_sleep)(struct bwfm_softc *);
+	int (*bs_dead)(struct bwfm_softc *);
+	void (*bs_gone)(struct bwfm_softc *, int);
+	/*
+	 * PDBwfm: why the last control message failed, in words ("not sent:
+	 * ...", "no answer in 5 s", "firmware refused, status N"), and how
+	 * many in a row went unanswered.
+	 */
+	const char *(*bs_ctlwhy)(struct bwfm_softc *);
+	int (*bs_unanswered)(struct bwfm_softc *);
 };
 
 struct bwfm_buscore_ops {
@@ -209,12 +228,25 @@ struct bwfm_softc {
 	char			 sc_antenna_sku[8];
 	/* PDBwfm: the firmware supplicant runs the WPA2-PSK handshake */
 	int			 sc_fwsup;
+	/* PDBwfm: one of init, stop, halt, sleep and detach at a time */
+	int			 sc_lifecycle;
+	void			*sc_lifecycle_owner;
+	int			 sc_media_done;
+	/* PDBwfm: the port is down, the glue keeps off the DART too */
+	int			 sc_bus_gone;
 };
 
 void bwfm_attach(struct bwfm_softc *);
 void bwfm_attachhook(struct device *);
 int bwfm_preinit(struct bwfm_softc *);
 void bwfm_cleanup(struct bwfm_softc *);
+/* PDBwfm: lifecycle, see bwfm.c */
+void bwfm_lifecycle_enter(struct bwfm_softc *);
+void bwfm_lifecycle_exit(struct bwfm_softc *);
+int bwfm_task_barrier(struct bwfm_softc *);
+int bwfm_radio_down(struct bwfm_softc *, int);
+void bwfm_init(struct ifnet *);
+void bwfm_stop(struct ifnet *);
 int bwfm_detach(struct bwfm_softc *, int);
 int bwfm_activate(struct bwfm_softc *, int);
 int bwfm_chip_attach(struct bwfm_softc *);

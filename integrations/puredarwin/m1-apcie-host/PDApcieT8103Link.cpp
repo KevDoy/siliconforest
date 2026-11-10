@@ -47,6 +47,11 @@
  *    the deviations of m1-apcie-bridge/proxy_linkup.py: REFCLK/APPCLK clock gating stays
  *    disabled (CGDIS set) and CLKREQ# GPIO 150 is muxed to function 1.
  *
+ * 2a. The port shutdown (PDApcieT8103PortShutdown) puts those two sources together in
+ *    reverse: the port interrupt mask and LTSSM stop of Linux apple_pcie_port_teardown()
+ *    and apple_pcie_tunnel_stop(), PERST# through the GPIO, then m1n1 pcie_shutdown()
+ *    for the port (reset, APPCLK) and the PHY (clock requests), then the radio's power.
+ *
  * 3. The radio power enable (Linux "pwren", SMC GPIO 13) is the SMC key write gP0d of
  *    m1n1 proxyclient/experiments/pcie_enable_devices.py, done by PDAppleSMC.cpp at the
  *    place Linux apple_pcie_setup_link() switches pwren on. Boot argument pdapciesmc=0
@@ -715,6 +720,7 @@ struct Link {
     IOReturn portInit();
     IOReturn rootPortInit();
     IOReturn linkSequence();
+    void shutdown();
     void gpioPerst(bool asserted);
 };
 
@@ -1121,7 +1127,104 @@ IOReturn Link::linkSequence()
     return kIOReturnSuccess;
 }
 
+/*
+ * Port 0 and PHY shutdown. The caller made sure the port block is readable (power domains
+ * active, PHY running, port ready) and that nothing uses the device behind the port any
+ * more. Each block gets its last access before it stops:
+ *
+ *   port  1. every port interrupt masked and acknowledged   (apple_pcie_port_teardown)
+ *         2. LTSSM stopped                                   (apple_pcie_tunnel_stop)
+ *   gpio  3. PERST# asserted: the device is in reset before its link and clocks go
+ *   port  4. port reset asserted, APPCLK off, wait for not-ready  (m1n1 pcie_shutdown;
+ *            the wait is Linux apple_pcie_tunnel_stop). Last port access. The status
+ *            read comes after APPCLK and the port reset: the cold bring-up reads and
+ *            writes the port block in exactly that state (portInit() applies the
+ *            tunables and sets APPCLK_EN by read-modify-write before either is on).
+ *   phy   5. reset bit, CLK1REQ, CLK0REQ cleared             (m1n1 pcie_shutdown, in its
+ *            order and with its register writes). Last PHY access; the PHY control
+ *            register itself stays readable, the bring-up reads it in this state.
+ *
+ * The lane reference clock requests and PORT_REFCLK are left as they are: neither source
+ * turns them off, and the bring-up sets them again. The PMGR power domains are not
+ * touched (m1n1 leaves them, and they have other users). This is the state m1n1 leaves
+ * behind before the guest starts, from which the bring-up above is proven; the sequence
+ * itself is UNTESTED on hardware.
+ */
+void Link::shutdown()
+{
+    UInt32 status = 0;
+
+    port.w32(PORT_INTMSK, 0xffffffff);
+    port.w32(PORT_INTSTAT, 0xffffffff);
+    port.w32(PORT_LINKCMDSTS, 0xffffffff);
+    port.clear32(PORT_LTSSMCTL, PORT_LTSSMCTL_START);
+    LOG("shutdown: port0 interrupts masked, LTSSM stopped; linksts 0x%08x", port.r32(PORT_LINKSTS));
+
+    gpioPerst(true);
+    LOG("shutdown: PERST# asserted; gpio%u 0x%08x", perstPin, gpio.r32(REG_GPIO(perstPin)));
+
+    port.clear32(PORT_PERST, PORT_PERST_OFF);
+    port.clear32(PORT_APPCLK, PORT_APPCLK_EN);
+    bool stopped = poll32(port, PORT_STATUS, PORT_STATUS_READY, 0, 100000, &status);
+    LOG("shutdown: port0 in reset, APPCLK off; status 0x%08x%s", status, stopped ? "" : " (still ready after 100 ms)");
+
+    phy.clear32(APCIE_PHY_CTRL, APCIE_PHY_CTRL_RESET_T8103);
+    phy.clear32(APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK1REQ);
+    phy.clear32(APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK0REQ);
+    LOG("shutdown: PHY clock requests dropped; phy ctrl 0x%08x", phy.r32(APCIE_PHY_CTRL));
+    linksts = 0;
+}
+
 } /* namespace */
+
+IOReturn PDApcieT8103PortShutdown(IORegistryEntry *apcie, OSArray *regs, UInt32 flags, bool *portDown)
+{
+    Link state;
+    Link *link = &state;
+    IOReturn ret;
+    bool pmgrActive = false;
+    UInt32 smc = kPDAppleSMCEnable;
+
+    if (portDown)
+        *portDown = false;
+    PE_parse_boot_argn("pdapciesmc", &smc, sizeof(smc));
+
+    /* The same checks and the same order of first reads as the bring-up. */
+    ret = link->setup(apcie, regs);
+    if (ret == kIOReturnSuccess)
+        ret = link->pmgr.clockGates(apcie, false, &pmgrActive);
+    if (ret != kIOReturnSuccess) {
+        LOG("shutdown: could not look at the port (0x%08x); nothing written", ret);
+        return ret;
+    }
+    if (link->controllerLooksUp(pmgrActive)) {
+        link->shutdown();
+    } else {
+        LOG("shutdown: the port is not running; no port or PHY register written");
+    }
+    if (portDown)
+        *portDown = true;
+
+    /*
+     * Linux switches pwren off with PERST# asserted. THE VALUE WRITTEN HERE IS UNVERIFIED:
+     * gP0d = 0x00800001 is proven to switch the radio on, 0x00800000 for off is the
+     * obvious reverse and has never been written on hardware.
+     */
+    if (!(flags & kPDApcieShutdownRadioOff)) {
+        LOG("shutdown: radio power left on (not asked to switch it off)");
+    } else if (!(smc & kPDAppleSMCEnable)) {
+        LOG("shutdown: pdapciesmc=0, no SMC access; radio power left on");
+    } else {
+        LOG("shutdown: switching the radio off through the SMC (gP0d = 0x%08x, UNVERIFIED value)",
+            PD_SMC_RADIO_POWER_OFF);
+        ret = PDAppleSMCRadioPowerOff(smc);
+        if (ret == kIOReturnSuccess)
+            LOG("shutdown: radio power off written");
+        else
+            LOG("shutdown: SMC radio power off FAILED (0x%08x); the port is down all the same", ret);
+    }
+    return ret;
+}
 
 IOReturn PDApcieT8103LinkBringUp(IORegistryEntry *apcie, OSArray *regs, UInt32 *linkstsOut)
 {

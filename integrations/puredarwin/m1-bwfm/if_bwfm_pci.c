@@ -24,13 +24,6 @@
 #include "bwfmreg.h"
 #include "if_bwfm_pci.h"
 
-
-
-
-
-
-
-
 #define BWFM_DMA_D2H_SCRATCH_BUF_LEN		8
 #define BWFM_DMA_D2H_RINGUPD_BUF_LEN		1024
 #define BWFM_DMA_H2D_IOCTL_BUF_LEN		ETHER_MAX_LEN
@@ -39,7 +32,7 @@
 #define BWFM_NUM_RX_MSGRINGS			3
 
 #define BWFM_NUM_IOCTL_PKTIDS			8
-/* PDBwfm: pd_bwfm_compat.h sizes these to the DMA bounce pool */
+/* PDBwfm: pd_bwfm_compat.h sets its own table sizes */
 #ifndef BWFM_NUM_TX_PKTIDS
 #define BWFM_NUM_TX_PKTIDS			2048
 #endif
@@ -174,7 +167,17 @@ struct bwfm_pci_softc {
 	uint8_t			 sc_mbdata_done;
 	uint8_t			 sc_pcireg64;
 	uint8_t			 sc_mb_via_ctl;
+
+	/* PDBwfm: lifecycle, see bwfm_pci_halt() */
+	int			 sc_ioctl_busy;		/* threads inside a control message */
+	int			 sc_ioctl_timeouts;	/* control messages unanswered in a row */
+	int			 sc_ioctl_gen;		/* which firmware bring-up a message belongs to */
+	int			 sc_gone;		/* the chip is powered down, no register access */
+	char			 sc_ctl_why[64];	/* why the last control message failed */
 };
+
+/* PDBwfm: this many unanswered control messages in a row and the firmware counts as dead */
+#define BWFM_PCI_IOCTL_DEAD	3
 
 struct bwfm_pci_dmamem {
 	bus_dmamap_t		bdm_map;
@@ -193,6 +196,16 @@ void		 bwfm_pci_attach(struct device *, struct device *, void *);
 int		 bwfm_pci_detach(struct device *, int);
 int		 bwfm_pci_activate(struct device *, int);
 void		 bwfm_pci_cleanup(struct bwfm_pci_softc *);
+void		 bwfm_pci_halt(struct bwfm_softc *);
+int		 bwfm_pci_sleep(struct bwfm_softc *);
+int		 bwfm_pci_dead(struct bwfm_softc *);
+void		 bwfm_pci_set_gone(struct bwfm_softc *, int);
+int		 bwfm_pci_d3_inform(struct bwfm_pci_softc *);
+void		 bwfm_pci_read_cal(struct bwfm_pci_softc *);
+void		 bwfm_pci_dump(struct bwfm_softc *);
+const char	*bwfm_pci_ctlwhy(struct bwfm_softc *);
+int		 bwfm_pci_unanswered(struct bwfm_softc *);
+void		 bwfm_pci_mb_data(struct bwfm_pci_softc *, uint32_t);
 
 #if defined(__HAVE_FDT)
 int		 bwfm_pci_read_otp(struct bwfm_pci_softc *);
@@ -218,7 +231,7 @@ void		 bwfm_pci_dmamem_free(struct bwfm_pci_softc *, struct bwfm_pci_dmamem *);
 int		 bwfm_pci_pktid_avail(struct bwfm_pci_softc *,
 		    struct bwfm_pci_pkts *);
 int		 bwfm_pci_pktid_new(struct bwfm_pci_softc *,
-		    struct bwfm_pci_pkts *, struct mbuf *,
+		    struct bwfm_pci_pkts *, struct mbuf **,
 		    uint32_t *, paddr_t *);
 struct mbuf *	 bwfm_pci_pktid_free(struct bwfm_pci_softc *,
 		    struct bwfm_pci_pkts *, uint32_t);
@@ -268,7 +281,7 @@ void		 bwfm_pci_buscore_activate(struct bwfm_softc *, uint32_t);
 
 int		 bwfm_pci_flowring_lookup(struct bwfm_pci_softc *,
 		     struct mbuf *);
-void		 bwfm_pci_flowring_create(struct bwfm_pci_softc *,
+int		 bwfm_pci_flowring_create(struct bwfm_pci_softc *,
 		     struct mbuf *);
 void		 bwfm_pci_flowring_create_cb(struct bwfm_softc *, void *);
 void		 bwfm_pci_flowring_delete(struct bwfm_pci_softc *, int);
@@ -277,7 +290,7 @@ void		 bwfm_pci_flowring_delete_cb(struct bwfm_softc *, void *);
 int		 bwfm_pci_preinit(struct bwfm_softc *);
 void		 bwfm_pci_stop(struct bwfm_softc *);
 int		 bwfm_pci_txcheck(struct bwfm_softc *);
-int		 bwfm_pci_txdata(struct bwfm_softc *, struct mbuf *);
+int		 bwfm_pci_txdata(struct bwfm_softc *, struct mbuf **);
 
 int		 bwfm_pci_send_mb_data(struct bwfm_pci_softc *, uint32_t);
 void		 bwfm_pci_handle_mb_data(struct bwfm_pci_softc *);
@@ -333,6 +346,12 @@ struct bwfm_bus_ops bwfm_pci_bus_ops = {
 	.bs_txcheck = bwfm_pci_txcheck,
 	.bs_txdata = bwfm_pci_txdata,
 	.bs_txctl = NULL,
+	.bs_halt = bwfm_pci_halt,
+	.bs_sleep = bwfm_pci_sleep,
+	.bs_dead = bwfm_pci_dead,
+	.bs_gone = bwfm_pci_set_gone,
+	.bs_ctlwhy = bwfm_pci_ctlwhy,
+	.bs_unanswered = bwfm_pci_unanswered,
 };
 
 struct bwfm_proto_ops bwfm_pci_msgbuf_ops = {
@@ -373,6 +392,9 @@ bwfm_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 	const char *intrstr;
 	pci_intr_handle_t ih;
+
+	/* PDBwfm: once, a control message may still be on the queue across a halt */
+	TAILQ_INIT(&sc->sc_ioctlq);
 
 	if (pci_mapreg_map(pa, PCI_MAPREG_START + 0x08,
 	    PCI_MAPREG_MEM_TYPE_64BIT, 0, &sc->sc_tcm_iot, &sc->sc_tcm_ioh,
@@ -419,18 +441,7 @@ bwfm_pci_attach(struct device *parent, struct device *self, void *aux)
 
 #if defined(__HAVE_FDT)
 	sc->sc_sc.sc_node = PCITAG_NODE(pa->pa_tag);
-	if (sc->sc_sc.sc_node) {
-		if (OF_getproplen(sc->sc_sc.sc_node, "brcm,cal-blob") > 0) {
-			sc->sc_sc.sc_calsize = OF_getproplen(sc->sc_sc.sc_node,
-			    "brcm,cal-blob");
-			sc->sc_sc.sc_cal = malloc(sc->sc_sc.sc_calsize,
-			    M_DEVBUF, M_WAITOK);
-			OF_getprop(sc->sc_sc.sc_node, "brcm,cal-blob",
-			    sc->sc_sc.sc_cal, sc->sc_sc.sc_calsize);
-		}
-		printf("%s: calibration blob %zu bytes\n", DEVNAME(sc),
-		    sc->sc_sc.sc_calsize);
-	}
+	bwfm_pci_read_cal(sc);
 #endif
 
 	sc->sc_sc.sc_bus_ops = &bwfm_pci_bus_ops;
@@ -443,6 +454,29 @@ bar0:
 	bus_space_unmap(sc->sc_reg_iot, sc->sc_reg_ioh, sc->sc_reg_ios);
 bar1:
 	bus_space_unmap(sc->sc_tcm_iot, sc->sc_tcm_ioh, sc->sc_tcm_ios);
+}
+
+/*
+ * PDBwfm: the calibration blob goes to the firmware once and is freed after
+ * that (bwfm_process_blob), so every firmware load reads it again.
+ */
+void
+bwfm_pci_read_cal(struct bwfm_pci_softc *sc)
+{
+#if defined(__HAVE_FDT)
+	if (sc->sc_sc.sc_node == 0 || sc->sc_sc.sc_cal != NULL)
+		return;
+	if (OF_getproplen(sc->sc_sc.sc_node, "brcm,cal-blob") > 0) {
+		sc->sc_sc.sc_calsize = OF_getproplen(sc->sc_sc.sc_node,
+		    "brcm,cal-blob");
+		sc->sc_sc.sc_cal = malloc(sc->sc_sc.sc_calsize,
+		    M_DEVBUF, M_WAITOK);
+		OF_getprop(sc->sc_sc.sc_node, "brcm,cal-blob",
+		    sc->sc_sc.sc_cal, sc->sc_sc.sc_calsize);
+	}
+	printf("%s: calibration blob %zu bytes\n", DEVNAME(sc),
+	    sc->sc_sc.sc_calsize);
+#endif
 }
 
 int
@@ -460,17 +494,39 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 
 	if (sc->sc_initialized)
 		return 0;
+	if (sc->sc_gone) {
+		printf("%s: the chip is powered down or unreachable, no "
+		    "bring-up\n", DEVNAME(sc));
+		return 1;
+	}
+
+	/*
+	 * PDBwfm: whatever an earlier bring-up left behind goes first, so
+	 * this can run any number of times (radio on after a halt, wake).
+	 */
+	bwfm_cleanup(bwfm);
+	sc->sc_ioctl_timeouts = 0;
+	sc->sc_mbdata_done = 0;
+	sc->sc_mb_via_ctl = 0;
+	/* blobs a bring-up loaded and never got to send: loaded again below */
+	if (bwfm->sc_clm != NULL)
+		free(bwfm->sc_clm, M_DEVBUF, bwfm->sc_clmsize);
+	if (bwfm->sc_txcap != NULL)
+		free(bwfm->sc_txcap, M_DEVBUF, bwfm->sc_txcapsize);
+	bwfm->sc_clm = bwfm->sc_txcap = NULL;
+	bwfm->sc_clmsize = bwfm->sc_txcapsize = 0;
+	bwfm_pci_read_cal(sc);
 
 	sc->sc_sc.sc_buscore_ops = &bwfm_pci_buscore_ops;
 	if (bwfm_chip_attach(&sc->sc_sc) != 0) {
 		printf("%s: cannot attach chip\n", DEVNAME(sc));
-		return 1;
+		goto fail;
 	}
 
 #if defined(__HAVE_FDT)
 	if (bwfm_pci_read_otp(sc)) {
 		printf("%s: cannot read OTP\n", DEVNAME(sc));
-		return 1;
+		goto fail;
 	}
 #endif
 
@@ -522,12 +578,12 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	default:
 		printf("%s: unknown firmware for chip %s\n",
 		    DEVNAME(sc), bwfm->sc_chip.ch_name);
-		return 1;
+		goto fail;
 	}
 
 	if (bwfm_loadfirmware(bwfm, chip, "-pcie", &ucode, &size,
 	    &nvram, &nvsize, &nvlen) != 0)
-		return 1;
+		goto fail;
 	printf("%s: firmware %zu bytes, nvram %zu bytes, clm %zu bytes, "
 	    "txcap %zu bytes\n", DEVNAME(sc), size, nvlen,
 	    bwfm->sc_clmsize, bwfm->sc_txcapsize);
@@ -544,7 +600,7 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 		    DEVNAME(sc));
 		free(ucode, M_DEVBUF, size);
 		free(nvram, M_DEVBUF, nvsize);
-		return 1;
+		goto fail;
 	}
 	free(ucode, M_DEVBUF, size);
 	free(nvram, M_DEVBUF, nvsize);
@@ -559,7 +615,7 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	    sc->sc_shared_version < BWFM_SHARED_INFO_MIN_VERSION) {
 		printf("%s: PCIe version %d unsupported\n",
 		    DEVNAME(sc), sc->sc_shared_version);
-		return 1;
+		goto fail;
 	}
 
 	if (sc->sc_shared_version >= 6) {
@@ -650,7 +706,7 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 			/* XXX: Fallback to TCM? */
 			printf("%s: cannot allocate idx buf\n",
 			    DEVNAME(sc));
-			return 1;
+			goto fail;
 		}
 
 		idx_offset = sc->sc_dma_idx_sz;
@@ -701,27 +757,27 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	if (bwfm_pci_setup_ring(sc, &sc->sc_ctrl_submit, 64, 40,
 	    h2d_w_idx_ptr, h2d_r_idx_ptr, 0, idx_offset,
 	    &ring_mem_ptr))
-		goto cleanup;
+		goto fail;
 	/* TX rxpost ring: Send clean data mbufs for RX */
 	if (bwfm_pci_setup_ring(sc, &sc->sc_rxpost_submit, 1024, 32,
 	    h2d_w_idx_ptr, h2d_r_idx_ptr, 1, idx_offset,
 	    &ring_mem_ptr))
-		goto cleanup;
+		goto fail;
 	/* RX completion rings: recv our filled buffers back */
 	if (bwfm_pci_setup_ring(sc, &sc->sc_ctrl_complete, 64, 24,
 	    d2h_w_idx_ptr, d2h_r_idx_ptr, 0, idx_offset,
 	    &ring_mem_ptr))
-		goto cleanup;
+		goto fail;
 	if (bwfm_pci_setup_ring(sc, &sc->sc_tx_complete, 1024,
 	    sc->sc_shared_version >= 7 ? 24 : 16,
 	    d2h_w_idx_ptr, d2h_r_idx_ptr, 1, idx_offset,
 	    &ring_mem_ptr))
-		goto cleanup;
+		goto fail;
 	if (bwfm_pci_setup_ring(sc, &sc->sc_rx_complete, 1024,
 	    sc->sc_shared_version >= 7 ? 40 : 32,
 	    d2h_w_idx_ptr, d2h_r_idx_ptr, 2, idx_offset,
 	    &ring_mem_ptr))
-		goto cleanup;
+		goto fail;
 
 	/* Dynamic TX rings for actual data */
 	sc->sc_flowrings = malloc(sc->sc_max_flowrings *
@@ -735,7 +791,7 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	/* Scratch and ring update buffers for firmware */
 	if ((sc->sc_scratch_buf = bwfm_pci_dmamem_alloc(sc,
 	    BWFM_DMA_D2H_SCRATCH_BUF_LEN, 8)) == NULL)
-		goto cleanup;
+		goto fail;
 	bus_space_write_4(sc->sc_tcm_iot, sc->sc_tcm_ioh,
 	    sc->sc_shared_address + BWFM_SHARED_DMA_SCRATCH_ADDR_LOW,
 	    BWFM_PCI_DMA_DVA(sc->sc_scratch_buf) & 0xffffffff);
@@ -748,7 +804,7 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 
 	if ((sc->sc_ringupd_buf = bwfm_pci_dmamem_alloc(sc,
 	    BWFM_DMA_D2H_RINGUPD_BUF_LEN, 8)) == NULL)
-		goto cleanup;
+		goto fail;
 	bus_space_write_4(sc->sc_tcm_iot, sc->sc_tcm_ioh,
 	    sc->sc_shared_address + BWFM_SHARED_DMA_RINGUPD_ADDR_LOW,
 	    BWFM_PCI_DMA_DVA(sc->sc_ringupd_buf) & 0xffffffff);
@@ -804,8 +860,6 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	if_rxr_init(&sc->sc_event_ring, 8, 8);
 	bwfm_pci_fill_rx_rings(sc);
 
-	TAILQ_INIT(&sc->sc_ioctlq);
-
 	printf("%s: rings and packet ids set up, rx buffers posted\n",
 	    DEVNAME(sc));
 
@@ -817,23 +871,13 @@ bwfm_pci_preinit(struct bwfm_softc *bwfm)
 	sc->sc_initialized = 1;
 	return 0;
 
-cleanup:
-	if (sc->sc_ringupd_buf)
-		bwfm_pci_dmamem_free(sc, sc->sc_ringupd_buf);
-	if (sc->sc_scratch_buf)
-		bwfm_pci_dmamem_free(sc, sc->sc_scratch_buf);
-	if (sc->sc_rx_complete.ring)
-		bwfm_pci_dmamem_free(sc, sc->sc_rx_complete.ring);
-	if (sc->sc_tx_complete.ring)
-		bwfm_pci_dmamem_free(sc, sc->sc_tx_complete.ring);
-	if (sc->sc_ctrl_complete.ring)
-		bwfm_pci_dmamem_free(sc, sc->sc_ctrl_complete.ring);
-	if (sc->sc_rxpost_submit.ring)
-		bwfm_pci_dmamem_free(sc, sc->sc_rxpost_submit.ring);
-	if (sc->sc_ctrl_submit.ring)
-		bwfm_pci_dmamem_free(sc, sc->sc_ctrl_submit.ring);
-	if (sc->sc_dma_idx_buf)
-		bwfm_pci_dmamem_free(sc, sc->sc_dma_idx_buf);
+fail:
+	/*
+	 * PDBwfm: a bring-up that stops half way leaves nothing behind: the
+	 * chip is masked and reset and everything allocated so far is freed.
+	 */
+	printf("%s: bus bring-up FAILED\n", DEVNAME(sc));
+	bwfm_pci_halt(bwfm);
 	return 1;
 }
 
@@ -955,66 +999,313 @@ bwfm_pci_load_microcode(struct bwfm_pci_softc *sc, const u_char *ucode, size_t s
 	return 0;
 }
 
+/*
+ * PDBwfm: OpenBSD's detach frees the rings under a running firmware and
+ * walks tables only a complete bring-up allocated. Here the chip is made
+ * quiet first and every step copes with a bring-up that never happened or
+ * stopped half way.
+ */
 int
 bwfm_pci_detach(struct device *self, int flags)
 {
 	struct bwfm_pci_softc *sc = (struct bwfm_pci_softc *)self;
+	struct bwfm_softc *bwfm = &sc->sc_sc;
+	int i, busy = 0;
 
-	bwfm_detach(&sc->sc_sc, flags);
-	bwfm_pci_cleanup(sc);
+	/* chip masked and reset, control messages woken, DMA memory freed */
+	bwfm_pci_halt(bwfm);
 
-	return 0;
+	/* a control message that was sleeping leaves the softc before it goes */
+	for (i = 0; i < 80 && sc->sc_ioctl_busy > 0; i++)
+		tsleep_nsec(&sc->sc_ioctl_busy, PWAIT, "bwfmdt",
+		    MSEC_TO_NSEC(100));
+	if (sc->sc_ioctl_busy > 0) {
+		printf("%s: detach: %d control messages still waiting\n",
+		    DEVNAME(sc), sc->sc_ioctl_busy);
+		busy = EBUSY;
+	}
+
+	if (bwfm_detach(bwfm, flags) != 0)
+		busy = EBUSY;
+
+	if (bwfm->sc_cal != NULL)
+		free(bwfm->sc_cal, M_DEVBUF, bwfm->sc_calsize);
+	if (bwfm->sc_clm != NULL)
+		free(bwfm->sc_clm, M_DEVBUF, bwfm->sc_clmsize);
+	if (bwfm->sc_txcap != NULL)
+		free(bwfm->sc_txcap, M_DEVBUF, bwfm->sc_txcapsize);
+	bwfm->sc_cal = bwfm->sc_clm = bwfm->sc_txcap = NULL;
+	bwfm->sc_calsize = bwfm->sc_clmsize = bwfm->sc_txcapsize = 0;
+
+	if (sc->sc_ih != NULL)
+		pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
+	sc->sc_ih = NULL;
+
+	/* EBUSY: something may still be inside, the softc must not be freed */
+	return busy;
 }
 
+static void
+bwfm_pci_release_pkts(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts)
+{
+	uint32_t i;
+
+	if (pkts->pkts == NULL)
+		return;
+	for (i = 0; i < pkts->npkt; i++) {
+		/* destroying a loaded map unloads it, which unmaps the buffer */
+		bus_dmamap_destroy(sc->sc_dmat, pkts->pkts[i].bb_map);
+		if (pkts->pkts[i].bb_m)
+			m_freem(pkts->pkts[i].bb_m);
+	}
+	free(pkts->pkts, M_DEVBUF, pkts->npkt * sizeof(struct bwfm_pci_buf));
+	pkts->pkts = NULL;
+	pkts->npkt = 0;
+	pkts->last = 0;
+}
+
+static void
+bwfm_pci_release_dmamem(struct bwfm_pci_softc *sc, struct bwfm_pci_dmamem **bdm)
+{
+	if (*bdm == NULL)
+		return;
+	bwfm_pci_dmamem_free(sc, *bdm);
+	*bdm = NULL;
+}
+
+/*
+ * Everything the bus allocated for a running firmware, whatever of it
+ * exists. PDBwfm: OpenBSD frees unconditionally; this takes any state
+ * and leaves every pointer NULL, so it can run twice. The packet buffers go
+ * first: their mappings are only retired by the DART invalidate that
+ * freeing the ring memory does. The caller made the chip quiet.
+ */
 void
 bwfm_pci_cleanup(struct bwfm_pci_softc *sc)
 {
 	int i;
 
-	for (i = 0; i < BWFM_NUM_RX_PKTIDS; i++) {
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_rx_pkts.pkts[i].bb_map);
-		if (sc->sc_rx_pkts.pkts[i].bb_m)
-			m_freem(sc->sc_rx_pkts.pkts[i].bb_m);
-	}
-	free(sc->sc_rx_pkts.pkts, M_DEVBUF, BWFM_NUM_RX_PKTIDS *
-	    sizeof(struct bwfm_pci_buf));
+	bwfm_pci_release_pkts(sc, &sc->sc_rx_pkts);
+	bwfm_pci_release_pkts(sc, &sc->sc_tx_pkts);
+	bwfm_pci_release_pkts(sc, &sc->sc_ioctl_pkts);
+	sc->sc_tx_pkts_full = 0;
 
-	for (i = 0; i < BWFM_NUM_TX_PKTIDS; i++) {
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_tx_pkts.pkts[i].bb_map);
-		if (sc->sc_tx_pkts.pkts[i].bb_m)
-			m_freem(sc->sc_tx_pkts.pkts[i].bb_m);
+	if (sc->sc_flowrings != NULL) {
+		for (i = 0; i < sc->sc_max_flowrings; i++) {
+			bwfm_pci_release_dmamem(sc, &sc->sc_flowrings[i].ring);
+			if (sc->sc_flowrings[i].m != NULL)
+				m_freem(sc->sc_flowrings[i].m);
+		}
+		free(sc->sc_flowrings, M_DEVBUF, sc->sc_max_flowrings *
+		    sizeof(struct bwfm_pci_msgring));
+		sc->sc_flowrings = NULL;
 	}
-	free(sc->sc_tx_pkts.pkts, M_DEVBUF, BWFM_NUM_TX_PKTIDS *
-	    sizeof(struct bwfm_pci_buf));
+	sc->sc_max_flowrings = 0;
 
-	for (i = 0; i < BWFM_NUM_IOCTL_PKTIDS; i++) {
-		bus_dmamap_destroy(sc->sc_dmat, sc->sc_ioctl_pkts.pkts[i].bb_map);
-		if (sc->sc_ioctl_pkts.pkts[i].bb_m)
-			m_freem(sc->sc_ioctl_pkts.pkts[i].bb_m);
-	}
-	free(sc->sc_ioctl_pkts.pkts, M_DEVBUF, BWFM_NUM_IOCTL_PKTIDS *
-	    sizeof(struct bwfm_pci_buf));
-
-	for (i = 0; i < sc->sc_max_flowrings; i++) {
-		if (sc->sc_flowrings[i].status >= RING_OPEN)
-			bwfm_pci_dmamem_free(sc, sc->sc_flowrings[i].ring);
-	}
-	free(sc->sc_flowrings, M_DEVBUF, sc->sc_max_flowrings *
-	    sizeof(struct bwfm_pci_msgring));
-
-	bwfm_pci_dmamem_free(sc, sc->sc_ringupd_buf);
-	bwfm_pci_dmamem_free(sc, sc->sc_scratch_buf);
-	bwfm_pci_dmamem_free(sc, sc->sc_rx_complete.ring);
-	bwfm_pci_dmamem_free(sc, sc->sc_tx_complete.ring);
-	bwfm_pci_dmamem_free(sc, sc->sc_ctrl_complete.ring);
-	bwfm_pci_dmamem_free(sc, sc->sc_rxpost_submit.ring);
-	bwfm_pci_dmamem_free(sc, sc->sc_ctrl_submit.ring);
-	if (sc->sc_dma_idx_buf) {
-		bwfm_pci_dmamem_free(sc, sc->sc_dma_idx_buf);
-		sc->sc_dma_idx_buf = NULL;
-	}
+	bwfm_pci_release_dmamem(sc, &sc->sc_ringupd_buf);
+	bwfm_pci_release_dmamem(sc, &sc->sc_scratch_buf);
+	bwfm_pci_release_dmamem(sc, &sc->sc_rx_complete.ring);
+	bwfm_pci_release_dmamem(sc, &sc->sc_tx_complete.ring);
+	bwfm_pci_release_dmamem(sc, &sc->sc_ctrl_complete.ring);
+	bwfm_pci_release_dmamem(sc, &sc->sc_rxpost_submit.ring);
+	bwfm_pci_release_dmamem(sc, &sc->sc_ctrl_submit.ring);
+	bwfm_pci_release_dmamem(sc, &sc->sc_dma_idx_buf);
+	sc->sc_dma_idx_sz = 0;
 
 	sc->sc_initialized = 0;
+}
+
+/*
+ * PDBwfm: stop the chip and give back everything a firmware bring-up took.
+ * Ported from brcmf_pcie_remove()/brcmf_pcie_reset() (interrupts masked,
+ * device reset, buffers released), in the order that keeps host memory
+ * safe: the firmware is dead before the first buffer is freed.
+ *
+ *  1. sc_initialized = 0: the interrupt handler, transmit and control
+ *     messages return at once from here on
+ *  2. chip: mailbox interrupts masked and acknowledged, PCIe function reset
+ *     through the watchdog, ARM core held in reset. These are register
+ *     accesses, so they only happen while the link is up (not sc_gone) and
+ *     the cores are known
+ *  3. control messages still waiting for an answer are woken
+ *  4. packet buffers unmapped and freed, then rings and index memory
+ *  5. the chip description is dropped, the next bring-up scans it again
+ *
+ * Runs in any state and any number of times; afterwards bwfm_init() or the
+ * attach hook start from firmware download. The stack lock is held.
+ */
+void
+bwfm_pci_halt(struct bwfm_softc *bwfm)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+	struct bwfm_pci_ioctl *ctl;
+	struct bwfm_core *core;
+	int was = sc->sc_initialized, quiet = 0;
+
+	sc->sc_initialized = 0;
+	sc->sc_ioctl_gen++;
+
+	core = bwfm_chip_get_core(bwfm, BWFM_AGENT_CORE_PCIE2);
+	if (!sc->sc_gone && core != NULL &&
+	    bwfm_chip_get_core(bwfm, BWFM_AGENT_CORE_CHIPCOMMON) != NULL) {
+		if (core->co_rev >= 64)
+			sc->sc_pcireg64 = 1;
+		bwfm_pci_select_core(sc, BWFM_AGENT_CORE_PCIE2);
+		/* a firmware that was not answering: what the rings looked like */
+		if (was && sc->sc_ioctl_timeouts > 0)
+			bwfm_pci_dump(bwfm);
+		bwfm_pci_intr_disable(sc);
+		bwfm_pci_intr_ack(sc, 0xffffffff);
+		bwfm_pci_buscore_reset(bwfm);
+		bwfm_chip_set_passive(bwfm);
+		quiet = 1;
+	}
+
+	TAILQ_FOREACH(ctl, &sc->sc_ioctlq, next)
+		wakeup(ctl);
+	wakeup(&sc->sc_mbdata_done);
+
+	bwfm_pci_cleanup(sc);
+	bwfm_cleanup(bwfm);
+
+	printf("%s: halt: %s, %s, rings and buffers released\n", DEVNAME(sc),
+	    was ? "firmware was running" : "no firmware was running",
+	    quiet ? "chip masked and reset" :
+	    sc->sc_gone ? "chip powered down, not touched" :
+	    "chip not attached, not touched");
+}
+
+/*
+ * PDBwfm: brcmf_pcie_pm_enter_D3() / OpenBSD DVACT_QUIESCE: tell the
+ * firmware the host goes away and wait for its acknowledgement.
+ */
+int
+bwfm_pci_d3_inform(struct bwfm_pci_softc *sc)
+{
+	int error;
+
+	if (!sc->sc_initialized)
+		return ENXIO;
+	sc->sc_mbdata_done = 0;
+	error = bwfm_pci_send_mb_data(sc, BWFM_PCI_H2D_HOST_D3_INFORM);
+	if (error) {
+		printf("%s: sleep: D3 inform not sent (error %d)\n",
+		    DEVNAME(sc), error);
+		return error;
+	}
+	if (!sc->sc_mbdata_done)
+		tsleep_nsec(&sc->sc_mbdata_done, PCATCH, DEVNAME(sc),
+		    SEC_TO_NSEC(2));
+	if (!sc->sc_mbdata_done) {
+		printf("%s: sleep: no D3 acknowledgement within 2 s\n",
+		    DEVNAME(sc));
+		return ETIMEDOUT;
+	}
+	printf("%s: sleep: firmware acknowledged D3\n", DEVNAME(sc));
+	return 0;
+}
+
+/*
+ * PDBwfm: the bus half of going to sleep (and of a radio off that stops the
+ * firmware): D3 inform, then bwfm_pci_halt(). The interface was stopped by
+ * the caller. Returns the result of the D3 handshake; the halt happens
+ * whatever that was, a firmware that does not answer is reset all the same.
+ */
+int
+bwfm_pci_sleep(struct bwfm_softc *bwfm)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+	int error = ENXIO;
+
+	if (sc->sc_initialized && !sc->sc_gone &&
+	    sc->sc_ioctl_timeouts < BWFM_PCI_IOCTL_DEAD)
+		error = bwfm_pci_d3_inform(sc);
+	bwfm_pci_halt(bwfm);
+	return error;
+}
+
+const char *
+bwfm_pci_ctlwhy(struct bwfm_softc *bwfm)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+
+	return sc->sc_ctl_why[0] != '\0' ? sc->sc_ctl_why : "no failure recorded";
+}
+
+int
+bwfm_pci_unanswered(struct bwfm_softc *bwfm)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+
+	return sc->sc_initialized ? sc->sc_ioctl_timeouts : 0;
+}
+
+/*
+ * PDBwfm: brcmf_pcie_handle_mb_data(). OpenBSD only knows the D3
+ * acknowledgement; the firmware also asks for permission to go into deep
+ * sleep (host capability DS_NO_OOB_DW is set in preinit) and brcmfmac
+ * answers that with DS_ACK. Here the request was dropped silently. It still
+ * is not acknowledged unless boot-arg bwfm_dsack=1 says so (untested), but
+ * the first few of each kind are logged now.
+ */
+void
+bwfm_pci_mb_data(struct bwfm_pci_softc *sc, uint32_t data)
+{
+	if (data & BWFM_PCI_D2H_DEV_DS_ENTER_REQ) {
+		int ack = pd_bwfm_want_dsack(), error = 0;
+
+		if (ack)
+			error = bwfm_pci_send_mb_data(sc,
+			    BWFM_PCI_H2D_HOST_DS_ACK);
+		PD_LOGN(6, "%s: firmware asks for deep sleep: %s\n",
+		    DEVNAME(sc), !ack ? "not acknowledged (boot-arg bwfm_dsack=1 would)" :
+		    error ? "acknowledgement NOT sent" : "acknowledged");
+	}
+	if (data & BWFM_PCI_D2H_DEV_DS_EXIT_NOTE)
+		PD_LOGN(6, "%s: firmware left deep sleep\n", DEVNAME(sc));
+	if (data & BWFM_PCI_D2H_DEV_D3_ACK) {
+		sc->sc_mbdata_done = 1;
+		wakeup(&sc->sc_mbdata_done);
+	}
+	if (data & BWFM_PCI_D2H_DEV_FWHALT) {
+		printf("%s: the firmware reports that it halted (mailbox data "
+		    "0x%08x), it counts as dead until it is loaded again\n",
+		    DEVNAME(sc), data);
+		sc->sc_ioctl_timeouts = BWFM_PCI_IOCTL_DEAD;
+	}
+	if (data & ~(BWFM_PCI_D2H_DEV_DS_ENTER_REQ |
+	    BWFM_PCI_D2H_DEV_DS_EXIT_NOTE | BWFM_PCI_D2H_DEV_D3_ACK |
+	    BWFM_PCI_D2H_DEV_FWHALT))
+		PD_LOGN(6, "%s: mailbox data 0x%08x\n", DEVNAME(sc), data);
+}
+
+/* PDBwfm: the firmware stopped answering control messages */
+int
+bwfm_pci_dead(struct bwfm_softc *bwfm)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+
+	return sc->sc_initialized &&
+	    sc->sc_ioctl_timeouts >= BWFM_PCI_IOCTL_DEAD;
+}
+
+/*
+ * PDBwfm: the port is about to be shut down (gone 1: a firmware that still
+ * runs is halted first, while the registers can be reached), is found dead
+ * (gone 2: nothing is touched, whatever state the bus is in) or is back
+ * (gone 0). While gone nothing here touches a BAR: an access with the link
+ * down stops the machine.
+ */
+void
+bwfm_pci_set_gone(struct bwfm_softc *bwfm, int gone)
+{
+	struct bwfm_pci_softc *sc = (void *)bwfm;
+
+	if (gone == 2)
+		sc->sc_gone = 1;
+	if (gone && sc->sc_initialized)
+		bwfm_pci_halt(bwfm);
+	sc->sc_gone = gone != 0;
 }
 
 int
@@ -1030,15 +1321,9 @@ bwfm_pci_activate(struct device *self, int act)
 		if (error)
 			return error;
 		if (sc->sc_initialized) {
-			sc->sc_mbdata_done = 0;
-			error = bwfm_pci_send_mb_data(sc,
-			    BWFM_PCI_H2D_HOST_D3_INFORM);
+			error = bwfm_pci_d3_inform(sc);
 			if (error)
 				return error;
-			tsleep_nsec(&sc->sc_mbdata_done, PCATCH,
-			    DEVNAME(sc), SEC_TO_NSEC(2));
-			if (!sc->sc_mbdata_done)
-				return ETIMEDOUT;
 		}
 		break;
 	case DVACT_WAKEUP:
@@ -1047,8 +1332,7 @@ bwfm_pci_activate(struct device *self, int act)
 			if (bwfm_pci_intmask(sc) == 0 ||
 			    bwfm_pci_send_mb_data(sc,
 			    BWFM_PCI_H2D_HOST_D0_INFORM) != 0) {
-				bwfm_cleanup(bwfm);
-				bwfm_pci_cleanup(sc);
+				bwfm_pci_halt(bwfm);
 			} else {
 				bwfm_pci_select_core(sc, BWFM_AGENT_CORE_PCIE2);
 				bwfm_pci_intr_enable(sc);
@@ -1306,6 +1590,8 @@ bwfm_pci_pktid_avail(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts)
 {
 	int i, idx;
 
+	if (pkts->pkts == NULL)
+		return ENOBUFS;
 	idx = pkts->last + 1;
 	for (i = 0; i < pkts->npkt; i++) {
 		if (idx == pkts->npkt)
@@ -1317,11 +1603,21 @@ bwfm_pci_pktid_avail(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts)
 	return ENOBUFS;
 }
 
+/*
+ * PDBwfm: m_defrag() here frees a chain and puts one new mbuf in its place,
+ * so the mbuf is passed by reference: whether this succeeds or fails, *mp is
+ * the mbuf that exists afterwards and the caller's old pointer is not used
+ * again. On failure it still belongs to the caller.
+ */
 int
 bwfm_pci_pktid_new(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts,
-    struct mbuf *m, uint32_t *pktid, paddr_t *paddr)
+    struct mbuf **mp, uint32_t *pktid, paddr_t *paddr)
 {
+	struct mbuf *m = *mp;
 	int i, idx;
+
+	if (pkts->pkts == NULL)
+		return ENOBUFS;
 
 	idx = pkts->last + 1;
 	for (i = 0; i < pkts->npkt; i++) {
@@ -1332,6 +1628,7 @@ bwfm_pci_pktid_new(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts,
 			    pkts->pkts[idx].bb_map, m, BUS_DMA_NOWAIT) != 0) {
 				if (m_defrag(m, M_DONTWAIT))
 					return EFBIG;
+				*mp = m;
 				if (bus_dmamap_load_mbuf(sc->sc_dmat,
 				    pkts->pkts[idx].bb_map, m, BUS_DMA_NOWAIT) != 0)
 					return EFBIG;
@@ -1356,7 +1653,8 @@ bwfm_pci_pktid_free(struct bwfm_pci_softc *sc, struct bwfm_pci_pkts *pkts,
 {
 	struct mbuf *m;
 
-	if (pktid >= pkts->npkt || pkts->pkts[pktid].bb_m == NULL)
+	if (pkts->pkts == NULL || pktid >= pkts->npkt ||
+	    pkts->pkts[pktid].bb_m == NULL)
 		return NULL;
 	bus_dmamap_sync(sc->sc_dmat, pkts->pkts[pktid].bb_map, 0,
 	    pkts->pkts[pktid].bb_map->dm_mapsize,
@@ -1405,7 +1703,7 @@ bwfm_pci_fill_rx_ioctl_ring(struct bwfm_pci_softc *sc, struct if_rxring *rxring,
 			break;
 		}
 		do { M_SETLEN(m, MSGBUF_MAX_CTL_PKT_SIZE); M_SETPKTLEN(m, MSGBUF_MAX_CTL_PKT_SIZE); } while (0);
-		if (bwfm_pci_pktid_new(sc, &sc->sc_rx_pkts, m, &pktid, &paddr)) {
+		if (bwfm_pci_pktid_new(sc, &sc->sc_rx_pkts, &m, &pktid, &paddr)) {
 			bwfm_pci_ring_write_cancel(sc, &sc->sc_ctrl_submit, 1);
 			m_freem(m);
 			break;
@@ -1445,7 +1743,7 @@ bwfm_pci_fill_rx_buf_ring(struct bwfm_pci_softc *sc)
 			break;
 		}
 		do { M_SETLEN(m, MSGBUF_MAX_PKT_SIZE); M_SETPKTLEN(m, MSGBUF_MAX_PKT_SIZE); } while (0);
-		if (bwfm_pci_pktid_new(sc, &sc->sc_rx_pkts, m, &pktid, &paddr)) {
+		if (bwfm_pci_pktid_new(sc, &sc->sc_rx_pkts, &m, &pktid, &paddr)) {
 			bwfm_pci_ring_write_cancel(sc, &sc->sc_rxpost_submit, 1);
 			m_freem(m);
 			break;
@@ -1787,8 +2085,9 @@ bwfm_pci_msg_rx(struct bwfm_pci_softc *sc, void *buf, struct mbuf_list *ml)
 		if (ring->m != NULL) {
 			m = ring->m;
 			ring->m = NULL;
-			if (bwfm_pci_txdata(&sc->sc_sc, m))
-				m_freem(ring->m);
+			/* PDBwfm: OpenBSD frees ring->m here, which is NULL */
+			if (bwfm_pci_txdata(&sc->sc_sc, &m))
+				m_freem(m);
 		}
 		ifq_restart(&ifp->if_snd);
 		break;
@@ -1868,10 +2167,7 @@ bwfm_pci_msg_rx(struct bwfm_pci_softc *sc, void *buf, struct mbuf_list *ml)
 		break;
 	case MSGBUF_TYPE_D2H_MAILBOX_DATA:
 		d2h = (struct msgbuf_d2h_mailbox_data *)buf;
-		if (d2h->data & BWFM_PCI_D2H_DEV_D3_ACK) {
-			sc->sc_mbdata_done = 1;
-			wakeup(&sc->sc_mbdata_done);
-		}
+		bwfm_pci_mb_data(sc, letoh32(d2h->data));
 		break;
 	default:
 		printf("%s: msgtype 0x%08x\n", DEVNAME(sc), msg->msgtype);
@@ -2096,7 +2392,8 @@ bwfm_pci_flowring_lookup(struct bwfm_pci_softc *sc, struct mbuf *m)
 	return -1;
 }
 
-void
+/* PDBwfm: returns 0 when the mbuf was taken, it is sent once the ring is open */
+int
 bwfm_pci_flowring_create(struct bwfm_pci_softc *sc, struct mbuf *m)
 {
 	struct ieee80211com *ic = &sc->sc_sc.sc_ic;
@@ -2125,7 +2422,7 @@ bwfm_pci_flowring_create(struct bwfm_pci_softc *sc, struct mbuf *m)
 #endif
 	default:
 		printf("%s: state not supported\n", DEVNAME(sc));
-		return;
+		return ENOBUFS;
 	}
 
 	found = 0;
@@ -2146,13 +2443,14 @@ bwfm_pci_flowring_create(struct bwfm_pci_softc *sc, struct mbuf *m)
 	 */
 	if (!found) {
 		printf("%s: no flowring available\n", DEVNAME(sc));
-		return;
+		return ENOBUFS;
 	}
 
 	cmd.m = m;
 	cmd.prio = prio;
 	cmd.flowid = flowid;
 	bwfm_do_async(&sc->sc_sc, bwfm_pci_flowring_create_cb, &cmd, sizeof(cmd));
+	return 0;
 }
 
 void
@@ -2168,17 +2466,32 @@ bwfm_pci_flowring_create_cb(struct bwfm_softc *bwfm, void *arg)
 	uint8_t *da, *sa;
 	int s;
 
+	/*
+	 * PDBwfm: this runs later, from the task. The bus may have been
+	 * halted since (the flowring table is gone), and a ring that cannot
+	 * be set up goes back to closed instead of staying "opening", which
+	 * would hold up transmit for good.
+	 */
+	if (!sc->sc_initialized || sc->sc_flowrings == NULL ||
+	    cmd->flowid >= sc->sc_max_flowrings) {
+		m_freem(cmd->m);
+		return;
+	}
+
 	da = mtod(cmd->m, char *) + 0 * ETHER_ADDR_LEN;
 	sa = mtod(cmd->m, char *) + 1 * ETHER_ADDR_LEN;
 
 	ring = &sc->sc_flowrings[cmd->flowid];
 	if (ring->status != RING_OPENING) {
 		printf("%s: flowring not opening\n", DEVNAME(sc));
+		m_freem(cmd->m);
 		return;
 	}
 
 	if (bwfm_pci_setup_flowring(sc, ring, 512, 48)) {
 		printf("%s: cannot setup flowring\n", DEVNAME(sc));
+		ring->status = RING_CLOSED;
+		m_freem(cmd->m);
 		return;
 	}
 
@@ -2186,6 +2499,10 @@ bwfm_pci_flowring_create_cb(struct bwfm_softc *bwfm, void *arg)
 	req = bwfm_pci_ring_write_reserve(sc, &sc->sc_ctrl_submit);
 	if (req == NULL) {
 		printf("%s: cannot reserve for flowring\n", DEVNAME(sc));
+		bwfm_pci_dmamem_free(sc, ring->ring);
+		ring->ring = NULL;
+		ring->status = RING_CLOSED;
+		m_freem(cmd->m);
 		splx(s);
 		return;
 	}
@@ -2249,9 +2566,17 @@ bwfm_pci_flowring_delete(struct bwfm_pci_softc *sc, int flowid)
 	bwfm_pci_ring_write_commit(sc, &sc->sc_ctrl_submit);
 	splx(s);
 
-	tsleep_nsec(ring, PCATCH, DEVNAME(sc), SEC_TO_NSEC(2));
+	/*
+	 * PDBwfm: the completion may have arrived already when this runs
+	 * from the interrupt path's thread, and the sleep gives up the stack
+	 * lock: look at the table again afterwards, a halt frees it.
+	 */
 	if (ring->status != RING_CLOSED)
-		printf("%s: flowring not closing\n", DEVNAME(sc));
+		tsleep_nsec(ring, PCATCH, DEVNAME(sc), SEC_TO_NSEC(2));
+	if (sc->sc_flowrings == NULL)
+		return;
+	if (ring->status != RING_CLOSED)
+		printf("%s: flowring %d not closing\n", DEVNAME(sc), flowid);
 }
 
 void
@@ -2261,8 +2586,15 @@ bwfm_pci_flowring_delete_cb(struct bwfm_softc *bwfm, void *arg)
 	struct bwfm_cmd_flowring_create *cmd = arg;
 	struct bwfm_pci_msgring *ring;
 
+	/* PDBwfm: a halt since the completion took the table with it */
+	if (sc->sc_flowrings == NULL || cmd->flowid >= sc->sc_max_flowrings)
+		return;
 	ring = &sc->sc_flowrings[cmd->flowid];
-	bwfm_pci_dmamem_free(sc, ring->ring);
+	if (ring->status != RING_CLOSING)
+		return;
+	if (ring->ring != NULL)
+		bwfm_pci_dmamem_free(sc, ring->ring);
+	ring->ring = NULL;
 	ring->status = RING_CLOSED;
 	wakeup(ring);
 }
@@ -2271,14 +2603,23 @@ void
 bwfm_pci_stop(struct bwfm_softc *bwfm)
 {
 	struct bwfm_pci_softc *sc = (void *)bwfm;
-	struct bwfm_pci_msgring *ring;
-	int i;
+	int i, deleted = 0;
 
-	for (i = 0; i < sc->sc_max_flowrings; i++) {
-		ring = &sc->sc_flowrings[i];
-		if (ring->status == RING_OPEN)
+	/*
+	 * PDBwfm: nothing to delete on a halted bus, and none of this can
+	 * work once the firmware stopped answering. The table is looked at
+	 * afresh every round, the delete sleeps.
+	 */
+	if (!sc->sc_initialized || bwfm_pci_dead(bwfm))
+		return;
+	for (i = 0; sc->sc_flowrings != NULL && i < sc->sc_max_flowrings;
+	    i++) {
+		if (sc->sc_flowrings[i].status == RING_OPEN) {
 			bwfm_pci_flowring_delete(sc, i);
+			deleted++;
+		}
 	}
+	printf("%s: stop: %d flow rings deleted\n", DEVNAME(sc), deleted);
 }
 
 int
@@ -2287,6 +2628,10 @@ bwfm_pci_txcheck(struct bwfm_softc *bwfm)
 	struct bwfm_pci_softc *sc = (void *)bwfm;
 	struct bwfm_pci_msgring *ring;
 	int i;
+
+	/* PDBwfm: a halted bus sends nothing */
+	if (!sc->sc_initialized || sc->sc_flowrings == NULL)
+		return ENOBUFS;
 
 	/* If we are transitioning, we cannot send. */
 	for (i = 0; i < sc->sc_max_flowrings; i++) {
@@ -2303,15 +2648,23 @@ bwfm_pci_txcheck(struct bwfm_softc *bwfm)
 	return 0;
 }
 
+/*
+ * PDBwfm: the mbuf comes by reference, see bwfm_pci_pktid_new(). On success
+ * it is the bus's; on failure *mp is the caller's to free.
+ */
 int
-bwfm_pci_txdata(struct bwfm_softc *bwfm, struct mbuf *m)
+bwfm_pci_txdata(struct bwfm_softc *bwfm, struct mbuf **mp)
 {
 	struct bwfm_pci_softc *sc = (void *)bwfm;
 	struct bwfm_pci_msgring *ring;
 	struct msgbuf_tx_msghdr *tx;
+	struct mbuf *m = *mp;
 	uint32_t pktid;
 	paddr_t paddr;
 	int flowid, ret;
+
+	if (!sc->sc_initialized || sc->sc_flowrings == NULL)
+		return ENOBUFS;
 
 	flowid = bwfm_pci_flowring_lookup(sc, m);
 	if (flowid < 0) {
@@ -2324,8 +2677,7 @@ bwfm_pci_txdata(struct bwfm_softc *bwfm, struct mbuf *m)
 		 * is created the queue will be restarted and this
 		 * mbuf will be transmitted.
 		 */
-		bwfm_pci_flowring_create(sc, m);
-		return 0;
+		return bwfm_pci_flowring_create(sc, m);
 	}
 
 	ring = &sc->sc_flowrings[flowid];
@@ -2350,7 +2702,8 @@ bwfm_pci_txdata(struct bwfm_softc *bwfm, struct mbuf *m)
 	tx->seg_cnt = 1;
 	memcpy(tx->txhdr, mtod(m, char *), ETHER_HDR_LEN);
 
-	ret = bwfm_pci_pktid_new(sc, &sc->sc_tx_pkts, m, &pktid, &paddr);
+	ret = bwfm_pci_pktid_new(sc, &sc->sc_tx_pkts, mp, &pktid, &paddr);
+	m = *mp;
 	if (ret) {
 		if (ret == ENOBUFS) {
 			printf("%s: no pktid available for TX\n",
@@ -2418,14 +2771,7 @@ bwfm_pci_handle_mb_data(struct bwfm_pci_softc *sc)
 	bus_space_write_4(sc->sc_tcm_iot, sc->sc_tcm_ioh,
 	    sc->sc_dtoh_mb_data_addr, 0);
 
-	if (reg & BWFM_PCI_D2H_DEV_D3_ACK) {
-		sc->sc_mbdata_done = 1;
-		wakeup(&sc->sc_mbdata_done);
-	}
-
-	/* TODO: support more events */
-	if (reg & ~BWFM_PCI_D2H_DEV_D3_ACK)
-		printf("%s: handle MB data 0x%08x\n", DEVNAME(sc), reg);
+	bwfm_pci_mb_data(sc, reg);
 }
 
 #ifdef BWFM_DEBUG
@@ -2582,12 +2928,27 @@ bwfm_pci_msgbuf_query_dcmd(struct bwfm_softc *bwfm, int ifidx,
 	uint32_t pktid;
 	paddr_t paddr;
 	size_t buflen;
-	int s;
+	int s, gen = sc->sc_ioctl_gen;
+
+	/*
+	 * PDBwfm: no firmware, no answer. Without this every control message
+	 * to a halted or dead firmware would sit out its five seconds.
+	 */
+	if (!sc->sc_initialized ||
+	    sc->sc_ioctl_timeouts >= BWFM_PCI_IOCTL_DEAD) {
+		snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+		    "not sent: %s", !sc->sc_initialized ?
+		    "no firmware running" : "the firmware counts as dead");
+		return 1;
+	}
 
 	buflen = min(*len, BWFM_DMA_H2D_IOCTL_BUF_LEN);
 	m = MCLGETL(NULL, M_DONTWAIT, buflen);
-	if (m == NULL)
+	if (m == NULL) {
+		snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+		    "not sent: no buffer");
 		return 1;
+	}
 	do { M_SETLEN(m, buflen); M_SETPKTLEN(m, buflen); } while (0);
 
 	if (buf)
@@ -2598,12 +2959,17 @@ bwfm_pci_msgbuf_query_dcmd(struct bwfm_softc *bwfm, int ifidx,
 	s = splnet();
 	req = bwfm_pci_ring_write_reserve(sc, &sc->sc_ctrl_submit);
 	if (req == NULL) {
+		snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+		    "not sent: control ring full (w %u r %u)",
+		    sc->sc_ctrl_submit.w_ptr, sc->sc_ctrl_submit.r_ptr);
 		splx(s);
 		m_freem(m);
 		return 1;
 	}
 
-	if (bwfm_pci_pktid_new(sc, &sc->sc_ioctl_pkts, m, &pktid, &paddr)) {
+	if (bwfm_pci_pktid_new(sc, &sc->sc_ioctl_pkts, &m, &pktid, &paddr)) {
+		snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+		    "not sent: no packet id or mapping for the request");
 		bwfm_pci_ring_write_cancel(sc, &sc->sc_ctrl_submit, 1);
 		splx(s);
 		m_freem(m);
@@ -2629,13 +2995,54 @@ bwfm_pci_msgbuf_query_dcmd(struct bwfm_softc *bwfm, int ifidx,
 	bwfm_pci_ring_write_commit(sc, &sc->sc_ctrl_submit);
 	splx(s);
 
-	tsleep_nsec(ctl, PWAIT, "bwfm", SEC_TO_NSEC(5));
+	/*
+	 * PDBwfm: the softc must outlive this sleep, detach waits for
+	 * sc_ioctl_busy. A halt wakes the sleeper with no answer.
+	 */
+	sc->sc_ioctl_busy++;
+	if (ctl->m == NULL && sc->sc_initialized)
+		tsleep_nsec(ctl, PWAIT, "bwfm", SEC_TO_NSEC(5));
 	TAILQ_REMOVE(&sc->sc_ioctlq, ctl, next);
+	if (--sc->sc_ioctl_busy == 0)
+		wakeup(&sc->sc_ioctl_busy);
 
 	if (ctl->m == NULL) {
+		if (gen != sc->sc_ioctl_gen || !sc->sc_initialized) {
+			snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+			    "sent, then the bus was halted");
+		} else {
+			/*
+			 * Rare and never per packet: say so every time, with
+			 * the firmware's side of both control rings read
+			 * afresh (submit r == w: it took the request).
+			 */
+			snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+			    "sent, no answer in 5 s");
+			bwfm_pci_ring_update_rptr(sc, &sc->sc_ctrl_submit);
+			bwfm_pci_ring_update_wptr(sc, &sc->sc_ctrl_complete);
+			printf("%s: control message %d (transaction %u) sent, "
+			    "no answer in 5 s; mailbox int 0x%08x mask "
+			    "0x%08x, control ring w %u r %u, completion "
+			    "ring w %u r %u\n", DEVNAME(sc), cmd,
+			    ctl->transid, bwfm_pci_intr_status(sc),
+			    bwfm_pci_intmask(sc), sc->sc_ctrl_submit.w_ptr,
+			    sc->sc_ctrl_submit.r_ptr,
+			    sc->sc_ctrl_complete.w_ptr,
+			    sc->sc_ctrl_complete.r_ptr);
+		}
+		/* a message a halt cut short says nothing about the firmware
+		 * that may be running by now */
+		if (sc->sc_initialized && gen == sc->sc_ioctl_gen &&
+		    ++sc->sc_ioctl_timeouts == BWFM_PCI_IOCTL_DEAD)
+			printf("%s: %d control messages in a row unanswered, "
+			    "the firmware counts as dead until it is "
+			    "loaded again\n", DEVNAME(sc),
+			    sc->sc_ioctl_timeouts);
 		free(ctl, M_TEMP, sizeof(*ctl));
 		return 1;
 	}
+	if (gen == sc->sc_ioctl_gen)
+		sc->sc_ioctl_timeouts = 0;
 
 	/* PDBwfm: m was freed by the request ack, its length was buflen */
 	*len = min(ctl->retlen, buflen);
@@ -2645,6 +3052,8 @@ bwfm_pci_msgbuf_query_dcmd(struct bwfm_softc *bwfm, int ifidx,
 	m_freem(ctl->m);
 
 	if (ctl->status < 0) {
+		snprintf(sc->sc_ctl_why, sizeof(sc->sc_ctl_why),
+		    "firmware refused, status %d", ctl->status);
 		free(ctl, M_TEMP, sizeof(*ctl));
 		return 1;
 	}
@@ -2709,7 +3118,8 @@ bwfm_pci_msgbuf_h2d_mb_write(struct bwfm_pci_softc *sc, uint32_t data)
 }
 
 
-/* PDBwfm bring-up aid: what the host and the chip each think the rings look like. */
+/* PDBwfm: what the host and the chip each think the rings look like, logged by
+ * bwfm_pci_halt() when the firmware it stops was not answering. */
 static void
 bwfm_pci_dump_ring(struct bwfm_pci_softc *sc, const char *name,
     struct bwfm_pci_msgring *ring)

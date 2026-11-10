@@ -43,13 +43,46 @@ class PDApcieT8103Host : public IOPCIBridge
     UInt32 msiCount;
     UInt32 msiDoorbell;
     UInt32 msiUsed;
+    IOPCIDevice *msiOwner[32];
     IOReturn setupMSI(IOService *client, IOPCIDevice *device, UInt32 *vectorOut);
+    IOReturn releaseMSI(IOPCIDevice *device);
+
+    /*
+     * Port lifecycle after the bring-up in start(). portDown is set by portShutdown() and
+     * cleared by portResume(); while it is set no config access reaches the hardware
+     * (reads return all ones), because the ECAM and everything behind the link fault then.
+     */
+    IOLock *portLock;
+    OSArray *apcieRegs;      /* what IODTResolveAddressing() returned in start(), retained */
+    bool portDown;
+    UInt8 secondaryBus;
+    bool rootSaved;
+    UInt32 rootConfig[8];
+    void programRid2sid(void);
+    void saveRootPort(void);
+    bool restoreRootPort(void);
+    IOReturn portShutdown(UInt32 flags, UInt32 *portDownOut);
+    IOReturn portResume(UInt32 *linkUpOut);
 
 public:
     bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+    void stop(IOService *provider) APPLE_KEXT_OVERRIDE;
     bool configure(IOService *provider) APPLE_KEXT_OVERRIDE;
     void free(void) APPLE_KEXT_OVERRIDE;
-    /* "PDApcieSetupMSI" (client service, IOPCIDevice, UInt32 *aicVector): one MSI for a device below this bridge */
+    /*
+     * Platform functions for the drivers of devices below this bridge. param1 is always
+     * the calling service.
+     *   "PDApcieSetupMSI"     (client, IOPCIDevice, UInt32 *aicVector): one MSI vector. A
+     *                         device that has one gets the same again, its MSI capability
+     *                         is written again (after a power loss).
+     *   "PDApcieReleaseMSI"   (client, IOPCIDevice): the vector goes back.
+     *   "PDApciePortShutdown" (client, flags, UInt32 *portDown): port and PHY stopped,
+     *                         flags bit 0: radio power off through the SMC. The caller must
+     *                         be done with its BARs. UNTESTED; SMC "off" value unverified.
+     *   "PDApciePortResume"   (client, UInt32 *linkUp): the link is brought up again if it
+     *                         is down, root port and stream table restored. UNTESTED.
+     * None of the last two is called by anything during a normal boot.
+     */
     IOReturn callPlatformFunction(const OSSymbol *functionName, bool waitForFunction,
                                   void *param1, void *param2, void *param3, void *param4) APPLE_KEXT_OVERRIDE;
     IODeviceMemory *ioDeviceMemory(void) APPLE_KEXT_OVERRIDE;

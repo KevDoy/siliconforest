@@ -14,9 +14,14 @@
  *
  * Link bring-up is in PDApcieT8103Link.cpp: when port 0 is not already up, the
  * bridge powers and initialises the controller, PHY and port itself (ported from
- * m1n1) and runs the Linux port link sequence. A link the launcher brought up is
+ * m1n1) and runs the Linux port link sequence. A link that is already up is
  * used as it is. The link sequence also powers the radio through the SMC (key
- * gP0d, PDAppleSMC.cpp); with boot argument pdapciesmc=0 that stays with the launcher.
+ * gP0d, PDAppleSMC.cpp); boot argument pdapciesmc=0 turns that off for a
+ * launcher that powers the radio itself.
+ *
+ * The way down is portShutdown(): from stop(), and for the driver of the device
+ * behind the port through the platform function PDApciePortShutdown. Nothing runs
+ * it during a normal boot. portResume() (PDApciePortResume) is the way back.
  */
 #include "PDApcieT8103.h"
 #include "PDApcieT8103Link.h"
@@ -183,6 +188,13 @@ bool PDApcieT8103Host::start(IOService *provider)
             msiCount = 32;
     }
 
+    portLock = IOLockAlloc();
+    if (!portLock)
+        return false;
+    /* Kept for portShutdown()/portResume(): the apcie "reg" is never resolved a second time. */
+    apcieRegs = regs;
+    apcieRegs->retain();
+
     busFirst = 0;
     busLast = 8;
     if (busRange && busRange->getLength() >= sizeof(range)) {
@@ -208,7 +220,7 @@ bool PDApcieT8103Host::start(IOService *provider)
     /*
      * Bring the link up unless it already is. This comes before any port register read
      * here: with the apcie power domains off the port block cannot be read.
-     * pdapcielink=0 restores the old behaviour (the launcher must have done it all).
+     * pdapcielink=0: no bring-up here, something before the kernel must have done it all.
      */
     int linkMode = 1;
     PE_parse_boot_argn("pdapcielink", &linkMode, sizeof(linkMode));
@@ -260,21 +272,154 @@ bool PDApcieT8103Host::start(IOService *provider)
                 configRead32(dev, 0x14), configRead32(dev, 0x10),
                 configRead32(dev, 0x1c), configRead32(dev, 0x18));
         }
-        /*
-         * apple_pcie_enable_device(): requester ID -> DART stream. Linux iommu-map
-         * sends every function on bus 1 to stream 1 of dart-apcie0.
-         */
-        for (unsigned fn = 0; fn < 2 && dev.s.busNum; fn++) {
-            UInt32 entry = PORT_RID2SID_VALID | (1u << PORT_RID2SID_SID_SHIFT) |
-                           ((UInt32)dev.s.busNum << PORT_RID2SID_BUS_SHIFT) | fn;
-            OSWriteLittleInt32((volatile void *)portBase, PORT_RID2SID + 4 * fn, entry);
-            OSSynchronizeIO();
-            LOG("rid2sid[%u] = 0x%08x (readback 0x%08x)", fn, entry, portRead(PORT_RID2SID + 4 * fn));
-        }
+        secondaryBus = dev.s.busNum;
+        programRid2sid();
+        saveRootPort();
         LOG("root port after scan buses=0x%08x membase/limit=0x%08x",
             configRead32(root, 0x18), configRead32(root, 0x20));
     }
     return ok;
+}
+
+/*
+ * apple_pcie_enable_device(): requester ID -> DART stream. Linux iommu-map sends every
+ * function on bus 1 to stream 1 of dart-apcie0. The link sequence clears the table, so
+ * this runs after every bring-up.
+ */
+void PDApcieT8103Host::programRid2sid(void)
+{
+    for (unsigned fn = 0; fn < 2 && secondaryBus; fn++) {
+        UInt32 entry = PORT_RID2SID_VALID | (1u << PORT_RID2SID_SID_SHIFT) |
+                       ((UInt32)secondaryBus << PORT_RID2SID_BUS_SHIFT) | fn;
+        OSWriteLittleInt32((volatile void *)portBase, PORT_RID2SID + 4 * fn, entry);
+        OSSynchronizeIO();
+        LOG("rid2sid[%u] = 0x%08x (readback 0x%08x)", fn, entry, portRead(PORT_RID2SID + 4 * fn));
+    }
+}
+
+/* What IOPCIFamily wrote to the root port and a controller re-initialisation clears. */
+static const UInt8 kRootConfig[8] = { 0x18, 0x1c, 0x20, 0x24, 0x28, 0x2c, 0x3c, 0x04 };
+
+void PDApcieT8103Host::saveRootPort(void)
+{
+    IOPCIAddressSpace root;
+    root.bits = 0;
+    for (unsigned i = 0; i < 8; i++)
+        rootConfig[i] = configRead32(root, kRootConfig[i]);
+    rootSaved = true;
+}
+
+bool PDApcieT8103Host::restoreRootPort(void)
+{
+    IOPCIAddressSpace root;
+    bool lost = false;
+    root.bits = 0;
+    if (!rootSaved)
+        return false;
+    for (unsigned i = 0; i < 8; i++) {
+        UInt32 now = configRead32(root, kRootConfig[i]);
+        /* 0x04: the status half is write-one-to-clear, only the command half goes back */
+        if (kRootConfig[i] == 0x04) {
+            if ((now & 0xffff) != (rootConfig[i] & 0xffff)) {
+                configWrite16(root, 0x04, (UInt16)rootConfig[i]);
+                lost = true;
+            }
+        } else if (now != rootConfig[i]) {
+            configWrite32(root, kRootConfig[i], rootConfig[i]);
+            lost = true;
+        }
+    }
+    return lost;
+}
+
+/*
+ * Port 0 down: see PDApcieT8103PortShutdown() for the register order. From here on the
+ * ECAM is not touched (configAddress() returns nothing while portDown is set): IOPCIFamily
+ * may still read config space of the devices it knows, and gets all ones.
+ * UNTESTED on hardware; the SMC radio "off" value is unverified.
+ */
+IOReturn PDApcieT8103Host::portShutdown(UInt32 flags, UInt32 *portDownOut)
+{
+    IOReturn ret = kIOReturnSuccess;
+
+    IOLockLock(portLock);
+    if (portDown) {
+        LOG("shutdown: port0 is already down");
+    } else if (!apcieRegs || !portBase) {
+        LOG("shutdown: the bridge never started, nothing to shut down");
+        ret = kIOReturnNotReady;
+    } else {
+        bool down = false;
+        LOG("shutdown: port0 going down%s (UNTESTED sequence)",
+            (flags & kPDApcieShutdownRadioOff) ? ", then radio power off through the SMC" : "");
+        /* nothing reaches for the ECAM once the sequence has started */
+        portDown = true;
+        ret = PDApcieT8103PortShutdown(getProvider(), apcieRegs, flags, &down);
+        if (!down) {
+            portDown = false;
+            LOG("shutdown: port0 was NOT shut down (0x%08x)", ret);
+        } else {
+            LOG("shutdown: port0 is down; config space reads all ones until PDApciePortResume");
+        }
+    }
+    if (portDownOut)
+        *portDownOut = portDown ? 1 : 0;
+    IOLockUnlock(portLock);
+    return ret;
+}
+
+/*
+ * Port 0 up again, after portShutdown() or after the SoC took the controller's power
+ * (system sleep): the bring-up of start() decides by itself what is needed, from nothing
+ * (link already up) to the whole controller, PHY and port sequence with the radio power
+ * write. Then the root port's config registers and the RID-to-stream table, which a
+ * bring-up clears, are written again. The devices behind the port come back with empty
+ * config space: restoring that is their drivers' business. UNTESTED on hardware.
+ */
+IOReturn PDApcieT8103Host::portResume(UInt32 *linkUpOut)
+{
+    IOReturn ret;
+    UInt32 linksts = 0;
+
+    if (linkUpOut)
+        *linkUpOut = 0;
+    IOLockLock(portLock);
+    if (!apcieRegs || !portBase || !ecamBase) {
+        IOLockUnlock(portLock);
+        LOG("resume: the bridge never started");
+        return kIOReturnNotReady;
+    }
+    LOG("resume: port0 %s, running the link bring-up (UNTESTED path)",
+        portDown ? "was shut down" : "is expected up");
+    ret = PDApcieT8103LinkBringUp(getProvider(), apcieRegs, &linksts);
+    if (ret != kIOReturnSuccess) {
+        /* in whatever state the port is, nothing may reach behind it */
+        portDown = true;
+        LOG("resume: port0 link did not come up (0x%08x, linksts 0x%08x); config space stays closed", ret, linksts);
+    } else {
+        portDown = false;
+        bool lost = restoreRootPort();
+        programRid2sid();
+        LOG("resume: port0 link up (linksts 0x%08x), root port config %s", linksts,
+            lost ? "was lost and is restored" : "intact");
+        if (linkUpOut)
+            *linkUpOut = 1;
+    }
+    IOLockUnlock(portLock);
+    return ret;
+}
+
+/*
+ * The bridge is going away: IOPCIFamily has stopped the devices behind it. Port and PHY
+ * are stopped and the radio's power is switched off (not with pdapciesmc=0). This never
+ * runs during a normal boot; a start() that fails does not come here either.
+ */
+void PDApcieT8103Host::stop(IOService *provider)
+{
+    LOG("stop: shutting port0 down");
+    if (portLock)
+        portShutdown(kPDApcieShutdownRadioOff, NULL);
+    super::stop(provider);
 }
 
 /*
@@ -292,9 +437,14 @@ IOReturn PDApcieT8103Host::setupMSI(IOService *client, IOPCIDevice *device, UInt
 
     if (!client || !device)
         return kIOReturnBadArgument;
+    if (portDown)
+        return kIOReturnNotReady;
     if (device->findPCICapability(kIOPCIMSICapability, &cap) == 0 || cap == 0)
         return kIOReturnUnsupported;
-    for (n = 0; n < msiCount && (msiUsed & (1u << n)); n++) {}
+    /* a device that has a vector keeps it: this is then the rewrite after a power loss */
+    for (n = 0; n < msiCount && msiOwner[n] != device; n++) {}
+    if (n >= msiCount)
+        for (n = 0; n < msiCount && (msiUsed & (1u << n)); n++) {}
     if (n >= msiCount)
         return kIOReturnNoResources;
 
@@ -325,6 +475,7 @@ IOReturn PDApcieT8103Host::setupMSI(IOService *client, IOPCIDevice *device, UInt
     if (!(device->configRead16(cap + 2) & 1))
         return kIOReturnIOError;
     msiUsed |= 1u << n;
+    msiOwner[n] = device;
     if (vectorOut)
         *vectorOut = (UInt32)vector;
     LOG("msi: %u:%u.%u message %u -> AIC interrupt %u (doorbell 0x%08x) for %s",
@@ -333,11 +484,36 @@ IOReturn PDApcieT8103Host::setupMSI(IOService *client, IOPCIDevice *device, UInt
     return kIOReturnSuccess;
 }
 
+/* The device stops sending MSIs (unless the port is down, then it cannot) and its vector is free. */
+IOReturn PDApcieT8103Host::releaseMSI(IOPCIDevice *device)
+{
+    UInt8 cap = 0;
+    UInt32 n;
+
+    if (!device)
+        return kIOReturnBadArgument;
+    for (n = 0; n < msiCount && msiOwner[n] != device; n++) {}
+    if (n >= msiCount)
+        return kIOReturnNotFound;
+    if (!portDown && device->findPCICapability(kIOPCIMSICapability, &cap) != 0 && cap != 0)
+        device->configWrite16(cap + 2, device->configRead16(cap + 2) & ~0x1);
+    msiOwner[n] = NULL;
+    msiUsed &= ~(1u << n);
+    LOG("msi: message %u released%s", n, portDown ? " (port down, device not written)" : "");
+    return kIOReturnSuccess;
+}
+
 IOReturn PDApcieT8103Host::callPlatformFunction(const OSSymbol *functionName, bool waitForFunction,
                                                 void *param1, void *param2, void *param3, void *param4)
 {
     if (functionName && functionName->isEqualTo("PDApcieSetupMSI"))
         return setupMSI((IOService *)param1, OSDynamicCast(IOPCIDevice, (OSObject *)param2), (UInt32 *)param3);
+    if (functionName && functionName->isEqualTo("PDApcieReleaseMSI"))
+        return releaseMSI(OSDynamicCast(IOPCIDevice, (OSObject *)param2));
+    if (functionName && functionName->isEqualTo("PDApciePortShutdown"))
+        return portShutdown((UInt32)(uintptr_t)param2, (UInt32 *)param3);
+    if (functionName && functionName->isEqualTo("PDApciePortResume"))
+        return portResume((UInt32 *)param2);
     return super::callPlatformFunction(functionName, waitForFunction, param1, param2, param3, param4);
 }
 
@@ -352,6 +528,11 @@ bool PDApcieT8103Host::configure(IOService *provider)
 
 void PDApcieT8103Host::free(void)
 {
+    OSSafeReleaseNULL(apcieRegs);
+    if (portLock) {
+        IOLockFree(portLock);
+        portLock = NULL;
+    }
     OSSafeReleaseNULL(ecamMap);
     OSSafeReleaseNULL(portMap);
     ecamBase = NULL;
@@ -376,6 +557,9 @@ IOPCIAddressSpace PDApcieT8103Host::getBridgeSpace(void)
 volatile UInt8 *PDApcieT8103Host::configAddress(IOPCIAddressSpace space, UInt8 offset) const
 {
     if (!ecamBase || space.s.busNum < busFirst || space.s.busNum > busLast)
+        return NULL;
+    /* port shut down: the ECAM, root port included, is not touched (see portShutdown()) */
+    if (portDown)
         return NULL;
     /*
      * Root bus: only port 0 (device 0, function 0) is initialised on the J293.

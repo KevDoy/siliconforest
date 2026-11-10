@@ -44,6 +44,8 @@ static int bwfm_debug = 1;
 void	 bwfm_start(struct ifnet *);
 void	 bwfm_init(struct ifnet *);
 void	 bwfm_stop(struct ifnet *);
+void	 bwfm_init1(struct ifnet *);
+void	 bwfm_stop1(struct ifnet *);
 void	 bwfm_iff(struct bwfm_softc *);
 void	 bwfm_watchdog(struct ifnet *);
 void	 bwfm_update_node(void *, struct ieee80211_node *);
@@ -158,6 +160,10 @@ struct bwfm_proto_ops bwfm_proto_bcdc_ops = {
 	.proto_rxctl = bwfm_proto_bcdc_rxctl,
 };
 
+/* PDBwfm: why the last control message failed, for the log */
+#define BWFM_CTLWHY(sc)	((sc)->sc_bus_ops->bs_ctlwhy != NULL ? \
+	    (sc)->sc_bus_ops->bs_ctlwhy(sc) : "?")
+
 struct cfdriver bwfm_cd = {
 	NULL, "bwfm", DV_IFNET
 };
@@ -216,12 +222,106 @@ bwfm_attachhook(struct device *self)
 {
 	struct bwfm_softc *sc = (struct bwfm_softc *)self;
 
-	if (sc->sc_bus_ops->bs_preinit != NULL &&
-	    sc->sc_bus_ops->bs_preinit(sc))
-		return;
-	if (bwfm_preinit(sc))
-		return;
-	sc->sc_initialized = 1;
+	bwfm_lifecycle_enter(sc);
+	if ((sc->sc_bus_ops->bs_preinit == NULL ||
+	    sc->sc_bus_ops->bs_preinit(sc) == 0) && bwfm_preinit(sc) == 0)
+		sc->sc_initialized = 1;
+	/*
+	 * PDBwfm: a firmware that came up and then did not answer is not
+	 * left running with its rings and buffers and nobody to serve it.
+	 */
+	if (!sc->sc_initialized && sc->sc_bus_ops->bs_halt != NULL)
+		sc->sc_bus_ops->bs_halt(sc);
+	bwfm_lifecycle_exit(sc);
+}
+
+/*
+ * PDBwfm lifecycle. bwfm_init, bwfm_stop, a bus halt and detach all sleep
+ * (every control message does, and sleeping gives up the stack lock), and they
+ * are entered from different threads: the interface ioctl, the firmware
+ * thread, the system sleep notification and the driver's stop. One runs at a
+ * time; the others wait here. The same thread may enter again.
+ */
+void
+bwfm_lifecycle_enter(struct bwfm_softc *sc)
+{
+	void *self = (void *)current_thread();
+
+	while (sc->sc_lifecycle != 0 && sc->sc_lifecycle_owner != self)
+		tsleep_nsec(&sc->sc_lifecycle, PWAIT, "bwfmlc",
+		    MSEC_TO_NSEC(100));
+	sc->sc_lifecycle_owner = self;
+	sc->sc_lifecycle++;
+}
+
+void
+bwfm_lifecycle_exit(struct bwfm_softc *sc)
+{
+	if (--sc->sc_lifecycle == 0) {
+		sc->sc_lifecycle_owner = NULL;
+		wakeup(&sc->sc_lifecycle);
+	}
+}
+
+static void
+bwfm_task_barrier_done(void *arg)
+{
+	*(int *)arg = 1;
+	wakeup(arg);
+}
+
+/*
+ * PDBwfm: wait until the task thread is through with everything queued so
+ * far, a command in the middle of a control message included. The compat
+ * taskq_barrier() does nothing; one thread runs all tasks and timeouts in
+ * order, so a task of our own at the end of the queue marks the spot.
+ */
+int
+bwfm_task_barrier(struct bwfm_softc *sc)
+{
+	struct task t;
+	int done = 0, i;
+
+	task_set(&t, bwfm_task_barrier_done, &done);
+	task_add(sc->sc_taskq, &t);
+	for (;;) {
+		for (i = 0; i < 50 && !done; i++)
+			tsleep_nsec(&done, PWAIT, "bwfmbar", MSEC_TO_NSEC(100));
+		if (done)
+			break;
+		if (task_del(sc->sc_taskq, &t)) {
+			printf("%s: the task queue did not drain in 5 s\n",
+			    DEVNAME(sc));
+			return EBUSY;
+		}
+		/* taken off the queue, not run yet: it runs once we sleep */
+	}
+	return 0;
+}
+
+/*
+ * PDBwfm: the radio goes down for more than an interface stop: the
+ * interface is stopped if it runs (scan aborted, disassociated, flow rings
+ * deleted), then the bus is halted (chip masked and reset, rings, buffers
+ * and their DMA mappings released). With inform the firmware is told first
+ * (D3 inform) and the result of that handshake is returned. The next
+ * bwfm_init() loads the firmware again. The stack lock is held.
+ */
+int
+bwfm_radio_down(struct bwfm_softc *sc, int inform)
+{
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	int error = 0;
+
+	bwfm_lifecycle_enter(sc);
+	if (ifp->if_flags & IFF_RUNNING)
+		bwfm_stop1(ifp);
+	if (inform && sc->sc_bus_ops->bs_sleep != NULL)
+		error = sc->sc_bus_ops->bs_sleep(sc);
+	else if (sc->sc_bus_ops->bs_halt != NULL)
+		sc->sc_bus_ops->bs_halt(sc);
+	bwfm_lifecycle_exit(sc);
+	return error;
 }
 
 int
@@ -325,7 +425,16 @@ bwfm_preinit(struct bwfm_softc *sc)
 	if (if_setlladdr(ifp, ic->ic_myaddr))
 		printf("%s: could not set MAC address\n", DEVNAME(sc));
 
-	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
+	/*
+	 * PDBwfm: once. A firmware that is loaded again reports the same
+	 * bands, and every ieee80211_media_init() allocates the bss node and
+	 * the media list anew without freeing the old ones.
+	 */
+	if (!sc->sc_media_done) {
+		ieee80211_media_init(ifp, bwfm_media_change,
+		    ieee80211_media_status);
+		sc->sc_media_done = 1;
+	}
 	return 0;
 }
 
@@ -341,15 +450,37 @@ bwfm_detach(struct bwfm_softc *sc, int flags)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
+	int i, busy = 0;
 
+	/*
+	 * PDBwfm: the softc is freed after this, so the task thread must be
+	 * through with it. The interface timer re-arms itself, it is only
+	 * stopped for good by taking it off the queue, so wait until that
+	 * works. Then queued commands and events run (on a halted bus their
+	 * control messages fail at once), and right after that barrier
+	 * net80211 deletes its timeouts. The compat timeout_del() is no
+	 * barrier: a net80211 timeout that comes due in the instant between
+	 * the two can still run afterwards. The last barrier at least lets it
+	 * run before the softc is freed; EBUSY tells the caller not to free.
+	 */
+	bwfm_lifecycle_enter(sc);
+	for (i = 0; i < 150 && !timeout_del(&ifp->if_slowtimo); i++)
+		tsleep_nsec(&ifp->if_slowtimo, PWAIT, "bwfmdt",
+		    MSEC_TO_NSEC(20));
+	if (bwfm_task_barrier(sc) != 0)
+		busy = EBUSY;
 	task_del(sc->sc_taskq, &sc->sc_task);
 	ieee80211_ifdetach(ifp);
 	taskq_barrier(sc->sc_taskq);
 	if_detach(ifp);
+	ml_purge(&sc->sc_evml);
+	if (bwfm_task_barrier(sc) != 0)
+		busy = EBUSY;
 	taskq_destroy(sc->sc_taskq);
 
 	bwfm_cleanup(sc);
-	return 0;
+	bwfm_lifecycle_exit(sc);
+	return busy;
 }
 
 int
@@ -407,9 +538,9 @@ bwfm_start(struct ifnet *ifp)
 			break;
 
 		/*
-		 * PDBwfm: the bus code reads the frame through mtod and m_len,
-		 * and the bounce copy never fails the way a one segment
-		 * bus_dmamap_load_mbuf does, so linearize a chain here.
+		 * PDBwfm: the bus code reads the frame through mtod and m_len
+		 * and maps one segment, so linearize a chain here. m_defrag
+		 * replaces m when it does.
 		 */
 		if (m_defrag(m, M_DONTWAIT) != 0) {
 			ifp->if_oerrors++;
@@ -418,7 +549,8 @@ bwfm_start(struct ifnet *ifp)
 		}
 
 		PD_LOGN(1, "%s: first tx frame %d bytes\n", DEVNAME(sc), (int)M_PKTLEN(m));
-		if (sc->sc_bus_ops->bs_txdata(sc, m) != 0) {
+		/* PDBwfm: by reference, on failure m is what is left to free */
+		if (sc->sc_bus_ops->bs_txdata(sc, &m) != 0) {
 			PD_LOGN(3, "%s: start: txdata refused the frame\n", DEVNAME(sc));
 			ifp->if_oerrors++;
 			m_freem(m);
@@ -432,8 +564,29 @@ bwfm_start(struct ifnet *ifp)
 	}
 }
 
+/* PDBwfm: init and stop are serialized, see bwfm_lifecycle_enter() */
 void
 bwfm_init(struct ifnet *ifp)
+{
+	struct bwfm_softc *sc = ifp->if_softc;
+
+	bwfm_lifecycle_enter(sc);
+	bwfm_init1(ifp);
+	bwfm_lifecycle_exit(sc);
+}
+
+void
+bwfm_stop(struct ifnet *ifp)
+{
+	struct bwfm_softc *sc = ifp->if_softc;
+
+	bwfm_lifecycle_enter(sc);
+	bwfm_stop1(ifp);
+	bwfm_lifecycle_exit(sc);
+}
+
+void
+bwfm_init1(struct ifnet *ifp)
 {
 	struct bwfm_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -441,34 +594,77 @@ bwfm_init(struct ifnet *ifp)
 	struct bwfm_join_pref_params join_pref[2];
 	int pm;
 
+	/*
+	 * PDBwfm: a firmware that stopped answering is reset here, so radio
+	 * off and on again recovers it; the block below then loads it anew.
+	 */
+	if (sc->sc_initialized && sc->sc_bus_ops->bs_dead != NULL &&
+	    sc->sc_bus_ops->bs_dead(sc)) {
+		printf("%s: init: the firmware does not answer, halting it\n",
+		    DEVNAME(sc));
+		sc->sc_bus_ops->bs_halt(sc);
+	}
+
+	if (sc->sc_initialized) {
+		/* Update MAC in case the upper layers changed it. */
+		IEEE80211_ADDR_COPY(ic->ic_myaddr,
+		    ((struct arpcom *)ifp)->ac_enaddr);
+		if (bwfm_fwvar_var_set_data(sc, "cur_etheraddr",
+		    ic->ic_myaddr, sizeof(ic->ic_myaddr))) {
+			printf("%s: could not write MAC address: %s\n",
+			    DEVNAME(sc), BWFM_CTLWHY(sc));
+			/*
+			 * PDBwfm: this is the first control message after the
+			 * interface was down, and on hardware it went
+			 * unanswered after a radio off of some seconds. A
+			 * firmware that refuses the address or a message that
+			 * could not be sent ends the init as in OpenBSD. One
+			 * that is silent gets a second try (the first may
+			 * only have woken it), and if it stays silent it is
+			 * halted and loaded again right here instead of
+			 * leaving the radio off.
+			 */
+			if (sc->sc_bus_ops->bs_unanswered == NULL ||
+			    sc->sc_bus_ops->bs_unanswered(sc) == 0 ||
+			    sc->sc_bus_ops->bs_halt == NULL)
+				return;
+			if (bwfm_fwvar_var_set_data(sc, "cur_etheraddr",
+			    ic->ic_myaddr, sizeof(ic->ic_myaddr)) == 0) {
+				printf("%s: init: the firmware answered the "
+				    "second time\n", DEVNAME(sc));
+			} else {
+				printf("%s: init: second try: %s; halting the "
+				    "firmware and loading it again\n",
+				    DEVNAME(sc), BWFM_CTLWHY(sc));
+				sc->sc_bus_ops->bs_halt(sc);
+			}
+		}
+	}
+
 	if (!sc->sc_initialized) {
+		printf("%s: init: no firmware running, loading it\n",
+		    DEVNAME(sc));
 		if (sc->sc_bus_ops->bs_preinit != NULL &&
 		    sc->sc_bus_ops->bs_preinit(sc)) {
 			printf("%s: could not init bus\n", DEVNAME(sc));
 			return;
 		}
 		if (bwfm_preinit(sc)) {
-			printf("%s: could not init\n", DEVNAME(sc));
+			printf("%s: could not init: %s\n", DEVNAME(sc),
+			    BWFM_CTLWHY(sc));
+			/* PDBwfm: not left running half set up */
+			if (sc->sc_bus_ops->bs_halt != NULL)
+				sc->sc_bus_ops->bs_halt(sc);
 			return;
 		}
 		sc->sc_initialized = 1;
-	} else {
-		/* Update MAC in case the upper layers changed it. */
-		IEEE80211_ADDR_COPY(ic->ic_myaddr,
-		    ((struct arpcom *)ifp)->ac_enaddr);
-		if (bwfm_fwvar_var_set_data(sc, "cur_etheraddr",
-		    ic->ic_myaddr, sizeof(ic->ic_myaddr))) {
-			printf("%s: could not write MAC address\n",
-			    DEVNAME(sc));
-			return;
-		}
 	}
 
 	/* Select default channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 
 	if (bwfm_fwvar_var_set_int(sc, "mpc", 1)) {
-		printf("%s: could not set mpc\n", DEVNAME(sc));
+		printf("%s: could not set mpc: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 
@@ -483,7 +679,7 @@ bwfm_init(struct ifnet *ifp)
 	join_pref[1].band = 0;
 	if (bwfm_fwvar_var_set_data(sc, "join_pref", join_pref,
 	    sizeof(join_pref))) {
-		printf("%s: could not set join pref\n", DEVNAME(sc));
+		printf("%s: could not set join pref: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 
@@ -519,23 +715,23 @@ bwfm_init(struct ifnet *ifp)
 #undef BWFM_EVENT
 
 	if (bwfm_fwvar_var_set_data(sc, "event_msgs", evmask, sizeof(evmask))) {
-		printf("%s: could not set event mask\n", DEVNAME(sc));
+		printf("%s: could not set event mask: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 
 	if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_SCAN_CHANNEL_TIME,
 	    BWFM_DEFAULT_SCAN_CHANNEL_TIME)) {
-		printf("%s: could not set scan channel time\n", DEVNAME(sc));
+		printf("%s: could not set scan channel time: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 	if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_SCAN_UNASSOC_TIME,
 	    BWFM_DEFAULT_SCAN_UNASSOC_TIME)) {
-		printf("%s: could not set scan unassoc time\n", DEVNAME(sc));
+		printf("%s: could not set scan unassoc time: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 	if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_SCAN_PASSIVE_TIME,
 	    BWFM_DEFAULT_SCAN_PASSIVE_TIME)) {
-		printf("%s: could not set scan passive time\n", DEVNAME(sc));
+		printf("%s: could not set scan passive time: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 
@@ -549,7 +745,7 @@ bwfm_init(struct ifnet *ifp)
 		pm = BWFM_PM_CAM;
 #endif
 	if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_PM, pm)) {
-		printf("%s: could not set power\n", DEVNAME(sc));
+		printf("%s: could not set power: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
 
@@ -584,13 +780,23 @@ bwfm_init(struct ifnet *ifp)
 	ieee80211_begin_scan(ifp);
 }
 
+/*
+ * PDBwfm: OpenBSD's stop, unchanged in what it tells the firmware: a scan is
+ * aborted (state INIT), the empty SSID disassociates, the radio goes down and
+ * comes back idle with mpc (minimum power consumption) so it is off until the
+ * next scan or join, and the bus deletes its flow rings. The firmware stays
+ * loaded and served; bwfm_radio_down() is the step beyond this.
+ */
 void
-bwfm_stop(struct ifnet *ifp)
+bwfm_stop1(struct ifnet *ifp)
 {
 	struct bwfm_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct bwfm_join_params join;
+	int failed = 0;
 
+	printf("%s: stop: interface down from state %s\n", DEVNAME(sc),
+	    ieee80211_state_name[ic->ic_state]);
 	sc->sc_tx_timer = 0;
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~IFF_RUNNING;
@@ -599,13 +805,22 @@ bwfm_stop(struct ifnet *ifp)
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 
 	memset(&join, 0, sizeof(join));
-	bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_SSID, &join, sizeof(join));
-	bwfm_fwvar_cmd_set_int(sc, BWFM_C_DOWN, 1);
-	bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_AP, 0);
-	bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_INFRA, 0);
-	bwfm_fwvar_cmd_set_int(sc, BWFM_C_UP, 1);
-	bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_PM, BWFM_PM_FAST_PS);
-	bwfm_fwvar_var_set_int(sc, "mpc", 1);
+	/* PDBwfm: the same seven messages, their failures counted for the log */
+	failed += bwfm_fwvar_cmd_set_data(sc, BWFM_C_SET_SSID, &join,
+	    sizeof(join)) != 0;
+	failed += bwfm_fwvar_cmd_set_int(sc, BWFM_C_DOWN, 1) != 0;
+	failed += bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_AP, 0) != 0;
+	failed += bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_INFRA, 0) != 0;
+	failed += bwfm_fwvar_cmd_set_int(sc, BWFM_C_UP, 1) != 0;
+	failed += bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_PM,
+	    BWFM_PM_FAST_PS) != 0;
+	failed += bwfm_fwvar_var_set_int(sc, "mpc", 1) != 0;
+	if (failed)
+		printf("%s: stop: %d of 7 control messages failed, the last "
+		    "one: %s\n", DEVNAME(sc), failed, BWFM_CTLWHY(sc));
+	else
+		printf("%s: stop: firmware told (7 control messages "
+		    "answered)\n", DEVNAME(sc));
 
 	if (sc->sc_bus_ops->bs_stop)
 		sc->sc_bus_ops->bs_stop(sc);
@@ -820,8 +1035,12 @@ bwfm_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
+			if (!(ifp->if_flags & IFF_RUNNING)) {
 				bwfm_init(ifp);
+				/* PDBwfm: bwfm_init has no result, the flag has */
+				if (!(ifp->if_flags & IFF_RUNNING))
+					error = EIO;
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				bwfm_stop(ifp);

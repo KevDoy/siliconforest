@@ -36,7 +36,10 @@ enum {
  */
 IOReturn PDAppleSMCRadioPowerOn(UInt32 options, bool *wrote);
 
-/* The reverse: gP0d = 0x00800000. Nothing calls this yet. */
+/*
+ * The reverse: gP0d = 0x00800000. UNVERIFIED: the value has never been written on hardware.
+ * Only PDApcieT8103PortShutdown() calls this, and nothing calls that during a normal boot.
+ */
 IOReturn PDAppleSMCRadioPowerOff(UInt32 options);
 
 /*

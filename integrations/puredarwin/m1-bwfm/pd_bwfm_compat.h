@@ -12,9 +12,10 @@ extern "C" {
 #define PD_BWFM_NAME		"PDBwfm"
 // firmware, clm, txcap and nvram files live here, under their linux names
 #define PD_BWFM_FIRMWARE_DIR	"/Library/Firmware/brcm"
-// no interrupts yet: bwfm_pci_intr runs from a timer with this period
+// bwfm_pci_intr runs from the MSI and, as a safety net, from a timer every
+// PD_BWFM_MSI_FALLBACK_POLL_US; without an MSI vector the timer alone drives it, every PD_BWFM_POLL_US
 #define PD_BWFM_POLL_US		2000
-#define PD_BWFM_MSI_FALLBACK_POLL_US	250000	/* safety net once MSI works */
+#define PD_BWFM_MSI_FALLBACK_POLL_US	250000
 
 // bwfm.c and if_bwfm_pci.c bring their own
 #undef DPRINTF
@@ -122,7 +123,7 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, bus_s
 	return 0;
 }
 
-// the IOMemoryMap behind a BAR stays with PDBwfm until it stops
+// the IOMemoryMap behind a BAR stays with PDBwfm until its stop releases it, after the detach
 #define bus_space_unmap(t, h, s)	((void)0)
 
 // dma, by default (pd_dart_map.h): every device visible address is an iova the DART mapper
@@ -254,6 +255,8 @@ int	pd_bwfm_adt_prop(const char *path, const char *name, void *buf, int len);
 int	pd_bwfm_bootarg(const char *name, char *buf, int len);
 // 1 when the firmware supplicant should do the WPA2-PSK handshake (boot-arg bwfm_fwsup=0 turns it off)
 int	pd_bwfm_want_fwsup(void);
+// 1 when the firmware's deep sleep request is acknowledged as brcmfmac does (boot-arg bwfm_dsack=1; default 0)
+int	pd_bwfm_want_dsack(void);
 
 // the rest of the kernel bwfm touches
 
@@ -311,6 +314,9 @@ if_rxr_put(struct if_rxring *rxr, u_int n)
 struct mbuf *pd_bwfm_mclgetl(int, u_int);
 #undef MCLGETL
 #define MCLGETL(m, how, l)	pd_bwfm_mclgetl((how), (l))
+
+// bwfm_lifecycle_enter remembers which thread is inside
+#include <kern/thread.h>
 
 int	loadfirmware(const char *, u_char **, size_t *);
 int	pd_bwfm_m_defrag(struct mbuf **, int);

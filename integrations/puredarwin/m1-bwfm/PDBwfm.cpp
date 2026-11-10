@@ -1,7 +1,31 @@
 // SPDX-License-Identifier: MIT
 // Broadcom BCM4378 PCIe FullMAC 802.11ax (14e4:4425, Apple M1 J293), OpenBSD's bwfm(4) on
-// IO80211Family, with the pci calls it makes. Derived from PDQwx.cpp. The interrupt is a
-// poll timer and DMA goes through the DART bounce pool, see pd_bwfm_compat.h.
+// IO80211Family, with the pci calls it makes. Derived from PDQwx.cpp. The interrupt is one
+// MSI vector from the host bridge with a slow poll timer behind it, DMA goes through the DART
+// mapper, see pd_bwfm_compat.h.
+//
+// Lifecycle, all of it logged with one line per stage:
+//
+//   start       pci side attached, a thread loads the firmware once the root file system is
+//               there and attaches the 802.11 interface. A bring-up that fails leaves the
+//               chip reset, nothing allocated, the interrupt sources off and no interface.
+//   radio off   (wifiutil off, APPLE80211_IOC_POWER 0) boot-arg bwfm_off selects what it means:
+//               0, the default: OpenBSD's interface stop. Scan aborted, disassociated, flow
+//                  rings deleted, radio idle; the firmware stays loaded and served.
+//               1: after that the firmware is told (D3 inform), the chip masked and reset and
+//                  every ring, buffer and DMA mapping released. Radio on loads the firmware again.
+//               2: after that the host bridge shuts the port down and switches the radio's
+//                  power off through the SMC (PDApciePortShutdown). Radio on brings the port
+//                  back (PDApciePortResume) and loads the firmware. The SMC "off" value and
+//                  the port sequence are UNVERIFIED on hardware.
+//   sleep/wake  a priority sleep/wake interest on the root domain, nothing else: on sleep the
+//               steps of bwfm_off=1, and neither chip nor DART is touched from then on; on
+//               wake the bridge is asked for the port (it brings the link up if the SoC took
+//               it down), config space, DART and MSI are checked and written again if they
+//               were lost and, if the interface ran before, the firmware is loaded again.
+//               UNTESTED: the guest cannot sleep. The code is that of bwfm_off=1 and 2, which
+//               can be run with wifiutil.
+//   stop        see PDBwfm::stop.
 
 #include "pd_dart_pool.h"
 #include <IOKit/IOInterruptEventSource.h>
@@ -9,13 +33,18 @@
 #include "IO80211Controller.h"
 #include "pd_bwfm_glue.h"
 #include <IOKit/IOLib.h>
+#include <IOKit/IOLocks.h>
+#include <IOKit/IOMessage.h>
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOTimerEventSource.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/pci/IOPCIDevice.h>
+#include <IOKit/pwr_mgt/RootDomain.h>
+#include <libkern/OSAtomic.h>
 #include <pexpert/pexpert.h>
 #include <sys/vnode.h>
 #include <sys/fcntl.h>
+#include <sys/errno.h>
 #include <sys/kpi_mbuf.h>
 
 #include "pd_bwfm_compat.h"
@@ -34,6 +63,25 @@ vnode_t vfs_rootvnode(void);
 #define BWFM_MAX_BARS		2
 #define BWFM_MAX_DEVICES	2
 
+// what "radio off" does, boot-arg bwfm_off
+enum {
+	kOffStop = 0,		// interface stop, firmware stays loaded
+	kOffHalt = 1,		// and firmware stopped, everything released
+	kOffPower = 2,		// and port shut down, radio power off
+};
+
+// how far PDBwfm::chipDown goes after it stopped the firmware
+enum {
+	kDownHalt = 0,		// no further: the chip stays powered and reachable
+	kDownSleep = 1,		// the system sleeps: the port counts as lost until the bridge has it back
+	kDownPower = 2,		// the bridge shuts the port down and switches the radio's power off
+};
+
+// the config registers a power loss clears: BARs, cache line and interrupt line. The command
+// register is kept apart, it goes back last
+static const UInt8 kSavedConfig[] = { 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x0c, 0x3c };
+#define BWFM_SAVED_CONFIG	(sizeof(kSavedConfig) / sizeof(kSavedConfig[0]))
+
 class PDBwfm;
 
 struct pd_bwfm_dma {
@@ -47,6 +95,9 @@ class PDBwfm : public IO80211Controller
 public:
 	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
 	virtual void stop(IOService *provider) APPLE_KEXT_OVERRIDE;
+	virtual void free() APPLE_KEXT_OVERRIDE;
+	virtual IOReturn enable(IONetworkInterface *interface) APPLE_KEXT_OVERRIDE;
+	virtual SInt32 apple80211Request(bool set, int type, int value, void *data, uint32_t *len) APPLE_KEXT_OVERRIDE;
 	virtual const OSString *newVendorString() const APPLE_KEXT_OVERRIDE;
 	virtual const OSString *newModelString() const APPLE_KEXT_OVERRIDE;
 
@@ -66,15 +117,43 @@ public:
 
 private:
 	static void firmwareThread(void *arg, wait_result_t wr);
+	static void wakeThread(void *arg, wait_result_t wr);
+	static IOReturn sleepWake(void *target, void *refCon, UInt32 messageType, IOService *provider,
+	    void *messageArgument, vm_size_t argSize);
 	void bringUp();
-	void teardown();
+	void bringUpFailed(const char *what);
+	void systemSleep();
+	void systemWake();
+	IOReturn chipDown(int how, const char *why);
+	IOReturn chipUp(bool askBridge, const char *why);
+	IOReturn bridgeCall(const char *name, void *param2, void *param3);
+	void saveConfig();
+	bool restoreConfig();
+	static IOReturn syncAction(OSObject *owner, void *arg0, void *arg1, void *arg2, void *arg3);
+	void pauseInterrupts();
+	void resumeInterrupts();
+	void quiesceInterrupts();
+	void teardown(bool stopping);
 
 	struct pd_bwfm_dma fDma;
 	struct device *fDev;
+	IOLock *fLifecycle;		// one chipDown or chipUp at a time
+	IONotifier *fSleepWake;
 	bool fAttached;
 	bool f80211;
 	volatile bool fStopping;
-	volatile bool fThreadDone;
+	volatile SInt32 fThreads;	// firmware and wake threads still running
+	int fOffMode;			// boot-arg bwfm_off, kOff*
+	bool fChipDown;			// the firmware was stopped on purpose: radio off or sleep
+	bool fPortDown;			// the bridge shut the port down, no register may be touched
+	bool fAsleep;
+	bool fSleepTookDown;		// this sleep stopped the firmware, the wake brings it back
+	bool fResumeUp;			// the interface ran when the system went to sleep
+	bool fHaveMSI;			// the bridge gave a vector, it goes back in stop
+	bool fConfigSaved;
+	UInt32 fSavedID;
+	UInt16 fSavedCommand;
+	UInt32 fSavedConfig[BWFM_SAVED_CONFIG];
 };
 
 #define super IO80211Controller
@@ -141,19 +220,25 @@ bool PDBwfm::start(IOService *provider)
 	struct pci_attach_args pa;
 	thread_t thread;
 
-	fThreadDone = true;
 	fPCI = OSDynamicCast(IOPCIDevice, provider);
 	if (fPCI == NULL || !super::start(provider))
 		return false;
 	if (!fPCI->open(this)) {
 		LOG("cannot open the pci device");
+		super::stop(provider);
 		return false;
 	}
 	fPollLoop = IOWorkLoop::workLoop();
-	if (fPollLoop == NULL) {
-		fPCI->close(this);
+	fLifecycle = IOLockAlloc();
+	if (fPollLoop == NULL || fLifecycle == NULL) {
+		teardown(false);
+		super::stop(provider);
 		return false;
 	}
+	fOffMode = kOffStop;
+	PE_parse_boot_argn("bwfm_off", &fOffMode, sizeof(fOffMode));
+	if (fOffMode < kOffStop || fOffMode > kOffPower)
+		fOffMode = kOffStop;
 	setOwner(fPCI, this);
 	fPCI->setMemoryEnable(true);
 	fPCI->setBusMasterEnable(true);
@@ -164,29 +249,38 @@ bool PDBwfm::start(IOService *provider)
 	pa.pa_tag = fPCI;
 	pa.pa_dmat = &fDma;
 	pa.pa_id = fPCI->configRead32(kIOPCIConfigVendorID);
-	LOG("attach: pci %04x:%04x, command 0x%04x", pa.pa_id & 0xffff, pa.pa_id >> 16,
-	    fPCI->configRead16(kIOPCIConfigCommand));
+	fSavedID = pa.pa_id;
+	LOG("attach: pci %04x:%04x, command 0x%04x, radio off mode %d (boot-arg bwfm_off)", pa.pa_id & 0xffff,
+	    pa.pa_id >> 16, fPCI->configRead16(kIOPCIConfigCommand), fOffMode);
 
 	fDev = pd_bwfm_alloc(PD_BWFM_NAME);
 	if (fDev == NULL || !pd_bwfm_match(&pa) || pd_bwfm_attach(fDev, &pa) != 0) {
 		LOG("the pci side did not attach");
-		teardown();
+		teardown(false);
+		super::stop(provider);
 		return false;
 	}
 	fAttached = true;
 
 	// the firmware comes off the root file system. Waiting for it here would hold up the
 	// matching thread, so the rest of the bring-up has a thread of its own
-	fThreadDone = false;
+	OSIncrementAtomic(&fThreads);
 	retain();
 	if (kernel_thread_start(&PDBwfm::firmwareThread, this, &thread) != KERN_SUCCESS) {
 		release();
-		fThreadDone = true;
+		OSDecrementAtomic(&fThreads);
 		LOG("no thread for the firmware bring-up");
-		teardown();
+		teardown(false);
+		super::stop(provider);
 		return false;
 	}
 	thread_deallocate(thread);
+	// Nothing comes of this unless the system really goes to sleep; the driver is not a
+	// power child of the pci device (IONetworkController gives that up when the driver
+	// registers no power states), so no power state change ever reaches it another way
+	fSleepWake = registerPrioritySleepWakeInterest(&PDBwfm::sleepWake, this, NULL);
+	if (fSleepWake == NULL)
+		LOG("attach: no sleep/wake notification, sleep is not handled");
 	LOG("attach: pci side done, firmware bring-up waits for the root file system");
 	return true;
 }
@@ -196,7 +290,7 @@ void PDBwfm::firmwareThread(void *arg, wait_result_t wr)
 	PDBwfm *self = (PDBwfm *)arg;
 
 	self->bringUp();
-	self->fThreadDone = true;
+	OSDecrementAtomic(&self->fThreads);
 	self->release();
 }
 
@@ -208,18 +302,23 @@ void PDBwfm::bringUp()
 		return;
 	if (!rootMounted()) {
 		LOG("no root file system after %d s, giving up", BWFM_ROOT_WAIT_S);
+		bringUpFailed("no root file system");
 		return;
 	}
 	LOG("root file system mounted, loading firmware from %s", PD_BWFM_FIRMWARE_DIR);
 	if (pd_bwfm_attach_hook(fDev) != 0) {
-		LOG("firmware bring-up FAILED, no interface");
+		bringUpFailed("firmware bring-up");
 		return;
 	}
 	if (fStopping)
 		return;
 	LOG("firmware bring-up done, attaching the 802.11 interface");
 	if (!attach80211(pd_bwfm_ic(fDev))) {
-		LOG("attach80211 failed");
+		// attach80211 hooked the interface before it failed
+		pd_bwfm_unhook(fDev);
+		fIC = NULL;
+		pd_bwfm_down(fDev, 0);
+		bringUpFailed("attach80211");
 		return;
 	}
 	f80211 = true;
@@ -253,26 +352,88 @@ void PDBwfm::bringUp()
 	}
 }
 
-void PDBwfm::teardown()
+// The bus side has halted the chip and freed what the bring-up took (bwfm_attachhook); what
+// is left here is the interrupt, which has nothing to deliver any more. The driver stays
+// attached so nothing matches the device again, and stop() takes the rest apart.
+void PDBwfm::bringUpFailed(const char *what)
 {
+	quiesceInterrupts();
+	LOG("%s FAILED: no interface. The chip is quiet (reset, or never started), nothing is allocated for it, "
+	    "the interrupt is off; the driver stays attached and idle", what);
+}
+
+// stop: nothing of the driver may run or be reachable once the softc is freed. In order:
+//  1. the firmware and wake threads have ended (they see fStopping)
+//  2. no sleep/wake notification comes any more
+//  3. the 802.11 interface is detached, which stops it if it was up (scan aborted,
+//     disassociated, flow rings deleted: needs the interrupt, so it comes first), and the
+//     stack's hooks into this controller are cleared
+//  4. the chip is masked and reset and every ring, buffer and DMA mapping is released
+//  5. the MSI source and the poll timer are off the work loop: no handler runs from here on
+//  6. net80211 is detached: control messages and the task thread are out of the softc
+//  7. the MSI vector goes back to the bridge, bus mastering is off; with bwfm_off=2 the port
+//     is shut down
+//  8. softc, BAR mappings and work loop are released, the pci device is closed
+// Every step looks at what exists, so this is also what a failed start runs.
+void PDBwfm::stop(IOService *provider)
+{
+	LOG("stop: waiting for the driver's threads");
+	fStopping = true;
+	for (int i = 0; fThreads > 0; i++) {
+		IOSleep(50);
+		if (i % 200 == 199)
+			LOG("stop: a driver thread is still running after %d s", (i + 1) / 20);
+	}
+	if (fSleepWake != NULL) {
+		fSleepWake->remove();
+		fSleepWake = NULL;
+	}
+	if (f80211) {
+		LOG("stop: detaching the 802.11 interface");
+		detach80211();
+		pd_bwfm_unhook(fDev);
+	}
+	f80211 = false;
+	teardown(true);
+	LOG("stop: done");
+	super::stop(provider);
+}
+
+void PDBwfm::teardown(bool stopping)
+{
+	if (fLifecycle != NULL)
+		IOLockLock(fLifecycle);
+	// with the port down the chip was halted on the way there, and the DART is not read
+	if (fAttached && !fPortDown) {
+		LOG("stop: halting the chip");
+		pd_bwfm_down(fDev, 0);
+	}
 	// no handler may run once the softc goes away
-	if (fIntSrc != NULL) {
-		fIntSrc->disable();
-		if (fPollLoop != NULL)
-			fPollLoop->removeEventSource(fIntSrc);
-		OSSafeReleaseNULL(fIntSrc);
+	quiesceInterrupts();
+	if (fAttached && pd_bwfm_detach(fDev) != 0) {
+		// better a leak than a thread on freed memory
+		LOG("stop: something is still inside the driver state, it is NOT freed");
+		fDev = NULL;
+	} else if (fAttached) {
+		LOG("stop: net80211 detached");
 	}
-	if (fPollTimer != NULL) {
-		fPolling = false;
-		fPollTimer->cancelTimeout();
-		fPollTimer->disable();
-		if (fPollLoop != NULL)
-			fPollLoop->removeEventSource(fPollTimer);
-		OSSafeReleaseNULL(fPollTimer);
-	}
-	if (fAttached)
-		pd_bwfm_detach(fDev);
 	fAttached = false;
+	if (fPCI != NULL && fHaveMSI) {
+		// with the port down the bridge only takes the vector back
+		bridgeCall("PDApcieReleaseMSI", fPCI, NULL);
+		fHaveMSI = false;
+	}
+	if (fPCI != NULL && !fPortDown) {
+		fPCI->setBusMasterEnable(false);
+		// never on the way out of a failed start: that would be a boot path
+		if (stopping && fOffMode == kOffPower) {
+			UInt32 portDown = 0;
+
+			LOG("stop: bwfm_off=2, asking the bridge to shut the port down and switch the radio off");
+			bridgeCall("PDApciePortShutdown", (void *)(uintptr_t)1, &portDown);
+			fPortDown = portDown != 0;
+		}
+	}
 	if (fDev != NULL)
 		pd_bwfm_free(fDev);
 	fDev = NULL;
@@ -283,18 +444,351 @@ void PDBwfm::teardown()
 		setOwner(fPCI, NULL);
 		fPCI->close(this);
 	}
+	// the lock itself stays until free(): a request that came in late may still wait for it
+	if (fLifecycle != NULL)
+		IOLockUnlock(fLifecycle);
 }
 
-void PDBwfm::stop(IOService *provider)
+void PDBwfm::free()
 {
-	fStopping = true;
-	while (!fThreadDone)
-		IOSleep(50);
-	if (f80211)
-		detach80211();
-	f80211 = false;
-	teardown();
-	super::stop(provider);
+	if (fLifecycle != NULL)
+		IOLockFree(fLifecycle);
+	fLifecycle = NULL;
+	super::free();
+}
+
+// the interrupt sources: paused while the port is down (the poll also reads the DART, which
+// may not be powered then), gone for good in stop
+
+IOReturn PDBwfm::syncAction(OSObject *owner, void *arg0, void *arg1, void *arg2, void *arg3)
+{
+	return kIOReturnSuccess;
+}
+
+void PDBwfm::pauseInterrupts()
+{
+	fPolling = false;
+	if (fIntSrc != NULL)
+		fIntSrc->disable();
+	if (fPollTimer != NULL)
+		fPollTimer->cancelTimeout();
+	// a handler that was already running is through once this comes back
+	if (fPollLoop != NULL)
+		fPollLoop->runAction(&PDBwfm::syncAction, this);
+}
+
+void PDBwfm::resumeInterrupts()
+{
+	if (fPollTimer == NULL)
+		return;
+	fPolling = true;
+	if (fIntSrc != NULL)
+		fIntSrc->enable();
+	fPollTimer->setTimeoutUS(fPollUS);
+}
+
+void PDBwfm::quiesceInterrupts()
+{
+	fPolling = false;
+	if (fIntSrc != NULL) {
+		fIntSrc->disable();
+		if (fPollLoop != NULL)
+			fPollLoop->removeEventSource(fIntSrc);
+		OSSafeReleaseNULL(fIntSrc);
+	}
+	if (fPollTimer != NULL) {
+		fPollTimer->cancelTimeout();
+		fPollTimer->disable();
+		if (fPollLoop != NULL)
+			fPollLoop->removeEventSource(fPollTimer);
+		OSSafeReleaseNULL(fPollTimer);
+	}
+}
+
+// radio off beyond the interface stop, and system sleep
+
+IOReturn PDBwfm::bridgeCall(const char *name, void *param2, void *param3)
+{
+	const OSSymbol *fn = OSSymbol::withCString(name);
+	IOReturn ret = fn ? fPCI->callPlatformFunction(fn, true, this, param2, param3, NULL) : kIOReturnNoMemory;
+
+	OSSafeReleaseNULL(fn);
+	if (ret != kIOReturnSuccess)
+		LOG("%s: the host bridge answered 0x%x", name, ret);
+	return ret;
+}
+
+void PDBwfm::saveConfig()
+{
+	fSavedCommand = fPCI->configRead16(kIOPCIConfigCommand);
+	for (unsigned i = 0; i < BWFM_SAVED_CONFIG; i++)
+		fSavedConfig[i] = fPCI->configRead32(kSavedConfig[i]);
+	fConfigSaved = true;
+}
+
+// true when something had to be written back, which means the function lost its state
+bool PDBwfm::restoreConfig()
+{
+	bool lost = false;
+
+	if (!fConfigSaved)
+		return false;
+	for (unsigned i = 0; i < BWFM_SAVED_CONFIG; i++) {
+		if (fPCI->configRead32(kSavedConfig[i]) != fSavedConfig[i]) {
+			fPCI->configWrite32(kSavedConfig[i], fSavedConfig[i]);
+			lost = true;
+		}
+	}
+	if (fPCI->configRead16(kIOPCIConfigCommand) != fSavedCommand) {
+		fPCI->configWrite16(kIOPCIConfigCommand, fSavedCommand);
+		lost = true;
+	}
+	return lost;
+}
+
+// The firmware is stopped and everything it used is released (how: kDown*).
+// Order: interface stop, D3 inform, chip masked and reset, buffers and mappings released
+// (all in pd_bwfm_down: the last BAR and DART access), config space saved. Beyond a plain
+// halt: interrupt sources paused (the poll reads the DART), the bus told to keep off the
+// registers, and for kDownPower the port shut down and the radio's power off in the bridge.
+// For sleep the port is only counted as down: the SoC may take its power, so nothing reaches
+// for the chip or the DART until chipUp has asked the bridge.
+IOReturn PDBwfm::chipDown(int how, const char *why)
+{
+	IOReturn ret = kIOReturnSuccess;
+
+	IOLockLock(fLifecycle);
+	if (fPortDown || fStopping || !fAttached) {
+		IOLockUnlock(fLifecycle);
+		return kIOReturnSuccess;
+	}
+	LOG("%s: stopping the firmware%s", why, how == kDownPower ? ", then the port and the radio's power" : "");
+	int d3 = pd_bwfm_down(fDev, 1);
+	saveConfig();
+	fChipDown = true;
+	LOG("%s: firmware stopped (D3 inform %s), chip reset, config space saved", why,
+	    d3 == 0 ? "acknowledged" : "not acknowledged");
+	if (how != kDownHalt) {
+		pauseInterrupts();
+		pd_bwfm_set_gone(fDev, 1);
+	}
+	if (how == kDownSleep) {
+		fPortDown = true;
+		LOG("%s: interrupt sources paused, chip and DART not touched until the bridge has the port back", why);
+	} else if (how == kDownPower) {
+		UInt32 portDown = 0;
+
+		// flags bit 0: also switch the radio's power off through the SMC
+		ret = bridgeCall("PDApciePortShutdown", (void *)(uintptr_t)1, &portDown);
+		fPortDown = portDown != 0;
+		if (!fPortDown) {
+			LOG("%s: the port is NOT shut down, the chip stays reachable", why);
+			pd_bwfm_set_gone(fDev, 0);
+			resumeInterrupts();
+		} else {
+			LOG("%s: port shut down%s", why, ret == kIOReturnSuccess ? ", radio power off" :
+			    ", radio power off FAILED");
+		}
+	}
+	IOLockUnlock(fLifecycle);
+	return ret;
+}
+
+// The way back up to the point where the firmware can be loaded: bwfm_init does that when
+// the interface is brought up. Order: port (the bridge brings the link up if it is down),
+// function there, config space, DART, MSI, then the bus may touch registers again and the
+// interrupt sources run. Nothing is written that still has its value.
+IOReturn PDBwfm::chipUp(bool askBridge, const char *why)
+{
+	IOReturn ret = kIOReturnSuccess;
+
+	IOLockLock(fLifecycle);
+	if (fStopping || !fAttached || (!fChipDown && !fPortDown)) {
+		IOLockUnlock(fLifecycle);
+		return kIOReturnSuccess;
+	}
+	if (fPortDown || askBridge) {
+		UInt32 linkUp = 0;
+
+		LOG("%s: asking the bridge for the port", why);
+		ret = bridgeCall("PDApciePortResume", &linkUp, NULL);
+		if (ret != kIOReturnSuccess || !linkUp) {
+			LOG("%s: no link, the chip stays down and is not touched", why);
+			// from here on nothing may reach for a register, whatever state we were in
+			pauseInterrupts();
+			pd_bwfm_set_gone(fDev, 2);
+			fPortDown = true;
+			IOLockUnlock(fLifecycle);
+			return ret != kIOReturnSuccess ? ret : kIOReturnNotReady;
+		}
+	}
+	UInt32 id = fPCI->configRead32(kIOPCIConfigVendorID);
+	if (id != fSavedID) {
+		LOG("%s: the function reads id 0x%08x instead of 0x%08x, the chip stays down and is not touched",
+		    why, id, fSavedID);
+		pauseInterrupts();
+		pd_bwfm_set_gone(fDev, 2);
+		fPortDown = true;
+		IOLockUnlock(fLifecycle);
+		return kIOReturnNoDevice;
+	}
+	bool lost = restoreConfig();
+	int dart = pd_bwfm_dma_resume();
+	if (lost && fIntSrc != NULL) {
+		UInt32 vector = 0;
+		// the bridge gives the same vector again and writes the MSI capability
+		ret = bridgeCall("PDApcieSetupMSI", fPCI, &vector);
+		if (ret != kIOReturnSuccess)
+			LOG("%s: no MSI any more, the poll timer serves the chip", why);
+		ret = kIOReturnSuccess;
+	}
+	LOG("%s: chip reachable, config space %s, DART %s", why, lost ? "was lost and is restored" : "intact",
+	    dart == 0 ? "translating" : "NOT translating");
+	if (dart != 0) {
+		// no DMA without the DART: the firmware must not be loaded
+		LOG("%s: no DMA without the DART, the chip stays down", why);
+		pd_bwfm_set_gone(fDev, 1);
+		fChipDown = true;
+		IOLockUnlock(fLifecycle);
+		return kIOReturnNotReady;
+	}
+	pd_bwfm_set_gone(fDev, 0);
+	fPortDown = false;
+	fChipDown = false;
+	resumeInterrupts();
+	IOLockUnlock(fLifecycle);
+	return ret;
+}
+
+IOReturn PDBwfm::enable(IONetworkInterface *interface)
+{
+	// every way to a running interface goes through chipUp once the chip was taken down
+	if ((fChipDown || fPortDown) && chipUp(false, "interface up") != kIOReturnSuccess)
+		return kIOReturnNotReady;
+	return super::enable(interface);
+}
+
+// The requests that change the radio pass through here: power is where bwfm_off takes
+// effect, and once the chip was taken down every other one first needs it back.
+SInt32 PDBwfm::apple80211Request(bool set, int type, int value, void *data, uint32_t *len)
+{
+	if (!set || fIC == NULL)
+		return super::apple80211Request(set, type, value, data, len);
+	if (type == APPLE80211_IOC_POWER && len != NULL && *len >= sizeof(struct apple80211_power_data)) {
+		bool on = ((struct apple80211_power_data *)data)->power_state != 0;
+		SInt32 error;
+
+		if (on) {
+			LOG("radio on");
+			if ((fChipDown || fPortDown) && chipUp(false, "radio on") != kIOReturnSuccess)
+				return EIO;
+			error = super::apple80211Request(set, type, value, data, len);
+			if (error == 0)
+				LOG("radio on: interface running");
+			else
+				LOG("radio on: FAILED (error %d), last control message: %s", error, pd_bwfm_ctlwhy(fDev));
+			return error;
+		}
+		LOG("radio off, mode %d", fOffMode);
+		error = fPortDown ? 0 : super::apple80211Request(set, type, value, data, len);
+		if (fOffMode >= kOffHalt)
+			chipDown(fOffMode == kOffPower ? kDownPower : kDownHalt, "radio off");
+		LOG("radio off: done (interface stop result %d)", error);
+		return error;
+	}
+	// scan, join and the like start the interface themselves
+	if ((fChipDown || fPortDown) && chipUp(false, "request") != kIOReturnSuccess)
+		return EIO;
+	return super::apple80211Request(set, type, value, data, len);
+}
+
+// System sleep and wake. UNTESTED: the guest under the hypervisor cannot sleep. Priority
+// clients get the capability change on current kernels and the classic messages on older
+// ones; both are taken, fAsleep makes the second of a pair a no-op. Returning without
+// touching the argument acknowledges at once: the work on the way down is done right here,
+// so the system does not go on to sleep before the firmware is quiet.
+IOReturn PDBwfm::sleepWake(void *target, void *refCon, UInt32 messageType, IOService *provider,
+    void *messageArgument, vm_size_t argSize)
+{
+	PDBwfm *self = (PDBwfm *)target;
+	bool sleep = messageType == kIOMessageSystemWillSleep;
+	bool wake = messageType == kIOMessageSystemHasPoweredOn;
+
+	if (messageType == kIOMessageSystemCapabilityChange &&
+	    argSize == sizeof(IOPMSystemCapabilityChangeParameters)) {
+		IOPMSystemCapabilityChangeParameters *params = (IOPMSystemCapabilityChangeParameters *)messageArgument;
+		bool fromCPU = (params->fromCapabilities & kIOPMSystemCapabilityCPU) != 0;
+		bool toCPU = (params->toCapabilities & kIOPMSystemCapabilityCPU) != 0;
+
+		if ((params->changeFlags & kIOPMSystemCapabilityWillChange) && fromCPU && !toCPU)
+			sleep = true;
+		if ((params->changeFlags & kIOPMSystemCapabilityDidChange) && !fromCPU && toCPU)
+			wake = true;
+	}
+	if (sleep)
+		self->systemSleep();
+	else if (wake)
+		self->systemWake();
+	return kIOReturnSuccess;
+}
+
+void PDBwfm::systemSleep()
+{
+	if (fAsleep || fStopping)
+		return;
+	fAsleep = true;
+	fSleepTookDown = false;
+	if (!fAttached || fPortDown) {
+		LOG("sleep: the port is down already, nothing to do");
+		return;
+	}
+	// also with the firmware stopped by a radio off: the poll must not read the DART
+	// across a sleep, and the wake has to ask the bridge for the port
+	fResumeUp = f80211 && !fChipDown && pd_bwfm_running(fDev) != 0;
+	LOG("sleep: interface %s", fResumeUp ? "running, it comes back on wake" : "down, it stays down on wake");
+	chipDown(kDownSleep, "sleep");
+	fSleepTookDown = true;
+}
+
+void PDBwfm::systemWake()
+{
+	thread_t thread;
+
+	if (!fAsleep || fStopping)
+		return;
+	fAsleep = false;
+	if (!fSleepTookDown) {
+		LOG("wake: the port was down before sleep, nothing to do");
+		return;
+	}
+	fSleepTookDown = false;
+	// loading the firmware takes seconds and needs the file system: not on the power thread
+	OSIncrementAtomic(&fThreads);
+	retain();
+	if (kernel_thread_start(&PDBwfm::wakeThread, this, &thread) != KERN_SUCCESS) {
+		release();
+		OSDecrementAtomic(&fThreads);
+		LOG("wake: no thread, the radio stays off until it is switched on");
+		return;
+	}
+	thread_deallocate(thread);
+}
+
+void PDBwfm::wakeThread(void *arg, wait_result_t wr)
+{
+	PDBwfm *self = (PDBwfm *)arg;
+
+	LOG("wake: bringing the chip back");
+	if (self->chipUp(true, "wake") != kIOReturnSuccess)
+		LOG("wake: the chip did not come back, the radio stays off");
+	else if (!self->fResumeUp)
+		LOG("wake: chip back, the interface was down and stays down");
+	else if (self->fStopping)
+		LOG("wake: the driver is stopping");
+	else
+		LOG("wake: interface %s", pd_bwfm_up(self->fDev) == 0 ? "running again" : "did NOT come up");
+	OSDecrementAtomic(&self->fThreads);
+	self->release();
 }
 
 const OSString *PDBwfm::newVendorString() const
@@ -310,14 +804,15 @@ const OSString *PDBwfm::newModelString() const
 // openbsd runs the interrupt handler at IPL_NET, here it runs on the poll work loop under the stack lock
 void PDBwfm::pollAction(OSObject *owner, IOTimerEventSource *sender)
 {
-	// the pool logs and clears DART faults; with MSI this timer is only a slow safety net
 	static unsigned ticks;
-	if (++ticks % 16 == 0)
-		pd_dart_pool_check("poll");
 	PDBwfm *self = (PDBwfm *)owner;
 
+	// paused while the port is down: neither the chip nor the DART may be read then
 	if (!self->fPolling)
 		return;
+	// a DART fault is logged and cleared here; with MSI this timer is only a slow safety net
+	if (++ticks % 16 == 0)
+		pd_dart_pool_check("poll");
 	pd80211_lock();
 	if (self->fIntrFn != NULL)
 		self->fIntrFn(self->fIntrArg);
@@ -420,6 +915,16 @@ int pd_bwfm_want_fwsup(void)
 	int value = 1;
 
 	PE_parse_boot_argn("bwfm_fwsup", &value, sizeof(value));
+	return value != 0;
+}
+
+// Off by default: the driver never acknowledged the request on hardware, and with the
+// acknowledgement the firmware may really go to sleep, also while associated
+int pd_bwfm_want_dsack(void)
+{
+	int value = 0;
+
+	PE_parse_boot_argn("bwfm_dsack", &value, sizeof(value));
 	return value != 0;
 }
 
@@ -557,6 +1062,7 @@ bool PDBwfm::setupMSI()
 		LOG("msi: the host bridge gave no vector (0x%x)", ret);
 		return false;
 	}
+	fHaveMSI = true;
 	fIntSrc = IOInterruptEventSource::interruptEventSource(this, &PDBwfm::intrAction, this, 0);
 	if (fIntSrc == NULL || fPollLoop->addEventSource(fIntSrc) != kIOReturnSuccess) {
 		LOG("msi: no interrupt event source for AIC vector %u", vector);

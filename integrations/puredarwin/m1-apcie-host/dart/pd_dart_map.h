@@ -44,6 +44,15 @@ int pd_dart_map_pages(const uint64_t *pa, unsigned npages, uint64_t *iova);
  */
 int pd_dart_map(uint64_t pa, size_t size, uint64_t *dva);
 
+/*
+ * After the DART may have lost its registers (system sleep, the PCIe port powered down and
+ * up again): if the stream no longer translates through our table, program it again as
+ * pd_dart_init() did. The tables and every mapping in them are kept. Call it only while
+ * the DART is powered, that is with the port up. 0 when the stream translates afterwards
+ * or the mapper was never initialised. UNTESTED on hardware.
+ */
+int pd_dart_resume(void);
+
 /* Unmaps the pages that [dva, dva + size) touches; takes what pd_dart_map() returned. */
 int pd_dart_unmap(uint64_t dva, size_t size);
 

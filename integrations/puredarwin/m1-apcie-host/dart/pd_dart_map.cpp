@@ -436,6 +436,41 @@ out:
     return ret;
 }
 
+int pd_dart_resume(void)
+{
+    if (!gLock || !gReady)
+        return 0;
+    IOLockLock(gLock);
+    int ret = 0;
+    uint32_t want = DART_T8020_TTBR_VALID | (uint32_t)(gL1pa >> DART_T8020_TTBR_SHIFT);
+    uint32_t tcr = rd(DART_T8020_TCR(PD_DART_SID)), ttbr = rd(DART_T8020_TTBR(PD_DART_SID, 0));
+
+    if ((tcr & DART_T8020_TCR_TRANSLATE_ENABLE) && ttbr == want) {
+        DLOG("resume: stream %d still translates (tcr=0x%08x ttbr0=0x%08x), nothing written", PD_DART_SID, tcr, ttbr);
+    } else if (rd(DART_T8020_CONFIG) & DART_T8020_CONFIG_LOCK) {
+        DLOG("resume: stream %d lost its state (tcr=0x%08x ttbr0=0x%08x) and the DART is locked", PD_DART_SID, tcr, ttbr);
+        ret = EPERM;
+    } else {
+        /* the same sequence as pd_dart_init(), with the table that exists */
+        tablesWritten();
+        wr(DART_T8020_TCR(PD_DART_SID), 0);
+        for (int i = 0; i < 4; i++)
+            wr(DART_T8020_TTBR(PD_DART_SID, i), 0);
+        wr(DART_T8020_STREAMS_ENABLE, rd(DART_T8020_STREAMS_ENABLE) | (1u << PD_DART_SID));
+        wr(DART_T8020_ERROR, rd(DART_T8020_ERROR));
+        ret = invalidate();
+        if (ret == 0) {
+            wr(DART_T8020_TTBR(PD_DART_SID, 0), want);
+            wr(DART_T8020_TCR(PD_DART_SID), DART_T8020_TCR_TRANSLATE_ENABLE);
+            ret = flushLocked();
+        }
+        DLOG("resume: stream %d had tcr=0x%08x ttbr0=0x%08x, programmed again: tcr=0x%08x ttbr0=0x%08x%s", PD_DART_SID,
+             tcr, ttbr, rd(DART_T8020_TCR(PD_DART_SID)), rd(DART_T8020_TTBR(PD_DART_SID, 0)), ret ? " FAILED" : "");
+    }
+    IOLockUnlock(gLock);
+    return ret;
+}
+
 int pd_dart_map_pages(const uint64_t *pa, unsigned npages, uint64_t *iova)
 {
     if (!gReady || !pa)

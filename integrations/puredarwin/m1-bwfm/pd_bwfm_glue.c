@@ -82,7 +82,7 @@ pd_bwfm_match(struct pci_attach_args *pa)
 	return bwfm_pci_ca.ca_match(NULL, NULL, pa);
 }
 
-// the pci half: both BARs mapped, the poll timer running, net80211 attached, no firmware yet
+// the pci half: both BARs mapped, the interrupt established, net80211 attached, no firmware yet
 int
 pd_bwfm_attach(struct device *dev, struct pci_attach_args *pa)
 {
@@ -115,29 +115,144 @@ pd_bwfm_attach_hook(struct device *dev)
 		return ENOMEM;
 	}
 	pd80211_lock();
+	// a bring-up that fails halts the chip and frees what it took, see bwfm_attachhook
 	fn(dev);
-	if (!sc->sc_initialized) {
-		extern void bwfm_pci_dump(struct bwfm_softc *);
-		bwfm_pci_dump(sc);
+	if (!sc->sc_initialized)
 		pd_bwfm_dma_check("bring-up failed");
-	}
 	pd80211_unlock();
 	pd_bwfm_dma_report(dev->dv_xname);
 	return sc->sc_initialized ? 0 : EIO;
 }
 
+// the lifecycle after the bring-up. Each of these takes the stack lock and waits for an init
+// or stop that is under way (bwfm_lifecycle_enter), so they may come from any thread
+
+// why the last control message to the firmware failed, for the stage logs
+const char *
+pd_bwfm_ctlwhy(struct device *dev)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+
+	return sc->sc_bus_ops != NULL && sc->sc_bus_ops->bs_ctlwhy != NULL ?
+	    sc->sc_bus_ops->bs_ctlwhy(sc) : "?";
+}
+
+int
+pd_bwfm_running(struct device *dev)
+{
+	return (((struct bwfm_softc *)dev)->sc_ic.ic_if.if_flags & IFF_RUNNING) != 0;
+}
+
+// The radio goes down for good until pd_bwfm_up or the next interface up: interface stopped
+// (scan aborted, disassociated, flow rings deleted), with inform the firmware told (D3
+// inform), then the chip masked and reset and every ring, buffer and DMA mapping released.
+// Returns 0 when the firmware acknowledged D3, an errno when it did not or was not asked.
+int
+pd_bwfm_down(struct device *dev, int inform)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+	int error;
+
+	pd80211_lock();
+	error = bwfm_radio_down(sc, inform);
+	pd80211_unlock();
+	// the DART is behind the port: not read once that is down
+	if (!sc->sc_bus_gone)
+		pd_bwfm_dma_check("radio down");
+	pd_bwfm_dma_report(dev->dv_xname);
+	return inform ? error : ENXIO;
+}
+
+// the interface comes back if it is configured up: the firmware is loaded again when it is
+// not running. Returns 0 when the interface runs afterwards
+int
+pd_bwfm_up(struct device *dev)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	int running;
+
+	pd80211_lock();
+	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) == IFF_UP)
+		bwfm_init(ifp);
+	running = (ifp->if_flags & IFF_RUNNING) != 0;
+	pd80211_unlock();
+	pd_bwfm_dma_report(dev->dv_xname);
+	return running ? 0 : EIO;
+}
+
+// after the port was powered down or the system slept: the DART translates again. Only
+// with the port up. The bounce pool has no such path
+int
+pd_bwfm_dma_resume(void)
+{
+#ifdef PD_BWFM_DMA_BOUNCE
+	printf(PD_BWFM_NAME ": the DMA pool cannot be programmed again after a power loss\n");
+	return ENOTSUP;
+#else
+	return pd_dart_resume();
+#endif
+}
+
+// The port is about to lose power (gone 1: a firmware that still runs is halted first), is
+// found dead (gone 2: nothing at all is touched) or is back (gone 0). While gone neither the
+// bus nor this file touches a register of the chip or the DART
 void
-pd_bwfm_detach(struct device *dev)
+pd_bwfm_set_gone(struct device *dev, int gone)
 {
 	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
 
 	pd80211_lock();
-	// bwfm_pci_cleanup walks tables that only a complete bring-up allocated
-	if (sc->sc_initialized)
-		bwfm_pci_ca.ca_detach(dev, 0);
-	else
-		bwfm_detach(sc, 0);
+	bwfm_lifecycle_enter(sc);
+	if (gone == 2)
+		sc->sc_bus_gone = 1;
+	if (sc->sc_bus_ops->bs_gone != NULL)
+		sc->sc_bus_ops->bs_gone(sc, gone);
+	sc->sc_bus_gone = gone != 0;
+	bwfm_lifecycle_exit(sc);
 	pd80211_unlock();
+}
+
+// IO80211Controller's hooks point at the controller: once it detached its interface no frame
+// and no link change may go there. pd80211_hook allocated the block and nothing frees it
+void
+pd_bwfm_unhook(struct device *dev)
+{
+	struct ifnet *ifp = &((struct bwfm_softc *)dev)->sc_ic.ic_if;
+	void *hooks;
+
+	pd80211_lock();
+	hooks = ifp->if_pdowner;
+	ifp->if_pdinput = NULL;
+	ifp->if_pdlinkchange = NULL;
+	ifp->if_pdowner = NULL;
+	pd80211_unlock();
+	if (hooks != NULL)
+		free(hooks, M_DEVBUF, 0);
+}
+
+// The softc goes away after this. In order: interface stopped and bus halted if they still
+// were up (pd_bwfm_down did that already in the driver's stop), control messages out of the
+// softc, task thread drained, net80211 detached, blobs freed. Works after a bring-up that
+// never ran or failed: every step looks at what exists. Returns non-zero when a control
+// message or the task thread did not get out in time: the softc must then not be freed.
+int
+pd_bwfm_detach(struct device *dev)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+	int busy;
+
+	pd80211_lock();
+	// one piece: no init slips in between the halt and the detach
+	bwfm_lifecycle_enter(sc);
+	bwfm_radio_down(sc, 0);
+	busy = bwfm_pci_ca.ca_detach(dev, 0);
+	bwfm_lifecycle_exit(sc);
+	pd80211_unlock();
+	// a hook that never ran
+	(void)pd_bwfm_take_hook(dev);
+	pd_bwfm_dma_report(dev->dv_xname);
+	return busy;
 }
 
 struct ieee80211com *

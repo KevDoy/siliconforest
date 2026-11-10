@@ -1,6 +1,5 @@
-# The m1-apcie-host kernel collection plus IO80211Family and PDBwfm.
-# NOTE: the base still carries PDApcieT8103Bridge with its diagnostic PDBCM4378Probe class,
-# which matches the same PCI function (0x442514e4) as PDBwfm and has to go before a boot.
+# The m1-apcie-host kernel collection (the PDApcieT8103Bridge build named in
+# ../m1-apcie-host/build-kc.nix) plus IO80211Family and PDBwfm.
 let
   base = import ../m1-apcie-host/build-kc.nix;
   wifi = import ./build-kexts.nix { };
