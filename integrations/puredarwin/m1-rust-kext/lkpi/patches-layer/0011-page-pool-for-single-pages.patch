@@ -9,6 +9,10 @@ allocation really is Z_NOWAIT, which fails whenever the kalloc zone has to grow.
   contiguity or mask), with a free bitmap per chunk; a fully free, unmapped chunk goes back
   to xnu above a 4 MiB reserve. Higher orders and GFP_DMA32 are unchanged. The page hash
   grows to 16384 buckets. pd_linux_page_stats() for diagnostics.
+- vmap() of pool pages maps sub-ranges of the buffer descriptors that own them
+  (pdos_map_owned_pages) instead of a physical-address descriptor over xnu-managed pages
+  (boot ag05: "IOMemoryDescriptor physical with managed page" on a DEBUG kernel); the
+  physical path stays as the fallback and for pages that are not from the pool.
 - xnu seam (in patch 0002's files): pdos_pages_alloc/free; pdos_malloc(canwait=0) retries
   blocking when the calling thread may block (not interrupt context, interrupts and
   preemption enabled), counted by pdos_malloc_nowait_retried().
@@ -53,7 +57,17 @@ UPSTREAM: yes.
  // a joined mapping and the page runs it keeps alive
  struct pd_vmap {
  	struct pd_vmap *next;
-@@ -81,8 +99,10 @@
+@@ -38,7 +56,8 @@
+ 
+ static void pd_page_flush(struct page *page);
+ 
+-static struct vm_page *pd_page_hash[PD_PAGE_HASH];
++// allocated by lkpi_page_init(), not part of the image (128 KiB)
++static struct vm_page **pd_page_hash;
+ static struct mtx pd_page_lock;
+ 
+ static inline unsigned
+@@ -81,8 +100,10 @@
  	unsigned long i;
  
  	run = malloc(sizeof(*run) + npages * sizeof(struct vm_page), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -65,7 +79,7 @@ UPSTREAM: yes.
  
  	run->phys = phys;
  	run->kva = kva;
-@@ -147,6 +167,153 @@
+@@ -147,6 +168,153 @@
  	return page->pd_kva;
  }
  
@@ -219,7 +233,7 @@ UPSTREAM: yes.
  struct page *
  linux_alloc_pages(gfp_t flags, unsigned int order)
  {
-@@ -155,10 +322,16 @@
+@@ -155,10 +323,16 @@
  	uint64_t phys;
  	void *kva;
  
@@ -237,7 +251,7 @@ UPSTREAM: yes.
  	if ((flags & M_ZERO) != 0)
  		memset(kva, 0, size);
  
-@@ -184,6 +357,10 @@
+@@ -184,6 +358,10 @@
  	}
  
  	run = page->pd_run;
@@ -248,3 +262,66 @@ UPSTREAM: yes.
  	for (unsigned long i = 0; i < run->npages; i++) {
  		if (run->pages[i].pd_kva_cached != NULL) {
  			pdos_unmap_pages(run->pages[i].pd_kva);
+@@ -279,17 +457,43 @@
+ 	if (i == count)
+ 		return pages[0]->pd_kva;
+ 
+-	phys = malloc(count * sizeof(*phys), M_DEVBUF, M_WAITOK);
+-	if (phys == NULL)
+-		return NULL;
+-	for (i = 0; i < count; i++)
+-		phys[i] = pages[i]->phys_addr;
+-	if (uncached) {
++	// pd_pool pages are mapped through the xnu allocations that own them; anything else
++	// (and a refusal by xnu) takes the physical ranges
++	va = NULL;
++	for (i = 0; i < count; i++) {
++		if (!((struct pd_page_run *)pages[i]->pd_run)->pooled)
++			break;
++	}
++	if (i == count) {
++		void **cookies = malloc(count * (sizeof(void *) + sizeof(uint32_t)), M_DEVBUF, M_WAITOK);
++		uint32_t *index = (uint32_t *)(cookies + count);
++
++		for (i = 0; i < count; i++) {
++			struct pd_page_run *run = pages[i]->pd_run;
++
++			cookies[i] = run->cookie;
++			index[i] = (uint32_t)(pages[i] - run->pages);
++		}
++		if (uncached) {
++			for (i = 0; i < count; i++)
++				pd_page_flush(pages[i]);
++		}
++		va = pdos_map_owned_pages(cookies, index, count, uncached);
++		free(cookies, M_DEVBUF);
++	}
++	if (va == NULL) {
++		phys = malloc(count * sizeof(*phys), M_DEVBUF, M_WAITOK);
++		if (phys == NULL)
++			return NULL;
+ 		for (i = 0; i < count; i++)
+-			pd_page_flush(pages[i]);
++			phys[i] = pages[i]->phys_addr;
++		if (uncached) {
++			for (i = 0; i < count; i++)
++				pd_page_flush(pages[i]);
++		}
++		va = pdos_map_pages(phys, count, uncached);
++		free(phys, M_DEVBUF);
+ 	}
+-	va = pdos_map_pages(phys, count, uncached);
+-	free(phys, M_DEVBUF);
+ 	if (va == NULL)
+ 		return NULL;
+ 
+@@ -427,6 +631,9 @@
+ lkpi_page_init(void *arg)
+ {
+ 	mtx_init(&pd_page_lock, "lkpi pages", NULL, MTX_DEF);
++	pd_page_hash = pdos_malloc(sizeof(*pd_page_hash) * PD_PAGE_HASH, 1, 1);
++	if (pd_page_hash == NULL)
++		panic("lkpi: no memory for the page hash");
+ }
+ SYSINIT(lkpi_page, SI_SUB_LOCK, SI_ORDER_ANY, lkpi_page_init, NULL);
+ 

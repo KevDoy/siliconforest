@@ -1,0 +1,128 @@
+# m1-rust-kext: Rust in XNU arm64 kexts, and the Asahi GPU driver built on it
+
+Everything here is built with nix only:
+
+```
+export PATH=$HOME/.nix-profile/bin:$PATH
+F="--extra-experimental-features nix-command --extra-experimental-features flakes"
+cd integrations/puredarwin/m1-rust-kext
+nix-build $F <recipe>.nix --no-out-link
+```
+
+The PureDarwin tree is not edited. Every change to it is a patch applied in these recipes
+(`lkpi/patches-layer/`), and each patch header says whether it should go upstream.
+
+## What is here
+
+| Path | What |
+| --- | --- |
+| `pins.nix`, `rust/toolchain.nix` | The pinned PureDarwin flake, cross toolchain, and the Rust target (`aarch64-apple-xnukext`), sysroot, `mkCrate`, `mkKextObject` |
+| `rust/`, `kext/`, `build-rust.nix`, `build-kext.nix`, `build-kc.nix` | Phase A: `PDRustHello`, plain Rust in a kext |
+| `lkpi/` | The Rust-for-Linux `kernel` crate (Linux 7.2.11) on PureDarwin's Linux layer: bindgen, helpers, module gating, patches, the module matrix |
+| `lkpi/pdrustlkpi/`, `build-lkpi-kext.nix`, `build-lkpi-kc.nix` | Phase B/C test kext `PDRustLKPI` |
+| `lkpi/pdrustplat/`, `build-plat-kext.nix`, `build-plat-kc.nix` | Phase D test kext `PDRustPlat` (a `platform::Driver` on the GPU node) |
+| `agx/`, `build-agx-kext.nix`, `build-agx-kc.nix` | The GPU driver kext `PDAgx` and its kernel collection |
+
+## GPU driver: how it is built
+
+`PDAgx.kext` is the Asahi AGX driver from `sources/gpu-plan/linux-aurora/drivers/gpu/drm/asahi`
+(Linux 7.2.11), common code plus the G13 backend, for the M1 (T8103). It is GPL-2.0 as a whole.
+
+### Inputs
+
+| Input | Used for | How it is taken |
+| --- | --- | --- |
+| PureDarwin tree at `e7aa00a6` (flake, `pins.nix`) | the Linux layer (`src/Kernel/fbsdkpi`), kext build system, `kc-builder` | flake output `drm-msm-arm64` and its `src` |
+| `sources/gpu-plan/linux-aurora/rust` | the `kernel` crate and its vendored crates | `builtins.path` |
+| `sources/gpu-plan/linux-aurora/drivers/gpu/drm/asahi` | the driver | `builtins.path`, then `agx/patches/` |
+| `sources/gpu-plan/linux-aurora/include/uapi/drm/asahi_drm.h` | the driver's uAPI for bindgen | by path |
+| `../m1-drm72/patches/drm-kmod` (8 patches), `../m1-drm72/patches/puredarwin` (2) | DRM core at Linux 7.2, GEM shmem helper | applied to the flake's drm-kmod source and to the tree |
+| `../m1-gpu-rtkit/src` | Apple mailbox + RTKit port, `PDRtkitPlatform.cpp` | copied into the kext as `rtkit/` |
+| `../m1-gpu-dt` | `PDGpuDT.kext` (powers GFX, publishes `gpu@206400000`); `kernel/pd_linux_fwnode.c` for the layer | `build-kext.nix` imported; one file copied into the layer |
+| `../m1-lkpi-extras` | xarray, `module_param`, `mm`, `seq_file`, extra bindings | sub-paths: `c/`, `helpers/`, `bindgen/`, `rust/patches/` |
+| `../m1-apcie-host/build-kc.nix`, `../m1-bwfm/build-kc.nix` | the base kernel collection without / with Wi-Fi | imported by `build-agx-kc.nix` |
+
+### Build steps (attributes of `lkpi/default.nix`, in order)
+
+1. `tree`: the tree slice with `lkpi/patches-layer/*.patch`, plus `pd_linux_fwnode.c` and
+   `pd_xarray.c`/`pd_xarray.h` copied in. `finalTree`, `finalDrmkmod`: m1-drm72's series on top.
+2. `bindingsGen`: bindgen against the layer's include set (`cflags.nix` is the one place the C
+   flags are written), the C helpers compiled one object per file into `libhelpers.a`.
+3. `rustTree`: Linux's `rust/` with every `kernel` module gated (`tools/gate.py`), Linux-only
+   errnos gated, then `lkpi/patches/` and m1-lkpi-extras' `rust/patches/`.
+4. `kernelAgx`: the `kernel` crate with the module list `modules.agx` (`modules.nix`).
+5. `agxSrc`: the driver with `agx/patches/`. `asahi`: the driver crate (`--cfg pd_g13`,
+   staticlib). `agxObject`: one prelinked object, exports `___asahi_init`, `___asahi_exit`,
+   `_pd_dev_printk_selftest`.
+6. `build-agx-kext.nix`: `PDAgx.kext` (CMake target in the tree: the layer, the DRM core with the
+   shmem helper, the RTKit port, `agx/kext/*`, the Rust object) and `PDDRMDri.kext`.
+   `$out/nix-support/` has the compile lines, `nm -u` and the link map.
+7. `build-agx-kc.nix`: the kernel collection. `--arg wifi true` adds the Wi-Fi kexts. The recipe
+   fails if fewer than 4 pages are left before the kernel's `__TEXT`.
+
+### Patch series
+
+Counts are added/removed lines.
+
+`lkpi/patches-layer/` (against the PureDarwin tree; all "upstream: yes" except 0008):
+
+| Patch | +/- |
+| --- | --- |
+| 0001 page size follows the kernel (16 KiB) | +9 -1 |
+| 0002 xnu seam: non-blocking malloc, lock storage, physmem, page bulk allocation, owned-page mapping | +255 -5 |
+| 0003 Haiku locks embed the xnu lock | +44 -36 |
+| 0004 allocator: exact sizes, alignment, realloc | +58 -16 |
+| 0005 driver-core surface of Linux 7.2 | +229 -4 |
+| 0006 of: text properties named by the node | +27 -1 |
+| 0007 xarray source in the LinuxKPI list | +1 -1 |
+| 0008 platform bus pre-probe hook (interim) | +9 -0 |
+| 0009 `si_meminfo()` reports the machine's memory | +7 -2 |
+| 0010 `dma_map_sg` for platform devices | +10 -4 |
+| 0011 page pool for single pages, vmap through owning descriptors | +204 -16 |
+| 0012 DRI ioctl restart codes are EINTR | +5 -0 |
+| 0013 thread and area tables off the image | +14 -2 |
+
+`lkpi/patches/` (against Linux `rust/`): 0001 +24 -12, 0002 +1, 0003 +16, 0004 +3 -3,
+0005 +10 -3, 0006 +7 -3. m1-lkpi-extras adds 1001 (+73) and 1002 (+16).
+
+`agx/patches/` (against `drivers/gpu/drm/asahi`):
+
+| Patch | +/- | |
+| --- | --- | --- |
+| 0001 G13-only build (`--cfg pd_g13`) | +50 -0 | G17 and M3 backends not compiled |
+| 0002 PureDarwin's Linux layer | +42 -25 | no `address_space`; firmware page tables reached through a mapping; one `c_char` cast |
+| 0003 temporary diagnostics | +64 -9 | `PDAgx: diag:` lines; remove when no longer needed |
+
+The layer and driver patches are generated from scratch directories that are not in the
+repository; the patch files are the source of truth.
+
+### Stubs
+
+`PD_STUB` in `agx/kext/pd_agx_linux.c`: `asahi_sysfs_register`, `asahi_sysfs_register_idle`,
+`asahi_sysfs_unregister`. The layer has no sysfs, so `agx_stats` and `gpu_memory` are not
+exported. Registered shrinkers are never called (m1-lkpi-extras README).
+
+### Boot
+
+```
+tools/agx_boot.sh <name> [extra boot-args]
+```
+
+builds `build-agx-kc.nix` and the Mesa off-screen test and boots once. Boot-args:
+
+| Boot-arg | Effect |
+| --- | --- |
+| `pdgpudt=2 pdgpudt_stringprops=1` | PDGpuDT powers GFX and publishes the GPU node (required) |
+| `pdagx=1` | PDAgx attaches (default off) |
+| `pdagx_diag=1` | allocation/mapping preflight before the probe, per-mapping and per-firmware-message lines |
+| `asahi.<param>=<value>` | the driver's module parameters, e.g. `asahi.debug_flags=0x10` |
+| `pdrtkit_debug=1`, `pdrtkit_irq=0\|1\|2` | RTKit port (see `../m1-gpu-rtkit/README.md`) |
+
+State on hardware is recorded in `reports/sprint-010/` by whoever ran the boot; this directory
+only holds build recipes.
+
+### Module matrix
+
+`nix-build $F lkpi -A matrix` compiles each `kernel` module the driver could use on top of the
+core tier. Last run: 28 compile, 6 blocked (`debugfs`, `maple_tree`, `fs`, `cred`, `cpufreq`,
+`time::hrtimer`); the G13 driver path uses none of the six.

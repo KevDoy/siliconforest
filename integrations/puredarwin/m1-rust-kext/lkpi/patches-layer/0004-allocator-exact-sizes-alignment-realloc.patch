@@ -121,7 +121,7 @@ UPSTREAM: yes.
  
 --- a/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
 +++ b/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
-@@ -807,18 +808,29 @@
+@@ -807,18 +810,29 @@
  	pdos_rw_downgrade(rw_impl(lock));
  }
  
@@ -157,7 +157,7 @@ UPSTREAM: yes.
  	return (void *)p;
  }
  
-@@ -838,7 +850,7 @@
+@@ -838,7 +852,7 @@
  free(void *ptr)
  {
  	if (ptr != NULL)
@@ -166,7 +166,7 @@ UPSTREAM: yes.
  }
  
  size_t malloc_usable_size(void *ptr);
-@@ -864,8 +876,7 @@
+@@ -864,8 +878,7 @@
  	if (ptr == NULL)
  		return 0;
  

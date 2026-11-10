@@ -41,3 +41,13 @@ RTKit/mailbox port (`m1-gpu-rtkit`) -> Rust-for-Linux kernel crate -> Asahi driv
 40 sequential runs of the GPU test, each a new process with exact-hash check: 40 pass, 0 fail,
 22 seconds in total. Then four processes at once: all four exit 0. No firmware timeout, crash
 or panic in the kernel log. Process exit with live GPU state therefore works at this scale.
+
+## Hardened driver, Wi-Fi and GPU together (boot `hd01`)
+
+Collection with bridge + Wi-Fi + PDGpuDT + PDDRMDri + PDAgx (`tools/agx_boot.sh`, now the
+default; 851,968 bytes free below the kernel after moving 850 KiB of zeroed layer tables out of
+the image). Wi-Fi attached with its MSI as usual; the GPU repeat test passed 40 of 40 in 13
+seconds and 4 of 4 in parallel; "firmware consumed its first channel command after 298 us"; the
+"IOMemoryDescriptor physical with managed page" warnings are gone (0 in the log). One
+diagnostic counter line still prints FAILED (`vmap through the owning descriptors: 0, refused: 0`):
+the counter, not the mapping, is suspect; under investigation.

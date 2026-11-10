@@ -7,7 +7,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/pd_fbsd_os.h
 +++ b/src/Kernel/fbsdkpi/pd_fbsd_os.h
-@@ -26,7 +26,21 @@
+@@ -26,7 +26,23 @@
  void pdos_sleep_us(uint64_t us);
  
  // memory, sizes are remembered by the backend
@@ -26,10 +26,12 @@ UPSTREAM: yes.
 +int64_t pdos_malloc_nowait_retried(void);
 +void *pdos_pages_alloc(size_t count, uint64_t *phys, void **cookie);
 +void pdos_pages_free(void *cookie);
++void *pdos_map_owned_pages(void *const *cookies, const uint32_t *index, size_t count, int uncached);
++void pdos_map_owned_stats(int64_t *maps, int64_t *failures);
  void pdos_free(void *ptr);
  size_t pdos_malloc_size(void *ptr);
  void *pdos_malloc_contig(size_t size, size_t align, uint64_t maxaddr, uint64_t *phys);
-@@ -50,6 +64,16 @@
+@@ -50,6 +66,16 @@
  int pdos_dma_has_mapper(void *pcidev);
  
  // sleepable mutexes, kernel thread context only
@@ -48,7 +50,15 @@ UPSTREAM: yes.
  void pdos_mtx_lock(void *m);
 --- a/src/Kernel/fbsdkpi/xnu/pd_fbsd_os.cpp
 +++ b/src/Kernel/fbsdkpi/xnu/pd_fbsd_os.cpp
-@@ -15,6 +15,7 @@
+@@ -6,6 +6,7 @@
+ #include <IOKit/IOBufferMemoryDescriptor.h>
+ #include <IOKit/IOPlatformExpert.h>
+ #include <IOKit/IOSubMemoryDescriptor.h>
++#include <IOKit/IOMultiMemoryDescriptor.h>
+ #include <IOKit/IODMACommand.h>
+ #include <IOKit/IOMapper.h>
+ #include <IOKit/IOFilterInterruptEventSource.h>
+@@ -15,6 +16,7 @@
  #include <IOKit/acpi/IOACPIPlatformExpert.h>
  #define PDOS_HAVE_ACPI 1
  #endif
@@ -56,7 +66,7 @@ UPSTREAM: yes.
  #include <kern/locks.h>
  #include <kern/thread.h>
  #include <kern/thread_call.h>
-@@ -33,18 +34,49 @@
+@@ -33,18 +35,49 @@
  extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
  extern boolean_t ml_set_interrupts_enabled(boolean_t enable);
  extern boolean_t ml_get_interrupts_enabled(void);
@@ -107,7 +117,7 @@ UPSTREAM: yes.
  	sWaitLock = lck_spin_alloc_init(sGroup, LCK_ATTR_NULL);
  	sListLock = lck_mtx_alloc_init(sGroup, LCK_ATTR_NULL);
  }
-@@ -136,15 +168,40 @@
+@@ -136,15 +169,40 @@
  	size_t		pad;
  };
  
@@ -151,7 +161,7 @@ UPSTREAM: yes.
  	return block + 1;
  }
  
-@@ -154,7 +211,39 @@
+@@ -154,7 +212,39 @@
  	if (ptr == NULL)
  		return;
  	pd_block *block = (pd_block *)ptr - 1;
@@ -192,7 +202,7 @@ UPSTREAM: yes.
  }
  
  size_t
-@@ -234,6 +323,42 @@
+@@ -234,6 +324,117 @@
  	return m->va;
  }
  
@@ -203,8 +213,9 @@ UPSTREAM: yes.
 +void *
 +pdos_pages_alloc(size_t count, uint64_t *phys, void **cookie)
 +{
++	// kIOMemoryKernelUserShared: the pages get mapped a second time (vmap, pdos_map_owned_pages)
 +	IOBufferMemoryDescriptor *buffer = IOBufferMemoryDescriptor::inTaskWithOptions(
-+		kernel_task, kIODirectionInOut, count * PAGE_SIZE, PAGE_SIZE);
++		kernel_task, kIODirectionInOut | kIOMemoryKernelUserShared, count * PAGE_SIZE, PAGE_SIZE);
 +	if (buffer == NULL)
 +		return NULL;
 +	if (buffer->prepare() != kIOReturnSuccess) {
@@ -223,6 +234,80 @@ UPSTREAM: yes.
 +	return buffer->getBytesNoCopy();
 +}
 +
++// One contiguous kernel mapping of pages that came from pdos_pages_alloc(): page i is page
++// index[i] of the allocation cookies[i]. The mapping is made from sub-ranges of the buffer
++// descriptors that own the pages, not from physical addresses: a physical descriptor over
++// xnu-managed pages does not hold them (DEBUG kernels report "IOMemoryDescriptor physical
++// with managed page"). NULL when xnu refuses; the caller may fall back. pdos_unmap_pages()
++// takes the mapping down.
++static volatile int64_t sOwnedMaps, sOwnedMapFailures;
++void *
++pdos_map_owned_pages(void *const *cookies, const uint32_t *index, size_t count, int uncached)
++{
++	IOMemoryDescriptor **subs = (IOMemoryDescriptor **)IOMalloc(count * sizeof(IOMemoryDescriptor *));
++	IOMemoryDescriptor *desc = NULL;
++	IOMemoryMap *map = NULL;
++	pd_mapping *m = NULL;
++	UInt32 n = 0;
++	bool ok = subs != NULL;
++
++	// adjacent pages of one allocation become one sub-range
++	for (size_t i = 0; ok && i < count;) {
++		size_t run = 1;
++		while (i + run < count && cookies[i + run] == cookies[i] && index[i + run] == index[i] + run)
++			run++;
++		IOSubMemoryDescriptor *s = IOSubMemoryDescriptor::withSubRange(
++			(IOMemoryDescriptor *)cookies[i], (IOByteCount)index[i] * PAGE_SIZE,
++			(IOByteCount)run * PAGE_SIZE, kIODirectionInOut);
++		if (s == NULL)
++			ok = false;
++		else
++			subs[n++] = s;
++		i += run;
++	}
++	if (ok) {
++		if (n == 1) {
++			desc = subs[0];
++			desc->retain();
++		} else {
++			desc = IOMultiMemoryDescriptor::withDescriptors(subs, n, kIODirectionInOut, false);
++		}
++	}
++	for (UInt32 i = 0; i < n; i++)
++		subs[i]->release();
++	if (subs != NULL)
++		IOFree(subs, count * sizeof(IOMemoryDescriptor *));
++	if (desc != NULL)
++		map = desc->createMappingInTask(kernel_task, 0,
++			kIOMapAnywhere | kIOMapUnique | (uncached ? kIOMapWriteCombineCache : 0));
++	if (map != NULL && map->getVirtualAddress() != 0)
++		m = (pd_mapping *)IOMalloc(sizeof(pd_mapping));
++	if (m == NULL) {
++		if (map != NULL)
++			map->release();
++		if (desc != NULL)
++			desc->release();
++		if (OSAddAtomic64(1, (SInt64 *)&sOwnedMapFailures) == 0)
++			IOLog("pdos: mapping pool pages through their own descriptors failed (%zu pages, %u ranges)\n",
++			    count, (unsigned)n);
++		return NULL;
++	}
++	bzero(m, sizeof(*m));
++	m->va = (void *)map->getVirtualAddress();
++	m->desc = desc;
++	m->map = map;
++	mapping_add(m);
++	OSAddAtomic64(1, (SInt64 *)&sOwnedMaps);
++	return m->va;
++}
++
++void
++pdos_map_owned_stats(int64_t *maps, int64_t *failures)
++{
++	*maps = sOwnedMaps;
++	*failures = sOwnedMapFailures;
++}
++
 +void
 +pdos_pages_free(void *cookie)
 +{
@@ -235,7 +320,7 @@ UPSTREAM: yes.
  void
  pdos_free_contig(void *ptr, size_t size)
  {
-@@ -785,16 +910,52 @@
+@@ -785,16 +986,52 @@
  
  // locks
  
@@ -288,7 +373,7 @@ UPSTREAM: yes.
  	lck_mtx_free((lck_mtx_t *)m, sGroup);
  }
  
-@@ -820,12 +981,14 @@
+@@ -820,12 +1057,14 @@
  pdos_spin_alloc(void)
  {
  	pdos_xnu_init();
@@ -303,7 +388,7 @@ UPSTREAM: yes.
  	lck_spin_free((lck_spin_t *)s, sGroup);
  }
  
-@@ -857,12 +1020,14 @@
+@@ -857,12 +1096,14 @@
  pdos_rw_alloc(void)
  {
  	pdos_xnu_init();

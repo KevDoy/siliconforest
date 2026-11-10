@@ -47,6 +47,13 @@ void pd_dev_printk_selftest(const struct device *dev);
 #define PD_AGX_MBOX	"/arm-io/gfx-asc"
 
 /*
+ * Boot-arg pdagx_diag=1: the allocation/mapping preflight below before the probe, and in the
+ * driver (agx/patches/0003) the per-mapping and per-firmware-message lines. Stage lines and
+ * every failure are logged without it.
+ */
+int pd_agx_diag;
+
+/*
  * PDAgx diag (temporary, boot ag02: the first GEM mapping failed with ENOMEM). The C steps
  * under the driver's first kernel mapping, one line each, on an object the size of an
  * allocator block: page allocation as the shmem backing does it, the sg table as
@@ -59,6 +66,7 @@ void pd_dev_printk_selftest(const struct device *dev);
 void pd_linux_page_stats(unsigned long *chunks, unsigned long *free_pages, unsigned long *chunk_allocs,
     unsigned long *chunk_frees, unsigned long *fail_xnu, unsigned long *fail_record);
 int64_t pdos_malloc_nowait_retried(void);
+void pdos_map_owned_stats(int64_t *maps, int64_t *failures);
 
 static void
 pd_agx_preflight_stats(const char *when)
@@ -195,6 +203,13 @@ out_pages:
 	for (i = 0; i < n; i++)
 		__free_page(pages[i]);
 	kvfree(pages);
+	{
+		int64_t maps, failures;
+
+		pdos_map_owned_stats(&maps, &failures);
+		kprintf("PDAgx: diag: vmap through the owning descriptors: %lld, refused by xnu (physical "
+		    "fallback): %lld%s\n", (long long)maps, (long long)failures, failures == 0 && maps > 0 ? "" : " FAILED");
+	}
 	pd_agx_preflight_stats("after the 600-page test");
 	pd_agx_preflight_bulk();
 }
@@ -240,7 +255,8 @@ pd_agx_pre_probe(struct platform_device *pdev)
 	    dev_name(&pdev->dev));
 	pd_dev_printk_selftest(&pdev->dev);
 
-	pd_agx_preflight(&pdev->dev);
+	if (pd_agx_diag)
+		pd_agx_preflight(&pdev->dev);
 
 	ret = pd_apple_mbox_bind(&pdev->dev, 0, PD_AGX_MBOX);
 	kprintf("PDAgx: mailbox 0 of %s is %s (%d)\n", dev_name(&pdev->dev), PD_AGX_MBOX, ret);
@@ -252,6 +268,7 @@ pd_agx_linux_init(void)
 {
 	/* LinuxKPI built with PD_LKPI_DRM prints through this (Linux %p extensions) */
 	pd_driver_vsnprintf = pd_drm_vsnprintf;
+	pd_agx_diag = pd_rtkit_platform_bootarg("pdagx_diag", 0);
 	pd_platform_pre_probe = pd_agx_pre_probe;
 	/*
 	 * User mappings of GEM objects: PDDRMDri asks the DRM kext once, at mmap time, for the

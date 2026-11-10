@@ -88,7 +88,7 @@ target_include_directories(PDAgx.kext PRIVATE "${RTKIT}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../IOGraphicsFamily"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../fbsdkpi/drm/include")
 
-target_link_options(PDAgx.kext PRIVATE -Wl,-x)
+target_link_options(PDAgx.kext PRIVATE -Wl,-x -Wl,-map,${CMAKE_BINARY_DIR}/PDAgx.map)
 
 set(PDAGX_RUST_OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/rust/asahi.o)
 if(NOT EXISTS ${PDAGX_RUST_OBJECT})

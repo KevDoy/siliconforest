@@ -54,6 +54,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     cp -R "$bundle" "$out/System/Library/Extensions/"
     cp -R build-nix/src/Kernel/Extensions/PDDRMDri/PDDRMDri.kext "$out/System/Library/Extensions/"
     cp build-commands.txt "$out/nix-support/build-commands"
+    cp build-nix/PDAgx.map "$out/nix-support/PDAgx.map"
     ${crossToolchain}/bin/arm64-apple-darwin20.4-nm -u "$bundle/Contents/MacOS/PDAgx" | sed 's/^ *//' | sort -u > "$out/nix-support/undefined"
     runHook postInstall
   '';

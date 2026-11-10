@@ -56,22 +56,35 @@ UPSTREAM: no.
  }
 --- a/gpu.rs
 +++ b/gpu.rs
-@@ -472,6 +472,14 @@
+@@ -463,6 +463,11 @@
+     }
+ }
+ 
++// PDAgx diag: set by the kext from the boot-arg pdagx_diag (agx/kext/pd_agx_linux.c)
++extern "C" {
++    static pd_agx_diag: core::ffi::c_int;
++}
++
+ #[versions(AGX)]
+ #[vtable]
+ impl rtkit::Operations for GpuManager::ver {
+@@ -472,6 +477,15 @@
      fn recv_message(data: <Self::Data as ForeignOwnable>::Borrowed<'_>, ep: u8, msg: u64) {
          let dev = &data.dev;
          //dev_info!(dev.as_ref(), "RtKit message: {:#x}:{:#x}\n", ep, msg);
-+        // PDAgx diag (temporary): the first messages the firmware sends after boot
++        // PDAgx diag (pdagx_diag=1): the first messages the firmware sends after boot
 +        {
 +            static SEEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 +            let n = SEEN.fetch_add(1, Ordering::Relaxed);
-+            if n < 4 {
++            // SAFETY: Written once, before the driver is registered.
++            if unsafe { pd_agx_diag } != 0 && n < 4 {
 +                pr_info!("PDAgx: diag: firmware message {} from endpoint {:#x}: {:#x}\n", n + 1, ep, msg);
 +            }
 +        }
  
          if ep != EP_FIRMWARE || msg != MSG_RX_DOORBELL {
              dev_err!(dev.as_ref(), "Unknown message: {:#x}:{:#x}\n", ep, msg);
-@@ -1394,6 +1402,7 @@
+@@ -1394,6 +1408,7 @@
          rtk.as_mut()
              .send_message(EP_DOORBELL, MSG_TX_DOORBELL | DOORBELL_DEVCTRL)?;
          core::mem::drop(guard);
@@ -107,7 +120,19 @@ UPSTREAM: no.
          // The caller invalidates negative translations after releasing its PPL lease.
          Ok(())
      }
-@@ -2517,7 +2522,7 @@
+@@ -2063,6 +2068,11 @@
+ /// Reuse cached segments without allocating another copy for each bind. The bind lease was
+ /// acquired before BO locking: its getter synchronized with any earlier reclaim under resv,
+ /// and its extra count excludes new eviction until preparation/commit finishes.
++// PDAgx diag: set by the kext from the boot-arg pdagx_diag (agx/kext/pd_agx_linux.c)
++extern "C" {
++    static pd_agx_diag: core::ffi::c_int;
++}
++
+ fn prepare_sgt_segments(
+     dev: &device::Device<Bound>,
+     gem: &gem::Object,
+@@ -2517,7 +2527,7 @@
          let reserved_size = size
              .checked_add(if guard { UAT_PGSZ } else { 0 })
              .ok_or(EOVERFLOW)?;
@@ -116,7 +141,7 @@ UPSTREAM: no.
          // Pin and copy backing before taking BO or DMA reservation locks.
          let dev = unsafe { self.dev.as_bound() };
          let _bind_lease = crate::gem::held_sg_table(gem, dev)?.into_lease();
-@@ -2526,8 +2531,24 @@
+@@ -2526,8 +2536,25 @@
              .obtain(&gem, pin_init!(VmBoData {
                  newest_bind: AtomicU64::new(0),
                  segments <- new_mutex!(None),
@@ -124,10 +149,11 @@ UPSTREAM: no.
 -        prepare_sgt_segments(dev, gem, &vm_bo, &_bind_lease)?;
 +            })).inspect_err(|e| pr_err!("PDAgx: diag: map_at gpuvm obtain failed: {:?}\n", e))?;
 +        prepare_sgt_segments(dev, gem, &vm_bo, &_bind_lease).inspect_err(|e| pr_err!("PDAgx: diag: map_at prepare_sgt_segments failed: {:?}\n", e))?;
-+        // PDAgx diag (temporary): the first mappings, with what the DMA layer returned
++        // PDAgx diag (pdagx_diag=1): the first mappings, with what the DMA layer returned
 +        {
 +            static SHOWN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-+            if SHOWN.fetch_add(1, Ordering::Relaxed) < 4 {
++            // SAFETY: Written once, before the driver is registered.
++            if unsafe { pd_agx_diag } != 0 && SHOWN.fetch_add(1, Ordering::Relaxed) < 4 {
 +                let segments = vm_bo.data().segments.lock();
 +                let (count, first) = match &*segments {
 +                    Some(s) => (s.iter().count(), s.iter().next().map(|(a, l)| (*a as u64, *l as u64))),
@@ -143,7 +169,7 @@ UPSTREAM: no.
  
          // SAFETY: no other UniqRefGpuVm exists so `GpuVm::exec_lock()` is safe
          let mut vm_exec = unsafe {
-@@ -2561,6 +2582,7 @@
+@@ -2561,6 +2588,7 @@
              Ok(node) => node,
              Err(error) => {
                  drop(vm_exec);
