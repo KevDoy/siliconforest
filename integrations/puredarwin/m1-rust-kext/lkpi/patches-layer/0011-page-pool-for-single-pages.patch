@@ -1,0 +1,250 @@
+fbsdkpi: single pages come from a pool of 1 MiB wired chunks; M_NOWAIT waits when it can
+
+Boot ag03: alloc_page() failed after 66 pages (and the Asahi driver's third 1 MiB GEM object
+with it) on a machine with 16 GiB. Each page was one physically-contiguous
+IOBufferMemoryDescriptor plus a record allocated M_NOWAIT, and since patch 0002 a M_NOWAIT
+allocation really is Z_NOWAIT, which fails whenever the kalloc zone has to grow.
+- pd_linux_page.c: order-0 pages without GFP_DMA32 are taken from chunks of 64 pages
+  (pdos_pages_alloc: one ordinary wired xnu allocation, per-page physical addresses, no
+  contiguity or mask), with a free bitmap per chunk; a fully free, unmapped chunk goes back
+  to xnu above a 4 MiB reserve. Higher orders and GFP_DMA32 are unchanged. The page hash
+  grows to 16384 buckets. pd_linux_page_stats() for diagnostics.
+- xnu seam (in patch 0002's files): pdos_pages_alloc/free; pdos_malloc(canwait=0) retries
+  blocking when the calling thread may block (not interrupt context, interrupts and
+  preemption enabled), counted by pdos_malloc_nowait_retried().
+UPSTREAM: yes.
+
+--- a/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
++++ b/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
+@@ -11,7 +11,9 @@
+ 
+ #include "../../pd_fbsd_os.h"
+ 
+-#define PD_PAGE_HASH	1024
++_Static_assert(PAGE_SIZE == (1UL << PAGE_SHIFT), "PAGE_SIZE and PAGE_SHIFT disagree");
++
++#define PD_PAGE_HASH	16384
+ // the offset bits in a page. linux/page.h makes PAGE_MASK the linux one, the page bits
+ #define PD_PAGE_OFFSET	((vm_paddr_t)PAGE_SIZE - 1)
+ 
+@@ -23,9 +25,25 @@
+ 	// joined kernel mappings still reaching these pages, and a free that waits for them
+ 	int vmaps;
+ 	bool freed;
++	// a pd_pool chunk: its pages are handed out one by one, bit i set = pages[i] is free
++	bool pooled;
++	void *cookie;
++	uint64_t freemask;
++	struct pd_page_run *pnext, **pprevp;
+ 	struct vm_page pages[];
+ };
+ 
++// pd_pool: single pages (alloc_page, every shmem/GEM page, page tables) come from chunks of
++// PD_CHUNK_PAGES wired pages, one xnu allocation each (pdos_pages_alloc). Before this every
++// page was its own physically-contiguous IOBufferMemoryDescriptor with its own records.
++// A chunk goes back to xnu when all its pages are free, nothing maps it and the pool still
++// holds PD_POOL_KEEP free pages elsewhere.
++#define PD_CHUNK_PAGES	64
++#define PD_POOL_KEEP	(4 * PD_CHUNK_PAGES)
++static struct pd_page_run *pd_pool_partial;	// chunks with a free page
++static unsigned long pd_pool_free, pd_pool_chunks, pd_pool_chunk_allocs, pd_pool_chunk_frees;
++static unsigned long pd_page_fail_xnu, pd_page_fail_record;
++
+ // a joined mapping and the page runs it keeps alive
+ struct pd_vmap {
+ 	struct pd_vmap *next;
+@@ -81,8 +99,10 @@
+ 	unsigned long i;
+ 
+ 	run = malloc(sizeof(*run) + npages * sizeof(struct vm_page), M_DEVBUF, M_NOWAIT | M_ZERO);
+-	if (run == NULL)
++	if (run == NULL) {
++		pd_page_fail_record++;
+ 		return NULL;
++	}
+ 
+ 	run->phys = phys;
+ 	run->kva = kva;
+@@ -147,6 +167,153 @@
+ 	return page->pd_kva;
+ }
+ 
++static void
++pd_pool_link(struct pd_page_run *run)
++{
++	run->pnext = pd_pool_partial;
++	run->pprevp = &pd_pool_partial;
++	if (pd_pool_partial != NULL)
++		pd_pool_partial->pprevp = &run->pnext;
++	pd_pool_partial = run;
++}
++
++static void
++pd_pool_unlink(struct pd_page_run *run)
++{
++	*run->pprevp = run->pnext;
++	if (run->pnext != NULL)
++		run->pnext->pprevp = run->pprevp;
++	run->pnext = NULL;
++	run->pprevp = NULL;
++}
++
++// one more chunk into the pool; false when xnu has no memory
++static bool
++pd_pool_grow(void)
++{
++	uint64_t phys[PD_CHUNK_PAGES];
++	struct pd_page_run *run;
++	void *cookie = NULL, *kva;
++	unsigned long i;
++
++	kva = pdos_pages_alloc(PD_CHUNK_PAGES, phys, &cookie);
++	if (kva == NULL) {
++		pd_page_fail_xnu++;
++		return false;
++	}
++	run = malloc(sizeof(*run) + PD_CHUNK_PAGES * sizeof(struct vm_page), M_DEVBUF, M_WAITOK | M_ZERO);
++	if (run == NULL) {
++		pd_page_fail_record++;
++		pdos_pages_free(cookie);
++		return false;
++	}
++	run->phys = phys[0];
++	run->kva = kva;
++	run->npages = PD_CHUNK_PAGES;
++	run->pooled = true;
++	run->cookie = cookie;
++	run->freemask = ~0ULL;
++
++	mtx_lock(&pd_page_lock);
++	for (i = 0; i < PD_CHUNK_PAGES; i++) {
++		vm_page_t m = &run->pages[i];
++		unsigned b;
++
++		m->phys_addr = phys[i];
++		m->pd_kva = (char *)kva + (i << PAGE_SHIFT);
++		m->pd_run = run;
++		b = pd_page_bucket(m->phys_addr);
++		m->pd_hnext = pd_page_hash[b];
++		pd_page_hash[b] = m;
++	}
++	pd_pool_link(run);
++	pd_pool_free += PD_CHUNK_PAGES;
++	pd_pool_chunks++;
++	pd_pool_chunk_allocs++;
++	mtx_unlock(&pd_page_lock);
++	return true;
++}
++
++static struct page *
++pd_pool_alloc(gfp_t flags)
++{
++	struct pd_page_run *run;
++	vm_page_t m;
++	int i;
++
++	for (;;) {
++		mtx_lock(&pd_page_lock);
++		run = pd_pool_partial;
++		if (run != NULL)
++			break;
++		mtx_unlock(&pd_page_lock);
++		if (!pd_pool_grow())
++			return NULL;
++	}
++	i = __builtin_ctzll(run->freemask);
++	run->freemask &= ~(1ULL << i);
++	if (run->freemask == 0)
++		pd_pool_unlink(run);
++	pd_pool_free--;
++	m = &run->pages[i];
++	m->ref_count = 1;
++	mtx_unlock(&pd_page_lock);
++	if ((flags & M_ZERO) != 0)
++		memset(m->pd_kva, 0, PAGE_SIZE);
++	return m;
++}
++
++static void
++pd_pool_free_page(struct page *page)
++{
++	struct pd_page_run *run = page->pd_run;
++	int i = (int)(page - run->pages);
++	bool release;
++
++	if (page->pd_kva_cached != NULL) {
++		pdos_unmap_pages(page->pd_kva);
++		page->pd_kva = page->pd_kva_cached;
++		page->pd_kva_cached = NULL;
++	}
++	mtx_lock(&pd_page_lock);
++	page->ref_count = 0;
++	page->flags = 0;
++	page->object = NULL;
++	if (run->freemask == 0)
++		pd_pool_link(run);
++	run->freemask |= 1ULL << i;
++	pd_pool_free++;
++	release = run->freemask == ~0ULL && run->vmaps == 0 &&
++	    pd_pool_free >= PD_POOL_KEEP + PD_CHUNK_PAGES;
++	if (release) {
++		pd_pool_unlink(run);
++		pd_page_run_unhash(run);
++		pd_pool_free -= PD_CHUNK_PAGES;
++		pd_pool_chunks--;
++		pd_pool_chunk_frees++;
++	}
++	mtx_unlock(&pd_page_lock);
++	if (release) {
++		pdos_pages_free(run->cookie);
++		free(run, M_DEVBUF);
++	}
++}
++
++// for a kext's diagnostics: pool state and why allocations failed
++void
++pd_linux_page_stats(unsigned long *chunks, unsigned long *free_pages, unsigned long *chunk_allocs,
++    unsigned long *chunk_frees, unsigned long *fail_xnu, unsigned long *fail_record)
++{
++	mtx_lock(&pd_page_lock);
++	*chunks = pd_pool_chunks;
++	*free_pages = pd_pool_free;
++	*chunk_allocs = pd_pool_chunk_allocs;
++	*chunk_frees = pd_pool_chunk_frees;
++	*fail_xnu = pd_page_fail_xnu;
++	*fail_record = pd_page_fail_record;
++	mtx_unlock(&pd_page_lock);
++}
++
+ struct page *
+ linux_alloc_pages(gfp_t flags, unsigned int order)
+ {
+@@ -155,10 +322,16 @@
+ 	uint64_t phys;
+ 	void *kva;
+ 
++	// single pages without an address limit: the pd_pool
++	if (order == 0 && (flags & GFP_DMA32) == 0)
++		return pd_pool_alloc(flags);
++
+ 	kva = pdos_malloc_contig(size, PAGE_SIZE,
+ 		(flags & GFP_DMA32) != 0 ? 0xffffffffULL : ~0ULL, &phys);
+-	if (kva == NULL)
++	if (kva == NULL) {
++		pd_page_fail_xnu++;
+ 		return NULL;
++	}
+ 	if ((flags & M_ZERO) != 0)
+ 		memset(kva, 0, size);
+ 
+@@ -184,6 +357,10 @@
+ 	}
+ 
+ 	run = page->pd_run;
++	if (run->pooled) {
++		pd_pool_free_page(page);
++		return;
++	}
+ 	for (unsigned long i = 0; i < run->npages; i++) {
+ 		if (run->pages[i].pd_kva_cached != NULL) {
+ 			pdos_unmap_pages(run->pages[i].pd_kva);

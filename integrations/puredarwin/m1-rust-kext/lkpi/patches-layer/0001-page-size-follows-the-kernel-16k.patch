@@ -35,14 +35,3 @@ UPSTREAM: yes, as a per-board setting (boards with 4 KiB kernels keep 4096/12).
  
  #endif
  
---- a/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
-+++ b/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
-@@ -11,6 +11,8 @@
- 
- #include "../../pd_fbsd_os.h"
- 
-+_Static_assert(PAGE_SIZE == (1UL << PAGE_SHIFT), "PAGE_SIZE and PAGE_SHIFT disagree");
-+
- #define PD_PAGE_HASH	1024
- // the offset bits in a page. linux/page.h makes PAGE_MASK the linux one, the page bits
- #define PD_PAGE_OFFSET	((vm_paddr_t)PAGE_SIZE - 1)

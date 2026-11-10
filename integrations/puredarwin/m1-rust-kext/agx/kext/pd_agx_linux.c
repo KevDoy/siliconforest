@@ -19,6 +19,12 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/types.h>
+#include <linux/dma-mapping.h>
+#include <linux/gfp.h>
+#include <linux/ktime.h>
+#include <linux/mm.h>
+#include <linux/scatterlist.h>
+#include <linux/vmalloc.h>
 
 #include "pd_rtkit_platform.h"
 #include "pd_rtkit_compat.h"
@@ -33,6 +39,159 @@ void *pd_agx_host_of_nub(void *nub);
 void pd_dev_printk_selftest(const struct device *dev);
 
 #define PD_AGX_MBOX	"/arm-io/gfx-asc"
+
+/*
+ * PDAgx diag (temporary, boot ag02: the first GEM mapping failed with ENOMEM). The C steps
+ * under the driver's first kernel mapping, one line each, on an object the size of an
+ * allocator block: page allocation as the shmem backing does it, the sg table as
+ * drm_prime_pages_to_sg() builds it, dma_map_sgtable(), vmap(). Nothing here touches the
+ * GPU. Remove with the driver's "PDAgx: diag:" lines (agx/patches/0003).
+ */
+#define PD_AGX_DIAG_PAGES	600
+
+/* layer: pd/lkpi/pd_linux_page.c and the xnu seam (patches-layer/0011) */
+void pd_linux_page_stats(unsigned long *chunks, unsigned long *free_pages, unsigned long *chunk_allocs,
+    unsigned long *chunk_frees, unsigned long *fail_xnu, unsigned long *fail_record);
+int64_t pdos_malloc_nowait_retried(void);
+
+static void
+pd_agx_preflight_stats(const char *when)
+{
+	unsigned long chunks, free_pages, allocs, frees, fail_xnu, fail_record;
+
+	pd_linux_page_stats(&chunks, &free_pages, &allocs, &frees, &fail_xnu, &fail_record);
+	kprintf("PDAgx: diag: page pool %s: %lu chunks (%lu MiB), %lu pages free, %lu chunks taken, "
+	    "%lu given back, failures: xnu %lu, record %lu; no-wait allocations that waited: %lld\n",
+	    when, chunks, chunks * 64 * PAGE_SIZE >> 20, free_pages, allocs, frees, fail_xnu, fail_record,
+	    (long long)pdos_malloc_nowait_retried());
+}
+
+/* 64 MiB as 64 objects of 1 MiB, the size of the driver's allocator blocks; then all freed */
+#define PD_AGX_BULK_OBJECTS	64
+#define PD_AGX_BULK_PAGES	((1UL << 20) / PAGE_SIZE)
+
+static void
+pd_agx_preflight_bulk(void)
+{
+	unsigned long total = PD_AGX_BULK_OBJECTS * PD_AGX_BULK_PAGES, got = 0, i, distinct_bad = 0;
+	struct page **pages;
+	u64 t0, t1, t2;
+
+	pages = kvmalloc_array(total, sizeof(*pages), GFP_KERNEL | __GFP_ZERO);
+	if (pages == NULL) {
+		kprintf("PDAgx: diag: bulk FAILED: page array\n");
+		return;
+	}
+	t0 = ktime_get_ns();
+	for (got = 0; got < total; got++) {
+		pages[got] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+		if (pages[got] == NULL)
+			break;
+		/* each page is its own memory: a mark, checked below */
+		*(unsigned long *)page_address(pages[got]) = got + 1;
+	}
+	t1 = ktime_get_ns();
+	for (i = 0; i < got; i++) {
+		if (*(unsigned long *)page_address(pages[i]) != i + 1 ||
+		    (page_to_phys(pages[i]) & (PAGE_SIZE - 1)) != 0)
+			distinct_bad++;
+	}
+	kprintf("PDAgx: diag: bulk alloc_page: %lu of %lu pages (%lu MiB) in %llu ms, %lu with a wrong "
+	    "mark or unaligned address%s\n", got, total, got * PAGE_SIZE >> 20,
+	    (unsigned long long)(t1 - t0) / 1000000, distinct_bad,
+	    got == total && distinct_bad == 0 ? "" : " FAILED");
+	pd_agx_preflight_stats("with 64 MiB held");
+	t1 = ktime_get_ns();
+	for (i = 0; i < got; i++)
+		__free_page(pages[i]);
+	t2 = ktime_get_ns();
+	kvfree(pages);
+	kprintf("PDAgx: diag: bulk free: %lu pages in %llu ms\n", got, (unsigned long long)(t2 - t1) / 1000000);
+	pd_agx_preflight_stats("after the bulk test");
+}
+
+static void
+pd_agx_preflight(struct device *dev)
+{
+	struct page **pages;
+	struct sg_table sgt;
+	struct scatterlist *sg;
+	size_t max_segment;
+	void *va;
+	int i, n = 0, ret, wrong = 0, mapped = 0;
+
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(40));
+	max_segment = dma_max_mapping_size(dev);
+	kprintf("PDAgx: diag: preflight 1/5 dma_set_mask_and_coherent(40 bits) = %d, "
+	    "dma_max_mapping_size 0x%zx, PAGE_SIZE 0x%lx\n", ret, max_segment, (unsigned long)PAGE_SIZE);
+
+	pages = kvmalloc_array(PD_AGX_DIAG_PAGES, sizeof(*pages), GFP_KERNEL | __GFP_ZERO);
+	if (pages == NULL) {
+		kprintf("PDAgx: diag: preflight FAILED: page array\n");
+		return;
+	}
+	for (n = 0; n < PD_AGX_DIAG_PAGES; n++) {
+		pages[n] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+		if (pages[n] == NULL)
+			break;
+	}
+	kprintf("PDAgx: diag: preflight 2/5 alloc_page: %d of %d, phys first 0x%llx last 0x%llx%s\n",
+	    n, PD_AGX_DIAG_PAGES, n > 0 ? (unsigned long long)page_to_phys(pages[0]) : 0ULL,
+	    n > 0 ? (unsigned long long)page_to_phys(pages[n - 1]) : 0ULL,
+	    n == PD_AGX_DIAG_PAGES ? "" : " FAILED");
+	if (n != PD_AGX_DIAG_PAGES)
+		goto out_pages;
+
+	/* drm_prime_pages_to_sg() */
+	if (max_segment == 0)
+		max_segment = UINT_MAX;
+	ret = sg_alloc_table_from_pages_segment(&sgt, pages, n, 0, (unsigned long)n << PAGE_SHIFT,
+	    max_segment, GFP_KERNEL);
+	kprintf("PDAgx: diag: preflight 3/5 sg_alloc_table_from_pages_segment(max_segment 0x%zx) = %d%s\n",
+	    max_segment, ret, ret == 0 ? "" : " FAILED");
+	if (ret != 0)
+		goto out_pages;
+	kprintf("PDAgx: diag: preflight 3/5 table: %u entries, first length 0x%x\n",
+	    sgt.orig_nents, sgt.sgl->length);
+
+	ret = dma_map_sgtable(dev, &sgt, DMA_BIDIRECTIONAL, 0);
+	if (ret == 0) {
+		for_each_sgtable_dma_sg(&sgt, sg, i) {
+			mapped++;
+			if (sg_dma_address(sg) != sg_phys(sg) || sg_dma_len(sg) != sg->length ||
+			    (sg_dma_address(sg) & (PAGE_SIZE - 1)) != 0)
+				wrong++;
+		}
+	}
+	kprintf("PDAgx: diag: preflight 4/5 dma_map_sgtable = %d, nents %u: %d mapped, %d not identity "
+	    "or not page aligned; first dma 0x%llx len 0x%x%s\n", ret, sgt.nents, mapped, wrong,
+	    ret == 0 ? (unsigned long long)sg_dma_address(sgt.sgl) : 0ULL,
+	    ret == 0 ? sg_dma_len(sgt.sgl) : 0, ret == 0 && wrong == 0 && mapped > 0 ? "" : " FAILED");
+	if (ret == 0)
+		dma_unmap_sgtable(dev, &sgt, DMA_BIDIRECTIONAL, 0);
+	sg_free_table(&sgt);
+
+	va = vmap(pages, n, VM_MAP, PAGE_KERNEL);
+	if (va != NULL) {
+		volatile u32 *last = (volatile u32 *)((char *)va + ((size_t)(n - 1) << PAGE_SHIFT));
+		u32 *direct = page_address(pages[n - 1]);
+
+		*last = 0x50444167;
+		kprintf("PDAgx: diag: preflight 5/5 vmap %d pages at %p: wrote the last page, reads back 0x%x "
+		    "through the page's own address%s\n", n, va, direct != NULL ? *direct : 0,
+		    direct != NULL && *direct == 0x50444167 ? "" : " FAILED");
+		vunmap(va);
+	} else {
+		kprintf("PDAgx: diag: preflight 5/5 vmap of %d pages FAILED\n", n);
+	}
+
+out_pages:
+	for (i = 0; i < n; i++)
+		__free_page(pages[i]);
+	kvfree(pages);
+	pd_agx_preflight_stats("after the 600-page test");
+	pd_agx_preflight_bulk();
+}
 
 static int
 pd_agx_pre_probe(struct platform_device *pdev)
@@ -74,6 +233,8 @@ pd_agx_pre_probe(struct platform_device *pdev)
 	kprintf("PDAgx: _dev_printk self-test, the next line should start \"asahi %s: \"\n",
 	    dev_name(&pdev->dev));
 	pd_dev_printk_selftest(&pdev->dev);
+
+	pd_agx_preflight(&pdev->dev);
 
 	ret = pd_apple_mbox_bind(&pdev->dev, 0, PD_AGX_MBOX);
 	kprintf("PDAgx: mailbox 0 of %s is %s (%d)\n", dev_name(&pdev->dev), PD_AGX_MBOX, ret);

@@ -7,7 +7,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/pd_fbsd_os.h
 +++ b/src/Kernel/fbsdkpi/pd_fbsd_os.h
-@@ -26,7 +26,18 @@
+@@ -26,7 +26,21 @@
  void pdos_sleep_us(uint64_t us);
  
  // memory, sizes are remembered by the backend
@@ -23,10 +23,13 @@ UPSTREAM: yes.
 +// the kernel's page size
 +size_t pdos_page_size(void);
 +uint64_t pdos_physmem(void);
++int64_t pdos_malloc_nowait_retried(void);
++void *pdos_pages_alloc(size_t count, uint64_t *phys, void **cookie);
++void pdos_pages_free(void *cookie);
  void pdos_free(void *ptr);
  size_t pdos_malloc_size(void *ptr);
  void *pdos_malloc_contig(size_t size, size_t align, uint64_t maxaddr, uint64_t *phys);
-@@ -50,6 +61,16 @@
+@@ -50,6 +64,16 @@
  int pdos_dma_has_mapper(void *pcidev);
  
  // sleepable mutexes, kernel thread context only
@@ -53,7 +56,15 @@ UPSTREAM: yes.
  #include <kern/locks.h>
  #include <kern/thread.h>
  #include <kern/thread_call.h>
-@@ -39,12 +40,41 @@
+@@ -33,18 +34,49 @@
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ extern boolean_t ml_set_interrupts_enabled(boolean_t enable);
+ extern boolean_t ml_get_interrupts_enabled(void);
++extern boolean_t ml_at_interrupt_context(void);
++extern boolean_t preemption_enabled(void);
+ }
+ 
+ static lck_grp_t *sGroup;
  static lck_spin_t *sWaitLock;
  static lck_mtx_t *sListLock;
  
@@ -96,13 +107,20 @@ UPSTREAM: yes.
  	sWaitLock = lck_spin_alloc_init(sGroup, LCK_ATTR_NULL);
  	sListLock = lck_mtx_alloc_init(sGroup, LCK_ATTR_NULL);
  }
-@@ -136,15 +166,22 @@
+@@ -136,15 +168,40 @@
  	size_t		pad;
  };
  
 +// kalloc_data rather than IOMalloc: it is the kpi that takes Z_NOWAIT. A Z_NOWAIT request
 +// is served from a kalloc zone without blocking or not at all (kalloc_large returns NULL for
 +// it), so it is safe under locks and with preemption disabled.
++static volatile int64_t sNowaitRetried;
++int64_t
++pdos_malloc_nowait_retried(void)
++{
++	return sNowaitRetried;
++}
++
  void *
  pdos_malloc(size_t size, int zero, int canwait)
  {
@@ -111,6 +129,17 @@ UPSTREAM: yes.
 +		return NULL;
 +	int flags = (canwait ? Z_WAITOK : Z_NOWAIT) | (zero ? Z_ZERO : 0);
 +	pd_block *block = (pd_block *)kalloc_data(size + sizeof(pd_block), (zalloc_flags_t)flags);
++	// Z_NOWAIT fails whenever the zone has to grow, which is routine, while Linux's
++	// GFP_ATOMIC/GFP_NOWAIT and FreeBSD's M_NOWAIT rarely fail (reserves). Nearly every
++	// "atomic" caller in this layer is a thread that may block (its spinlocks are mutexes,
++	// its interrupt handlers run on threads), so when the thread really can block, wait.
++	if (block == NULL && !canwait && !ml_at_interrupt_context() && ml_get_interrupts_enabled() &&
++	    preemption_enabled()) {
++		block = (pd_block *)kalloc_data(size + sizeof(pd_block),
++		    (zalloc_flags_t)(Z_WAITOK | (zero ? Z_ZERO : 0)));
++		if (block != NULL)
++			OSAddAtomic64(1, (SInt64 *)&sNowaitRetried);
++	}
  	if (block == NULL)
  		return NULL;
  	block->size = size;
@@ -122,7 +151,7 @@ UPSTREAM: yes.
  	return block + 1;
  }
  
-@@ -154,7 +191,39 @@
+@@ -154,7 +211,39 @@
  	if (ptr == NULL)
  		return;
  	pd_block *block = (pd_block *)ptr - 1;
@@ -163,7 +192,50 @@ UPSTREAM: yes.
  }
  
  size_t
-@@ -785,16 +854,52 @@
+@@ -234,6 +323,42 @@
+ 	return m->va;
+ }
+ 
++// `count` wired pages in one xnu allocation, not physically contiguous: the bulk primitive
++// under linuxkpi's page allocator. phys[] gets each page's address; the kernel address of
++// the whole range is returned, *cookie frees it. No physical mask and no contiguity, so
++// this is an ordinary wired kernel allocation that scales to the gigabytes a gpu wants.
++void *
++pdos_pages_alloc(size_t count, uint64_t *phys, void **cookie)
++{
++	IOBufferMemoryDescriptor *buffer = IOBufferMemoryDescriptor::inTaskWithOptions(
++		kernel_task, kIODirectionInOut, count * PAGE_SIZE, PAGE_SIZE);
++	if (buffer == NULL)
++		return NULL;
++	if (buffer->prepare() != kIOReturnSuccess) {
++		buffer->release();
++		return NULL;
++	}
++	for (size_t i = 0; i < count; i++) {
++		phys[i] = buffer->getPhysicalSegment(i * PAGE_SIZE, NULL, kIOMemoryMapperNone);
++		if (phys[i] == 0) {
++			buffer->complete();
++			buffer->release();
++			return NULL;
++		}
++	}
++	*cookie = buffer;
++	return buffer->getBytesNoCopy();
++}
++
++void
++pdos_pages_free(void *cookie)
++{
++	IOBufferMemoryDescriptor *buffer = (IOBufferMemoryDescriptor *)cookie;
++
++	buffer->complete();
++	buffer->release();
++}
++
+ void
+ pdos_free_contig(void *ptr, size_t size)
+ {
+@@ -785,16 +910,52 @@
  
  // locks
  
@@ -216,7 +288,7 @@ UPSTREAM: yes.
  	lck_mtx_free((lck_mtx_t *)m, sGroup);
  }
  
-@@ -820,12 +925,14 @@
+@@ -820,12 +981,14 @@
  pdos_spin_alloc(void)
  {
  	pdos_xnu_init();
@@ -231,7 +303,7 @@ UPSTREAM: yes.
  	lck_spin_free((lck_spin_t *)s, sGroup);
  }
  
-@@ -857,12 +964,14 @@
+@@ -857,12 +1020,14 @@
  pdos_rw_alloc(void)
  {
  	pdos_xnu_init();

@@ -18,3 +18,23 @@ found no asahi render node because the probe failed. Mesa's software path still 
 
 Also found: the collection with Wi-Fi + PDAgx is rejected by the launcher ("Overlapping
 file-backed segments map different bytes"): the kext area below the kernel is full.
+
+## Boots `ag03`, `ag04`: probe completes, render node answers
+
+`ag03` showed the layer's page allocator failing after about 1 MiB of single pages. The layer now
+takes single pages from 1 MiB wired chunks (`lkpi/patches-layer/0011`); in `ag04` the pre-flight
+allocated, marked, verified and freed 64 MiB (4096 pages) in 22 ms + 25 ms with no failures.
+
+`ag04` result: the driver's probe completed. `[drm] Initialized asahi 0.0.0 for gpu@206400000 on
+minor 0`, `PDAgx: attached`, RTKit initialised (protocol 12), four kernel GPU mappings made.
+From user space on Darwin, through `/dev/dri/renderD128`:
+
+- `drmGetVersion`: `asahi 0.0.0 "Apple AGX Graphics"`, as on Linux.
+- `GET_PARAMS`: every field equal to Linux on this M1 (generation 13, variant G, revision 0x11,
+  chip 0x8103, 8 cores, 1278000 kHz, VM range 0x4000..0x7fffff8000, features SOFT_FAULTS).
+- Mesa's asahi driver then created its VM and buffers and stopped at the first `mmap` of a GPU
+  buffer: `pd_cdev_mmap: driver refused 0x4000 bytes at 0x100238000 (19)`. EGL fell back to the
+  software renderer, so the GPU pass of the test failed ("renderer does not contain Apple M1").
+
+Not yet reached: user-space mapping of GPU buffers, job submission, any GPU rendering.
+Run with `tools/agx_boot.sh <name>`.
