@@ -422,6 +422,58 @@ def bring_up(p, u, out, no_smc=False):
     return result
 
 
+def gpu_probe(p, u, out):
+    """Read-only look at the GPU before the guest starts (mode file gpu_probe_mode.txt = "on"):
+    the PMGR state of every GPU-related power domain and, only if the coprocessor's domain is
+    powered, the ASC CPU control/status and mailbox control registers. Writes nothing."""
+    mode_file = Path(__file__).with_name("gpu_probe_mode.txt")
+    mode = mode_file.read_text().strip() if mode_file.exists() else "off"
+    if mode not in ("on", "power"):
+        return None
+    result = {"mode": mode, "domains": {}, "nodes": {}}
+    try:
+        adt = u.adt
+        if mode == "power":
+            # The one write this probe can make: turn the GPU power domains on (m1n1's own
+            # device-tree walk, parents first), so the registers below can be read.
+            result["power_enable"] = {path: p.pmgr_adt_power_enable(path) for path in ("/arm-io/sgx", "/arm-io/gfx-asc")}
+        for dev in adt["/arm-io/pmgr"].devices:
+            name = dev.name
+            if any(k in name.upper() for k in ("GFX", "SGX", "GPU", "AGX")):
+                addr = adt.pmgr_dev_get_addr(dev)
+                result["domains"][name] = {"id": adt.pmgr_dev_get_id(dev), "addr": addr, "value": p.read32(addr)}
+        for path in ("/arm-io/sgx", "/arm-io/gfx-asc"):
+            try:
+                node = adt[path]
+                result["nodes"][path] = {"reg": [list(node.get_reg(i)) for i in range(len(node.reg))],
+                                         "props": sorted(node._properties.keys())}
+            except Exception as e:
+                result["nodes"][path] = {"error": repr(e)}
+        gfx = result["domains"].get("GFX")
+        powered = bool(gfx) and (gfx["value"] >> 4) & 0xf == 0xf
+        result["gfx_domain_powered"] = powered
+        sgx = adt["/arm-io/sgx"]
+        result["handoff"] = {k: getattr(sgx, k.replace("-", "_"), None) for k in
+                             ("gfx-handoff-base", "gfx-handoff-size", "gfx-shared-region-base", "gfx-shared-region-size",
+                              "gpu-region-base", "gpu-region-size", "rtkit-private-vm-region-base",
+                              "rtkit-private-vm-region-size", "ttbat-phys-addr-base", "gptbat-ready")}
+        if powered:
+            base = result["nodes"]["/arm-io/gfx-asc"]["reg"][0][0]
+            result["asc"] = {n: p.read32(base + o) for n, o in
+                             (("cpu_control", 0x44), ("cpu_status", 0x48), ("inbox_ctrl", 0x8110), ("outbox_ctrl", 0x8114))}
+            sbase = result["nodes"]["/arm-io/sgx"]["reg"][1][0]
+            result["sgx_id"] = {hex(o): p.read32(sbase + o) for o in
+                                (0x1500, 0x1514, 0x4000, 0x4004, 0x4008, 0x400c, 0x4010, 0x4014, 0x4018, 0x401c, 0x8024)}
+    except Exception:
+        result["error"] = traceback.format_exc()
+    log("gpu probe: " + json.dumps(result, default=hex))
+    try:
+        (Path(out) / "gpu-probe.json").write_text(json.dumps(result, indent=1, default=hex))
+    except Exception:
+        pass
+    return result
+
+
 def launcher_step(p, u, out):
     """Called by the boot launcher after hv.init(). The mode file next to this module says who
     brings the link up: "none" (the default: nothing here; the kext powers the radio and brings
@@ -429,6 +481,7 @@ def launcher_step(p, u, out):
     sequence from here, the original arrangement, kept for debugging)."""
     mode_file = Path(__file__).with_name("pcie_linkup_mode.txt")
     mode = mode_file.read_text().strip() if mode_file.exists() else "none"
+    gpu_probe(p, u, out)
     if mode == "launcher":
         result = bring_up(p, u, out)
         result["mode"] = "launcher"

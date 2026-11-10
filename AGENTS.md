@@ -1441,5 +1441,10 @@ on hardware.
 Still in force: the Goal/truthfulness and Boundaries sections at the top (no
 DFU, partitioning, flashing or boot-policy changes; no firmware, credentials or
 device identifiers committed), no writes to the M1's internal storage, and the
-M1 is returned to Linux at the end of each session. The GPU observer and
-serial-bridge holds are unrelated to this track and unchanged.
+M1 is returned to Linux at the end of each session.
+
+GPU (Chris, November 10): "keep working on the gpu ... a functional GPU is ideal". The
+earlier GPU observer hold is lifted. GPU power-domain writes, starting the GPU coprocessor
+and loading the GPU driver are allowed under the same rules as the PCIe/Wi-Fi track. Plan and
+state: GitHub issue SF-F (`docs/roadmap/issues/SF-F-gpu-kernel.md`); first hardware facts in
+`reports/sprint-010/gpu-power-and-id-probe-001.md`.
