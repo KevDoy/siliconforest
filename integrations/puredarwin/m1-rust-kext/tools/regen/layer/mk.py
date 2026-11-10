@@ -137,6 +137,14 @@ from expanding, so every scoped_guard() used the label ___label___COUNTER__ and 
 with two of them did not compile (drivers/gpu/drm/apple has 16 such functions).
 UPSTREAM: yes (FreeBSD LinuxKPI).
 """, []),
+ "0017-backlight-and-platform-driver-fields-of-linux-7": ("""linuxkpi: backlight and platform_driver fields a Linux 7 display driver names
+
+- linux/backlight.h: BACKLIGHT_PLATFORM/FIRMWARE, enum backlight_scale,
+  backlight_properties.state/.scale, BL_CORE_SUSPENDED/FBBLANK, backlight_ops.controls_device
+- platform_driver.driver_managed_dma
+Declarations only: nothing in the layer acts on them yet.
+UPSTREAM: yes.
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -158,6 +166,7 @@ def topic(path, hunk, lineno):
     if path.endswith("pd_lkpi_kern.c"): return "0009-physmem-is-the-machines"
     if path.endswith(("bus_dma.cpp", "dma-mapping.h")): return "0010-dma-map-sg-for-platform-devices"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
+    if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
     if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"
     if path.endswith("pd_linux_of.c"): return "0006-of-text-properties-named-by-the-node"

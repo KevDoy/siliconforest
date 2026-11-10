@@ -23,6 +23,11 @@
  *                    wake can complete. pdrtkitprobe_dart=1 stops the DART part after its
  *                    read-only stage (then behaves as 3); pdrtkitprobe_exit=1 quiesces the
  *                    coprocessor after a completed wake instead of leaving it awake.
+ *   pdrtkitprobe=5   DCP through Linux's IOMMU/DMA API (../m1-dcp-dart): read-only look at
+ *                    /arm-io/dart-disp0 streams 0 and 4 (the boot framebuffer must be found
+ *                    mapped in stream 0), then the mode 4 wake with the pin's shmem_setup
+ *                    code on that API, then one pass over the driver's other DMA calls on
+ *                    the dcp stream. pdrtkitprobe_dvamask=1 hands out m1n1's address form.
  *   any other value  nothing
  *
  * Every line this kext logs starts with "PDRtkitProbe: ".
@@ -44,6 +49,7 @@
 #include "pd_rtkit_platform.h"
 #include "pd_rtkitprobe.h"
 #include "pd_dcp_dart.h"
+#include "pd_dart.h"
 
 #define GFX_ASC "/arm-io/gfx-asc"
 #define SGX     "/arm-io/sgx"
@@ -79,7 +85,8 @@ public:
 
 private:
     void run(int mode);
-    void runDcp(bool withDart);
+    void runDcp(int level);
+    bool dispDartLook();
     bool dcpPowerState(UInt32 *fe, UInt32 *cpu0);
     void logRegisters(const char *when);
     bool firmwareMemoryOutsideKernel();
@@ -126,12 +133,12 @@ bool PDRtkitProbe::start(IOService *provider)
         return true;
     }
     pd_rtkit_platform_set_log_prefix("PDRtkitProbe: ");
-    if (mode == 3 || mode == 4)
-        runDcp(mode == 4);
+    if (mode >= 3 && mode <= 5)
+        runDcp(mode - 3);
     else if (mode <= 2)
         run(mode);
     else
-        plog("pdrtkitprobe=%d is not a mode (0 off, 1 GPU read-only, 2 GPU RTKit boot, 3 DCP wake, 4 DCP wake with DART): nothing done", mode);
+        plog("pdrtkitprobe=%d is not a mode (0 off, 1 GPU read-only, 2 GPU RTKit boot, 3 DCP wake, 4 DCP wake with DART, 5 DCP through the IOMMU API): nothing done", mode);
     registerService();
     return true;
 }
@@ -373,8 +380,70 @@ bool PDRtkitProbe::dcpPowerState(UInt32 *fe, UInt32 *cpu0)
  * of the display pipe, of either DART or of PMGR is written; no endpoint from 0x20 up is
  * started; the coprocessor is not shut down, quiesced or put to sleep afterwards.
  */
-void PDRtkitProbe::runDcp(bool withDart)
+/*
+ * Mode 5, read-only: the two streams of /arm-io/dart-disp0 the display driver uses. Stream 0
+ * (the display-subsystem device) must hold iBoot's mapping of the boot framebuffer; stream 4
+ * is the dcp's piodma child. Nothing of this DART is written here.
+ */
+bool PDRtkitProbe::dispDartLook()
 {
+    boot_args *args = (boot_args *)PE_state.bootArgs;
+    uint64_t fb = args->Video.v_baseAddr & ~0x3fffULL;
+    uint64_t fbSize = ((uint64_t)args->Video.v_rowBytes * args->Video.v_height + 0x3fff) & ~0x3fffULL;
+    struct pd_dart_stream *s0 = pd_dart_open("/arm-io/dart-disp0", 0, 0);
+    struct pd_dart_stream *s4 = pd_dart_open("/arm-io/dart-disp0", 0, 4);
+    struct pd_dart_stream *sd = pd_dart_open("/arm-io/dart-dcp", 0, 0);
+    uint64_t iova = 0;
+    bool ok = s0 && s4 && sd;
+
+    plog("dcp fb: boot framebuffer from the boot-args: phys 0x%llx, %lux%lu, %lu bytes per row, 0x%llx bytes",
+         (unsigned long long)args->Video.v_baseAddr, (unsigned long)args->Video.v_width, (unsigned long)args->Video.v_height,
+         (unsigned long)args->Video.v_rowBytes, (unsigned long long)fbSize);
+    if (!ok) {
+        plog("dcp fb: a display DART stream could not be opened (disp0/0 %s, disp0/4 %s, dcp/0 %s)", s0 ? "ok" : "FAILED",
+             s4 ? "ok" : "FAILED", sd ? "ok" : "FAILED");
+        return false;
+    }
+    if (pd_dart_find(s0, fb, fbSize, &iova) == 0) {
+        uint64_t l1e = 0, pte = 0;
+        uint64_t first = pd_dart_walk(s0, iova, &l1e, &pte), last = pd_dart_translate(s0, iova + fbSize - 0x4000);
+        plog("dcp fb: dart-disp0 stream 0 maps it at iova 0x%llx, contiguous over 0x%llx bytes: first-level 0x%llx, leaf 0x%llx -> phys 0x%llx, last page -> 0x%llx: %s",
+             (unsigned long long)iova, (unsigned long long)fbSize, (unsigned long long)l1e, (unsigned long long)pte,
+             (unsigned long long)first, (unsigned long long)last,
+             first == fb && last == fb + fbSize - 0x4000 ? "matches the boot framebuffer" : "DOES NOT MATCH");
+        ok = first == fb && last == fb + fbSize - 0x4000;
+    } else {
+        plog("dcp fb: dart-disp0 stream 0 has NO contiguous mapping of the boot framebuffer");
+        ok = false;
+    }
+    /* m1n1 kboot.c:2519: "boot framebuffer, mapped to dart-disp0 sid 0 and dart-dcp sid 0/5" */
+    if (pd_dart_find(sd, fb, fbSize, &iova) == 0)
+        plog("dcp fb: dart-dcp stream 0 maps it at iova 0x%llx", (unsigned long long)iova);
+    else
+        plog("dcp fb: dart-dcp stream 0 does not map it contiguously");
+    if (pd_dart_find(s4, fb, 0x4000, &iova) == 0)
+        plog("dcp fb: dart-disp0 stream 4 (piodma) maps its first page at iova 0x%llx", (unsigned long long)iova);
+    else
+        plog("dcp fb: dart-disp0 stream 4 (piodma) does not map it (m1n1 lists no framebuffer mapping for piodma either)");
+    pd_dart_check(s0, "disp0 look");
+
+    uint32_t l1w = 0, leafw = 0, leafc = 0, inv = 0, t;
+    pd_dart_stats(s0, &l1w, &leafw, &leafc, &inv);
+    pd_dart_stats(s4, &t, NULL, NULL, NULL);
+    l1w += t;
+    pd_dart_stats(s4, NULL, &t, NULL, NULL);
+    leafw += t;
+    pd_dart_stats(s4, NULL, NULL, NULL, &t);
+    inv += t;
+    plog("dcp fb: writes to dart-disp0 by this probe: %u first-level, %u leaf, %u cleared, %u invalidates (all must be 0)", l1w,
+         leafw, leafc, inv);
+    return ok && !l1w && !leafw && !leafc && !inv;
+}
+
+void PDRtkitProbe::runDcp(int level)
+{
+    const bool withDart = level >= 1;
+    const bool viaIommu = level >= 2;
     plog("dcp start: attach to " DCP " as found, wake its RTKit as Linux dcp_comp_bind does, log the endpoint map, stop");
 
     int ret = pd_rtkit_platform_mbox_resolve(DCP, &res);
@@ -423,7 +492,20 @@ void PDRtkitProbe::runDcp(bool withDart)
      * it). Nothing is sent to the coprocessor unless all of that worked.
      */
     int serve = 0, quiesce = 0;
-    if (withDart) {
+    if (viaIommu) {
+        int exitMode = 0, dvaMask = 0;
+        PE_parse_boot_argn("pdrtkitprobe_exit", &exitMode, sizeof(exitMode));
+        PE_parse_boot_argn("pdrtkitprobe_dvamask", &dvaMask, sizeof(dvaMask));
+        plog("dcp iommu: mode 5: display DARTs through Linux's IOMMU/DMA API (pdrtkitprobe_dvamask=%d, pdrtkitprobe_exit=%d)",
+             dvaMask, exitMode);
+        pd_dart_set_log_prefix("PDRtkitProbe: dcp ");
+        pd_rtkitprobe_set_dva_mask(dvaMask);
+        bool fbOk = dispDartLook();
+        if (!fbOk)
+            plog("dcp fb: the look at dart-disp0 did not come out as expected; going on, since nothing below touches dart-disp0");
+        serve = 2;
+        quiesce = exitMode == 1;
+    } else if (withDart) {
         int dartStage = 2, exitMode = 0;
         PE_parse_boot_argn("pdrtkitprobe_dart", &dartStage, sizeof(dartStage));
         PE_parse_boot_argn("pdrtkitprobe_exit", &exitMode, sizeof(exitMode));
@@ -471,8 +553,9 @@ void PDRtkitProbe::runDcp(bool withDart)
         setProperty("PDRtkitProbeResult", ret == 0 ? "dcp-awake" : "dcp-wake-incomplete");
         return;
     }
-    plog("dcp done: result %d (%s); no endpoint from 0x20 up started; dart-disp0 never accessed", ret,
+    plog("dcp done: result %d (%s); no endpoint from 0x20 up started; %s", ret,
          ret != 0 ? "not completed, see the lines above" : quiesce ? "woken with every buffer request served, then quiesced" :
-                                                                      "RTKit awake with every buffer request served");
+                                                                      "RTKit awake with every buffer request served",
+         viaIommu ? "dart-disp0 read, never written" : "dart-disp0 never accessed");
     setProperty("PDRtkitProbeResult", ret == 0 ? (quiesce ? "dcp-served-quiesced" : "dcp-served-awake") : "dcp-h2-incomplete");
 }

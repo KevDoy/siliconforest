@@ -92,11 +92,205 @@ const __be32 *of_prop_next_u32(const struct property *prop, const __be32 *cur, u
 #define DECLARE_COMPLETION_ONSTACK(c)	struct completion c; init_completion(&c)
 #endif
 
-/* linux/iommu.h protection bits (the DART backend, m1-dcp-dart, uses Linux's values) */
-#ifndef IOMMU_READ
-#define IOMMU_READ		(1 << 0)
-#define IOMMU_WRITE		(1 << 1)
+/* the pin's include/uapi/drm/drm_fourcc.h; drm-kmod's is older */
+#include <drm/drm_fourcc.h>
+#ifndef DRM_FORMAT_P230
+#define DRM_FORMAT_P230		fourcc_code('P', '2', '3', '0')
 #endif
+#ifndef DRM_FORMAT_MOD_VENDOR_APPLE
+#define DRM_FORMAT_MOD_VENDOR_APPLE	0x0c
+#endif
+#ifndef DRM_FORMAT_MOD_APPLE_INTERCHANGE
+#define DRM_FORMAT_MOD_APPLE_INTERCHANGE	fourcc_mod_code(APPLE, 3)
+#endif
+
+/*
+ * Live device-tree edits (dcp-fabric.c disables a route node on boards with a display
+ * crossbar). There is no such thing here; the functions are in kext/pd_dcp_linux.c and
+ * refuse, see the README for why J293 does not get there.
+ */
+struct of_changeset { int pd_unused; };
+void of_changeset_init(struct of_changeset *ocs);
+void of_changeset_destroy(struct of_changeset *ocs);
+int of_changeset_apply(struct of_changeset *ocs);
+int of_changeset_update_prop_string(struct of_changeset *ocs, struct device_node *np,
+				    const char *prop_name, const char *str);
+
+struct of_device_id;
+struct device_node *of_find_matching_node(struct device_node *from, const struct of_device_id *matches);
+#ifndef for_each_matching_node
+#define for_each_matching_node(dn, matches)					\
+	for (dn = of_find_matching_node(NULL, matches); dn;			\
+	     dn = of_find_matching_node(dn, matches))
+#endif
+
+/* no module loader: device tables and soft dependencies are not emitted */
+#undef MODULE_DEVICE_TABLE
+#define MODULE_DEVICE_TABLE(type, name)
+#undef MODULE_SOFTDEP
+#define MODULE_SOFTDEP(x)
+
+/* no system sleep through LinuxKPI yet (SF-H item H7): the callbacks are compiled, not wired */
+#ifndef pm_sleep_ptr
+#define pm_sleep_ptr(p)		(p)
+#endif
+#ifndef SYSTEM_SLEEP_PM_OPS
+#define SYSTEM_SLEEP_PM_OPS(suspend_fn, resume_fn)	\
+	.suspend = suspend_fn, .resume = resume_fn,
+#endif
+
+/* 7.x names for things the layer has under an older name or as a plain barrier */
+#include <linux/slab.h>
+#include <linux/iosys-map.h>
+#include <asm/barrier.h>
+#ifndef dma_mb
+#define dma_mb()		mb()
+#define dma_rmb()		rmb()
+#define dma_wmb()		wmb()
+#endif
+#ifndef ktime_sub_us
+#define ktime_sub_us(kt, usval)	ktime_sub_ns((kt), (u64)(usval) * 1000)
+#endif
+#ifndef time_after_eq64
+#define time_after_eq64(a, b)	((s64)((a) - (b)) >= 0)
+#endif
+#ifndef __ALIGN_KERNEL
+#define __ALIGN_KERNEL(x, a)	(((x) + ((typeof(x))(a) - 1)) & ~((typeof(x))(a) - 1))
+#endif
+#ifndef IOSYS_MAP_INIT_VADDR
+#define IOSYS_MAP_INIT_VADDR(vaddr_)	{ .vaddr = (vaddr_), .is_iomem = false }
+#endif
+/* 7.2 passes the format info it already looked up; 6.14 looks it up itself */
+#include <drm/drm_modeset_helper.h>
+#define drm_helper_mode_fill_fb_struct(dev, fb, info, mode_cmd)	\
+	drm_helper_mode_fill_fb_struct(dev, fb, mode_cmd)
+
+/*
+ * disable_work()/enable_work() (6.10): cancel and refuse queueing until enabled again. The
+ * layer has only the cancel half: a work item queued between disable and enable runs here.
+ */
+#undef disable_work_sync
+#define disable_work_sync(w)		cancel_work_sync(w)
+#define disable_work(w)			cancel_work_sync(w)
+#define enable_work(w)			(true)
+#undef disable_delayed_work_sync
+#define disable_delayed_work_sync(w)	cancel_delayed_work_sync(w)
+#define disable_delayed_work(w)		cancel_delayed_work(w)
+#define enable_delayed_work(w)		(true)
+
+/* no module loader: nothing to pin, and an optional symbol of another module is absent */
+#undef __module_get
+#define __module_get(m)			do { } while (0)
+#undef symbol_get
+#define symbol_get(x)			((typeof(&x))NULL)
+#undef symbol_put
+#define symbol_put(x)			do { } while (0)
+
+/* declared by the layer's linux/debugfs.h, defined nowhere: there is no debugfs */
+#include <linux/debugfs.h>
+#undef debugfs_remove_recursive
+#define debugfs_remove_recursive(d)	do { } while (0)
+
+/* the 7.2 atomic-commit helpers (kext/pd_dcp_drm72.c); `drm_atomic_commit` is renamed above */
+struct drm_device;
+struct drm_crtc;
+struct drm_modeset_acquire_ctx;
+struct drm_atomic_commit *drm_atomic_commit_alloc(struct drm_device *dev);
+int drm_atomic_commit_init(struct drm_device *dev, struct drm_atomic_commit *state);
+void drm_atomic_commit_clear(struct drm_atomic_commit *state);
+void drm_atomic_commit_default_clear(struct drm_atomic_commit *state);
+void drm_atomic_commit_default_release(struct drm_atomic_commit *state);
+struct drm_atomic_commit *drm_atomic_commit_get(struct drm_atomic_commit *state);
+void drm_atomic_commit_put(struct drm_atomic_commit *state);
+int drm_atomic_helper_reset_crtc(struct drm_crtc *crtc, struct drm_modeset_acquire_ctx *ctx);
+struct component_match;
+void drm_of_component_match_add(struct device *master, struct component_match **matchptr,
+				int (*compare)(struct device *, void *), struct device_node *node);
+
+/* small things of newer kernels, as inlines or macros */
+#include <linux/string.h>
+#include <linux/io.h>
+#include <linux/mm.h>
+#include <drm/drm_device.h>
+#ifndef strstarts
+#define strstarts(str, prefix)		(strncmp((str), (prefix), strlen(prefix)) == 0)
+#endif
+#ifndef dev_info_ratelimited
+#define dev_info_ratelimited(dev, fmt, ...)	dev_info(dev, fmt, ##__VA_ARGS__)
+#endif
+/* the layer's kmalloc_objs() calls size_mul() with one argument; fix belongs in the layer */
+#undef kmalloc_objs
+#define kmalloc_objs(_p, _n, ...)	kmalloc_array((_n), sizeof(typeof(_p)), default_gfp(__VA_ARGS__))
+#ifndef kvmalloc_obj
+#define kvmalloc_obj(_p, ...)		kvmalloc(sizeof(typeof(_p)), default_gfp(__VA_ARGS__))
+#endif
+/* ioremap() on this layer already maps non-posted (lkpi/helpers/io.c says the same) */
+#ifndef ioremap_np
+#define ioremap_np(addr, size)		ioremap((addr), (size))
+#endif
+#ifndef of_fwnode_handle
+#define of_fwnode_handle(np)		(&(np)->fwnode)
+#endif
+static inline bool of_node_name_eq(const struct device_node *np, const char *name)
+{
+	return np != NULL && np->name != NULL && strcmp(np->name, name) == 0;
+}
+struct device_node *of_find_node_by_path(const char *path);
+static inline int device_match_name(struct device *dev, const void *name)
+{
+	return strcmp(dev_name(dev), name) == 0;
+}
+static inline int device_match_of_node(struct device *dev, const void *np)
+{
+	return np != NULL && dev->of_node == np;
+}
+void devres_close_group(struct device *dev, void *id);
+/* 6.16: a DRM device may do DMA through another device; not here */
+static inline struct device *drm_dev_dma_dev(struct drm_device *dev)
+{
+	return dev->dev;
+}
+/*
+ * PD_STUB: user mappings on PureDarwin do not go through file_operations.mmap (PDDRMDri asks
+ * the kext for pages), so drm_gem_dma_mmap() is never called; these only let it compile.
+ */
+struct vm_area_struct;
+#define vm_flags_mod(vma, set, clear)	do { } while (0)
+#define dma_mmap_wc(dev, vma, cpu, dma, size)		(-ENODEV)
+#define dma_mmap_pages(dev, vma, size, page)		(-ENODEV)
+/* only iomfb_v14_7.c (firmware 14.7 boards) asks for these */
+struct clk;
+static inline struct clk *clk_get_optional(struct device *dev, const char *id) { return NULL; }
+struct regmap;
+static inline int regmap_read(struct regmap *map, unsigned int reg, unsigned int *val) { return -ENODEV; }
+
+/* kext/pd_dcp_linux.c */
+struct device_link;
+struct device_link *device_link_add(struct device *consumer, struct device *supplier, u32 flags);
+void device_set_wakeup_path(struct device *dev);
+struct clk;
+void devm_clk_put(struct device *dev, struct clk *clk);
+int driver_deferred_probe_check_state(struct device *dev);
+void *devres_open_group(struct device *dev, void *id, gfp_t gfp);
+int devres_release_group(struct device *dev, void *id);
+int devres_remove_group(struct device *dev, void *id);
+struct backlight_device;
+struct backlight_ops;
+struct backlight_properties;
+struct backlight_device *devm_backlight_device_register(struct device *dev, const char *name,
+	struct device *parent, void *devdata, const struct backlight_ops *ops,
+	const struct backlight_properties *props);
+void devm_backlight_device_unregister(struct device *dev, struct backlight_device *bd);
+struct platform_device;
+struct platform_device *of_platform_device_create(struct device_node *np, const char *bus_id,
+	struct device *parent);
+int of_platform_device_destroy(struct device *dev, void *data);
+bool of_machine_is_compatible(const char *compat);
+struct device_node *of_get_compatible_child(const struct device_node *parent, const char *compatible);
+int of_property_count_u8_elems(const struct device_node *np, const char *propname);
+int of_property_read_u8_array(const struct device_node *np, const char *propname, u8 *out, size_t sz);
+int of_property_read_variable_u32_array(const struct device_node *np, const char *propname,
+	u32 *out_values, size_t sz_min, size_t sz_max);
 
 /* device links are not modelled: flags accepted and ignored by device_link_add() */
 #ifndef DL_FLAG_AUTOREMOVE_CONSUMER
@@ -118,5 +312,26 @@ const __be32 *of_prop_next_u32(const struct property *prop, const __be32 *cur, u
 #ifndef ARCH_DMA_MINALIGN
 #define ARCH_DMA_MINALIGN	128	/* arm64 */
 #endif
+
+/*
+ * Logging. Every dev_err/dev_warn/dev_notice/dev_info of the driver reaches the kernel log
+ * as "PDDcp: <device>: ..."; dev_dbg is shown with the boot-arg pddcp_debug=1.
+ */
+void kprintf(const char *, ...);
+extern int pd_dcp_debug;
+#undef dev_err
+#undef dev_warn
+#undef dev_notice
+#undef dev_info
+#undef dev_dbg
+#define pd_dcp_dev_log(dev, fmt, ...)	kprintf("PDDcp: %s: " fmt, dev_name(dev), ##__VA_ARGS__)
+#define dev_err(dev, fmt, ...)		pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
+#define dev_warn(dev, fmt, ...)		pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
+#define dev_notice(dev, fmt, ...)	pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
+#define dev_info(dev, fmt, ...)		pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
+#define dev_dbg(dev, fmt, ...)		do { if (pd_dcp_debug) pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__); } while (0)
+/* patches/0002: the IOMFB callback dispatcher reports each callback (kext/pd_dcp_linux.c) */
+void pd_dcp_note_callback(struct device *dev, int tag, const char *fourcc, u32 in_len, u32 out_len,
+			  unsigned int context, bool handled);
 
 #endif

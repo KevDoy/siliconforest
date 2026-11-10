@@ -1,0 +1,41 @@
+drm/apple: PDDcp stage lines
+
+Three lines for following a first bring-up on a console: each AFK endpoint start request,
+dcp_start() with the firmware compat chosen, and the first occurrence of every IOMFB callback
+the firmware makes with whether the driver has a handler (pd_dcp_note_callback(), in the
+kext). The driver's own messages are otherwise untouched.
+UPSTREAM: no.
+
+--- a/afk.c
++++ b/afk.c
+@@ -220,6 +220,8 @@
+ 
+ 	reinit_completion(&ep->started);
+ 	ret = apple_rtkit_start_ep(ep->dcp->rtk, ep->endpoint);
++	/* PDDcp: stage line */
++	dev_info(ep->dcp->dev, "endpoint 0x%02x start requested (%d)\n", ep->endpoint, ret);
+ 	if (ret)
+ 		return ret;
+ 	if (ep->dcp->fw_compat == DCP_FIRMWARE_V_14_7_TEMPLATE &&
+--- a/dcp.c
++++ b/dcp.c
+@@ -2427,6 +2427,8 @@
+ 
+ 	/* Even if nothing starts, dcp_wait_ready() must find it initialised. */
+ 	init_completion(&dcp->start_done);
++	/* PDDcp: stage line */
++	dev_info(dcp->dev, "dcp_start: firmware compat id %d, external %d\n", dcp->fw_compat, dcp->external);
+ 	if (dcp->fw_compat == DCP_FIRMWARE_V_26_6)
+ 		return iomfb_v26_6_start(dcp);
+ 
+--- a/iomfb.c
++++ b/iomfb.c
+@@ -1277,6 +1277,8 @@
+ 
+ 	handled = tag >= 0 && tag < IOMFB_MAX_CB && dcp->cb_handlers &&
+ 		  dcp->cb_handlers[tag];
++	/* PDDcp: one line per callback the firmware makes (kext/pd_dcp_linux.c) */
++	pd_dcp_note_callback(dev, tag, hdr->tag, hdr->in_len, hdr->out_len, context, handled);
+ 	if (dcp->fw_compat == DCP_FIRMWARE_H17P &&
+ 	    (tag < 0 || tag >= IOMFB_MAX_CB ||
+ 	     (u64)sizeof(*hdr) + hdr->in_len + hdr->out_len != length ||

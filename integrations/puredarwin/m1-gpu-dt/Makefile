@@ -17,8 +17,9 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off
 
 .PHONY: test clean check-inputs freestanding
 
-test: build/harness build/fwnode_test freestanding
+test: build/harness build/fwnode_test build/dispdt_test freestanding
 	./build/harness selftest
+	./build/dispdt_test
 	./build/fwnode_test
 	python3 test/compare.py ./build/harness $(GT)
 	@echo; echo "predicted PDGpuDT kext log for core mask $(CORE_MASK):"
@@ -35,6 +36,10 @@ build/adt_fixture.c: test/gen_fixture.py | check-inputs
 build/harness: src/gpudt.c src/gpudt_summary.c src/gpudt.h src/gpudt_fw_table.inc test/harness.c test/fixture.h build/adt_fixture.c
 	$(CC) $(CFLAGS) -Isrc -Itest -o $@ src/gpudt.c src/gpudt_summary.c test/harness.c build/adt_fixture.c -lm
 
+# the display nodes (dispdt.c) from the same saved device tree
+build/dispdt_test: src/dispdt.c src/dispdt.h src/gpudt.h test/dispdt_test.c test/fixture.h build/adt_fixture.c
+	$(CC) $(CFLAGS) -Isrc -Itest -o $@ src/dispdt.c test/dispdt_test.c build/adt_fixture.c
+
 # the proposed of-layer additions, against stand-ins for the layer's headers (test/stubs)
 build/fwnode_test: kernel/pd_linux_fwnode.c test/fwnode_test.c src/gpudt.c src/gpudt.h build/adt_fixture.c $(wildcard test/stubs/linux/*.h)
 	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Itest/stubs -Isrc -Itest -o $@ kernel/pd_linux_fwnode.c test/fwnode_test.c src/gpudt.c build/adt_fixture.c
@@ -43,6 +48,9 @@ build/fwnode_test: kernel/pd_linux_fwnode.c test/fwnode_test.c src/gpudt.c src/g
 freestanding: src/gpudt.c src/gpudt.h src/gpudt_fw_table.inc
 	@mkdir -p build
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -mgeneral-regs-only -c -o build/gpudt_freestanding.o src/gpudt.c
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -mgeneral-regs-only -Isrc -c -o build/dispdt_freestanding.o src/dispdt.c
+	@if nm -u build/dispdt_freestanding.o | grep -v -E ' (memcpy|memset|memcmp|strcmp|strncmp|strlen)$$'; then \
+		echo "unexpected external symbols in dispdt"; exit 1; fi
 	@if nm -u build/gpudt_freestanding.o | grep -v -E ' (memcpy|memset|memcmp|strcmp|strncmp|strlen)$$'; then \
 		echo "unexpected external symbols in the core"; exit 1; fi
 

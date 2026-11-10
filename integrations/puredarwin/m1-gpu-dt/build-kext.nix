@@ -13,6 +13,9 @@ let
     cp ${./src/gpudt.h} "$out/gpudt.h"
     cp ${./src/gpudt_summary.c} "$out/gpudt_summary.c"
     cp ${./src/gpudt_fw_table.inc} "$out/gpudt_fw_table.inc"
+    cp ${./kernel/PDDispDT.cpp} "$out/PDDispDT.cpp"
+    cp ${./src/dispdt.c} "$out/dispdt.c"
+    cp ${./src/dispdt.h} "$out/dispdt.h"
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
   pname = "puredarwin-gpu-dt";

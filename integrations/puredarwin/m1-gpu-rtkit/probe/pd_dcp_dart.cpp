@@ -206,6 +206,14 @@ uint64_t *tableAt(uint64_t phys)
 {
     Table *free = NULL;
 
+    /*
+     * Our own table is reached through the descriptor that owns it: mapping a page this
+     * kernel manages by physical address drew "IOMemoryDescriptor physical with managed
+     * page" in boot dc11.
+     */
+    if (gL2 && phys == gL2Phys)
+        return gL2;
+
     for (int i = 0; i < MAX_TABLES; i++) {
         if (gTables[i].va && gTables[i].phys == phys)
             return gTables[i].va;

@@ -28,3 +28,5 @@ linux/usb/typec.h
 linux/usb/typec_mux.h
 linux/usb/typec_tbt.h
 vdso/align.h
+drm/drm_gem_framebuffer_helper.h
+drm/drm_dumb_buffers.h

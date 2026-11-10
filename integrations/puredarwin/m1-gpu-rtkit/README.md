@@ -230,6 +230,7 @@ changes, the store paths change with it.
 | `pdrtkitprobe=2` | read-only probe, then the RTKit boot attempt |
 | `pdrtkitprobe=3` | DCP mode (SF-H item H1), none of the GPU steps; see "DCP mode" below |
 | `pdrtkitprobe=4` | DCP mode with the dcp DART (SF-H item H2); see "DCP mode 4" below |
+| `pdrtkitprobe=5` | DCP through Linux's IOMMU/DMA API (`../m1-dcp-dart`): read-only look at `dart-disp0`, the mode 4 wake on that API, an API pass. `pdrtkitprobe_dvamask=1` hands out m1n1's address form. See `../m1-dcp-dart/README.md` |
 | `pdrtkitprobe_dart=1\|2\|3` | mode 4 only: 1 = DART read-only stage, requests not served; 2 (default) = serve; 3 = serve even if the self-check fails |
 | `pdrtkitprobe_exit=0\|1` | mode 4 only: 0 (default) = leave the DCP awake; 1 = quiesce it after a completed wake |
 | `pdrtkit_irq=0\|1\|2` | interrupt mode, see above (mode 2 only) |

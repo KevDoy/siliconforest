@@ -21,6 +21,13 @@ WANTED = {
     "/chosen": ["firmware-version", "system-firmware-version"],
     # iBoot's memory carve-outs (address, size): the harness checks the UAT regions against them
     "/chosen/carveout-memory-map": None,
+    # the display (dispdt.c): register windows to cross-check, the boot framebuffer carve-out
+    "/arm-io/dcp": ["reg"],
+    "/arm-io/disp0": ["reg"],
+    "/arm-io/dart-dcp": ["reg"],
+    "/arm-io/dart-disp0": ["reg"],
+    "/vram": ["reg"],
+    "/": ["compatible"],
 }
 
 

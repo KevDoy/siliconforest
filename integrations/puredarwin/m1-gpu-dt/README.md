@@ -22,6 +22,25 @@ driver works.
 | `kernel/pd_linux_fwnode.c` | The missing `of`/`fwnode` functions, proposed for the layer. Host-tested against stand-in headers only |
 | `test/`, `Makefile` | Host test against the saved ADT and the Linux ground truth |
 
+## Display nodes (`src/dispdt.{h,c}`, `kernel/PDDispDT.cpp`)
+
+For the pin's `drivers/gpu/drm/apple` on J293: `iommu@23130c000`, `iommu@231304000`,
+`mbox@231c08000`, `power-management@23b738000`, `clock-disp0`, `dcp@231c00000` with `piodma`
+and `panel`, `display-subsystem`, the five reserved regions m1n1 adds (`dcp_data`,
+`region57`, `region94`, `region95`, `framebuffer`, from `/chosen/carveout-memory-map` and
+`/vram`) and `chosen/framebuffer@<base>`. Static values are `t8103.dtsi`, `t8103-jxxx.dtsi`
+and `t8103-j293.dts` at the pin; the boot-time parts follow m1n1 `kboot.c`. Host-tested
+against the saved device tree (`build/dispdt_test`, part of `make test`); the kext part is
+compile evidence. Boot-arg `pddispdt=1` logs a summary, `pddispdt=2` publishes (with
+`pdgpudt_stringprops=1`); default is off.
+
+Not produced: `interrupts`/`interrupt-parent`, `power-domains`, `resets` (power and
+interrupts come from native interfaces, as for the GPU), the `ports` graph to the audio
+node, `iommu-addresses` unless the caller supplies the mapped addresses (the kext does not;
+the DART backend in `../m1-dcp-dart` reads the mappings from the tables themselves), and
+the second `iommus` entry of `display-subsystem` (dispext0). **Not compared with the live
+Linux tree yet.**
+
 ## Running the test
 
 ```

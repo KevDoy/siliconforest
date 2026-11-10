@@ -34,10 +34,16 @@ int pd_rtkitprobe_dcp_wake(void);
  * served through the dcp DART (pd_dcp_dart.h, which the caller has opened): a buffer the
  * firmware placed is translated and mapped for reading, one it asks the AP for is
  * allocated, mapped and answered. serve = 0 behaves exactly as pd_rtkitprobe_dcp_wake().
+ * serve = 2 (mode 5): the same requests are served by the pin's dcp_rtk_shmem_setup() code
+ * through Linux's IOMMU/DMA API (../../m1-dcp-dart/include/pd_dcp_iommu.h) instead, and a
+ * completed wake is followed by one pass over the other calls the driver makes on the dcp
+ * stream.
  * quiesce != 0: after a completed wake, apple_rtkit_quiesce() (AP then IOP power state
  * 0x10, the state m1n1 hands over); otherwise the coprocessor is left awake.
  */
 int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce);
+/* mode 5: 1 = hand out addresses in m1n1's form (| asc-dram-mask) instead of Linux's */
+void pd_rtkitprobe_set_dva_mask(int on);
 
 #ifdef __cplusplus
 }

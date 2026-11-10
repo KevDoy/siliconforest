@@ -273,7 +273,17 @@ UPSTREAM: yes, with m1-gpu-dt's pd_linux_fwnode.c and pd_linux_of.patch.
 +#endif
 --- a/src/Kernel/fbsdkpi/pd/lkpi-override/linux/platform_device.h
 +++ b/src/Kernel/fbsdkpi/pd/lkpi-override/linux/platform_device.h
-@@ -52,6 +52,17 @@
+@@ -42,6 +42,9 @@
+ 	void	(*shutdown)(struct platform_device *);
+ 	struct device_driver	driver;
+ 	const struct platform_device_id *id_table;
++	// linux 6.x+: the driver sets up its DMA/iommu itself (drivers/gpu/drm/apple); accepted,
++	// the platform bus here never configures an iommu for a device anyway
++	bool	driver_managed_dma;
+ 	// the probe that matched, kept for remove and shutdown at teardown
+ 	struct list_head	pd_link;
+ };
+@@ -52,6 +55,17 @@
  bool pd_dev_is_platform(const struct device *);
  #define	dev_is_platform(dev)	pd_dev_is_platform(dev)
  

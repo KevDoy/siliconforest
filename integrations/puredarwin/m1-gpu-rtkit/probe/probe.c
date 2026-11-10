@@ -170,6 +170,10 @@ int pd_rtkitprobe_rtkit_boot(void)
 #include <linux/soc/apple/mailbox.h>
 
 #include "pd_dcp_dart.h"
+/* mode 5: Linux's IOMMU/DMA API over the display DARTs (../../m1-dcp-dart) */
+#include <linux/io.h>
+#include <linux/mm.h>
+#include "pd_dcp_iommu.h"
 
 #define dlog(fmt, ...)	pd_rtkit_printk(NULL, "dcp " fmt, ##__VA_ARGS__)
 
@@ -185,8 +189,9 @@ struct dcp_probe_state {
 	unsigned int shmem_calls;
 	unsigned int app_messages;
 	unsigned int crashes;
-	/* mode 4: serve buffer requests through the dcp DART */
+	/* 0: not served (mode 3); 1: through pd_dcp_dart directly (mode 4); 2: through the IOMMU/DMA API (mode 5) */
 	int serve;
+	struct device *dev;
 	unsigned int served_fw_placed;
 	unsigned int served_allocated;
 };
@@ -302,6 +307,164 @@ static void dcp_recv_message(void *cookie, u8 endpoint, u64 message)
 	     endpoint, dcp_ep_name(endpoint), (unsigned long long)message);
 }
 
+/* dcp.c:799-815 at the pin, unchanged */
+static int dcp_check_iova_contiguous(struct iommu_domain *domain,
+				     dma_addr_t iova, size_t size,
+				     phys_addr_t phys)
+{
+	unsigned long pgsize = domain->pgsize_bitmap ?
+			       1UL << __ffs(domain->pgsize_bitmap) : PAGE_SIZE;
+	dma_addr_t end = iova + size;
+	dma_addr_t addr = iova;
+
+	while (addr < end) {
+		if (iommu_iova_to_phys(domain, addr) != phys + (addr - iova))
+			return -EINVAL;
+		addr = ALIGN_DOWN(addr, pgsize) + pgsize;
+	}
+
+	return 0;
+}
+
+/*
+ * Mode 5: dcp_rtk_shmem_setup() of the pin (dcp.c:817-866) with its calls as they are
+ * there; pd_dcp_iommu.h turns them into the DART backend for the bound device. The log
+ * lines replace Linux's dev_info().
+ */
+static int dcp_shmem_setup_iommu(struct dcp_probe_state *st, struct apple_rtkit_shmem *bfr)
+{
+	int ret;
+
+	if (bfr->iova) {
+		struct iommu_domain *domain = iommu_get_domain_for_dev(st->dev);
+		phys_addr_t phy_addr;
+
+		if (!domain)
+			return -ENOMEM;
+
+		phy_addr = iommu_iova_to_phys(domain, bfr->iova);
+		if (!phy_addr)
+			return -ENOMEM;
+
+		/* memremap() below needs the whole buffer physically contiguous */
+		ret = dcp_check_iova_contiguous(domain, bfr->iova, bfr->size, phy_addr);
+		if (ret) {
+			dlog("iommu: shmem_setup: iova 0x%llx (0x%zx bytes) is not physically contiguous",
+			     (unsigned long long)bfr->iova, bfr->size);
+			return ret;
+		}
+
+		/* Firmware writes without CPU cache maintenance. */
+		bfr->buffer = memremap(phy_addr, bfr->size, MEMREMAP_WC);
+		if (!bfr->buffer)
+			return -ENOMEM;
+
+		bfr->is_mapped = true;
+		st->served_fw_placed++;
+		dlog("iommu: shmem_setup: iommu_iova_to_phys(0x%llx) = 0x%llx, 0x%zx bytes contiguous, memremap -> %p; no reply",
+		     (unsigned long long)bfr->iova, (unsigned long long)phy_addr, bfr->size, bfr->buffer);
+	} else {
+		bfr->buffer = dma_alloc_coherent(st->dev, bfr->size, &bfr->iova, GFP_KERNEL);
+		if (!bfr->buffer)
+			return -ENOMEM;
+
+		st->served_allocated++;
+		dlog("iommu: shmem_setup: dma_alloc_coherent(0x%zx) -> address 0x%llx, kernel %p, phys of first page 0x%llx; RTKit replies with the address",
+		     bfr->size, (unsigned long long)bfr->iova, bfr->buffer,
+		     (unsigned long long)iommu_iova_to_phys(iommu_get_domain_for_dev(st->dev), bfr->iova));
+	}
+
+	return 0;
+}
+
+/* dcp_rtk_shmem_destroy(), dcp.c:868-876 */
+static void dcp_shmem_destroy_iommu(struct dcp_probe_state *st, struct apple_rtkit_shmem *bfr)
+{
+	if (bfr->is_mapped)
+		memunmap(bfr->buffer);
+	else
+		dma_free_coherent(st->dev, bfr->size, bfr->buffer, bfr->iova);
+}
+
+/*
+ * Mode 5, after the wake: the calls the driver makes later (AFK rings, shared memory,
+ * framebuffer descriptors), once each, on the dcp stream. The addresses are never given to
+ * the firmware.
+ */
+static int dcp_iommu_api_test(struct device *dev)
+{
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
+	const size_t size = 5 * PAGE_SIZE;
+	struct sg_table sgt;
+	struct scatterlist *sg;
+	dma_addr_t dva = 0, res;
+	phys_addr_t pa;
+	u32 *buf;
+	int i, bad = 0, ret;
+
+	if (!domain || !iommu_is_dma_domain(domain) || iommu_device_use_default_domain(dev) ||
+	    dma_set_mask_and_coherent(dev, DMA_BIT_MASK(42))) {
+		dlog("iommu-test: no DMA domain for the dcp device");
+		return -ENODEV;
+	}
+
+	/* several pages: separate pages made contiguous for the device, one kernel view */
+	buf = dma_alloc_coherent(dev, size, &dva, GFP_KERNEL);
+	if (!buf) {
+		dlog("iommu-test: dma_alloc_coherent(0x%zx) failed", size);
+		return -ENOMEM;
+	}
+	for (i = 0; i < 5; i++)
+		buf[i * (PAGE_SIZE / 4)] = 0xdc900000u + i;
+	ret = dma_get_sgtable(dev, &sgt, buf, dva, size);
+	if (ret) {
+		dlog("iommu-test: dma_get_sgtable failed: %d", ret);
+		bad++;
+	} else {
+		for_each_sgtable_sg(&sgt, sg, i) {
+			pa = iommu_iova_to_phys(domain, dva + (dma_addr_t)i * PAGE_SIZE);
+			if (pa != sg_phys(sg) || *(u32 *)page_address(sg_page(sg)) != 0xdc900000u + i)
+				bad++;
+		}
+		if (i != 5)
+			bad++;
+		sg_free_table(&sgt);
+	}
+	dlog("iommu-test: dma_alloc_coherent(0x%zx) -> address 0x%llx; 5 pages checked against dma_get_sgtable and iommu_iova_to_phys: %s",
+	     size, (unsigned long long)dva, bad ? "MISMATCH" : "ok");
+	dma_free_coherent(dev, size, buf, dva);
+	pa = iommu_iova_to_phys(domain, dva);
+	dlog("iommu-test: dma_free_coherent; the address now translates to 0x%llx (%s)",
+	     (unsigned long long)pa, pa ? "STILL MAPPED" : "unmapped, ok");
+	if (pa)
+		bad++;
+
+	/* a physical range at a new address, as iomfb maps what the firmware names: one page of our own */
+	struct page *pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	if (pg) {
+		phys_addr_t phys = page_to_phys(pg) + 0x100;
+
+		res = dma_map_resource(dev, phys, 0x200, DMA_BIDIRECTIONAL, 0);
+		if (dma_mapping_error(dev, res)) {
+			bad++;
+			dlog("iommu-test: dma_map_resource failed");
+		} else {
+			pa = iommu_iova_to_phys(domain, res);
+			dlog("iommu-test: dma_map_resource(phys 0x%llx) -> address 0x%llx, translates to 0x%llx: %s",
+			     (unsigned long long)phys, (unsigned long long)res, (unsigned long long)pa,
+			     pa == phys ? "ok" : "MISMATCH");
+			if (pa != phys)
+				bad++;
+			dma_unmap_resource(dev, res, 0x200, DMA_BIDIRECTIONAL, 0);
+			if (iommu_iova_to_phys(domain, res))
+				bad++;
+		}
+		__free_page(pg);
+	}
+	dlog("iommu-test: %s", bad ? "FAILED" : "passed; everything it mapped is unmapped again");
+	return bad ? -EIO : 0;
+}
+
 /* The request itself is printed, with its endpoint, by dcp_rx_trace(). */
 static int dcp_shmem_setup(void *cookie, struct apple_rtkit_shmem *bfr)
 {
@@ -310,6 +473,8 @@ static int dcp_shmem_setup(void *cookie, struct apple_rtkit_shmem *bfr)
 	st->shmem_calls++;
 	if (!st->serve)
 		return -ENOMEM;
+	if (st->serve == 2)
+		return dcp_shmem_setup_iommu(st, bfr);
 
 	/*
 	 * Linux dcp_rtk_shmem_setup(), dcp.c:817-866 at the pin. An error return leaves the
@@ -345,6 +510,10 @@ static void dcp_shmem_destroy(void *cookie, struct apple_rtkit_shmem *bfr)
 {
 	if (!dcp_state.serve || !bfr->buffer)
 		return;
+	if (dcp_state.serve == 2) {
+		dcp_shmem_destroy_iommu(&dcp_state, bfr);
+		return;
+	}
 	if (bfr->is_mapped)
 		pd_dcp_dart_unmap_fw(bfr->buffer);
 	else
@@ -362,6 +531,11 @@ static const struct apple_rtkit_ops dcp_probe_ops = {
 int pd_rtkitprobe_dcp_wake(void)
 {
 	return pd_rtkitprobe_dcp_wake_serving(0, 0);
+}
+
+void pd_rtkitprobe_set_dva_mask(int on)
+{
+	pd_dcp_iommu_dva_mask = on != 0;
 }
 
 int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
@@ -386,6 +560,17 @@ int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
 	if (ret) {
 		dlog("rtkit-init: could not bind the mailbox: %d", ret);
 		return ret;
+	}
+	dcp_state.dev = dev;
+	if (serve == 2) {
+		/* Linux: iommus = <&dcp_dart 0 ...> on the dcp node, t8103.dtsi:663 */
+		ret = pd_dcp_iommu_bind(dev, "/arm-io/dart-dcp", 0);
+		if (ret) {
+			dlog("iommu: the dcp device could not be bound to /arm-io/dart-dcp stream 0: %d; nothing was sent", ret);
+			return ret;
+		}
+		dlog("iommu: dcp device bound to /arm-io/dart-dcp stream 0; addresses in %s form",
+		     pd_dcp_iommu_dva_mask ? "m1n1's (| 0xf00000000)" : "Linux's (plain stream address)");
 	}
 
 	rtk = apple_rtkit_init(dev, &dcp_state, NULL, 0, &dcp_probe_ops);
@@ -427,7 +612,14 @@ int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
 
 	dlog("served: %u firmware-placed buffers mapped for reading, %u buffers allocated and mapped in the dcp DART",
 	     dcp_state.served_fw_placed, dcp_state.served_allocated);
-	pd_dcp_dart_check("after wake");
+	if (serve == 2) {
+		pd_dcp_iommu_report(dev, "after wake");
+		if (!ret)
+			dcp_iommu_api_test(dev);
+		pd_dcp_iommu_report(dev, "after the API test");
+	} else {
+		pd_dcp_dart_check("after wake");
+	}
 	if (ret) {
 		dlog("exit: wake did not complete (%d); nothing more is sent, the coprocessor is left as it is", ret);
 		return ret;
@@ -445,6 +637,9 @@ int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
 	dlog("exit: apple_rtkit_quiesce(): AP power 0x10, IOP power 0x10, then buffers released");
 	ret = apple_rtkit_quiesce(rtk);
 	dlog("exit: apple_rtkit_quiesce returned %d; %u messages received in all", ret, dcp_state.rx_total);
-	pd_dcp_dart_check("after quiesce");
+	if (serve == 2)
+		pd_dcp_iommu_report(dev, "after quiesce");
+	else
+		pd_dcp_dart_check("after quiesce");
 	return ret;
 }

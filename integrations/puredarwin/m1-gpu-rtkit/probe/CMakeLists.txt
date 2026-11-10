@@ -11,6 +11,8 @@ pd_drm_layout("${PD_DRMKMOD_DIR}" drminc drmdefs drmopts)
 pd_drm_core_includes("${PD_DRMKMOD_DIR}" coreinc)
 
 set(RTKIT "${CMAKE_CURRENT_SOURCE_DIR}/rtkit")
+# ../m1-dcp-dart: the display DARTs behind Linux's IOMMU/DMA API (mode 5)
+set(DCPDART "${CMAKE_CURRENT_SOURCE_DIR}/dcpdart")
 
 add_fbsdkpi_driver(PDRtkitProbe
     CLASS PDRtkitProbe
@@ -23,6 +25,8 @@ add_fbsdkpi_driver(PDRtkitProbe
         "${RTKIT}/rtkit.c"
         "${RTKIT}/rtkit-crashlog.c"
         "${RTKIT}/pd_rtkit_compat.c"
+        "${DCPDART}/src/pd_dart_table.c"
+        "${DCPDART}/src/pd_dcp_iommu.c"
         # LinuxKPI built with PD_LKPI_DRM prints through this (linux %p extensions)
         "${PD_DRM_DIR}/src/pd_drm_printf.c"
     LKPI_INCLUDES ${drminc}
@@ -30,9 +34,10 @@ add_fbsdkpi_driver(PDRtkitProbe
     LKPI_OPTIONS ${drmopts}
     DEFINITIONS ${drmdefs} KBUILD_MODNAME=\"rtkitprobe\"
     # the port's own linux/soc/apple/*.h first
-    INCLUDES "${RTKIT}/include" "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}" ${drminc} ${coreinc}
+    INCLUDES "${RTKIT}/include" "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}" "${DCPDART}/include" ${drminc} ${coreinc}
     XNU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/PDRtkitProbe.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/pd_dcp_dart.cpp"
+        "${DCPDART}/src/pd_dart.cpp"
         "${RTKIT}/PDRtkitPlatform.cpp"
 )
-target_include_directories(PDRtkitProbe.kext PRIVATE "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(PDRtkitProbe.kext PRIVATE "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}" "${DCPDART}/include")

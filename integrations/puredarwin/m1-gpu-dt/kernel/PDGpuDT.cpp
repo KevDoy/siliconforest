@@ -53,6 +53,9 @@
 
 #define LOG(fmt, ...) IOLog("PDGpuDT: " fmt "\n", ##__VA_ARGS__)
 
+/* PDDispDT.cpp: the display nodes, behind boot-arg pddispdt (default off) */
+bool pd_dispdt_run(const uint32_t *fwVersion, uint32_t fwVersionLen, bool ofHasStringProps);
+
 #define super IOService
 OSDefineMetaClassAndStructors(PDGpuDT, IOService);
 
@@ -620,6 +623,11 @@ PDGpuDT::start(IOService *provider)
             LOG("not publishing (pdgpudt=%d%s)", mode, cfg.have_core_mask ? "" : ", no core mask");
         }
     }
+    /* the display nodes: independent of the GPU's being published, after them so that a shared
+     * reserved-memory node is found; nothing unless pddispdt is given */
+    bool dispPublished = pd_dispdt_run(tree->fw_version, tree->fw_version_len, stringProps != 0);
+    setProperty("PDDispDTPublished", dispPublished ? kOSBooleanTrue : kOSBooleanFalse);
+
     for (unsigned i = 0; i < ctx.n; i++)
         ctx.held[i]->release();
     IOFree(tree, sizeof(*tree));
