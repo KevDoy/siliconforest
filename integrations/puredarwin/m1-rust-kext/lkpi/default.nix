@@ -27,7 +27,19 @@ let
   # The PureDarwin tree slice a DRM kext is built from, and its drm-kmod (FreeBSD's port of
   # Linux 6.14 DRM, fetched by the flake, with PureDarwin's removals and patch applied).
   drmKext = pd.packages.x86_64-linux.drm-msm-arm64;
-  tree = drmKext.src;
+  # Phase C: the layer as this ticket needs it. patches-layer/*.patch are applied to our copy
+  # of the tree slice; bindgen, the helpers and the kext all see the patched layer, and no
+  # other kext is affected (each kext compiles its own copy of the layer). Every patch says
+  # in its header whether it has to go upstream into src/Kernel/fbsdkpi.
+  pristineTree = drmKext.src;
+  tree = pkgs.runCommand "puredarwin-tree-lkpi-layer-patched" { nativeBuildInputs = [ pkgs.patch ]; } ''
+    cp -R ${pristineTree} $out
+    chmod -R u+w $out
+    for p in ${./patches-layer}/*.patch; do
+      echo "applying $(basename $p)"
+      patch -d $out -p1 --no-backup-if-mismatch < $p
+    done
+  '';
   drmkmod = pd.packages.x86_64-linux.drm-kmod-src;
   cflags = import ./cflags.nix { inherit lib tree drmkmod; sdk = appleSdk; };
 
@@ -57,6 +69,7 @@ let
       cat ${./include/pd_bindings_extra.h} >> bindings_helper.h
       python3 ${./tools/subset.py} headers ${linuxRust}/uapi/uapi_helper.h \
         uapi_helper.h $out/status/uapi-headers.tsv -- "''${CC[@]}"
+      cat ${./include/pd_uapi_extra.h} >> uapi_helper.h
       HD=(${lib.concatMapStringsSep " " (d: "-D${d}") cflags.helperDefines})
       python3 ${./tools/subset.py} helpers ${linuxRust}/helpers ${./helpers} \
         helpers.c $out/status/helpers.tsv -- "''${CC[@]}" "''${HD[@]}"
@@ -86,8 +99,19 @@ let
       "''${BG[@]}" bindings_helper.h "''${PARAMS[@]}" -o $gen/bindings/bindings_generated.rs -- "''${BGC[@]}" 2> bindgen.log \
         || { grep -v ' WARN ' bindgen.log | head -40; exit 1; }
       sed -Ei 's/pub const RUST_CONST_HELPER_([a-zA-Z0-9_]*)/pub const \1/g' $gen/bindings/bindings_generated.rs
+      # sys/malloc.h: #define free pd_fbsd_free renames every struct member called `free`
+      # (drm_gem_object_funcs, kernel_param_ops, idr). Same member, Linux's name back.
+      sed -Ei 's/\bpub pd_fbsd_free:/pub free:/' $gen/bindings/bindings_generated.rs
       "''${BG[@]}" uapi_helper.h "''${PARAMS[@]}" -o $gen/uapi/uapi_generated.rs -- "''${BGC[@]}" 2> bindgen.log \
         || { grep -v ' WARN ' bindgen.log | head -40; exit 1; }
+      # `struct spinlock` is LinuxKPI's spinlock_t (a FreeBSD struct mtx), but the name that
+      # reaches bindgen first is Haiku's own 4-byte `spinlock` typedef (which struct mtx
+      # itself contains). Rust code that says `bindings::spinlock` (kernel::dma_fence) must
+      # get the Linux meaning, or spin_lock_init() writes a whole mtx into 4 bytes.
+      for f in $gen/bindings/bindings_generated.rs $gen/uapi/uapi_generated.rs; do
+        sed -Ei 's/\bspinlock\b/haiku_spinlock/g' $f
+        echo 'pub type spinlock = mtx;' >> $f
+      done
       "''${BG[@]}" helpers.c --blocklist-type '.*' --allowlist-var "" --allowlist-function 'rust_helper_.*' \
         -o $gen/bindings/bindings_helpers_generated.rs -- "''${BGC[@]}" "''${HD[@]}" -I${linuxRust}/helpers -Wno-missing-prototypes 2> bindgen.log \
         || { grep -v ' WARN ' bindgen.log | head -40; exit 1; }
@@ -222,7 +246,8 @@ let
     procMacros = [ (pm "macros") (pm "zerocopy_derive") ];
     cfgs = modules.cfgsFor moduleList ++ extraCfgs;
   };
-  kernel = kernelWith modules.core [ ];
+  # the crate PDRustLKPI links: core tier plus the phase C modules
+  kernel = kernelWith modules.phaseC [ ];
 
   # B3: the test kext's Rust side
   pdrustlkpi = linuxCrate {
@@ -244,13 +269,14 @@ let
   };
 
   # B4: every subsystem module the Asahi driver needs, compiled on top of the core tier.
-  matrixSpec = pkgs.writeText "matrix-targets.json" (builtins.toJSON {
+  # `matrixOnly [ "io" "irq" ]` runs a subset (nix-build lkpi -A matrixQuick for the phase C five)
+  matrixSpecFor = names: pkgs.writeText "matrix-targets.json" (builtins.toJSON {
     core = modules.core;
     gated = lib.splitString " " (lib.removeSuffix "\n" (builtins.readFile "${rustTree}/pd-delta/modules")) ++ [ "hrtimer" ];
-    targets = modules.matrixTargets;
+    targets = lib.filter (t: names == null || lib.elem t.name names) modules.matrixTargets;
   });
   kernelDeps = [ ffi pin_init build_error bindings uapi zerocopy ];
-  matrix = pkgs.stdenvNoCC.mkDerivation {
+  matrixOnly = names: pkgs.stdenvNoCC.mkDerivation {
     name = "pd-lkpi-kernel-crate-matrix";
     dontUnpack = true;
     nativeBuildInputs = [ rust.rustc pkgs.python3 ];
@@ -259,7 +285,7 @@ let
       ${lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}") rust.env)}
       export OBJTREE=${bindingsGen}/objtree
       mkdir -p $out
-      python3 ${./tools/matrix.py} ${matrixSpec} $out -- \
+      python3 ${./tools/matrix.py} ${matrixSpecFor names} $out -- \
         rustc ${lib.escapeShellArgs rust.rustFlags} --sysroot ${rust.sysroot} \
           --edition=2021 --crate-type rlib --crate-name kernel --error-format=short \
           -Astable_features -Aunused_features --cap-lints=allow \
@@ -273,9 +299,15 @@ let
     dontInstall = true;
     dontFixup = true;
   };
+  # F4's acceptance: an existing DRM kext still builds on the patched layer (build only;
+  # PDDRMmsm is for another board and is not part of this collection)
+  drmKextOnPatchedLayer = drmKext.overrideAttrs (old: { pname = "puredarwin-drm-msm-arm64-lkpi-layer-patched"; src = tree; });
+
+  matrix = matrixOnly null;
+  matrixQuick = matrixOnly [ "io" "irq" "uaccess" "dma" "dma_fence" ];
 in
 {
-  inherit matrix rust cflags modules linuxRust tree drmkmod drmKext
+  inherit drmKextOnPatchedLayer matrixOnly matrixQuick matrix rust cflags modules linuxRust tree pristineTree drmkmod drmKext
     bindingsGen rustTree hostMacros ffi build_error pin_init zerocopy bindings uapi kernel kernelWith
     pdrustlkpi object linuxCrate pm;
 }

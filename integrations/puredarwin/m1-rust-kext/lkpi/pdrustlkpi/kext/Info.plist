@@ -25,6 +25,7 @@
     <key>com.apple.kpi.iokit</key><string>10.0.0d1</string>
     <key>com.apple.kpi.libkern</key><string>10.0.0d1</string>
     <key>com.apple.kpi.mach</key><string>10.0.0d1</string>
+    <key>com.apple.kpi.private</key><string>10.0.0d1</string>
     <key>com.apple.kpi.unsupported</key><string>10.0.0d1</string>
   </dict>
 </dict></plist>

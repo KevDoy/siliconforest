@@ -1,6 +1,7 @@
 # Builds PDRustLKPI.kext: the Rust-for-Linux `kernel` crate on LinuxKPI, self-test kext.
 # The kext is built in the flake's arm64 DRM-kext tree slice (drm-msm-arm64: fbsdkpi, the
-# drm-kmod source, PD_DRMKMOD_DIR), with lkpi/pdrustlkpi/kext added as PDRustLKPI.
+# drm-kmod source, PD_DRMKMOD_DIR) with lkpi/patches-layer applied (lkpi.tree), and
+# lkpi/pdrustlkpi/kext added as PDRustLKPI.
 # $out/nix-support/build-commands has the compile and link lines ninja ran; the build fails
 # if the defines LinuxKPI was compiled with differ from the ones bindgen saw (lkpi/cflags.nix).
 let
@@ -17,7 +18,7 @@ let
 in lkpi.drmKext.overrideAttrs (old: {
   pname = "puredarwin-rust-lkpi";
   src = pkgs.runCommand "puredarwin-rust-lkpi-tree" {} ''
-    cp -R ${old.src} "$out"
+    cp -R ${lkpi.tree} "$out"
     chmod -R u+w "$out"
     test ! -e "$out/src/Kernel/Extensions/PDRustLKPI"
     cp -R ${copied} "$out/src/Kernel/Extensions/PDRustLKPI"

@@ -25,3 +25,12 @@
 # Real functions in LinuxKPI whose C type differs from Linux's; the helper of the same name
 # (Linux's signature) is used instead. is_vmalloc_addr returns int here, bool on Linux.
 --blocklist-function is_vmalloc_addr
+
+# linux/fs.h: #define file linux_file. Without this `bindings::file` is the FreeBSD
+# compatibility layer's own `struct file` (declared before that define), not the struct
+# LinuxKPI code means by `struct file`. Nothing uses the FreeBSD one by value.
+--blocklist-type file
+--raw-line 'pub type file = linux_file;'
+
+# linux/slab.h: #define kmem_cache linux_kmem_cache
+--raw-line 'pub type kmem_cache = linux_kmem_cache;'

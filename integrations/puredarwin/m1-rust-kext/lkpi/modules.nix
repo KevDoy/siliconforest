@@ -13,11 +13,17 @@ rec {
     "workqueue"
   ];
 
+  # Phase C: what PDRustLKPI is built with. io is the register access (Mmio, Region), not
+  # io::mem; irq is Flags only; see patches/0005.
+  phaseC = core ++ [ "io" "processor" "irq" "uaccess" ];
+
   # Kconfig as rustc sees it (Linux: include/generated/rustc_cfg). Only what the tree's
   # CONFIG_ cfgs can truthfully be on this platform.
   config = [
     "CONFIG_RUST" "CONFIG_64BIT" "CONFIG_ARM64" "CONFIG_SMP" "CONFIG_PRINTK"
     "CONFIG_ARCH_SUPPORTS_ATOMIC_RMW"
+    # ioremap exists (helpers/io.c)
+    "CONFIG_HAS_IOMEM"
     # init/Kconfig, for rustc 1.95
     "CONFIG_RUSTC_HAS_SPAN_FILE" "CONFIG_RUSTC_HAS_UNNECESSARY_TRANSMUTES"
     "CONFIG_RUSTC_HAS_FILE_WITH_NUL" "CONFIG_RUSTC_HAS_FILE_AS_C_STR"
@@ -38,8 +44,8 @@ rec {
       drm = sub: { name = "drm::${sub}"; modules = [ "drm" "drm_${sub}" ]; cfgs = drmCfgs; };
     in
     map top [
-      "device_id" "device" "driver" "platform" "of" "io" "uaccess" "dma" "debugfs"
-      "maple_tree" "module_param" "xarray" "devres" "irq" "mm" "fs" "cred"
+      "device_id" "device" "driver" "platform" "of" "io" "processor" "uaccess" "dma" "debugfs"
+      "maple_tree" "module_param" "xarray" "devres" "irq" "ioctl" "mm" "fs" "cred"
     ] ++ [
       { name = "cpufreq"; modules = [ "cpufreq" ]; cfgs = [ "CONFIG_CPU_FREQ" ]; }
       { name = "time::hrtimer"; modules = [ "hrtimer" ]; cfgs = [ ]; }

@@ -1,0 +1,48 @@
+fbsdkpi: the layer's page size is the kernel's (16 KiB on Apple Silicon)
+
+LinuxKPI and the FreeBSD compatibility code were built for 4 KiB pages on every arm64 board,
+while the xnu seam (pd_fbsd_os.cpp: pdos_map_pages, pdos_malloc_contig, pdos_vtophys) already
+works in xnu pages. PAGESIZE/B_PAGE_SIZE/PAGE_SIZE and PAGE_SHIFT are the only two places
+the number is written down; everything else in the layer derives from them.
+UPSTREAM: yes, as a per-board setting (boards with 4 KiB kernels keep 4096/12).
+
+--- a/src/Kernel/fbsdkpi/haiku/freebsd_network/compat/sys/param.h
++++ b/src/Kernel/fbsdkpi/haiku/freebsd_network/compat/sys/param.h
+@@ -26,7 +26,12 @@
+ 
+ #define MAXBSIZE	0x10000
+ 
++// log2(B_PAGE_SIZE), see posix/arch/<arch>/limits.h; checked in pd/lkpi/pd_linux_page.c
++#if defined(__aarch64__) || defined(__arm64__)
++#define PAGE_SHIFT	14
++#else
+ #define PAGE_SHIFT	12
++#endif
+ #define PAGE_MASK	(B_PAGE_SIZE - 1)
+ 
+ #define trunc_page(x)	((x) & ~PAGE_MASK)
+--- a/src/Kernel/fbsdkpi/pd/haiku-headers/posix/arch/arm64/limits.h
++++ b/src/Kernel/fbsdkpi/pd/haiku-headers/posix/arch/arm64/limits.h
+@@ -5,7 +5,10 @@
+ #ifndef _ARM64_LIMITS_H
+ #define _ARM64_LIMITS_H
+ 
+-#define PAGESIZE 4096
++// The page size LinuxKPI and the FreeBSD compatibility code are built for. It has to be the
++// kernel's: the xnu seam (pd_fbsd_os.cpp) maps, wires and translates in xnu pages, and Apple
++// Silicon kernels run 16 KiB pages. Boards with 4 KiB kernels need 4096 here.
++#define PAGESIZE 16384
+ 
+ #endif
+ 
+--- a/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
++++ b/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_page.c
+@@ -11,6 +11,8 @@
+ 
+ #include "../../pd_fbsd_os.h"
+ 
++_Static_assert(PAGE_SIZE == (1UL << PAGE_SHIFT), "PAGE_SIZE and PAGE_SHIFT disagree");
++
+ #define PD_PAGE_HASH	1024
+ // the offset bits in a page. linux/page.h makes PAGE_MASK the linux one, the page bits
+ #define PD_PAGE_OFFSET	((vm_paddr_t)PAGE_SIZE - 1)

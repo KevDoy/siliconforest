@@ -14,6 +14,9 @@
 #include <linux/gfp.h>
 #include <linux/rcupdate.h>
 #include <linux/kthread.h>
+#include <linux/io.h>
+#include <linux/hardirq.h>
+#include <linux/uaccess.h>
 
 /* Macros bindgen cannot turn into constants (casts, expressions). */
 const clockid_t RUST_CONST_HELPER_CLOCK_MONOTONIC = CLOCK_MONOTONIC;
