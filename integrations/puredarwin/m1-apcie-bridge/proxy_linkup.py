@@ -450,6 +450,30 @@ def launcher_step(p, u, out):
     return result
 
 
+def cpu_step(p, out):
+    """Called by the boot launcher before the guest starts. iBoot leaves the CPU clusters at a low
+    performance state and nothing in our kernel raises it; m1n1's cpufreq_init() (the call it makes
+    before booting Linux) sets the normal operating states. Mode file cpufreq_mode.txt: "on"
+    (default) or "off" (leave the clusters as iBoot left them, for A/B measurements)."""
+    mode_file = Path(__file__).with_name("cpufreq_mode.txt")
+    mode = mode_file.read_text().strip() if mode_file.exists() else "on"
+    regs = {"ecpu": 0x210e20020, "pcpu": 0x211e20020}   # T8103 cluster P-state registers (m1n1 cpufreq.c)
+    result = {"mode": mode}
+    try:
+        result["before"] = {k: p.read64(a) for k, a in regs.items()}
+        if mode == "on":
+            result["ret"] = p.cpufreq_init()
+            result["after"] = {k: p.read64(a) for k, a in regs.items()}
+    except Exception:
+        result["error"] = traceback.format_exc()
+    log("cpufreq: " + json.dumps(result, default=hex))
+    try:
+        (Path(out) / "cpufreq-result.json").write_text(json.dumps(result, indent=1, default=hex))
+    except Exception:
+        pass
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", required=True)

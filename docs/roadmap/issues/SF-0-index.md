@@ -26,9 +26,9 @@ SiliconForest is a fork of PureDarwin (Darwin/XNU) for Apple Silicon Macs. First
 | SF-M | Wi-Fi hardening | Fix the firmware stall, soak, multi-CPU audit, WPA3, tree patches | SF-B, SF-C |
 
 ## What can run in parallel right now
-- **No dependencies, start today:** SF-A, SF-B, SF-E, SF-C item C1, SF-D items D2/D3, SF-G items G1-G4, SF-F (in progress), SF-M items M1/M2/M6.
+- **No dependencies, start today:** SF-A, SF-B, SF-E, SF-C item C2, SF-D items D1-D3, SF-G items G1-G4, SF-F (in progress), SF-M items M1/M2/M6.
 - **After SF-A's interfaces (item A1) are agreed:** SF-I, SF-J, SF-H, SF-L stage 1, SF-K phase 1 can all proceed against the headers while A2-A8 are implemented.
-- **Suggested order for user-visible wins:** C1 (minutes), SF-E (days), D1-D3, SF-C SMP, then SF-A, then the feature tickets.
+- **Suggested order for user-visible wins:** SF-E (days; in progress), SF-D D1 (non-DEBUG kernel), SF-C SMP so performance cores are used, then SF-A, then the feature tickets. The frequency step alone (C1, done) measured no gain.
 
 ## The one shared resource: the bench
 There is one M1 and one controller. Until SF-B's queue exists, coordinate boots by hand. Rules:
