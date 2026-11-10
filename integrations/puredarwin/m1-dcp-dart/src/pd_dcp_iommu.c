@@ -232,11 +232,15 @@ ssize_t pd_iommu_map_sgtable(struct pd_iommu_domain *domain, unsigned long iova,
 			ret = -EINVAL;
 			goto undo;
 		}
-		ret = pd_dart_map(domain->pd_stream, iova + mapped, phys, len, pd_prot(prot));
+		ret = pd_dart_map_deferred(domain->pd_stream, iova + mapped, phys, len, pd_prot(prot));
 		if (ret)
 			goto undo;
 		mapped += len;
 	}
+	/* one invalidate for the whole table */
+	ret = pd_dart_flush(domain->pd_stream);
+	if (ret)
+		goto undo;
 	return mapped;
 undo:
 	if (mapped)
@@ -339,17 +343,20 @@ void *pd_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle
 		return NULL;
 	}
 	for (i = 0; i < n; i++) {
-		if (pd_dart_map(dom->pd_stream, iova + ((u64)i << PD_DART_PAGE_SHIFT),
-				page_to_phys(a->pages[i]), PD_DART_PAGE,
-				PD_DART_PROT_READ | PD_DART_PROT_WRITE))
+		if (pd_dart_map_deferred(dom->pd_stream, iova + ((u64)i << PD_DART_PAGE_SHIFT),
+					 page_to_phys(a->pages[i]), PD_DART_PAGE,
+					 PD_DART_PROT_READ | PD_DART_PROT_WRITE))
 			break;
 	}
+	/* one invalidate for the whole buffer; a failed one counts as a failed mapping */
+	if (pd_dart_flush(dom->pd_stream))
+		i = min(i, n - 1);
 	if (i == n) {
 		a->cpu = n == 1 ? page_address(a->pages[0]) : vmap(a->pages, n, VM_MAP, PAGE_KERNEL);
 		a->vmapped = n != 1;
 	}
 	if (i < n || !a->cpu) {
-		pd_dart_unmap(dom->pd_stream, iova, (u64)i << PD_DART_PAGE_SHIFT);
+		pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
 		pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
 		pd_alloc_drop(a, n);
 		return NULL;
@@ -488,8 +495,8 @@ int pd_dma_map_sgtable(struct device *dev, struct sg_table *sgt, enum dma_data_d
 	if (!total || pd_dart_iova_alloc(dom->pd_stream, total, &iova))
 		return -ENOMEM;
 	for_each_sgtable_sg(sgt, sg, i) {
-		if (pd_dart_map(dom->pd_stream, iova + at, sg_phys(sg), sg->length,
-				PD_DART_PROT_READ | PD_DART_PROT_WRITE)) {
+		if (pd_dart_map_deferred(dom->pd_stream, iova + at, sg_phys(sg), sg->length,
+					 PD_DART_PROT_READ | PD_DART_PROT_WRITE)) {
 			pd_dart_unmap(dom->pd_stream, iova, at);
 			pd_dart_iova_free(dom->pd_stream, iova, total);
 			return -EIO;
@@ -497,6 +504,11 @@ int pd_dma_map_sgtable(struct device *dev, struct sg_table *sgt, enum dma_data_d
 		sg_dma_address(sg) = pd_to_dma(iova + at);
 		sg_dma_len(sg) = sg->length;
 		at += sg->length;
+	}
+	if (pd_dart_flush(dom->pd_stream)) {
+		pd_dart_unmap(dom->pd_stream, iova, total);
+		pd_dart_iova_free(dom->pd_stream, iova, total);
+		return -EIO;
 	}
 	sgt->nents = sgt->orig_nents;
 	return 0;
@@ -521,6 +533,28 @@ void pd_dma_unmap_sgtable(struct device *dev, struct sg_table *sgt, enum dma_dat
 		total += sg->length;
 	pd_dart_unmap(dom->pd_stream, iova, total);
 	pd_dart_iova_free(dom->pd_stream, iova, total);
+}
+
+int pd_dma_buffer_pages(struct device *dev, void *cpu_addr, size_t size, uint32_t *pages)
+{
+	struct mutex *lock = pd_lock_get();
+	struct pd_alloc *a;
+	unsigned int i, n = size >> PD_DART_PAGE_SHIFT;
+	int ret = 0;
+
+	if (!pages || !size || (size & (PD_DART_PAGE - 1)))
+		return -EINVAL;
+	mutex_lock(lock);
+	a = pd_alloc_find(dev, cpu_addr);
+	if (!a)
+		ret = -ENOENT;
+	else if (n > a->npages)
+		ret = -EINVAL;
+	else
+		for (i = 0; i < n; i++)
+			pages[i] = (uint32_t)(page_to_phys(a->pages[i]) >> PAGE_SHIFT);
+	mutex_unlock(lock);
+	return ret;
 }
 
 void pd_dcp_iommu_report(struct device *dev, const char *when)

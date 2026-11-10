@@ -27,6 +27,8 @@ add_fbsdkpi_driver(PDRtkitProbe
         "${RTKIT}/pd_rtkit_compat.c"
         "${DCPDART}/src/pd_dart_table.c"
         "${DCPDART}/src/pd_dcp_iommu.c"
+        # ../m1-gpu-dt/kernel/pd_of_iter.c: of_find_compatible_node() that honours `from`
+        "${DCPDART}/pd_of_iter.c"
         # LinuxKPI built with PD_LKPI_DRM prints through this (linux %p extensions)
         "${PD_DRM_DIR}/src/pd_drm_printf.c"
     LKPI_INCLUDES ${drminc}

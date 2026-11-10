@@ -498,6 +498,9 @@ int dispdt_build_t8103(const struct gpudt_adt_ops *adt, const struct dispdt_conf
             prop_u32(&b, DISPDT_NODE_FRAMEBUFFER0, "stride", GPUDT_O_ADT, GPUDT_F_INFO, cfg->fb_stride);
             prop_str(&b, DISPDT_NODE_FRAMEBUFFER0, "format", GPUDT_O_ADT, GPUDT_F_INFO, format);
             prop_u32(&b, DISPDT_NODE_FRAMEBUFFER0, "panel", GPUDT_O_SYNTH, GPUDT_F_PHANDLE | GPUDT_F_INFO, ph + PH_PANEL);
+            /* j293.dts:54 */
+            prop_u32(&b, DISPDT_NODE_FRAMEBUFFER0, "post-init-providers", GPUDT_O_SYNTH, GPUDT_F_PHANDLE | GPUDT_F_INFO,
+                     ph + PH_PANEL);
         }
     } else {
         diag(t, DISPDT_D_NO_FRAMEBUFFER, NULL, 0, 0);

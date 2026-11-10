@@ -109,6 +109,16 @@ int pd_dma_map_sgtable(struct device *dev, struct sg_table *sgt, enum dma_data_d
 void pd_dma_unmap_sgtable(struct device *dev, struct sg_table *sgt, enum dma_data_direction dir,
 			  unsigned long attrs);
 
+/*
+ * For a user mapping of a buffer from pd_dma_alloc_*() (PDDRMDri's pd_drm_mmap_pages
+ * resolver for a GEM DMA object, in place of Linux's dma_mmap_wc()/dma_mmap_pages()):
+ * writes one physical page number (LinuxKPI PAGE_SHIFT units) per page of `size` into
+ * `pages`. The pages stay valid until the buffer is freed, so the caller must keep the
+ * owning object alive for the life of the mapping. 0, -ENOENT if cpu_addr is not such a
+ * buffer of this device, -EINVAL if size is not whole pages or exceeds the buffer.
+ */
+int pd_dma_buffer_pages(struct device *dev, void *cpu_addr, size_t size, uint32_t *pages);
+
 /* Counters and the last error of the DART behind a device, one line to the kernel log. */
 void pd_dcp_iommu_report(struct device *dev, const char *when);
 

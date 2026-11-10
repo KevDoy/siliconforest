@@ -218,8 +218,10 @@ bool pd_dispdt_run(const uint32_t *fwVersion, uint32_t fwVersionLen, bool ofHasS
             (unsigned long long)tree->region_phys[2], (unsigned long long)tree->region_size[2],
             (unsigned long long)tree->region_phys[3], (unsigned long long)tree->region_size[3],
             (unsigned long long)tree->region_phys[4], (unsigned long long)tree->region_size[4]);
-        LOG("boot framebuffer 0x%llx %ux%u stride %u depth %u", (unsigned long long)cfg.fb_base, (unsigned)cfg.fb_width,
-            (unsigned)cfg.fb_height, (unsigned)cfg.fb_stride, (unsigned)cfg.fb_depth);
+        /* v_depth carries flag bits above the depth (0x1001e in boot dc12): the low byte is the depth, as m1n1 takes it */
+        LOG("boot framebuffer 0x%llx %ux%u stride %u depth %u (v_depth 0x%x)", (unsigned long long)cfg.fb_base,
+            (unsigned)cfg.fb_width, (unsigned)cfg.fb_height, (unsigned)cfg.fb_stride, (unsigned)(cfg.fb_depth & 0xff),
+            (unsigned)cfg.fb_depth);
         if (mode >= 2 && ofHasStringProps) {
             published = publish(tree);
             LOG("%s", published ? "published" : "NOT published");

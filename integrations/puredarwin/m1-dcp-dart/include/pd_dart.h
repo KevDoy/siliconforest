@@ -56,6 +56,12 @@ int pd_dart_find(struct pd_dart_stream *s, uint64_t phys, uint64_t size, uint64_
  * -EEXIST when part of the range is already mapped.
  */
 int pd_dart_map(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t size, unsigned int prot);
+/*
+ * The same without the TLB invalidate, for a caller that maps many ranges: every run of
+ * pd_dart_map_deferred() calls must end with one pd_dart_flush(), also when a call failed.
+ */
+int pd_dart_map_deferred(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t size, unsigned int prot);
+int pd_dart_flush(struct pd_dart_stream *s);
 /* Clears the range and invalidates. Returns the number of bytes that were mapped. */
 uint64_t pd_dart_unmap(struct pd_dart_stream *s, uint64_t iova, uint64_t size);
 

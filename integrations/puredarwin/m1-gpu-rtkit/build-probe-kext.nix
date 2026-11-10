@@ -26,6 +26,7 @@ let
     mkdir -p "$out/dcpdart"
     cp -R ${../m1-dcp-dart/include} "$out/dcpdart/include"
     cp -R ${../m1-dcp-dart/src} "$out/dcpdart/src"
+    cp ${../m1-gpu-dt/kernel/pd_of_iter.c} "$out/dcpdart/pd_of_iter.c"
   '';
   bindgenDefines = pkgs.writeText "bindgen-defines"
     (pkgs.lib.concatMapStrings (d: "-D${d}\n") lkpi.cflags.defines);

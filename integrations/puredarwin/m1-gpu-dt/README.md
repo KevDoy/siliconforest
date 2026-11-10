@@ -38,8 +38,18 @@ Not produced: `interrupts`/`interrupt-parent`, `power-domains`, `resets` (power 
 interrupts come from native interfaces, as for the GPU), the `ports` graph to the audio
 node, `iommu-addresses` unless the caller supplies the mapped addresses (the kext does not;
 the DART backend in `../m1-dcp-dart` reads the mappings from the tables themselves), and
-the second `iommus` entry of `display-subsystem` (dispext0). **Not compared with the live
-Linux tree yet.**
+the second `iommus` entry of `display-subsystem` (dispext0).
+
+Compared with the live Linux tree of this machine (`make compare-disp`, needs the untracked
+`private/linux-dt/display-nodes.txt`): 87 properties identical once phandle numbers are
+translated, 30 differences explained (`name`; `interrupts`, `interrupt-parent`,
+`interrupt-names`, `power-domains`, `resets`, none of which the T8103 driver path or this
+layer consumes; the dispext0 entry), none unexplained. For that comparison the regions'
+mapped addresses, which give `iommu-addresses`, are passed in as boot dc12 measured them; the
+kext does not publish `iommu-addresses` (only Linux's IOMMU core reads it).
+
+`kernel/pd_of_iter.c`: `of_find_compatible_node()` with Linux's `from` semantics, which the
+layer's lacks (it always returns the first match); see `../m1-dcp-dart/ANSWERS.md`.
 
 ## Running the test
 

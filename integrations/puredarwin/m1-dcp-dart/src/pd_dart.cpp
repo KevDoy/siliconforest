@@ -449,6 +449,26 @@ int pd_dart_map(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t
     return ret ? ret : inv;
 }
 
+int pd_dart_map_deferred(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t size, unsigned int prot)
+{
+    if (!s)
+        return -EINVAL;
+    IOLockLock(gLock);
+    int ret = pd_dart_table_map(&s->tables, iova, phys, size, prot);
+    IOLockUnlock(gLock);
+    return ret;
+}
+
+int pd_dart_flush(struct pd_dart_stream *s)
+{
+    if (!s)
+        return -EINVAL;
+    IOLockLock(gLock);
+    int ret = invalidate(s);
+    IOLockUnlock(gLock);
+    return ret;
+}
+
 uint64_t pd_dart_unmap(struct pd_dart_stream *s, uint64_t iova, uint64_t size)
 {
     if (!s)

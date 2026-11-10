@@ -198,16 +198,96 @@ of_machine_is_compatible(const char *compat)
 	return (pd_rtkit_of_machine_is_compatible(compat));
 }
 
+/*
+ * Depth-first walk of the whole tree from of_root; returns the first node compatible with
+ * `compat` that comes after `from` in that order (NULL `from`: the first). Linux's contract
+ * for of_find_compatible_node(): `from` is released, the result is held.
+ */
+struct pd_dcp_walk {
+	struct device_node *from;
+	const char *compat;
+	bool past;
+};
+
+static struct device_node *
+pd_dcp_walk(struct device_node *np, struct pd_dcp_walk *w, int depth)
+{
+	struct device_node *child, *found;
+
+	if (np == NULL || depth > 16)
+		return (NULL);
+	if (w->past) {
+		if (of_device_is_compatible(np, w->compat))
+			return (of_node_get(np));
+	} else if (np == w->from) {
+		w->past = true;
+	}
+	for_each_child_of_node(np, child) {
+		found = pd_dcp_walk(child, w, depth + 1);
+		if (found != NULL) {
+			of_node_put(child);
+			return (found);
+		}
+	}
+	return (NULL);
+}
+
+#undef of_find_compatible_node
+struct device_node *
+pd_dcp_of_find_compatible_node(struct device_node *from, const char *type, const char *compat)
+{
+	struct pd_dcp_walk w = { .from = from, .compat = compat, .past = from == NULL };
+	struct device_node *np = pd_dcp_walk(of_root, &w, 0);
+
+	if (np == NULL && from == NULL)
+		kprintf("PDDcp: of: no node compatible with \"%s\" in the tree\n", compat);
+	if (from != NULL)
+		of_node_put(from);
+	return (np);
+}
+
 struct device_node *
 of_find_matching_node(struct device_node *from, const struct of_device_id *matches)
 {
-	/* one compatible at a time: the order differs from Linux's tree order, the set does not */
-	for (; matches != NULL && matches->compatible[0] != '\0'; matches++) {
-		struct device_node *np = of_find_compatible_node(from, NULL, matches->compatible);
+	/*
+	 * One compatible at a time, each walked to its end before the next: the order differs
+	 * from Linux's tree order, the set of nodes does not. `from` belongs to exactly one of
+	 * the walks: the one whose compatible it matches.
+	 */
+	const struct of_device_id *m;
+	struct device_node *np;
 
-		if (np != NULL)
+	for (m = matches; m != NULL && m->compatible[0] != '\0'; m++) {
+		if (from != NULL && !of_device_is_compatible(from, m->compatible))
+			continue;
+		np = pd_dcp_of_find_compatible_node(from != NULL ? of_node_get(from) : NULL, NULL, m->compatible);
+		if (np != NULL) {
+			if (from != NULL)
+				of_node_put(from);
 			return (np);
+		}
+		/* this compatible is exhausted: the first node of each later one follows */
+		for (m++; m->compatible[0] != '\0'; m++) {
+			np = pd_dcp_of_find_compatible_node(NULL, NULL, m->compatible);
+			/* a node that also matched an earlier entry was already returned */
+			if (np != NULL) {
+				const struct of_device_id *e;
+				bool dup = false;
+
+				for (e = matches; e != m; e++)
+					dup |= of_device_is_compatible(np, e->compatible);
+				if (!dup) {
+					if (from != NULL)
+						of_node_put(from);
+					return (np);
+				}
+				of_node_put(np);
+			}
+		}
+		break;
 	}
+	if (from != NULL)
+		of_node_put(from);
 	return (NULL);
 }
 

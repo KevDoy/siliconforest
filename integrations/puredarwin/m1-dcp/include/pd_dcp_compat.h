@@ -116,6 +116,15 @@ int of_changeset_apply(struct of_changeset *ocs);
 int of_changeset_update_prop_string(struct of_changeset *ocs, struct device_node *np,
 				    const char *prop_name, const char *str);
 
+/*
+ * of_find_compatible_node(): the layer's does not continue after `from` (boot dp01: the
+ * display-subsystem probe looped forever in for_each_matching_node). The kext's own walks
+ * the tree depth-first from of_root and returns the first match after `from`.
+ */
+struct device_node *pd_dcp_of_find_compatible_node(struct device_node *from, const char *type,
+						   const char *compat);
+#define of_find_compatible_node(from, type, compat)	pd_dcp_of_find_compatible_node(from, type, compat)
+
 struct of_device_id;
 struct device_node *of_find_matching_node(struct device_node *from, const struct of_device_id *matches);
 #ifndef for_each_matching_node
@@ -330,6 +339,14 @@ extern int pd_dcp_debug;
 #define dev_notice(dev, fmt, ...)	pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
 #define dev_info(dev, fmt, ...)		pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__)
 #define dev_dbg(dev, fmt, ...)		do { if (pd_dcp_debug) pd_dcp_dev_log(dev, fmt, ##__VA_ARGS__); } while (0)
+/*
+ * pddcp=1 binds and starts the coprocessor but refuses every atomic commit; pddcp=2 lets
+ * them through (kext/pd_dcp_drm72.c). The driver's mode_config_funcs names the helper.
+ */
+#include <drm/drm_atomic_helper.h>
+int pd_dcp_atomic_helper_commit(struct drm_device *dev, struct drm_atomic_commit *state, bool nonblock);
+#define drm_atomic_helper_commit	pd_dcp_atomic_helper_commit
+
 /* patches/0002: the IOMFB callback dispatcher reports each callback (kext/pd_dcp_linux.c) */
 void pd_dcp_note_callback(struct device *dev, int tag, const char *fourcc, u32 in_len, u32 out_len,
 			  unsigned int context, bool handled);

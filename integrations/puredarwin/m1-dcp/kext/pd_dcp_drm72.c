@@ -131,3 +131,21 @@ int drm_mode_size_dumb(struct drm_device *dev, struct drm_mode_create_dumb *args
 	args->size = size;
 	return 0;
 }
+
+/* the commit gate, see include/pd_dcp_compat.h */
+void kprintf(const char *, ...);
+extern int pd_dcp_mode;
+
+int pd_dcp_atomic_helper_commit(struct drm_device *dev, struct drm_atomic_state *state, bool nonblock)
+{
+	static int said;
+
+	if (pd_dcp_mode < 2) {
+		if (!said) {
+			said = 1;
+			kprintf("PDDcp: atomic commit refused: pddcp=%d (2 allows modesets and flips)\n", pd_dcp_mode);
+		}
+		return -EPERM;
+	}
+	return drm_atomic_helper_commit(dev, state, nonblock);
+}

@@ -15,7 +15,7 @@ CC   ?= cc
 # -ffp-contract=off: the self-test's reference floats must round after every operation
 CFLAGS ?= -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off
 
-.PHONY: test clean check-inputs freestanding
+.PHONY: test clean check-inputs freestanding compare-disp
 
 test: build/harness build/fwnode_test build/dispdt_test freestanding
 	./build/harness selftest
@@ -39,6 +39,16 @@ build/harness: src/gpudt.c src/gpudt_summary.c src/gpudt.h src/gpudt_fw_table.in
 # the display nodes (dispdt.c) from the same saved device tree
 build/dispdt_test: src/dispdt.c src/dispdt.h src/gpudt.h test/dispdt_test.c test/fixture.h build/adt_fixture.c
 	$(CC) $(CFLAGS) -Isrc -Itest -o $@ src/dispdt.c test/dispdt_test.c build/adt_fixture.c
+
+# the display tree against the live Linux tree, when its dump is there (private/, never committed):
+#   make compare-disp DISP_ARGS="13 5 0 0xbd5d5c000 2560 1600 10240 0x1001e 0x0 0x300000 0x1318000 0x131c000 0x13dc000"
+# (firmware version, boot framebuffer as the boot-args give it, the regions' mapped addresses as boot dc12 measured them)
+DISP_GT ?= $(REPO)/private/linux-dt/display-nodes.txt
+DISP_ARGS ?= 13 5 0 0xbd5d5c000 2560 1600 10240 0x1001e 0x0 0x300000 0x1318000 0x131c000 0x13dc000
+build/dispdt_dump: src/dispdt.c src/dispdt.h test/dispdt_dump.c test/fixture.h build/adt_fixture.c
+	$(CC) $(CFLAGS) -Isrc -Itest -o $@ src/dispdt.c test/dispdt_dump.c build/adt_fixture.c
+compare-disp: build/dispdt_dump
+	python3 test/compare_disp.py ./build/dispdt_dump $(DISP_ARGS) $(DISP_GT)
 
 # the proposed of-layer additions, against stand-ins for the layer's headers (test/stubs)
 build/fwnode_test: kernel/pd_linux_fwnode.c test/fwnode_test.c src/gpudt.c src/gpudt.h build/adt_fixture.c $(wildcard test/stubs/linux/*.h)

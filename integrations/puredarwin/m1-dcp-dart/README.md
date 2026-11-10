@@ -69,11 +69,18 @@ DART node has `reg` (the nodes `../m1-gpu-dt` publishes with `pddispdt=2` do), o
 
 `dma_alloc_coherent` allocates single pages, maps them at consecutive addresses and returns
 one kernel view (`vmap`), as iommu-dma does, so a 16 MiB framebuffer does not need 16 MiB of
-contiguous memory. It currently invalidates the TLB once per page.
+contiguous memory, with one TLB invalidate per call.
 
-Not provided: `dma_mmap_*` (the layer has none either; `drm_gem_dma` mmap of a framebuffer
-to user space will need it), IOMMU fault reporting (`pd_dcp_iommu_report` reads the error
-register on request).
+User mappings: `/dev/dri` mmap asks the DRM kext for pages (`pd_drm_mmap_pages`), so
+`dma_mmap_wc`/`dma_mmap_pages` are not reached; `pd_dma_buffer_pages(dev, cpu_addr, size,
+pages)` gives that resolver the physical pages of a buffer from `dma_alloc_*` (see
+`ANSWERS.md` for the resolver).
+
+Not provided: IOMMU fault reporting (`pd_dcp_iommu_report` reads the error register on
+request).
+
+`ANSWERS.md` answers the PDDcp owner's questions (binding of `piodma`, the published nubs,
+`of_find_compatible_node` iteration, `status`).
 
 ## Writes
 

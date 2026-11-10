@@ -430,7 +430,19 @@ static int dcp_iommu_api_test(struct device *dev)
 			bad++;
 		sg_free_table(&sgt);
 	}
-	dlog("iommu-test: dma_alloc_coherent(0x%zx) -> address 0x%llx; 5 pages checked against dma_get_sgtable and iommu_iova_to_phys: %s",
+	{
+		/* what a user mapping of such a buffer is given (PDDRMDri's page resolver) */
+		uint32_t pfn[5] = { 0 };
+
+		if (pd_dma_buffer_pages(dev, buf, size, pfn))
+			bad++;
+		for (i = 0; i < 5; i++)
+			if ((phys_addr_t)pfn[i] << PAGE_SHIFT != iommu_iova_to_phys(domain, dva + (dma_addr_t)i * PAGE_SIZE))
+				bad++;
+		if (pd_dma_buffer_pages(dev, buf + 1, size, pfn) != -ENOENT)
+			bad++;
+	}
+	dlog("iommu-test: dma_alloc_coherent(0x%zx) -> address 0x%llx; 5 pages checked against dma_get_sgtable, pd_dma_buffer_pages and iommu_iova_to_phys: %s",
 	     size, (unsigned long long)dva, bad ? "MISMATCH" : "ok");
 	dma_free_coherent(dev, size, buf, dva);
 	pa = iommu_iova_to_phys(domain, dva);
@@ -563,6 +575,26 @@ int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
 	}
 	dcp_state.dev = dev;
 	if (serve == 2) {
+		/*
+		 * The tree walk the display driver's for_each_compatible_node() needs
+		 * (../../m1-gpu-dt/kernel/pd_of_iter.c): every ASC wrapper of the device tree,
+		 * once each, and an end.
+		 */
+		struct device_node *pd_of_find_compatible_node_from(struct device_node *, const char *, const char *);
+		struct device_node *np = NULL;
+		char names[160];
+		size_t used = 0;
+		int count = 0;
+
+		names[0] = '\0';
+		while ((np = pd_of_find_compatible_node_from(np, NULL, "iop,ascwrap-v4")) && count < 64) {
+			if (used + 24 < sizeof(names))
+				used += snprintf(names + used, sizeof(names) - used, " %s", np->name);
+			count++;
+		}
+		dlog("of-iter: %d nodes compatible with iop,ascwrap-v4, each found once:%s%s", count, names,
+		     count >= 64 ? " (STOPPED at 64: the walk did not end)" : "");
+
 		/* Linux: iommus = <&dcp_dart 0 ...> on the dcp node, t8103.dtsi:663 */
 		ret = pd_dcp_iommu_bind(dev, "/arm-io/dart-dcp", 0);
 		if (ret) {

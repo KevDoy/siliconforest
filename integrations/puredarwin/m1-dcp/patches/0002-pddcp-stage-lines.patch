@@ -17,6 +17,24 @@ UPSTREAM: no.
  	if (ret)
  		return ret;
  	if (ep->dcp->fw_compat == DCP_FIRMWARE_V_14_7_TEMPLATE &&
+--- a/apple_drv.c
++++ b/apple_drv.c
+@@ -1221,10 +1221,14 @@
+ 
+ 	/* add DCP components, handle less than 1 as probe error */
+ 	num_dcp = add_dcp_components(mdev, &match);
++	/* PDDcp: stage lines */
++	dev_info(mdev, "display-subsystem probe: %d dcp node(s) in the tree\n", num_dcp);
+ 	if (num_dcp < 1)
+ 		return -ENODEV;
+ 
+-	return component_master_add_with_match(mdev, &apple_drm_ops, match);
++	num_dcp = component_master_add_with_match(mdev, &apple_drm_ops, match);
++	dev_info(mdev, "display-subsystem probe: master added, returned %d\n", num_dcp);
++	return num_dcp;
+ }
+ 
+ static void apple_platform_remove(struct platform_device *pdev)
 --- a/dcp.c
 +++ b/dcp.c
 @@ -2427,6 +2427,8 @@
@@ -28,6 +46,32 @@ UPSTREAM: no.
  	if (dcp->fw_compat == DCP_FIRMWARE_V_26_6)
  		return iomfb_v26_6_start(dcp);
  
+@@ -4040,7 +4042,9 @@
+ 
+ 	if (READ_ONCE(dcp->ext_dead))
+ 		return 0;
++	dev_info(dev, "component bind: start\n");	/* PDDcp: stage lines */
+ 	ret = dcp_comp_bind_pipe(dev, main, data);
++	dev_info(dev, "component bind: returned %d\n", ret);
+ 	if (ret && dcp->ext_failsafe) {
+ 		dcp_ext_give_up(dcp, ret, "bind");
+ 		return 0;
+@@ -4723,8 +4727,13 @@
+ 	void *group;
+ 	int ret;
+ 
+-	if (!of_device_is_compatible(dev->of_node, "apple,t8122-dcpext"))
+-		return dcp_platform_probe_pipe(pdev);
++	if (!of_device_is_compatible(dev->of_node, "apple,t8122-dcpext")) {
++		/* PDDcp: stage lines */
++		dev_info(dev, "dcp probe: start\n");
++		ret = dcp_platform_probe_pipe(pdev);
++		dev_info(dev, "dcp probe: returned %d\n", ret);
++		return ret;
++	}
+ 
+ 	ret = dcp_ext_route_suppliers(dev);
+ 	if (ret)
 --- a/iomfb.c
 +++ b/iomfb.c
 @@ -1277,6 +1277,8 @@
