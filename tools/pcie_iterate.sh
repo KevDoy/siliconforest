@@ -30,8 +30,9 @@ if [ "${PCIE_WIFI:-0}" = 1 ]; then
   (cd integrations/puredarwin/m1-bwfm && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
 fi
 fi
-python3 -B tools/pcie_assemble.py $NAME | tail -2
 LAB=$RUN/pcie-m2-host-001/lab
+echo "${PCIE_BOOTARGS:-}" > $LAB/integrations/puredarwin/m1-bringup/extra_bootargs.txt
+python3 -B tools/pcie_assemble.py $NAME | tail -2
 cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/puredarwin/m1-bringup/pcie_linkup.py
 echo "${PCIE_LINK:-none}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
 echo "${PCIE_CPUFREQ:-on}" > $LAB/integrations/puredarwin/m1-bringup/cpufreq_mode.txt
