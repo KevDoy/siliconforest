@@ -342,23 +342,42 @@ A read-only look from the m1n1 proxy before the guest starts is in
 PMGR state of the display domains and, if `DISP0_CPU0` is powered, ASC `CPU_CONTROL`,
 `CPU_STATUS` and the two mailbox control registers; `dart` adds DART register reads.
 
-### What Linux does (`/home/chrisk/source/aurora-linux`, `e4735882`)
+### What Linux does (the pin: `sources/gpu-plan/linux-aurora`, omacom `6a08a08e`, 7.2.11)
+
+`src/rtkit.c` and `src/mailbox.c` of this port were made from this same pin (no upstream line
+removed; `apple_rtkit_wake_early_ap`, the kdebug buffers, the ioreport acknowledgments and the
+oslog handling are all in the port).
+
+Which variant applies: T8103's node is `"apple,t8103-dcp", "apple,dcp"` (`t8103.dtsi:660`),
+which matches `apple_dcp_hw_dcp` (`dcp.c:5144,5197`): no `adopt_live_session`, default IOMFB
+method profile. With firmware compat 12.3 or 13.5 neither early return of
+`dcp_comp_bind_pipe` (26.6 at `dcp.c:3884`, 14.7 at `:3894`) is taken. `apple_rtkit_init`
+gets `&rtkit_ops` and the wake is plain `apple_rtkit_wake`; `&external_h17p_rtkit_ops` and
+`apple_rtkit_wake_early_ap` (`dcp.c:3991-4014`) are only for the
+`DCP_IOMFB_METHODS_H17P_EXTERNAL` profile (`apple,t8140-dcpext`, `:5121`).
+`dcp_pin_live_session` returns 0 at once for this hardware (`:96-101`), `dcp_ext_wait_pmp`
+too (`:3686`).
 
 | Step | Where | Panel / DART |
 | --- | --- | --- |
-| genpd powers `ps_disp0_cpu0` (parent `ps_disp0_fe`) for `dcp`, `dcp_mbox`, `dcp_dart`, `disp0_dart` | `t8103.dtsi:631,643,657,678`, `t8103-pmgr.dtsi:1006` | already on when the panel is lit; a power cycle would blank it |
-| DART drivers attach `dcp` (stream 0 of `dcp_dart`) and the `piodma` child (stream 4 of `disp0_dart`); m1n1's reserved-memory entries are mapped again | `t8103.dtsi:665,687`, `dcp.c:2165-2196`, `apple-dart.c:942` | rewrites live translation state; **needs DART**; not done here |
-| `dma_set_mask_and_coherent`, map `coproc`, panel properties, display registers, clock | `dcp.c:2455-2522` | no hardware effect |
-| `CPU_CONTROL \|= RUN` | `dcp.c:2533-2536` | no change when RUN is already set |
-| `devm_apple_rtkit_init(dev, dcp, "mbox", 0, &rtkit_ops)` | `dcp.c:2538` | mailbox interrupts on; nothing sent |
-| `apple_rtkit_wake`: IOP power state 0x220, then HELLO, endpoint map, start of the system endpoints, IOP power ack, AP power 0x20 | `dcp.c:2543`, `rtkit.c:1110-1130`, `:118`, `:155`, `:198`, `:1018` | management endpoint only |
-| during that, buffer requests on crashlog/syslog/ioreport/oslog go to `dcp_rtk_shmem_setup` | `rtkit.c:261-340`, `dcp.c:1416-1454` | with an iova (firmware-placed): `iommu_iova_to_phys` + `memremap`, **no reply** (`rtkit.c:324`); without: `dma_alloc_coherent` through `dcp_dart` and a reply. **Needs DART** either to read or to map |
-| later, from the DRM driver: `dcp_start`: system endpoint 0x20, on some machines iBoot 0x23 and DPTX 0x2a, then IOMFB 0x37 | `dcp.c:1883-1953` | **this is where the panel can change**; not done here |
+| genpd powers `ps_disp0_cpu0` (parent `ps_disp0_fe`) for `dcp`, `dcp_mbox`, `dcp_dart`, `disp0_dart` | `t8103.dtsi:631,641,655,676`, `t8103-pmgr.dtsi:648,1066` | already on while the panel is lit |
+| probe: firmware compat from `apple,firmware-compat`, `apple,bw-scratch` required, `iommu_device_use_default_domain(dev)` | `dcp.c:4297-4310`, `:4364` | **needs DART**: `dcp` is stream 0 of `dcp_dart` (`t8103.dtsi:663`) |
+| bind: `dma_set_mask_and_coherent(42 bit)`, map `coproc`, panel properties | `dcp.c:3786-3882` | no hardware effect |
+| `dcp_create_piodma_iommu_dev`: the `piodma` child, stream 4 of `disp0_dart` | `dcp.c:3920`, `:3158-3186`, `t8103.dtsi:684-685` | **needs DART** (`disp0_dart`, the one the tree calls locked, `:703`) |
+| display registers, clock | `dcp.c:3930-3947` | no hardware effect |
+| `CPU_CONTROL \|= RUN` (because not `adopt_live_session`) | `dcp.c:3979-3984` | no change when RUN is already set |
+| `apple_rtkit_init(dev, dcp, "mbox", 0, &rtkit_ops)` | `dcp.c:3996` | mailbox interrupts on; nothing sent |
+| `apple_rtkit_wake`: IOP power state 0x220, then HELLO, endpoint map, start of the system endpoints, IOP power ack, AP power 0x20 | `dcp.c:4014`, `rtkit.c:1480-1507`, `:154`, `:191`, `:252`, `:1383` | management endpoint only |
+| during that, buffer requests on crashlog/syslog/ioreport/oslog go to `dcp_rtk_shmem_setup` | `rtkit.c:337-415`, `dcp.c:817-866` | with an iova (firmware-placed): `iommu_iova_to_phys` on the `dcp_dart` stream 0 domain, contiguity check, `memremap(MEMREMAP_WC)`, **no reply** (`rtkit.c:391`); without: `dma_alloc_coherent` through the same domain and a reply. **Needs DART** either to translate or to map |
+| kdebug buffers | `rtkit.c:469`, `:823`, `:1131` | only with `apple,sync-syslog-ack`, which only `t8122-j613.dts:610` has; not T8103. A message on endpoint 0x03 is logged as unknown |
+| `schedule_work(&dcp->dimensions_wq)` | `dcp.c:4019-4020`, `iomfb.c:1431` | DRM connector size bookkeeping; sends nothing |
+| later, from the DRM driver: `dcp_start`: system endpoint 0x20, on machines with a DPTX phy iBoot 0x23 and DPTX 0x2a, then IOMFB 0x37 | `dcp.c:2423-2530` (`:2462`, `:2474`, `:2487`, `:2518`) | **this is where the panel can change**; not done here |
+| `apple_boot_display_up()` | `apple_boot_display.h:53`, `apple_drv.c:1036`, `:1104` | a pure decision: the DRM driver removes the boot framebuffer (simplefb/simpledrm) only once a display processor of the highest class present (a panel here) came up. No hardware access, nothing the probe needs |
 
-Minimum sequence to "endpoint map received": the two rows `devm_apple_rtkit_init` and
-`apple_rtkit_wake`, nothing before them when the domain is on and RUN is set, nothing after.
-`apple_rtkit_wake` goes past the map (it starts the system endpoints and waits for the power
-acks); the port's `rtkit.c` is used unmodified, so the probe runs it whole.
+Minimum sequence to "endpoint map received": `apple_rtkit_init` and `apple_rtkit_wake`,
+nothing before them when the domain is on and RUN is set, nothing after. `apple_rtkit_wake`
+goes past the map (it starts the system endpoints and waits for the power acks); the port's
+`rtkit.c` is used unmodified, so the probe runs it whole.
 
 ### What state the DCP is in on this machine
 

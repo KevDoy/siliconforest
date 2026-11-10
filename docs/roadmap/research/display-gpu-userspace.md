@@ -63,6 +63,23 @@ Risks:
 
 # (B) Display controller
 
+> **Correction, 2026-11-10.** Part B below was read from `/home/chrisk/source/aurora-linux`, which is a 7.1.12 tree
+> from a different fork, not the lab pin. The pin is Omacom `linux-aurora` branch `integration/aurora` at `6a08a08e`
+> (7.2.11, the kernel this M1 runs), checked out at `sources/gpu-plan/linux-aurora`. At the pin:
+> - `drivers/gpu/drm/apple` is 132 files, 61,295 lines (36 test files, 13,708 lines). The module without audio and
+>   tests is about 44,300 lines; the internal-panel core for firmware 12.3/13.5 is 19,664 lines of C plus headers
+>   (`dcp.c` 5,216, `iomfb_template.c` 2,833, `iomfb.c` 2,786, `afk.c` 2,348, `parser.c` 1,917, `apple_drv.c` 1,361).
+>   `dcp.c` references the fabric, external, 14.7, 26.6 and H17P code unconditionally, so a port compiles all of it
+>   or cuts and stubs.
+> - Licence: 120 of 127 source files are `GPL-2.0-only OR MIT`, 2 `GPL-2.0+ OR MIT`, `dcp_trace.c` GPL-2.0, four
+>   headers without an SPDX line.
+> - For J293 the bind path is `apple_rtkit_init` (`dcp.c:3996`) then plain `apple_rtkit_wake` (`:4014`); the
+>   early-AP wake is for other hardware. All `file:line` references below are to the old tree and are wrong for the pin.
+> - 20 headers the driver includes are absent from our layer and 6 more are empty placeholders (`component.h` matters
+>   most); the list is in `integrations/puredarwin/m1-gpu-rtkit/README.md`, "DCP mode".
+> - State at OS start, from this M1's console (not from source): m1n1 power-cycles the DCP, sets the mode through the
+>   iBoot endpoint and quiesces it; it reports `dart-dcp` locked and `dart-disp0` not locked, the reverse of B5 below.
+
 **B5. What DCP is and its state at OS start**
 - It is a coprocessor running RTKit firmware. T8103 nodes (`arch/arm64/boot/dts/apple/t8103.dtsi:625-701`):
   - `dcp@231c00000` with five display register ranges;

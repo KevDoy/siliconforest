@@ -353,7 +353,7 @@ bool PDRtkitProbe::dcpPowerState(UInt32 *fe, UInt32 *cpu0)
  *   regs    ASC CPU_CONTROL, CPU_STATUS, mailbox A2I/I2A control, read only. Stops unless
  *           RUN is set: this probe never starts the coprocessor (a stopped DCP needs its
  *           firmware mappings and a PMGR reset first, m1n1 dcp.c:211-219).
- *   cpu     Linux ORs RUN into CPU_CONTROL here (dcp.c:2533); with RUN set that write
+ *   cpu     Linux ORs RUN into CPU_CONTROL here (dcp.c:3979 at the pin); with RUN set that write
  *           changes nothing, so it is not made.
  *   rtkit-init, wake, rx, hello, endpoint, endpoint-map, buffer-request, power, endpoints,
  *   summary   probe.c pd_rtkitprobe_dcp_wake()
@@ -409,7 +409,7 @@ void PDRtkitProbe::runDcp()
              reads);
         return;
     }
-    plog("dcp cpu: RUN is set; Linux's CPU_CONTROL |= RUN (dcp.c:2533) would write the value back unchanged, not written");
+    plog("dcp cpu: RUN is set; Linux's CPU_CONTROL |= RUN (dcp.c:3979) would write the value back unchanged, not written");
 
     pdos_xnu_init();
     if (pd_rtkitprobe_layer_up() != 0) {

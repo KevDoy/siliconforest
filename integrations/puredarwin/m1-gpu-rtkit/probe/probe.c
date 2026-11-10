@@ -140,19 +140,28 @@ int pd_rtkitprobe_rtkit_boot(void)
  * ---- DCP mode (pdrtkitprobe=3), SF-H item H1 ----
  *
  * What Linux's display coprocessor driver does to the DCP's RTKit before any display
- * endpoint exists, and nothing after it (drivers/gpu/drm/apple/dcp.c, dcp_comp_bind()):
+ * endpoint exists, and nothing after it. Read from the lab's pin, omacom/linux-aurora
+ * 6a08a08e (sources/gpu-plan/linux-aurora), drivers/gpu/drm/apple/dcp.c,
+ * dcp_comp_bind_pipe(), for a T8103 "apple,dcp" (hw data apple_dcp_hw_dcp, dcp.c:5144: no
+ * adopt_live_session, default IOMFB profile, firmware compat 12.3/13.5):
  *
- *   Linux                                                         here
- *   CPU_CONTROL |= RUN                              dcp.c:2533    not written: the caller stops unless RUN is already set
- *   devm_apple_rtkit_init(dev, dcp, "mbox", 0, ops) dcp.c:2538    apple_rtkit_init(dev, cookie, NULL, 0, ops)
- *   apple_rtkit_wake(dcp->rtk)                      dcp.c:2543    apple_rtkit_wake(rtk)
- *   dcp_start(): systemep, [ibootep, dptxep], iomfb dcp.c:1883    NOT done
+ *   Linux                                                      here
+ *   CPU_CONTROL |= RUN (not adopt_live_session)  dcp.c:3979    not written: the caller stops unless RUN is already set
+ *   apple_rtkit_init(dev, dcp, "mbox", 0, &rtkit_ops)   :3996  apple_rtkit_init(dev, cookie, NULL, 0, ops)
+ *   apple_rtkit_wake(dcp->rtk)                          :4014  apple_rtkit_wake(rtk)
+ *   schedule_work(&dcp->dimensions_wq)                  :4020  NOT done (DRM connector bookkeeping, iomfb.c:1431)
+ *   dcp_start(): systemep, [ibootep, dptxep], iomfb     :2423  NOT done
  *
- * The ops are Linux's rtkit_ops for DCP (dcp.c:1466): flags 0, crashed, recv_message,
- * shmem_setup, shmem_destroy, no recv_message_early. Linux's shmem_setup either maps a
- * buffer the firmware placed itself (request carries an iova: iommu_iova_to_phys() through
- * the dcp DART, memremap, and RTKit sends no reply) or allocates one through the dcp DART
- * (iova 0: dma_alloc_coherent, and RTKit replies with the new iova). There is no DART
+ * The other pair in that function, &external_h17p_rtkit_ops with
+ * apple_rtkit_wake_early_ap() (:3993, :4012), is taken only for the
+ * DCP_IOMFB_METHODS_H17P_EXTERNAL profile ("apple,t8140-dcpext", dcp.c:5121), not here.
+ *
+ * The ops are Linux's rtkit_ops for DCP (dcp.c:878): flags 0, crashed, recv_message,
+ * shmem_setup, shmem_destroy, no recv_message_early. Linux's shmem_setup (dcp.c:817)
+ * either maps a buffer the firmware placed itself (request carries an iova:
+ * iommu_iova_to_phys() through the dcp DART, a contiguity check, memremap write-combined,
+ * and RTKit sends no reply, rtkit.c:391) or allocates one through the dcp DART (iova 0:
+ * dma_alloc_coherent, and RTKit replies with the new iova). There is no DART
  * driver here. Both kinds are refused, so the first puts nothing different on the wire
  * than Linux does and the second leaves the firmware without its reply: that request,
  * logged with endpoint, size and iova, is what H2 has to provide.
@@ -178,7 +187,7 @@ struct dcp_probe_state {
 
 static struct dcp_probe_state dcp_state;
 
-/* rtkit.c system endpoints; drivers/gpu/drm/apple/dcp-internal.h:66-75 */
+/* rtkit.c system endpoints; drivers/gpu/drm/apple/dcp-internal.h:76-95 at the pin */
 static const char *dcp_ep_name(unsigned int ep)
 {
 	switch (ep) {
@@ -193,10 +202,12 @@ static const char *dcp_ep_name(unsigned int ep)
 	case 0x21: return "test";
 	case 0x22: return "dcp-expert";
 	case 0x23: return "disp0/iBoot";
+	case 0x24: return "dptx-controller/dpav-ctrl";
 	case 0x28: return "dpavserv";
 	case 0x29: return "av";
 	case 0x2a: return "dptx";
 	case 0x2b: return "hdcp";
+	case 0x2c: return "dptx-v2";
 	case 0x2d: return "remote-alloc";
 	case 0x37: return "iomfb";
 	default: return "unknown";
