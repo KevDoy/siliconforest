@@ -98,9 +98,60 @@ pd_dcp_pre_probe(struct platform_device *pdev)
 	return (ret);
 }
 
+/*
+ * "fixed-clock" provider. The display tree gives the dcp a fixed clock (clock-disp0, as
+ * Linux's t8103.dtsi does) and the layer has no provider for that compatible, so
+ * devm_clk_get() deferred the probe forever (boot dp03: "no provider for clocks of
+ * dcp@231c00000 on clock-disp0"). A fixed clock has a rate and nothing else.
+ */
+#include <linux/pd_providers.h>
+
+struct pd_dcp_fixed_clk { unsigned long rate; };
+
+static void *
+pd_dcp_fixed_clk_xlate(void *priv, const struct of_phandle_args *spec)
+{
+	struct pd_dcp_fixed_clk *clk;
+	u32 hz = 0;
+
+	if (spec == NULL || spec->np == NULL)
+		return (NULL);
+	if (of_property_read_u32(spec->np, "clock-frequency", &hz) != 0)
+		kprintf("PDDcp: fixed clock %s has no clock-frequency\n", spec->np->name);
+	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
+	if (clk != NULL)
+		clk->rate = hz;
+	kprintf("PDDcp: fixed clock %s: %u Hz\n", spec->np->name, hz);
+	return (clk);
+}
+
+static int pd_dcp_fixed_clk_enable(void *hw) { return (0); }
+static void pd_dcp_fixed_clk_disable(void *hw) { }
+static unsigned long pd_dcp_fixed_clk_get_rate(void *hw) { return (((struct pd_dcp_fixed_clk *)hw)->rate); }
+static long pd_dcp_fixed_clk_round_rate(void *hw, unsigned long rate) { return ((long)((struct pd_dcp_fixed_clk *)hw)->rate); }
+
+static int
+pd_dcp_fixed_clk_set_rate(void *hw, unsigned long rate)
+{
+	return (rate == ((struct pd_dcp_fixed_clk *)hw)->rate ? 0 : -EINVAL);
+}
+
+static const struct pd_clk_ops pd_dcp_fixed_clk_ops = {
+	.xlate = pd_dcp_fixed_clk_xlate,
+	.enable = pd_dcp_fixed_clk_enable,
+	.disable = pd_dcp_fixed_clk_disable,
+	.set_rate = pd_dcp_fixed_clk_set_rate,
+	.get_rate = pd_dcp_fixed_clk_get_rate,
+	.round_rate = pd_dcp_fixed_clk_round_rate,
+};
+
 void
 pd_dcp_linux_init(void)
 {
+	int clk_ret = pd_clk_provider_add("fixed-clock", &pd_dcp_fixed_clk_ops, NULL);
+
+	if (clk_ret != 0)
+		kprintf("PDDcp: fixed-clock provider not registered: %d\n", clk_ret);
 	pd_dcp_mode = pd_rtkit_platform_bootarg("pddcp", 0);
 	pd_dcp_debug = pd_rtkit_platform_bootarg("pddcp_debug", 0);
 	pd_driver_vsnprintf = pd_drm_vsnprintf;
@@ -199,95 +250,36 @@ of_machine_is_compatible(const char *compat)
 }
 
 /*
- * Depth-first walk of the whole tree from of_root; returns the first node compatible with
- * `compat` that comes after `from` in that order (NULL `from`: the first). Linux's contract
- * for of_find_compatible_node(): `from` is released, the result is held.
+ * of_find_matching_node() on the layer's of_find_compatible_node() (which continues after
+ * `from` since patches-layer/0018). One compatible at a time, each walked to its end before
+ * the next: the order differs from Linux's tree order, the set of nodes does not. A node that
+ * matches two entries is returned for the first only.
  */
-struct pd_dcp_walk {
-	struct device_node *from;
-	const char *compat;
-	bool past;
-};
-
-static struct device_node *
-pd_dcp_walk(struct device_node *np, struct pd_dcp_walk *w, int depth)
-{
-	struct device_node *child, *found;
-
-	if (np == NULL || depth > 16)
-		return (NULL);
-	if (w->past) {
-		if (of_device_is_compatible(np, w->compat))
-			return (of_node_get(np));
-	} else if (np == w->from) {
-		w->past = true;
-	}
-	for_each_child_of_node(np, child) {
-		found = pd_dcp_walk(child, w, depth + 1);
-		if (found != NULL) {
-			of_node_put(child);
-			return (found);
-		}
-	}
-	return (NULL);
-}
-
-#undef of_find_compatible_node
-struct device_node *
-pd_dcp_of_find_compatible_node(struct device_node *from, const char *type, const char *compat)
-{
-	struct pd_dcp_walk w = { .from = from, .compat = compat, .past = from == NULL };
-	struct device_node *np = pd_dcp_walk(of_root, &w, 0);
-
-	if (np == NULL && from == NULL)
-		kprintf("PDDcp: of: no node compatible with \"%s\" in the tree\n", compat);
-	if (from != NULL)
-		of_node_put(from);
-	return (np);
-}
-
 struct device_node *
 of_find_matching_node(struct device_node *from, const struct of_device_id *matches)
 {
-	/*
-	 * One compatible at a time, each walked to its end before the next: the order differs
-	 * from Linux's tree order, the set of nodes does not. `from` belongs to exactly one of
-	 * the walks: the one whose compatible it matches.
-	 */
-	const struct of_device_id *m;
+	const struct of_device_id *m = matches, *e;
 	struct device_node *np;
 
-	for (m = matches; m != NULL && m->compatible[0] != '\0'; m++) {
-		if (from != NULL && !of_device_is_compatible(from, m->compatible))
-			continue;
-		np = pd_dcp_of_find_compatible_node(from != NULL ? of_node_get(from) : NULL, NULL, m->compatible);
-		if (np != NULL) {
-			if (from != NULL)
-				of_node_put(from);
-			return (np);
-		}
-		/* this compatible is exhausted: the first node of each later one follows */
-		for (m++; m->compatible[0] != '\0'; m++) {
-			np = pd_dcp_of_find_compatible_node(NULL, NULL, m->compatible);
-			/* a node that also matched an earlier entry was already returned */
-			if (np != NULL) {
-				const struct of_device_id *e;
-				bool dup = false;
-
-				for (e = matches; e != m; e++)
-					dup |= of_device_is_compatible(np, e->compatible);
-				if (!dup) {
-					if (from != NULL)
-						of_node_put(from);
-					return (np);
-				}
-				of_node_put(np);
-			}
-		}
-		break;
-	}
+	if (matches == NULL)
+		return (NULL);
+	/* the entry `from` was found under: the first it is compatible with */
 	if (from != NULL)
-		of_node_put(from);
+		while (m->compatible[0] != '\0' && !of_device_is_compatible(from, m->compatible))
+			m++;
+	for (; m->compatible[0] != '\0'; m++, from = NULL) {
+		for (np = of_find_compatible_node(from, NULL, m->compatible); np != NULL;
+		    np = of_find_compatible_node(np, NULL, m->compatible)) {
+			bool earlier = false;
+
+			for (e = matches; e != m; e++)
+				earlier |= of_device_is_compatible(np, e->compatible);
+			if (!earlier)
+				return (np);
+		}
+	}
+	if (from == NULL && m == matches)
+		kprintf("PDDcp: of: nothing in the tree matches the table starting \"%s\"\n", matches->compatible);
 	return (NULL);
 }
 
@@ -384,21 +376,43 @@ pd_dcp_child_release(struct device *dev)
 {
 }
 
+/* the layer's own way of making a struct device for a node (pd/lkpi/pd_linux_platform.c) */
+extern const struct kobj_type linux_dev_ktype;
+extern struct device linux_root_device;
+device_t pd_platform_bsddev(const char *name, const char *desc);
+
 struct platform_device *
 of_platform_device_create(struct device_node *np, const char *bus_id, struct device *parent)
 {
-	struct platform_device *pdev = kzalloc(sizeof(*pdev), GFP_KERNEL);
+	struct platform_device *pdev;
+	struct device *dev;
 
+	if (np == NULL) {
+		kprintf("PDDcp: of_platform_device_create: no node\n");
+		return (NULL);
+	}
+	pdev = kzalloc(sizeof(*pdev), GFP_KERNEL);
 	if (pdev == NULL)
 		return (NULL);
 	pdev->name = np->name;
 	pdev->id = -1;
-	device_initialize(&pdev->dev);
-	dev_set_name(&pdev->dev, "%s", np->full_name != NULL ? np->full_name : np->name);
-	pdev->dev.parent = parent;
-	pdev->dev.of_node = of_node_get(np);
-	pdev->dev.release = pd_dcp_child_release;
-	kprintf("PDDcp: device %s created for node %s\n", dev_name(&pdev->dev), np->name);
+	dev = &pdev->dev;
+	/*
+	 * Not device_initialize(): boot dp02 took a NULL dereference in it (far 0x48) for a
+	 * device that has no FreeBSD device behind it. This is the sequence the platform bus
+	 * uses for the devices it creates.
+	 */
+	kobject_init(&dev->kobj, &linux_dev_ktype);
+	kobject_set_name(&dev->kobj, "%s", np->full_name != NULL ? np->full_name : np->name);
+	spin_lock_init(&dev->devres_lock);
+	INIT_LIST_HEAD(&dev->devres_head);
+	INIT_LIST_HEAD(&dev->irqents);
+	dev->parent = parent != NULL ? parent : &linux_root_device;
+	dev->of_node = np;
+	dev->release = pd_dcp_child_release;
+	dev->bsddev = pd_platform_bsddev(np->name, np->full_name != NULL ? np->full_name : np->name);
+	kprintf("PDDcp: device %s created for node %s (parent %s)\n", dev_name(dev), np->name,
+	    parent != NULL ? dev_name(parent) : "none");
 	return (pdev);
 }
 

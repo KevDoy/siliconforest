@@ -19,7 +19,92 @@ UPSTREAM: no.
  	if (ep->dcp->fw_compat == DCP_FIRMWARE_V_14_7_TEMPLATE &&
 --- a/apple_drv.c
 +++ b/apple_drv.c
-@@ -1221,10 +1221,14 @@
+@@ -956,8 +956,10 @@
+ 		}
+ 
+ 		dcp[num_dcp] = of_find_device_by_node(np);
+-		if (!dcp[num_dcp])
++		if (!dcp[num_dcp]) {
++			dev_info(dev, "stage: no platform device for dcp node %pOF, skipped\n", np); /* PDDcp */
+ 			continue;
++		}
+ 		/* A failed T8122 dcpext: bound, but no pipeline. */
+ 		if (dcp_ext_unusable(dcp[num_dcp])) {
+ 			dev_warn(dev, "%s: external display processor unusable, skipped\n",
+@@ -971,6 +973,7 @@
+ 		ret = apple_probe_per_dcp(dev, &apple->drm, dcp[num_dcp],
+ 					  num_dcp, dcp_ext, &encoder[num_dcp],
+ 					  &crtc_mask[num_dcp]);
++		dev_info(dev, "stage: planes/crtc/encoder/connector for dcp %d: %d\n", num_dcp, ret); /* PDDcp */
+ 		if (ret) {
+ 			if (of_device_is_compatible(np, "apple,t8140-dcpext")) {
+ 				put_device(&dcp[num_dcp]->dev);
+@@ -983,6 +986,7 @@
+ 		num_dcp++;
+ 	}
+ 
++	dev_info(dev, "stage: %d display processor(s) set up\n", num_dcp); /* PDDcp */
+ 	if (num_dcp < 1)
+ 		return -ENODEV;
+ 
+@@ -992,12 +996,14 @@
+ 	 * and it needs somewhere to report the display.
+ 	 */
+ 	ret = apple_probe_typec_ports(&apple->drm, dcp, crtc_mask, num_dcp);
++	dev_info(dev, "stage: type-c port connectors: %d\n", ret); /* PDDcp */
+ 	if (ret)
+ 		return ret;
+ 
+ 	for (i = 0; i < num_dcp; i++) {
+ 		connector_type[i] = dcp_get_connector_type(dcp[i]);
+ 		ret = dcp_start(dcp[i]);
++		dev_info(dev, "stage: dcp_start(%d) returned %d\n", i, ret); /* PDDcp */
+ 		started[i] = !ret;
+ 		if (ret)
+ 			dev_warn(dev, "DCP[%d] failed to start: %d\n", i, ret);
+@@ -1018,6 +1024,7 @@
+ 		if (!started[i])
+ 			continue;
+ 		ret = dcp_wait_ready(dcp[i], wait);
++		dev_info(dev, "stage: dcp_wait_ready(%d, %llu jiffies) returned %d\n", i, (unsigned long long)wait, ret); /* PDDcp */
+ 		ready[i] = !ret;
+ 		/*
+ 		 * Any other processor that does not come up is left out: the
+@@ -1067,6 +1074,7 @@
+ 	dev_set_drvdata(dev, apple);
+ 
+ 	ret = component_bind_all(dev, apple);
++	dev_info(dev, "stage: components bound: %d\n", ret); /* PDDcp */
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1095,6 +1103,7 @@
+ 	apple->drm.mode_config.helper_private = &apple_mode_config_helpers;
+ 
+ 	ret = apple_drm_init_dcp(dev);
++	dev_info(dev, "stage: display processors initialised: %d\n", ret); /* PDDcp */
+ 	if (ret)
+ 		goto err_unbind;
+ 
+@@ -1108,7 +1117,9 @@
+ 		goto err_unbind;
+ 	}
+ 
++	dev_info(dev, "stage: boot framebuffer released, registering the DRM device\n"); /* PDDcp */
+ 	ret = drm_dev_register(&apple->drm, 0);
++	dev_info(dev, "stage: drm_dev_register: %d\n", ret); /* PDDcp */
+ 	if (ret)
+ 		goto err_unbind;
+ 
+@@ -1119,6 +1130,7 @@
+ 
+ 	/* A subsequent successful platform probe retries deferred GPU probes. */
+ 	ret = apple_g15_display_publish(dev);
++	dev_info(dev, "stage: bind complete (%d)\n", ret); /* PDDcp */
+ 	if (ret) {
+ 		drm_dev_unregister(&apple->drm);
+ 		goto err_unbind;
+@@ -1221,10 +1233,14 @@
  
  	/* add DCP components, handle less than 1 as probe error */
  	num_dcp = add_dcp_components(mdev, &match);

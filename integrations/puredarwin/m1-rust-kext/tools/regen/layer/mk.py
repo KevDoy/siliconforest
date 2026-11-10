@@ -60,6 +60,11 @@ pd_platform_pre_probe, when a kext sets it, is called with the platform_device r
 the driver's probe; a nonzero return keeps the device from being probed. PDAgx uses it to name the GPU's mailbox (pd_apple_mbox_bind): Apple's
 device tree has no mboxes phandle from the GPU to gfx-asc, and the driver is unmodified.
 UPSTREAM: only until the published GPU node carries a mailbox reference the layer resolves.
+
+Also in this file (boot dp04): a device is entered in the bus's device table before its probe
+runs, as Linux registers a device first, so that a probe, or a component bind running
+inside it, finds its own device with of_find_device_by_node(); the entry is removed when the
+pre-probe hook or the probe fails. UPSTREAM for this part: yes.
 """, []),
  "0009-physmem-is-the-machines": ("""fbsdkpi: si_meminfo() reports the machine's memory, not a constant 4 GiB
 
@@ -145,6 +150,14 @@ UPSTREAM: yes (FreeBSD LinuxKPI).
 Declarations only: nothing in the layer acts on them yet.
 UPSTREAM: yes.
 """, []),
+ "0018-of-find-compatible-node-continues-after-from": ("""fbsdkpi: of_find_compatible_node() continues after `from`
+
+It ignored `from` and returned the first match every time: for_each_compatible_node() and
+anything built on it looped forever once a node matched (boot dp01, the display driver's
+for_each_matching_node over "apple,dcp"). Now a pre-order walk from the tree root that
+returns the first match after `from`. Found and written by m1-dcp-dart (ANSWERS.md, item 3).
+UPSTREAM: yes.
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -169,6 +182,7 @@ def topic(path, hunk, lineno):
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
     if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"
+    if path.endswith("pd_linux_of.c") and "pd_of_next" in hunk: return "0018-of-find-compatible-node-continues-after-from"
     if path.endswith("pd_linux_of.c"): return "0006-of-text-properties-named-by-the-node"
     if path.endswith("lock.h"): return "0003-haiku-locks-embed-the-xnu-lock"
     if path.endswith("pd_haiku_kernel.cpp") and re.search(r"pd_tid|sThreadsRecycled|stale", hunk): return "0014-thread-slots-follow-the-xnu-thread"

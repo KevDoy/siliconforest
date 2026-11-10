@@ -116,15 +116,6 @@ int of_changeset_apply(struct of_changeset *ocs);
 int of_changeset_update_prop_string(struct of_changeset *ocs, struct device_node *np,
 				    const char *prop_name, const char *str);
 
-/*
- * of_find_compatible_node(): the layer's does not continue after `from` (boot dp01: the
- * display-subsystem probe looped forever in for_each_matching_node). The kext's own walks
- * the tree depth-first from of_root and returns the first match after `from`.
- */
-struct device_node *pd_dcp_of_find_compatible_node(struct device_node *from, const char *type,
-						   const char *compat);
-#define of_find_compatible_node(from, type, compat)	pd_dcp_of_find_compatible_node(from, type, compat)
-
 struct of_device_id;
 struct device_node *of_find_matching_node(struct device_node *from, const struct of_device_id *matches);
 #ifndef for_each_matching_node
@@ -346,6 +337,17 @@ extern int pd_dcp_debug;
 #include <drm/drm_atomic_helper.h>
 int pd_dcp_atomic_helper_commit(struct drm_device *dev, struct drm_atomic_commit *state, bool nonblock);
 #define drm_atomic_helper_commit	pd_dcp_atomic_helper_commit
+
+/*
+ * dev_err_probe(): every error a probe or bind path reports through it is logged with the
+ * function and line that produced it, deferrals included (Linux logs those at debug level,
+ * and boot dp03 showed only "returned -517").
+ */
+#undef dev_err_probe
+#define dev_err_probe(dev, err, fmt, ...)	({				\
+	int pd_err_ = (err);							\
+	kprintf("PDDcp: %s: %s:%d: error %d: " fmt, dev_name(dev), __func__, __LINE__, pd_err_, ##__VA_ARGS__); \
+	pd_err_; })
 
 /* patches/0002: the IOMFB callback dispatcher reports each callback (kext/pd_dcp_linux.c) */
 void pd_dcp_note_callback(struct device *dev, int tag, const char *fourcc, u32 in_len, u32 out_len,
