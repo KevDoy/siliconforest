@@ -34,3 +34,11 @@
 
 # linux/slab.h: #define kmem_cache linux_kmem_cache
 --raw-line 'pub type kmem_cache = linux_kmem_cache;'
+
+# dma_addr_t is u64 on Linux. Here it is vm_paddr_t, Haiku's `unsigned long`, which bindgen
+# gives Rust as usize: same size and layout, a different Rust type (rtkit.rs assigns a u64).
+--blocklist-type dma_addr_t
+--raw-line 'pub type dma_addr_t = u64;'
+
+# pd/fbsd-extra: #define acpi_device _device (FreeBSD's ACPI device is its newbus device)
+--raw-line 'pub type acpi_device = _device;'

@@ -51,3 +51,28 @@ __rust_helper int rust_helper_kstrtobool(const char *s, bool *res)
 {
 	return kstrtobool(s, res);
 }
+
+/*
+ * rust/kernel/drm/gem/mod.rs puts noop_llseek into the driver's file_operations. LinuxKPI's
+ * is a static inline that reads file->_file->f_offset, and a /dev/dri file on PureDarwin has
+ * no _file (pd_drm_cdev.c); PDDRMDri never calls llseek. (From m1-drm72/rust-helpers.)
+ */
+#include <linux/fs.h>
+
+__rust_helper loff_t rust_helper_noop_llseek(struct file *file, loff_t offset, int whence)
+{
+	return 0;
+}
+
+/* static inlines in LinuxKPI's linux/device.h, exported functions on Linux */
+#include <linux/device.h>
+
+__rust_helper struct device *rust_helper_get_device(struct device *dev)
+{
+	return get_device(dev);
+}
+
+__rust_helper void rust_helper_put_device(struct device *dev)
+{
+	put_device(dev);
+}

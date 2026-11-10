@@ -1,4 +1,4 @@
-kernel: io, irq and uaccess without the device model; dma_fence on 6.14's dma_fence_ops
+kernel: io, irq and uaccess without the device model
 
 The device/devres modules are replaced separately (thin modules over the IOKit nub), so the
 parts of io, irq and uaccess that are written against them, or against dma and fs, are
@@ -10,25 +10,6 @@ compiled only with those modules:
 What remains is the register access (Io, Mmio, the io_read!/io_write! macros, polling),
 io::Resource/Region, irq::Flags and the user-copy types.
 
-dma_fence: drm-kmod's (6.14, FreeBSD's implementation) struct dma_fence_ops still has the
-three fields 7.2 removed; `use_64bit_seqno = true` is how 6.14 spells dma_fence_init64().
-These three lines go away when the DRM C core is brought to 7.2.
-
---- a/kernel/dma_fence.rs
-+++ b/kernel/dma_fence.rs
-@@ -245,6 +245,12 @@
-         wait: None, // Deprecated
-         release: Some(release_cb::<T>),
-         set_deadline: None,
-+        #[cfg(pd_lkpi)]
-+        fence_value_str: None,
-+        #[cfg(pd_lkpi)]
-+        timeline_value_str: None,
-+        #[cfg(pd_lkpi)]
-+        use_64bit_seqno: true,
-     };
- }
- 
 --- a/kernel/io.rs
 +++ b/kernel/io.rs
 @@ -18,7 +18,7 @@

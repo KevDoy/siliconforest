@@ -15,10 +15,10 @@ let
   '';
   bindgenDefines = pkgs.writeText "bindgen-defines"
     (pkgs.lib.concatMapStrings (d: "-D${d}\n") lkpi.cflags.defines);
-in lkpi.drmKext.overrideAttrs (old: {
+in lkpi.drmKextFinal.overrideAttrs (old: {
   pname = "puredarwin-rust-lkpi";
   src = pkgs.runCommand "puredarwin-rust-lkpi-tree" {} ''
-    cp -R ${lkpi.tree} "$out"
+    cp -R ${lkpi.finalTree} "$out"
     chmod -R u+w "$out"
     test ! -e "$out/src/Kernel/Extensions/PDRustLKPI"
     cp -R ${copied} "$out/src/Kernel/Extensions/PDRustLKPI"

@@ -4,7 +4,7 @@
  *
  * LinuxKPI's asm/atomic.h lacks 119 of the operations that file wraps (every _acquire,
  * _release and _relaxed variant, most fetch_* and all of try_cmpxchg for atomic64). The
- * kernel crate itself calls 21 operations per width (rust/kernel/sync/atomic/internal.rs).
+ * kernel crate itself calls 21 operations per width (and atomic_sub once) (rust/kernel/sync/atomic/internal.rs).
  * Those are implemented here directly with the compiler's atomic builtins on the counter
  * field, sequentially consistent, which satisfies every weaker ordering the name asks for.
  * The other operations have no Rust caller and are not provided.
@@ -37,6 +37,12 @@ __rust_helper itype rust_helper_##prefix##_fetch_add##sfx(itype i, atype *v)			\
 { return __atomic_fetch_add(&v->counter, i, __ATOMIC_SEQ_CST); }				\
 __rust_helper itype rust_helper_##prefix##_fetch_sub##sfx(itype i, atype *v)			\
 { return __atomic_fetch_sub(&v->counter, i, __ATOMIC_SEQ_CST); }
+
+/* rust/kernel/drm/sched.rs (credit accounting); not one of the crate's own atomics */
+__rust_helper void rust_helper_atomic_sub(int i, atomic_t *v)
+{
+	(void)__atomic_fetch_sub(&v->counter, i, __ATOMIC_SEQ_CST);
+}
 
 PD_ATOMIC_HELPERS(atomic, atomic_t, int)
 #define X(sfx) PD_ATOMIC_ORDERED(atomic, atomic_t, int, sfx)

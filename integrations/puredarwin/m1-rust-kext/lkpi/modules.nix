@@ -17,6 +17,11 @@ rec {
   # io::mem; irq is Flags only; see patches/0005.
   phaseC = core ++ [ "io" "processor" "irq" "uaccess" ];
 
+  # Phase D: the driver-core tier, unmodified device/driver/platform/devres/of/io::mem/
+  # irq::request/dma on the C-side driver-core surface (patches-layer/0005).
+  plat = phaseC ++ [ "device" "device_id" "driver" "platform" "devres" "of" "acpi" "dma"
+    "revocable" "impl_flags" ];
+
   # Kconfig as rustc sees it (Linux: include/generated/rustc_cfg). Only what the tree's
   # CONFIG_ cfgs can truthfully be on this platform.
   config = [
@@ -24,6 +29,8 @@ rec {
     "CONFIG_ARCH_SUPPORTS_ATOMIC_RMW"
     # ioremap exists (helpers/io.c)
     "CONFIG_HAS_IOMEM"
+    # device-tree matching (kernel::driver looks ids up only with it)
+    "CONFIG_OF"
     # init/Kconfig, for rustc 1.95
     "CONFIG_RUSTC_HAS_SPAN_FILE" "CONFIG_RUSTC_HAS_UNNECESSARY_TRANSMUTES"
     "CONFIG_RUSTC_HAS_FILE_WITH_NUL" "CONFIG_RUSTC_HAS_FILE_AS_C_STR"

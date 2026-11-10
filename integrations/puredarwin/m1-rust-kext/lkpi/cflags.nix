@@ -33,7 +33,7 @@ rec {
   # layer has the code (drm core, dma-buf, gpuvm) but no Kconfig for it. No header of the
   # include set looks at these, so they cannot change a struct layout; they are given to
   # the helper compiles and their bindgen run only, never to LinuxKPI itself.
-  helperDefines = [ "CONFIG_DRM" "CONFIG_DMA_SHARED_BUFFER" "CONFIG_RUST_DRM_GPUVM" ];
+  helperDefines = [ "CONFIG_DRM" "CONFIG_DMA_SHARED_BUFFER" "CONFIG_RUST_DRM_GPUVM" "CONFIG_DRM_GEM_SHMEM_HELPER" ];
   # per object library in cmake; any value does for headers
   moduleDefines = [ ''KBUILD_MODNAME="rust"'' "LINUXKPI_PARAM_PREFIX=rust_" ];
   includes = [

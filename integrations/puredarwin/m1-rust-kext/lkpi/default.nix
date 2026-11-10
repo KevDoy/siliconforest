@@ -39,9 +39,34 @@ let
       echo "applying $(basename $p)"
       patch -d $out -p1 --no-backup-if-mismatch < $p
     done
+    # m1-gpu-dt's fwnode/reserved-memory functions, taken from that directory as they are
+    # (patches-layer/0005 adds the file to the LinuxKPI source list and the headers; 0006 is
+    # that directory's pd_linux_of.patch re-made, which does not apply as written)
+    cp ${../../m1-gpu-dt/kernel/pd_linux_fwnode.c} $out/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_fwnode.c
   '';
   drmkmod = pd.packages.x86_64-linux.drm-kmod-src;
-  cflags = import ./cflags.nix { inherit lib tree drmkmod; sdk = appleSdk; };
+  # Phase D: what the kexts are really built from. `drmkmod` and `tree` above keep their
+  # meaning (m1-drm72 patches exactly those); the final sources add m1-drm72's series (DRM
+  # core at Linux 7.2) on top, and bindgen, the helpers, the matrix and the kexts use these.
+  drm72 = ../../m1-drm72;
+  gpuDt = ../../m1-gpu-dt;
+  rtkitSrc = ../../m1-gpu-rtkit/src;
+  applySeries = name: base: dir: pkgs.runCommand name { nativeBuildInputs = [ pkgs.patch ]; } ''
+    cp -r ${base} $out
+    chmod -R u+w $out
+    for p in ${dir}/*.patch; do
+      echo "applying $(basename $p)"
+      patch -d $out -p1 -F0 --no-backup-if-mismatch < $p
+    done
+  '';
+  finalDrmkmod = applySeries "puredarwin-drm-kmod-src-final" drmkmod "${drm72}/patches/drm-kmod";
+  finalTree = applySeries "puredarwin-tree-final" tree "${drm72}/patches/puredarwin";
+  # the flake's arm64 DRM-kext recipe on the final sources
+  drmKextFinal = drmKext.overrideAttrs (old:
+    let configurePhase = builtins.replaceStrings [ "-DPD_DRMKMOD_DIR=${drmkmod}" ] [ "-DPD_DRMKMOD_DIR=${finalDrmkmod}" ] old.configurePhase; in
+    assert configurePhase != old.configurePhase;
+    { inherit configurePhase; src = finalTree; });
+  cflags = import ./cflags.nix { inherit lib; tree = finalTree; drmkmod = finalDrmkmod; sdk = appleSdk; };
 
   clang = "${crossToolchain}/bin/arm64-apple-darwin20.4-clang";
   libclang = pkgs.llvmPackages_21.libclang.lib;
@@ -61,7 +86,7 @@ let
       export LIBCLANG_PATH=${libclang}/lib
       mkdir -p lnk $out/status $out/objtree/rust/bindings $out/objtree/rust/uapi $out/lib $out/c
       ln -s ${linuxRust}/helpers lnk/linux-helpers
-      CC=(${clang} ${lib.escapeShellArgs cflags.cc} -I${./include} -I$PWD/lnk)
+      CC=(${clang} ${lib.escapeShellArgs cflags.cc} -I${./include} -I${rtkitSrc}/include -I$PWD/lnk)
 
       echo "== reduce bindings_helper.h, uapi_helper.h, helpers/"
       python3 ${./tools/subset.py} headers ${linuxRust}/bindings/bindings_helper.h \
@@ -92,7 +117,7 @@ let
         BGC+=("$a")
         if [ "$a" = ${cflags.lkpiPre} ]; then BGC+=(-include ${./include/pd_bindgen_pre.h}); fi
       done
-      BGC+=(-I${./include} -I$PWD/lnk -w -fno-builtin -D__BINDGEN__ -DMODULE
+      BGC+=(-I${./include} -I${rtkitSrc}/include -I$PWD/lnk -w -fno-builtin -D__BINDGEN__ -DMODULE
             -resource-dir ${libclang}/lib/clang/21)
       BG=(bindgen ${lib.escapeShellArgs bindgenFlags})
       gen=$out/objtree/rust
@@ -305,9 +330,27 @@ let
 
   matrix = matrixOnly null;
   matrixQuick = matrixOnly [ "io" "irq" "uaccess" "dma" "dma_fence" ];
+
+  # D3: PDRustPlat, a platform::Driver on the published GPU node
+  kernelPlat = kernelWith modules.plat [ ];
+  pdrustplat = linuxCrate {
+    crateName = "pdrustplat";
+    crateType = "staticlib";
+    src = ./pdrustplat/rust;
+    root = "lib.rs";
+    deps = [ kernelPlat pin_init ];
+    procMacros = [ (pm "macros") ];
+    extraFlags = [ "-Zcrate-attr=feature(arbitrary_self_types,derive_coerce_pointee,used_with_arg)" ];
+  };
+  platObject = rust.mkKextObject {
+    name = "pdrustplat";
+    staticlib = pdrustplat;
+    exports = [ "_pd_rust_plat_register" ];
+    extraArchives = [ "${bindingsGen}/lib/libhelpers.a" ];
+  };
 in
 {
-  inherit drmKextOnPatchedLayer matrixOnly matrixQuick matrix rust cflags modules linuxRust tree pristineTree drmkmod drmKext
+  inherit kernelPlat pdrustplat platObject finalTree finalDrmkmod drmKextFinal rtkitSrc drmKextOnPatchedLayer matrixOnly matrixQuick matrix rust cflags modules linuxRust tree pristineTree drmkmod drmKext
     bindingsGen rustTree hostMacros ffi build_error pin_init zerocopy bindings uapi kernel kernelWith
     pdrustlkpi object linuxCrate pm;
 }
