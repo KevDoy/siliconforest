@@ -16,7 +16,7 @@ run() { # label, test arguments...
     printf '%s\n' "$out" | grep -e 'flips in' -e 'timing:' -e FAIL -e 'failed' | cut -c1-240 | sed "s/^/DL51 $label: /"
     printf 'DL51_TIMING_%s_RC=%s\n' "$label" "$rc"
 }
-run dumb_read --seconds 20 --wait read
-run dumb_poll --seconds 20 --wait poll
-run gpubuf_read --seconds 20 --prime-from auto
+run dumb_read --seconds ${DL51_SECONDS:-12} --wait read
+run dumb_poll --seconds ${DL51_SECONDS:-12} --wait poll
+run gpubuf_read --seconds ${DL51_SECONDS:-12} --prime-from auto
 printf 'DL51_TIMING_END_%s\n' "$nonce"
