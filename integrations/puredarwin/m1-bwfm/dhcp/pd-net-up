@@ -1,0 +1,15 @@
+#!/bin/sh
+# pd-net-up [interface] - bring an already-joined interface onto the network in the RAM root:
+# DHCP lease (address, default route, /etc/resolv.conf via netsetup), then the resolver daemon
+# that libc name lookups talk to. There is no configd or launchd job for either here.
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+ifname=${1:-en0}
+pd-dhcp "$ifname" || exit 1
+if [ ! -S /var/run/mDNSResponder ]; then
+    mkdir -p /var/run /var/log
+    # -debug keeps mdnsd in the foreground; it reads /etc/resolv.conf itself
+    mdnsd -debug > /var/log/mdnsd.log 2>&1 &
+    i=0
+    while [ ! -S /var/run/mDNSResponder ] && [ $i -lt 20 ]; do sleep 1; i=$((i+1)); done
+fi
+[ -S /var/run/mDNSResponder ] && echo "pd-net-up: resolver ready" || { echo "pd-net-up: resolver did not start"; exit 1; }

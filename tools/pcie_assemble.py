@@ -33,6 +33,7 @@ for e in load(BASE/'mapping.json')['files']:
  mapping.append(e)
 if JOIN:
  mapping.append({'source':str((ROOT/'runs/m1-desktop-010/pd-dhcp-build-001/result/usr/bin/pd-dhcp').resolve()),'destination':'/usr/bin/pd-dhcp','executable':True})
+ mapping.append({'source':str(ROOT/'integrations/puredarwin/m1-bwfm/dhcp/pd-net-up'),'destination':'/usr/bin/pd-net-up','executable':True})
 if WIFI:
  # This M1's own firmware, private and never committed.
  for f in sorted((ROOT/'private/firmware/brcm').iterdir()):

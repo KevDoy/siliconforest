@@ -38,7 +38,6 @@ class PDApcieT8103Host : public IOPCIBridge
 
     volatile UInt8 *configAddress(IOPCIAddressSpace space, UInt8 offset) const;
     UInt32 portRead(UInt32 offset) const;
-    static void watchThread(void *arg, wait_result_t wr);
 
 public:
     bool start(IOService *provider) APPLE_KEXT_OVERRIDE;

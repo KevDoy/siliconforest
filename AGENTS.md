@@ -1411,9 +1411,12 @@ Milestones:
   `PCIE_WIFI=1 PCIE_WIFI_JOIN=1 tools/pcie_iterate.sh <n> 180`; credentials are
   in `private/wifi.env` (never commit). Open: libc name resolution in the RAM
   root fails even with a nameserver in `/etc/resolv.conf`.
-- M6 (next): name resolution, MSI instead of polling, link-up inside the kext
-  at 5 GT/s, remove bring-up logging, DHCP renewal, teardown, power management,
-  WPA3, Bluetooth coexistence.
+- M6, done so far (`reports/sprint-010/wifi-darwin-msi-dns-001.md`): MSI on AIC
+  vector 704 with a 250 ms fallback poll; name resolution via `pd-net-up`
+  (DHCP, then `mdnsd -debug`); bring-up logging removed.
+- M6, remaining: link-up inside the kext at 5 GT/s, DHCP renewal, starting
+  `pd-net-up` automatically, teardown, power management, WPA3, Bluetooth
+  coexistence, running outside the hypervisor.
 
 Licensing (Chris, November 9): port Omacom `linux-aurora` code directly. The
 PCIe host bridge and DART kexts are ported from `pcie-apple.c`, `apple-dart.c`

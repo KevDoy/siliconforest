@@ -23,7 +23,7 @@
 #include <IOKit/IOMemoryDescriptor.h>
 #include <libkern/OSByteOrder.h>
 
-#define DLOG(fmt, ...) do { IOLog("PDDart: " fmt "\n", ##__VA_ARGS__); IOSleep(25); } while (0)
+#define DLOG(fmt, ...) IOLog("PDDart: " fmt "\n", ##__VA_ARGS__)
 
 /* apple-dart.c, T8020 */
 #define DART_PARAMS1                        0x00

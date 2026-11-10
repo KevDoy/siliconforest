@@ -18,10 +18,9 @@ wifiutil join '@SSID@' '@PSK@' 2>&1
 printf 'DL34_JOIN_RC=%s\n' "$?"
 sleep 4
 wifiutil info 2>&1
-printf 'DL34_DHCP\n'
-pd-dhcp en0 2>&1
-printf 'DL34_DHCP_RC=%s\n' "$?"
-sleep 1
+printf 'DL34_NET_UP\n'
+pd-net-up en0 2>&1
+printf 'DL34_NET_UP_RC=%s\n' "$?"
 printf 'DL34_PING_GATEWAY\n'
 ping -c 3 10.1.1.1 2>&1
 printf 'DL34_PING_GATEWAY_RC=%s\n' "$?"
@@ -32,10 +31,9 @@ printf 'DL34_HTTP_BY_ADDRESS\n'
 printf 'GET / HTTP/1.0\r\nHost: one.one.one.one\r\n\r\n' | netcat 1.1.1.1 80 2>&1 | head -4
 printf 'DL34_HTTP_BY_ADDRESS_DONE\n'
 printf 'DL34_DNS\n'
-cat /etc/resolv.conf 2>&1
-(/usr/sbin/mdnsd >/dev/null 2>&1 &)
-sleep 4
-printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' | netcat example.com 80 2>&1 | head -4
+ping -c 2 example.com 2>&1
+printf 'DL34_DNS_PING_RC=%s\n' "$?"
+printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' | netcat -4 example.com 80 2>&1 | head -4
 printf 'DL34_DNS_DONE\n'
 wifiutil info 2>&1
 printf 'DL34_JOIN_END_%s\n' "$nonce"

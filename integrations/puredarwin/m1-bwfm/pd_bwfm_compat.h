@@ -14,6 +14,7 @@ extern "C" {
 #define PD_BWFM_FIRMWARE_DIR	"/Library/Firmware/brcm"
 // no interrupts yet: bwfm_pci_intr runs from a timer with this period
 #define PD_BWFM_POLL_US		2000
+#define PD_BWFM_MSI_FALLBACK_POLL_US	250000	/* safety net once MSI works */
 
 // bwfm.c and if_bwfm_pci.c bring their own
 #undef DPRINTF
@@ -310,8 +311,8 @@ int	if_setlladdr(struct ifnet *, const uint8_t *);
 }
 #endif
 
-/* Bring-up: every message is followed by a short sleep so the serial console drains
- * before a possible hard stop (the hypervisor halts the guest on an SError). */
+/* Driver messages. Define PD_BWFM_SLOW_LOG to follow each with a short sleep so the
+ * serial console drains before a possible hard stop (useful when chasing an SError). */
 int pd_bwfm_printf(const char *fmt, ...) __printflike(1, 2);
 /* log the first n occurrences of something on the data path */
 #define PD_LOGN(n, ...) do { static int pd_logn_; if (pd_logn_ < (n)) { pd_logn_++; pd_bwfm_printf(__VA_ARGS__); } } while (0)

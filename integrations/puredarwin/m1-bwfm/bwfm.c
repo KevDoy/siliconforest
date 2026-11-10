@@ -199,11 +199,8 @@ bwfm_attach(struct bwfm_softc *sc)
 	ifp->if_watchdog = bwfm_watchdog;
 	memcpy(ifp->if_xname, DEVNAME(sc), IFNAMSIZ);
 
-	printf("%s: bwfm_attach: taskq %p, before if_attach\n", DEVNAME(sc), sc->sc_taskq);
 	if_attach(ifp);
-	printf("%s: bwfm_attach: if_attach done\n", DEVNAME(sc));
 	ieee80211_ifattach(ifp);
-	printf("%s: bwfm_attach: ieee80211_ifattach done\n", DEVNAME(sc));
 
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = bwfm_newstate;
@@ -212,7 +209,6 @@ bwfm_attach(struct bwfm_softc *sc)
 	ic->ic_delete_key = bwfm_delete_key;
 
 	ieee80211_media_init(ifp, bwfm_media_change, ieee80211_media_status);
-	printf("%s: bwfm_attach: media init done\n", DEVNAME(sc));
 }
 
 void
@@ -385,7 +381,7 @@ bwfm_start(struct ifnet *ifp)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct mbuf *m;
 
-	PD_LOGN(6, "%s: start: flags 0x%x oactive %d empty %d state %d xflags 0x%x\n", DEVNAME(sc),
+	PD_LOGN(0, "%s: start: flags 0x%x oactive %d empty %d state %d xflags 0x%x\n", DEVNAME(sc),
 	    ifp->if_flags, ifq_is_oactive(&ifp->if_snd), ifq_empty(&ifp->if_snd), ic->ic_state, ic->ic_xflags);
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return;
@@ -421,9 +417,9 @@ bwfm_start(struct ifnet *ifp)
 			continue;
 		}
 
-		PD_LOGN(6, "%s: start: tx frame %d bytes\n", DEVNAME(sc), (int)M_PKTLEN(m));
+		PD_LOGN(1, "%s: first tx frame %d bytes\n", DEVNAME(sc), (int)M_PKTLEN(m));
 		if (sc->sc_bus_ops->bs_txdata(sc, m) != 0) {
-			PD_LOGN(6, "%s: start: txdata refused the frame\n", DEVNAME(sc));
+			PD_LOGN(3, "%s: start: txdata refused the frame\n", DEVNAME(sc));
 			ifp->if_oerrors++;
 			m_freem(m);
 			continue;
@@ -924,9 +920,6 @@ bwfm_chip_attach(struct bwfm_softc *sc)
 	}
 
 	LIST_FOREACH(core, &sc->sc_chip.ch_list, co_link) {
-		printf("%s: core 0x%x rev %d base 0x%08x wrap 0x%08x\n",
-		    DEVNAME(sc), core->co_id, core->co_rev,
-		    core->co_base, core->co_wrapbase);
 
 		switch (core->co_id) {
 		case BWFM_AGENT_CORE_ARM_CM3:
@@ -953,16 +946,12 @@ bwfm_chip_attach(struct bwfm_softc *sc)
 		return 1;
 	}
 
-	printf("%s: chip: set passive (1)\n", DEVNAME(sc));
 	bwfm_chip_set_passive(sc);
 
 	if (sc->sc_buscore_ops->bc_reset) {
-		printf("%s: chip: bus core reset\n", DEVNAME(sc));
-		sc->sc_buscore_ops->bc_reset(sc);
-		printf("%s: chip: set passive (2)\n", DEVNAME(sc));
-		bwfm_chip_set_passive(sc);
+			sc->sc_buscore_ops->bc_reset(sc);
+			bwfm_chip_set_passive(sc);
 	}
-	printf("%s: chip: passive, reading ram info\n", DEVNAME(sc));
 
 	if ((core = bwfm_chip_get_core(sc, BWFM_AGENT_CORE_ARM_CR4)) != NULL) {
 		bwfm_chip_tcm_ramsize(sc, core);
@@ -1050,7 +1039,6 @@ bwfm_chip_get_pmu(struct bwfm_softc *sc)
 int
 bwfm_chip_ai_isup(struct bwfm_softc *sc, struct bwfm_core *core)
 {
-	printf("%s: bwfm_chip_ai_isup core 0x%x wrap 0x%08x\n", DEVNAME(sc), core->co_id, core->co_wrapbase);
 	uint32_t ioctl, reset;
 
 	ioctl = sc->sc_buscore_ops->bc_read(sc,
@@ -1070,28 +1058,22 @@ void
 bwfm_chip_ai_disable(struct bwfm_softc *sc, struct bwfm_core *core,
     uint32_t prereset, uint32_t reset)
 {
-	printf("%s: bwfm_chip_ai_disable core 0x%x wrap 0x%08x\n", DEVNAME(sc), core->co_id, core->co_wrapbase);
 	uint32_t val;
 	int i;
 
-	printf("%s: dis: reading resetctl\n", DEVNAME(sc));
 	val = sc->sc_buscore_ops->bc_read(sc,
 	    core->co_wrapbase + BWFM_AGENT_RESET_CTL);
-	printf("%s: dis: resetctl 0x%08x\n", DEVNAME(sc), val);
 	if ((val & BWFM_AGENT_RESET_CTL_RESET) == 0) {
 
 		sc->sc_buscore_ops->bc_write(sc,
 		    core->co_wrapbase + BWFM_AGENT_IOCTL,
 		    prereset | BWFM_AGENT_IOCTL_FGC | BWFM_AGENT_IOCTL_CLK);
-		printf("%s: dis: ioctl prereset written\n", DEVNAME(sc));
 		val = sc->sc_buscore_ops->bc_read(sc,
 		    core->co_wrapbase + BWFM_AGENT_IOCTL);
-		printf("%s: dis: ioctl 0x%08x, writing resetctl\n", DEVNAME(sc), val);
 
 		sc->sc_buscore_ops->bc_write(sc,
 		    core->co_wrapbase + BWFM_AGENT_RESET_CTL,
 		    BWFM_AGENT_RESET_CTL_RESET);
-		printf("%s: dis: resetctl written\n", DEVNAME(sc));
 		delay(20);
 
 		for (i = 300; i > 0; i--) {
@@ -1102,7 +1084,6 @@ bwfm_chip_ai_disable(struct bwfm_softc *sc, struct bwfm_core *core,
 		}
 		if (i == 0)
 			printf("%s: timeout on core reset\n", DEVNAME(sc));
-		printf("%s: dis: in reset after %d polls\n", DEVNAME(sc), 300 - i);
 	}
 
 	sc->sc_buscore_ops->bc_write(sc,
@@ -1116,7 +1097,6 @@ void
 bwfm_chip_ai_reset(struct bwfm_softc *sc, struct bwfm_core *core,
     uint32_t prereset, uint32_t reset, uint32_t postreset)
 {
-	printf("%s: bwfm_chip_ai_reset core 0x%x wrap 0x%08x\n", DEVNAME(sc), core->co_id, core->co_wrapbase);
 	int i;
 
 	bwfm_chip_ai_disable(sc, core, prereset, reset);

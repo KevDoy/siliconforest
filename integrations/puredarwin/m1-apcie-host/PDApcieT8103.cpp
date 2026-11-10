@@ -230,31 +230,10 @@ bool PDApcieT8103Host::start(IOService *provider)
             OSSynchronizeIO();
             LOG("rid2sid[%u] = 0x%08x (readback 0x%08x)", fn, entry, portRead(PORT_RID2SID + 4 * fn));
         }
-        /* Bring-up aid: report port error/interrupt status once a second for two minutes. */
-        retain();
-        thread_t watcher;
-        if (kernel_thread_start(&PDApcieT8103Host::watchThread, this, &watcher) == KERN_SUCCESS)
-            thread_deallocate(watcher);
         LOG("root port after scan buses=0x%08x membase/limit=0x%08x",
             configRead32(root, 0x18), configRead32(root, 0x20));
     }
     return ok;
-}
-
-void PDApcieT8103Host::watchThread(void *arg, wait_result_t)
-{
-    PDApcieT8103Host *self = (PDApcieT8103Host *)arg;
-    UInt32 last = 0xffffffff, lastLink = 0xffffffff;
-    for (int i = 0; i < 120 && self->portBase; i++) {
-        UInt32 stat = self->portRead(PORT_INTSTAT), link = self->portRead(PORT_LINKSTS);
-        if (stat != last || link != lastLink) {
-            LOG("port0 intstat=0x%08x linksts=0x%08x (t+%ds)", stat, link, i);
-            last = stat;
-            lastLink = link;
-        }
-        IOSleep(1000);
-    }
-    self->release();
 }
 
 bool PDApcieT8103Host::configure(IOService *provider)

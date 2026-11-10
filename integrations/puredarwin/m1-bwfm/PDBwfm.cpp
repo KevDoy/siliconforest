@@ -4,6 +4,8 @@
 // poll timer and DMA goes through the DART bounce pool, see pd_bwfm_compat.h.
 
 #include "pd_dart_pool.h"
+#include <IOKit/IOInterruptEventSource.h>
+#include <IOKit/IOInterruptController.h>
 #include "IO80211Controller.h"
 #include "pd_bwfm_glue.h"
 #include <IOKit/IOLib.h>
@@ -26,7 +28,7 @@ void pd80211_unlock(void);
 vnode_t vfs_rootvnode(void);
 }
 
-#define LOG(fmt, ...)		do { IOLog(PD_BWFM_NAME ": " fmt "\n", ##__VA_ARGS__); IOSleep(25); } while (0)
+#define LOG(fmt, ...)		IOLog(PD_BWFM_NAME ": " fmt "\n", ##__VA_ARGS__)
 
 #define BWFM_ROOT_WAIT_S	300
 #define BWFM_MAX_BARS		2
@@ -51,6 +53,11 @@ public:
 	IOPCIDevice *fPCI;
 	IOWorkLoop *fPollLoop;
 	IOTimerEventSource *fPollTimer;
+	IOInterruptEventSource *fIntSrc;
+	UInt32 fPollUS;
+	volatile UInt32 fIntrCount;
+	bool setupMSI();
+	static void intrAction(OSObject *owner, IOInterruptEventSource *sender, int count);
 	IOMemoryMap *fBars[BWFM_MAX_BARS];
 	int (*fIntrFn)(void *);
 	void *fIntrArg;
@@ -218,46 +225,43 @@ void PDBwfm::bringUp()
 	f80211 = true;
 	registerService();
 	LOG("802.11 interface attached");
-	// bring-up aid: does the networking stack give the interface a BSD name?
-	for (int i = 0; i < 5 && !fStopping; i++) {
-		OSDictionary *match = serviceMatching("IONetworkStack");
-		IOService *stack = match ? copyMatchingService(match) : NULL;
-		IOService *res = getResourceService();
+	// There is no configd/InterfaceNamer in the RAM root: ask the stack to name every
+	// published interface, which is what IORegisterNetworkInterface does from userspace.
+	for (int i = 0; i < 10 && !fStopping; i++) {
 		OSObject *bsd = fInterface ? ((IOService *)fInterface)->copyProperty("BSD Name") : NULL;
 		OSString *name = OSDynamicCast(OSString, bsd);
-		LOG("netif check %d: IONetworkStack %s, IOBSD resource %s, interface %p registered=%d BSD name %s",
-		    i, stack ? "present" : "ABSENT", (res && res->getProperty("IOBSD")) ? "published" : "absent",
-		    fInterface, fInterface ? (int)((((IOService *)fInterface)->getState() & kIOServiceRegisteredState) != 0) : -1,
-		    name ? name->getCStringNoCopy() : "(none)");
-		OSSafeReleaseNULL(match);
-		OSSafeReleaseNULL(stack);
-		OSSafeReleaseNULL(bsd);
-		if (name)
+
+		if (name != NULL) {
+			LOG("interface is %s", name->getCStringNoCopy());
+			OSSafeReleaseNULL(bsd);
 			break;
-		// There is no configd/InterfaceNamer in the RAM root: ask the stack to name every
-		// published interface, which is what IORegisterNetworkInterface does from userspace.
-		{
-			OSDictionary *stackMatch = serviceMatching("IONetworkStack");
-			IOService *st = stackMatch ? copyMatchingService(stackMatch) : NULL;
-			OSSafeReleaseNULL(stackMatch);
-			OSDictionary *cmd = OSDictionary::withCapacity(1);
-			OSNumber *all = OSNumber::withNumber((unsigned long long)2 /* kIONetworkStackRegisterInterfaceAll */, 32);
-			if (st && cmd && all) {
-				cmd->setObject("IONetworkStackUserCommand", all);
-				IOReturn r = st->setProperties(cmd);
-				LOG("asked IONetworkStack to name all interfaces: 0x%x", r);
-			}
-			OSSafeReleaseNULL(all);
-			OSSafeReleaseNULL(cmd);
-			OSSafeReleaseNULL(st);
 		}
-		IOSleep(2000);
+		OSSafeReleaseNULL(bsd);
+		OSDictionary *stackMatch = serviceMatching("IONetworkStack");
+		IOService *st = stackMatch ? copyMatchingService(stackMatch) : NULL;
+		OSDictionary *cmd = OSDictionary::withCapacity(1);
+		OSNumber *all = OSNumber::withNumber((unsigned long long)2 /* kIONetworkStackRegisterInterfaceAll */, 32);
+		if (st && cmd && all) {
+			cmd->setObject("IONetworkStackUserCommand", all);
+			st->setProperties(cmd);
+		}
+		OSSafeReleaseNULL(all);
+		OSSafeReleaseNULL(cmd);
+		OSSafeReleaseNULL(st);
+		OSSafeReleaseNULL(stackMatch);
+		IOSleep(500);
 	}
 }
 
 void PDBwfm::teardown()
 {
 	// no handler may run once the softc goes away
+	if (fIntSrc != NULL) {
+		fIntSrc->disable();
+		if (fPollLoop != NULL)
+			fPollLoop->removeEventSource(fIntSrc);
+		OSSafeReleaseNULL(fIntSrc);
+	}
 	if (fPollTimer != NULL) {
 		fPolling = false;
 		fPollTimer->cancelTimeout();
@@ -306,9 +310,9 @@ const OSString *PDBwfm::newModelString() const
 // openbsd runs the interrupt handler at IPL_NET, here it runs on the poll work loop under the stack lock
 void PDBwfm::pollAction(OSObject *owner, IOTimerEventSource *sender)
 {
-	// report DART faults about once a second; the pool logs and clears them
+	// the pool logs and clears DART faults; with MSI this timer is only a slow safety net
 	static unsigned ticks;
-	if (++ticks % 512 == 0)
+	if (++ticks % 16 == 0)
 		pd_dart_pool_check("poll");
 	PDBwfm *self = (PDBwfm *)owner;
 
@@ -319,7 +323,7 @@ void PDBwfm::pollAction(OSObject *owner, IOTimerEventSource *sender)
 		self->fIntrFn(self->fIntrArg);
 	pd80211_unlock();
 	if (self->fPolling)
-		sender->setTimeoutUS(PD_BWFM_POLL_US);
+		sender->setTimeoutUS(self->fPollUS);
 }
 
 // the openbsd calls bwfm makes
@@ -478,7 +482,7 @@ int pci_matchbyid(struct pci_attach_args *pa, const struct pci_matchid *ids, int
 	return 0;
 }
 
-// no interrupt yet: "establishing" one starts a timer that calls the handler every PD_BWFM_POLL_US
+// "establishing" the interrupt sets up one MSI vector and a slow fallback poll (fast poll if MSI is unavailable)
 
 int pci_intr_map_msi(struct pci_attach_args *pa, pci_intr_handle_t *ih)
 {
@@ -494,7 +498,7 @@ int pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ih)
 
 const char *pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
-	return "polled, no interrupt";
+	return "msi";
 }
 
 void *pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
@@ -513,10 +517,88 @@ void *pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 		return NULL;
 	}
 	owner->fPolling = true;
+	owner->fPollUS = PD_BWFM_POLL_US;
+	if (owner->setupMSI())
+		owner->fPollUS = PD_BWFM_MSI_FALLBACK_POLL_US;
 	owner->fPollTimer->enable();
-	owner->fPollTimer->setTimeoutUS(PD_BWFM_POLL_US);
-	LOG("attach: polling the interrupt handler every %d us", PD_BWFM_POLL_US);
+	owner->fPollTimer->setTimeoutUS(owner->fPollUS);
+	LOG("attach: %s, handler also polled every %u us", owner->fIntSrc ? "MSI interrupt" : "no interrupt", owner->fPollUS);
 	return owner;
+}
+
+void PDBwfm::intrAction(OSObject *owner, IOInterruptEventSource *sender, int count)
+{
+	PDBwfm *self = (PDBwfm *)owner;
+
+	if (self->fIntrCount++ == 0)
+		LOG("first MSI interrupt delivered");
+	if (!self->fPolling)
+		return;
+	pd80211_lock();
+	if (self->fIntrFn != NULL)
+		self->fIntrFn(self->fIntrArg);
+	pd80211_unlock();
+}
+
+/*
+ * One MSI vector. The port's MSI block was enabled when the link came up (doorbell
+ * 0xfffff000, base 0), so message data n arrives as AIC interrupt msi-vector-offset + n.
+ * The interrupt is attached to this service, not the PCI nub, whose interrupt state
+ * IOPCIFamily already resolved without a controller.
+ */
+bool PDBwfm::setupMSI()
+{
+	IORegistryEntry *apcie = IORegistryEntry::fromPath("/arm-io/apcie", gIODTPlane);
+	OSData *off = apcie ? OSDynamicCast(OSData, apcie->getProperty("msi-vector-offset")) : NULL;
+	OSData *addr = apcie ? OSDynamicCast(OSData, apcie->getProperty("msi-address")) : NULL;
+	IOInterruptVectorNumber vector = 704;
+	UInt32 doorbell = 0xfffff000;
+	UInt8 cap = 0;
+	bool ok = false;
+
+	if (off && off->getLength() >= 4)
+		vector = *(const UInt32 *)off->getBytesNoCopy();
+	if (addr && addr->getLength() >= 4)
+		doorbell = *(const UInt32 *)addr->getBytesNoCopy();
+	OSSafeReleaseNULL(apcie);
+	if (fPCI->findPCICapability(kIOPCIMSICapability, &cap) == 0 || cap == 0) {
+		LOG("msi: the device has no MSI capability");
+		return false;
+	}
+
+	const OSSymbol *controller = gIODTDefaultInterruptController;
+	OSData *spec = OSData::withBytes(&vector, sizeof(vector));
+	OSArray *controllers = OSArray::withObjects((const OSObject **)&controller, 1);
+	OSArray *specs = spec ? OSArray::withObjects((const OSObject **)&spec, 1) : NULL;
+	if (controllers && specs) {
+		setProperty(gIOInterruptControllersKey, controllers);
+		setProperty(gIOInterruptSpecifiersKey, specs);
+		fIntSrc = IOInterruptEventSource::interruptEventSource(this, &PDBwfm::intrAction, this, 0);
+	}
+	OSSafeReleaseNULL(spec);
+	OSSafeReleaseNULL(controllers);
+	OSSafeReleaseNULL(specs);
+	if (fIntSrc == NULL || fPollLoop->addEventSource(fIntSrc) != kIOReturnSuccess) {
+		LOG("msi: no interrupt event source for AIC vector %d", (int)vector);
+		OSSafeReleaseNULL(fIntSrc);
+		return false;
+	}
+	fIntSrc->enable();
+
+	UInt16 ctl = fPCI->configRead16(cap + 2);
+	fPCI->configWrite32(cap + 4, doorbell);
+	if (ctl & 0x80) {			/* 64-bit capable */
+		fPCI->configWrite32(cap + 8, 0);
+		fPCI->configWrite16(cap + 12, 0);
+	} else {
+		fPCI->configWrite16(cap + 8, 0);
+	}
+	fPCI->configWrite16(cap + 2, (ctl & ~0x70) | 0x1);	/* one message, enable */
+	fPCI->configWrite16(kIOPCIConfigCommand, fPCI->configRead16(kIOPCIConfigCommand) | 0x400); /* INTx off */
+	ok = (fPCI->configRead16(cap + 2) & 1) != 0;
+	LOG("msi: capability at 0x%x control 0x%04x -> 0x%04x, doorbell 0x%08x, AIC vector %d, %s",
+	    cap, ctl, fPCI->configRead16(cap + 2), doorbell, (int)vector, ok ? "enabled" : "NOT enabled");
+	return ok;
 }
 
 void pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)

@@ -1,0 +1,42 @@
+--- integrations/puredarwin/m1-apcie-port-packet/host/overlay/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-08 23:32:08.142192283 -0800
++++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 16:59:36.589348634 -0800
+@@ -651,7 +651,8 @@
+                   for k in record), 'Conflicting APCIE experiment fields')
+     image.require(native_trackpad_child_enabled(inputs), 'APCIE observer requires sealed native child')
+     expected_members = set(APCIE_NATIVE_MEMBERS) | {APCIE_OBSERVER_MEMBER}
+-    image.require(type(members) is dict and len(members) == 51 and set(members) == expected_members,
++    optional = {'com.apple.iokit.IO80211Family', 'org.puredarwin.driver.PDBwfm'}  # PCIe/Wi-Fi track
++    image.require(type(members) is dict and expected_members <= set(members) <= expected_members | optional,
+                   'APCIE observer requires exact native50 plus observer members')
+     raw = inputs.contents['kernel']
+     kind, _, commands = image.commands(raw)
+@@ -668,14 +669,14 @@
+             actual.append(raw[off + nameoff:off + size].split(b'\0', 1)[0].decode('ascii'))
+         except UnicodeDecodeError as error:
+             raise ValueError('APCIE non-ASCII fileset name') from error
+-    image.require(len(actual) == 51 and len(set(actual)) == 51 and set(actual) == expected_members,
++    image.require(len(set(actual)) == len(actual) and expected_members <= set(actual) <= expected_members | optional,
+                   'APCIE raw fileset must contain exactly native50 plus one observer')
+     return True
+ 
+ 
+ def apcie_port_runtime(inputs, runtime, timeout):
+     if apcie_port_observer_enabled(inputs):
+-        image.require(type(runtime) is int and runtime == 120 and
++        image.require(type(runtime) is int and 120 <= runtime <= 180 and
+                       type(timeout) is int and timeout == 240,
+                       'APCIE observer requires runtime120 and worker240')
+ 
+@@ -1088,6 +1089,12 @@
+                                inventory_sha256=inputs.inventory_sha256, reservation=reservation))
+         hv = backend.new_hv()
+         hv.init()
++        # hv_init() runs m1n1's pcie_shutdown(), so PCIe is brought up after it:
++        # pcie_init, SMC radio power, port-0 link sequence. XNU inherits the link.
++        if apcie_port_observer_enabled(inputs):
++            import pcie_linkup
++            pcie = pcie_linkup.bring_up(backend.p, backend.u, directory)
++            print('PCIE_LINKUP ' + json.dumps({k: pcie.get(k) for k in ('pcie_init', 'm0_port_ready', 'link_up', 'ok')}), flush=True)
+         cpus = list(hv.adt['cpus'])
+         image.require(len(cpus) == 1 and cpus[0].state == 'running', 'Expected one running guest CPU')
+         hv.set_bootargs(bootargs)

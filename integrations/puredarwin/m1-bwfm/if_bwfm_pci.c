@@ -435,9 +435,7 @@ bwfm_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_sc.sc_bus_ops = &bwfm_pci_bus_ops;
 	sc->sc_sc.sc_proto_ops = &bwfm_pci_msgbuf_ops;
-	printf("%s: pci attach: calling bwfm_attach\n", DEVNAME(sc));
 	bwfm_attach(&sc->sc_sc);
-	printf("%s: pci attach: bwfm_attach returned\n", DEVNAME(sc));
 	config_mountroot(self, bwfm_attachhook);
 	return;
 
@@ -1765,7 +1763,7 @@ bwfm_pci_msg_rx(struct bwfm_pci_softc *sc, void *buf, struct mbuf_list *ml)
 	case MSGBUF_TYPE_FLOW_RING_CREATE_CMPLT:
 		fcr = (struct msgbuf_flowring_create_resp *)buf;
 		flowid = letoh16(fcr->compl_hdr.flow_ring_id);
-		PD_LOGN(8, "%s: flowring create completion: ring %d status %d\n", DEVNAME(sc), flowid, letoh16(fcr->compl_hdr.status));
+		PD_LOGN(4, "%s: flowring create completion: ring %d status %d\n", DEVNAME(sc), flowid, letoh16(fcr->compl_hdr.status));
 		if (flowid < 2)
 			break;
 		flowid -= 2;
@@ -1840,7 +1838,7 @@ bwfm_pci_msg_rx(struct bwfm_pci_softc *sc, void *buf, struct mbuf_list *ml)
 		bwfm_pci_fill_rx_rings(sc);
 		break;
 	case MSGBUF_TYPE_TX_STATUS:
-		PD_LOGN(8, "%s: tx status received\n", DEVNAME(sc));
+		PD_LOGN(1, "%s: first tx status received\n", DEVNAME(sc));
 		tx = (struct msgbuf_tx_status *)buf;
 		m = bwfm_pci_pktid_free(sc, &sc->sc_tx_pkts,
 		    letoh32(tx->msg.request_id) - 1);
@@ -1854,7 +1852,7 @@ bwfm_pci_msg_rx(struct bwfm_pci_softc *sc, void *buf, struct mbuf_list *ml)
 		break;
 	case MSGBUF_TYPE_RX_CMPLT:
 		rx = (struct msgbuf_rx_complete *)buf;
-		PD_LOGN(8, "%s: rx complete: %d bytes at offset %d, flags 0x%x\n", DEVNAME(sc), letoh16(rx->data_len), letoh16(rx->data_offset), letoh16(rx->flags));
+		PD_LOGN(1, "%s: first rx complete: %d bytes at offset %d, flags 0x%x\n", DEVNAME(sc), letoh16(rx->data_len), letoh16(rx->data_offset), letoh16(rx->flags));
 		m = bwfm_pci_pktid_free(sc, &sc->sc_rx_pkts,
 		    letoh32(rx->msg.request_id));
 		if (m == NULL)
@@ -2110,8 +2108,6 @@ bwfm_pci_flowring_create(struct bwfm_pci_softc *sc, struct mbuf *m)
 	int flowid, prio, fifo;
 	int i, found;
 
-	PD_LOGN(6, "%s: flowring create requested\n", "PDBwfm");
-
 	prio = ieee80211_classify(ic, m);
 	fifo = bwfm_pci_prio2fifo[prio];
 
@@ -2171,8 +2167,6 @@ bwfm_pci_flowring_create_cb(struct bwfm_softc *bwfm, void *arg)
 	struct bwfm_pci_msgring *ring;
 	uint8_t *da, *sa;
 	int s;
-
-	PD_LOGN(6, "%s: flowring create task running\n", "PDBwfm");
 
 	da = mtod(cmd->m, char *) + 0 * ETHER_ADDR_LEN;
 	sa = mtod(cmd->m, char *) + 1 * ETHER_ADDR_LEN;
@@ -2318,8 +2312,6 @@ bwfm_pci_txdata(struct bwfm_softc *bwfm, struct mbuf *m)
 	uint32_t pktid;
 	paddr_t paddr;
 	int flowid, ret;
-
-	PD_LOGN(6, "%s: txdata called\n", "PDBwfm");
 
 	flowid = bwfm_pci_flowring_lookup(sc, m);
 	if (flowid < 0) {

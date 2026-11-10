@@ -513,6 +513,8 @@ pd_bwfm_printf(const char *fmt, ...)
 	n = vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
 	printf("%s", line);
+#ifdef PD_BWFM_SLOW_LOG
 	IOSleep(25);
+#endif
 	return n;
 }

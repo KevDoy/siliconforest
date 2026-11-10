@@ -287,7 +287,12 @@ int main(int argc, char **argv)
     printf("PD_DHCP_LEASE addr=%s mask=%s router=%s dns=%s lease=%us\n", ipstr(ack.addr, a), ipstr(ack.mask, m),
            ipstr(ack.router, r), ipstr(ack.dns ? ack.dns : ack.router, d), ack.secs);
     fflush(stdout);
-    execl("/bin/netsetup", "netsetup", ifname, a, m, r, d, (char *)NULL);
+    {
+        /* netsetup defaults the broadcast address to a fixed test network; pass the real one */
+        char bc[16];
+        ipstr(ack.addr | ~ack.mask, bc);
+        execl("/bin/netsetup", "netsetup", ifname, a, m, r, d, bc, (char *)NULL);
+    }
     fprintf(stderr, "pd-dhcp: exec netsetup: %s\n", strerror(errno));
     return 1;
 }
