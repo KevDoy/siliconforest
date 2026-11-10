@@ -37,6 +37,7 @@ cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/pur
 echo "${PCIE_LINK:-none}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
 echo "${PCIE_CPUFREQ:-on}" > $LAB/integrations/puredarwin/m1-bringup/cpufreq_mode.txt
 echo "${PCIE_GPU_PROBE:-off}" > $LAB/integrations/puredarwin/m1-bringup/gpu_probe_mode.txt
+echo "${PCIE_DCP_PROBE:-off}" > $LAB/integrations/puredarwin/m1-bringup/dcp_probe_mode.txt
 LSHA=$(sha256sum $LAB/integrations/puredarwin/m1-bringup/host_progress.py | cut -d' ' -f1)
 tar -C $RUN/pcie-m2-host-001 -cf - lab | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'rm -rf $W/lab-pcie-m2-001 && mkdir -m 700 $W/lab-pcie-m2-001 && tar -xf - -C $W/lab-pcie-m2-001 --strip-components 1 && chown -R root:staff $W/lab-pcie-m2-001'"
 tar -C artifacts/m1-desktop-010 -cf - $NAME/manifest.json $NAME/build-record.json $NAME/source.patch $NAME/kernel.macho $NAME/ramdisk.img $NAME/ramdisk.record.json | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'mkdir -p -m 700 $W/pcie-m2 && rm -rf $W/pcie-m2/$NAME && tar -xf - -C $W/pcie-m2 && chown -R root:staff $W/pcie-m2'"
@@ -44,5 +45,5 @@ echo "delivered $NAME; booting"
 ssh -o BatchMode=yes -o ServerAliveInterval=15 $M5 "sudo -n sh -c 'cd $W/lab-pcie-m2-001 && exec $W/venv/bin/python -B tools/m1_bringup_cycle.py --execute --confirm-recovery J293_RECOVERY_READY --cycles 1 --candidate $W/pcie-m2/$NAME/manifest.json --launcher-sha256 $LSHA --inspector-sha256 ea36952b5d68118583f03bdf756683a4a83b534fd4d1a96a62a23e2e54a8b062 --runtime $RUNTIME --inventory $W/lab/reports/sprint-007/ssh-target-inventory.json --private-root $W/pcie-m2-cycles'" | tail -2 || true
 R=$RUN/pcie-enum-attempt-$N; mkdir -p $R
 ssh -o BatchMode=yes $M5 "sudo -n sh -c 'cd $W/pcie-m2-cycles && d=\$(ls -td cycle-*/001 | head -1) && tar -cf - -C \$d guest/console.bin guest/worker.log result.json'" | tar -xf - -C $R
-grep -a 'PCIE_LINKUP\|CPUFREQ\|gpu probe' $R/guest/worker.log || true
+grep -a 'PCIE_LINKUP\|CPUFREQ\|gpu probe\|dcp probe' $R/guest/worker.log || true
 strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-9]|DL4[0-9]|agx-offscreen|WMBENCH|WMSTAT|PDRust|PDGpuDT|PDRtkit|PDAgx|PDDrm|pd-dhcp|pd-netd|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true

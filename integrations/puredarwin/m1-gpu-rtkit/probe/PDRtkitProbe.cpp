@@ -14,14 +14,21 @@
  *                    apple_rtkit_init (rtkit.rs RtKit::new), apple_rtkit_boot (gpu.rs
  *                    init). Stops there. See ../README.md for what this boot lacks and
  *                    why it is not expected to get all the way.
+ *   pdrtkitprobe=3   DCP (SF-H item H1), nothing of the above: attaches to the display
+ *                    coprocessor's ASC (/arm-io/dcp) as iBoot/m1n1 left it and wakes its
+ *                    RTKit the way Linux's dcp_comp_bind() does, to log the endpoint map.
+ *                    Lines start with "PDRtkitProbe: dcp". See runDcp() and ../README.md.
+ *   any other value  nothing
  *
  * Every line this kext logs starts with "PDRtkitProbe: ".
  */
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLib.h>
+#include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IORegistryEntry.h>
 #include <IOKit/IOService.h>
 #include <libkern/OSAtomic.h>
+#include <libkern/c++/OSArray.h>
 #include <libkern/c++/OSData.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/boot.h>
@@ -34,6 +41,17 @@
 
 #define GFX_ASC "/arm-io/gfx-asc"
 #define SGX     "/arm-io/sgx"
+#define DCP     "/arm-io/dcp"
+
+/*
+ * T8103 PMGR power-state registers of the display coprocessor's domain and its parent:
+ * Linux t8103-pmgr.dtsi ps_disp0_cpu0 (reg 0x10018) and ps_disp0_fe (reg 0x360) under
+ * pmgr@23b700000; the same addresses come out of this machine's device tree for PMGR
+ * devices DISP0_CPU0 (id 132) and DISP0_FE (id 84).
+ */
+#define T8103_PMGR_BASE       0x23b700000ULL
+#define T8103_PMGR_DISP0_FE   0x360
+#define T8103_PMGR_DISP0_CPU0 0x10018
 
 /* m1n1 proxyclient/m1n1/hw/asc.py R_CPU_STATUS, R_MBOX_CTRL; Linux mailbox.c */
 #define ASC_CPU_STATUS_RUNNING 0x01
@@ -55,6 +73,8 @@ public:
 
 private:
     void run(int mode);
+    void runDcp();
+    bool dcpPowerState(UInt32 *fe, UInt32 *cpu0);
     void logRegisters(const char *when);
     bool firmwareMemoryOutsideKernel();
     bool regionOutsideKernel(const char *what, UInt64 base, UInt64 size);
@@ -100,7 +120,12 @@ bool PDRtkitProbe::start(IOService *provider)
         return true;
     }
     pd_rtkit_platform_set_log_prefix("PDRtkitProbe: ");
-    run(mode >= 2 ? 2 : 1);
+    if (mode == 3)
+        runDcp();
+    else if (mode <= 2)
+        run(mode);
+    else
+        plog("pdrtkitprobe=%d is not a mode (0 off, 1 GPU read-only, 2 GPU RTKit boot, 3 DCP wake): nothing done", mode);
     registerService();
     return true;
 }
@@ -275,4 +300,134 @@ void PDRtkitProbe::run(int mode)
     }
     plog("mode 2 done: result %d; %u register reads and %u write by the probe itself, the rest by mailbox.c", ret, reads, writes);
     setProperty("PDRtkitProbeResult", ret == 0 ? "rtkit-ready" : "rtkit-boot-incomplete");
+}
+
+/* ---- DCP mode (pdrtkitprobe=3) ---- */
+
+/*
+ * Two PMGR reads, no write. Refuses anything but the SoC and PMGR window the two offsets
+ * were taken from.
+ */
+bool PDRtkitProbe::dcpPowerState(UInt32 *fe, UInt32 *cpu0)
+{
+    IORegistryEntry *armio = IORegistryEntry::fromPath("/arm-io", gIODTPlane);
+    IORegistryEntry *pmgr = IORegistryEntry::fromPath("/arm-io/pmgr", gIODTPlane);
+    OSData *compat = armio ? OSDynamicCast(OSData, armio->getProperty("compatible")) : NULL;
+    bool t8103 = compat && compat->getLength() >= sizeof("arm-io,t8103") &&
+                 !memcmp(compat->getBytesNoCopy(), "arm-io,t8103", sizeof("arm-io,t8103"));
+    UInt64 base = 0;
+    bool ok = false;
+
+    if (t8103 && pmgr) {
+        /* registry-owned array: used here, never released; this function runs once */
+        OSArray *regs = IODTResolveAddressing(pmgr, "reg", NULL);
+        IOMemoryDescriptor *d = regs ? OSDynamicCast(IOMemoryDescriptor, regs->getObject(0)) : NULL;
+        base = d ? d->getPhysicalSegment(0, NULL, kIOMemoryMapperNone) : 0;
+    }
+    if (base == T8103_PMGR_BASE) {
+        volatile UInt32 *pfe = (volatile UInt32 *)pd_rtkit_platform_ioremap(T8103_PMGR_BASE + T8103_PMGR_DISP0_FE, 4);
+        volatile UInt32 *pcpu = (volatile UInt32 *)pd_rtkit_platform_ioremap(T8103_PMGR_BASE + T8103_PMGR_DISP0_CPU0, 4);
+        if (pfe && pcpu) {
+            *fe = *pfe;
+            *cpu0 = *pcpu;
+            reads += 2;
+            ok = true;
+        }
+        pd_rtkit_platform_iounmap((void *)pfe);
+        pd_rtkit_platform_iounmap((void *)pcpu);
+    } else {
+        plog("dcp power: not T8103 or PMGR reg 0 is 0x%llx, expected 0x%llx", (unsigned long long)base,
+             (unsigned long long)T8103_PMGR_BASE);
+    }
+    OSSafeReleaseNULL(armio);
+    OSSafeReleaseNULL(pmgr);
+    return ok;
+}
+
+/*
+ * SF-H item H1. Stages, one "PDRtkitProbe: dcp <stage>:" line each:
+ *
+ *   start   what is about to happen
+ *   dt      /arm-io/dcp from the device tree: ASC window, mailbox, AIC numbers. No access.
+ *   power   PMGR DISP0_FE and DISP0_CPU0, read only. Stops unless DISP0_CPU0 is powered.
+ *   regs    ASC CPU_CONTROL, CPU_STATUS, mailbox A2I/I2A control, read only. Stops unless
+ *           RUN is set: this probe never starts the coprocessor (a stopped DCP needs its
+ *           firmware mappings and a PMGR reset first, m1n1 dcp.c:211-219).
+ *   cpu     Linux ORs RUN into CPU_CONTROL here (dcp.c:2533); with RUN set that write
+ *           changes nothing, so it is not made.
+ *   rtkit-init, wake, rx, hello, endpoint, endpoint-map, buffer-request, power, endpoints,
+ *   summary   probe.c pd_rtkitprobe_dcp_wake()
+ *   regs    the four registers again
+ *   irq     interrupt counters
+ *   done    result
+ *
+ * Writes made: mailbox messages on the management endpoint only (IOP power state 0x220,
+ * HELLO reply, endpoint-map replies, start of the system endpoints present below 0x20, AP
+ * power state 0x20) and acknowledgments RTKit owes on syslog/ioreport/oslog. No register
+ * of the display pipe, of either DART or of PMGR is written; no endpoint from 0x20 up is
+ * started; the coprocessor is not shut down, quiesced or put to sleep afterwards.
+ */
+void PDRtkitProbe::runDcp()
+{
+    plog("dcp start: attach to " DCP " as found, wake its RTKit as Linux dcp_comp_bind does, log the endpoint map, stop");
+
+    int ret = pd_rtkit_platform_mbox_resolve(DCP, &res);
+    if (ret != 0) {
+        plog("dcp stop: " DCP " could not be resolved: %d", ret);
+        return;
+    }
+    plog("dcp dt: %s iop,ascwrap-v4, reg 0 0x%llx len 0x%llx, mailbox 0x%llx len 0x%llx, AIC listed %u %u %u %u: send-empty %u, recv-not-empty %u",
+         res.path, (unsigned long long)res.asc_phys, (unsigned long long)res.asc_size, (unsigned long long)res.mbox_phys,
+         (unsigned long long)res.mbox_size, (unsigned)res.aic_listed[0], (unsigned)res.aic_listed[1],
+         (unsigned)res.aic_listed[2], (unsigned)res.aic_listed[3], (unsigned)res.aic_send_empty,
+         (unsigned)res.aic_recv_not_empty);
+
+    UInt32 fe = 0, cpu0 = 0;
+    if (!dcpPowerState(&fe, &cpu0)) {
+        plog("dcp stop: PMGR power state not read; ASC registers NOT touched");
+        return;
+    }
+    bool powered = ((cpu0 >> 4) & 0xf) == 0xf;
+    plog("dcp power: DISP0_FE 0x%08x (target 0x%x actual 0x%x) DISP0_CPU0 0x%08x (target 0x%x actual 0x%x): %s", fe, fe & 0xf,
+         (fe >> 4) & 0xf, cpu0, cpu0 & 0xf, (cpu0 >> 4) & 0xf, powered ? "powered" : "NOT powered");
+    if (!powered) {
+        plog("dcp stop: DISP0_CPU0 is not powered; ASC registers NOT touched (%u register reads, 0 writes)", reads);
+        return;
+    }
+
+    asc = (volatile UInt32 *)pd_rtkit_platform_ioremap(res.asc_phys, 0x100);
+    mbox = (volatile UInt32 *)pd_rtkit_platform_ioremap(res.mbox_phys, 0x200);
+    if (!asc || !mbox) {
+        plog("dcp stop: ASC registers could not be mapped");
+        return;
+    }
+    logRegisters("dcp regs before");
+    UInt32 control = asc[PD_RTKIT_ASC_CPU_CONTROL / 4];
+    reads++;
+    if (!(control & PD_RTKIT_ASC_CPU_CONTROL_RUN)) {
+        plog("dcp stop: CPU_CONTROL.RUN is clear, the coprocessor is not running; this probe does not start it (%u register reads, 0 writes)",
+             reads);
+        return;
+    }
+    plog("dcp cpu: RUN is set; Linux's CPU_CONTROL |= RUN (dcp.c:2533) would write the value back unchanged, not written");
+
+    pdos_xnu_init();
+    if (pd_rtkitprobe_layer_up() != 0) {
+        plog("dcp stop: LinuxKPI layer did not come up; nothing was sent");
+        return;
+    }
+    ret = pd_rtkitprobe_dcp_wake();
+
+    logRegisters("dcp regs after");
+    uint64_t taken = 0, handled = 0;
+    pd_rtkit_platform_irq_stats(res.irq_recv_not_empty, &taken, &handled);
+    uint64_t staken = 0, shandled = 0;
+    if (res.irq_send_empty >= 0)
+        pd_rtkit_platform_irq_stats(res.irq_send_empty, &staken, &shandled);
+    plog("dcp irq: recv-not-empty (AIC %u) %llu taken, %llu handler runs; send-empty (AIC %u) %llu taken, %llu handler runs",
+         (unsigned)res.aic_recv_not_empty, (unsigned long long)taken, (unsigned long long)handled, (unsigned)res.aic_send_empty,
+         (unsigned long long)staken, (unsigned long long)shandled);
+    plog("dcp done: result %d (%s); no endpoint from 0x20 up started, no shutdown, no sleep; RTKit stays attached and keeps acknowledging",
+         ret, ret == 0 ? "RTKit awake, IOP and AP power states 0x20" : "wake did not complete");
+    setProperty("PDRtkitProbeResult", ret == 0 ? "dcp-awake" : "dcp-wake-incomplete");
 }

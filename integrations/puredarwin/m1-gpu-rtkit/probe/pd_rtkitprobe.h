@@ -20,6 +20,15 @@ int pd_rtkitprobe_layer_up(void);
  */
 int pd_rtkitprobe_rtkit_boot(void);
 
+/*
+ * probe.c, DCP mode (pdrtkitprobe=3), after the caller has seen CPU_CONTROL.RUN set on
+ * /arm-io/dcp: apple_rtkit_init() and apple_rtkit_wake() as Linux's dcp_comp_bind() does
+ * them, with every received mailbox message traced. No endpoint >= 0x20 is started, no
+ * buffer request is answered, nothing is shut down or put to sleep. Returns what
+ * apple_rtkit_wake() returned, or the error of an earlier step.
+ */
+int pd_rtkitprobe_dcp_wake(void);
+
 #ifdef __cplusplus
 }
 #endif

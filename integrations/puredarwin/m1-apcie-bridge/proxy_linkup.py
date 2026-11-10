@@ -474,6 +474,67 @@ def gpu_probe(p, u, out):
     return result
 
 
+def dcp_probe(p, u, out):
+    """Read-only look at the display coprocessor before the guest starts (mode file
+    dcp_probe_mode.txt = "dcp"; "on" means the same): the PMGR state of every display power
+    domain and, only if DISP0_CPU0 is powered, the DCP ASC CPU control/status and the two
+    mailbox control registers. "dart" additionally reads the configuration, TCR and TTBR
+    registers of dart-dcp and dart-disp0 (t8020 layout, m1n1 src/dart.c). Writes nothing and
+    never reads a mailbox data register (reading the outbox would take a message out)."""
+    mode_file = Path(__file__).with_name("dcp_probe_mode.txt")
+    mode = mode_file.read_text().strip() if mode_file.exists() else "off"
+    if mode not in ("dcp", "on", "dart"):
+        return None
+    result = {"mode": mode, "domains": {}, "nodes": {}}
+    try:
+        adt = u.adt
+        for dev in adt["/arm-io/pmgr"].devices:
+            name = dev.name
+            if any(k in name.upper() for k in ("DISP", "DCP")):
+                addr = adt.pmgr_dev_get_addr(dev)
+                entry = {"id": adt.pmgr_dev_get_id(dev), "addr": addr, "virtual": bool(dev.flags.no_ps)}
+                # a virtual device has no register of its own (its address is a placeholder)
+                if not entry["virtual"]:
+                    entry["value"] = p.read32(addr)
+                result["domains"][name] = entry
+        for path in ("/arm-io/dcp", "/arm-io/dart-dcp", "/arm-io/dart-disp0", "/arm-io/disp0"):
+            try:
+                node = adt[path]
+                result["nodes"][path] = {"reg": [list(node.get_reg(i)) for i in range(len(node.reg))],
+                                         "interrupts": list(getattr(node, "interrupts", [])),
+                                         "props": sorted(node._properties.keys())}
+            except Exception as e:
+                result["nodes"][path] = {"error": repr(e)}
+        cpu0 = result["domains"].get("DISP0_CPU0")
+        powered = bool(cpu0) and "value" in cpu0 and (cpu0["value"] >> 4) & 0xf == 0xf
+        result["disp0_cpu0_powered"] = powered
+        if powered:
+            base = result["nodes"]["/arm-io/dcp"]["reg"][0][0]
+            asc = {n: p.read32(base + o) for n, o in
+                   (("cpu_control", 0x44), ("cpu_status", 0x48), ("inbox_ctrl", 0x8110), ("outbox_ctrl", 0x8114))}
+            result["asc"] = asc
+            # m1n1 hw/asc.py: CPU_CONTROL.RUN bit 4; mailbox control EMPTY bit 17, FULL bit 16
+            result["summary"] = {"run": bool(asc["cpu_control"] & BIT(4)),
+                                 "ap_to_dcp_fifo_empty": bool(asc["inbox_ctrl"] & BIT(17)),
+                                 "dcp_to_ap_fifo_empty": bool(asc["outbox_ctrl"] & BIT(17))}
+            if mode == "dart":
+                for path, sids in (("/arm-io/dart-dcp", (0,)), ("/arm-io/dart-disp0", (0, 4))):
+                    dbase = result["nodes"][path]["reg"][0][0]
+                    d = {"config_0x60": p.read32(dbase + 0x60), "error_0x40": p.read32(dbase + 0x40)}
+                    for sid in sids:
+                        d[f"tcr_sid{sid}"] = p.read32(dbase + 0x100 + 4 * sid)
+                        d[f"ttbr_sid{sid}"] = [p.read32(dbase + 0x200 + 16 * sid + 4 * i) for i in range(4)]
+                    result.setdefault("dart", {})[path] = d
+    except Exception:
+        result["error"] = traceback.format_exc()
+    log("dcp probe: " + json.dumps(result, default=hex))
+    try:
+        (Path(out) / "dcp-probe.json").write_text(json.dumps(result, indent=1, default=hex))
+    except Exception:
+        pass
+    return result
+
+
 def launcher_step(p, u, out):
     """Called by the boot launcher after hv.init(). The mode file next to this module says who
     brings the link up: "none" (the default: nothing here; the kext powers the radio and brings
@@ -482,6 +543,7 @@ def launcher_step(p, u, out):
     mode_file = Path(__file__).with_name("pcie_linkup_mode.txt")
     mode = mode_file.read_text().strip() if mode_file.exists() else "none"
     gpu_probe(p, u, out)
+    dcp_probe(p, u, out)
     if mode == "launcher":
         result = bring_up(p, u, out)
         result["mode"] = "launcher"

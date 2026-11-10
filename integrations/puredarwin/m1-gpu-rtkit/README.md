@@ -228,6 +228,7 @@ changes, the store paths change with it.
 | `pdrtkitprobe=0` | nothing |
 | none, or `pdrtkitprobe=1` | read-only probe |
 | `pdrtkitprobe=2` | read-only probe, then the RTKit boot attempt |
+| `pdrtkitprobe=3` | DCP mode (SF-H item H1), none of the GPU steps; see "DCP mode" below |
 | `pdrtkit_irq=0\|1\|2` | interrupt mode, see above (mode 2 only) |
 
 To boot it: use the `kernel` from `build-probe-kc.nix` in place of the phase A collection in
@@ -320,6 +321,101 @@ that `shmem_setup` refuses: a buffer request is logged and left unanswered.
 If mode 2 times out at the endpoint map, the last lines tell the cases apart: `I2A_CONTROL`
 not empty with 0 interrupts taken means a message is waiting and the interrupt did not arrive
 (try `pdrtkit_irq=0`); empty with RUN set means the firmware did not speak.
+
+## DCP mode (`pdrtkitprobe=3`, SF-H item H1)
+
+Attaches the port to the display coprocessor (`/arm-io/dcp`) in whatever state the boot chain
+left it, wakes its RTKit the way Linux does, logs the endpoint map and stops. Build evidence
+only, like the rest of this directory. Lines start with `PDRtkitProbe: dcp`.
+
+```sh
+$NB build-dcp-probe-kc.nix     # ../m1-apcie-host/build-kc.nix + PDRtkitProbe.kext; boot-args pdrtkitprobe=3
+```
+
+The collection needs no other kext for the probe: it links its own hidden copy of the Linux
+layer and the port, and the recipe fails on any unresolved symbol beyond the layer's four
+known ones or if fewer than 4 pages stay free before the kernel's `__TEXT`. The GPU kexts are
+left out on purpose.
+
+A read-only look from the m1n1 proxy before the guest starts is in
+`../m1-apcie-bridge/proxy_linkup.py` (`dcp_probe`, mode file `dcp_probe_mode.txt` = `dcp`):
+PMGR state of the display domains and, if `DISP0_CPU0` is powered, ASC `CPU_CONTROL`,
+`CPU_STATUS` and the two mailbox control registers; `dart` adds DART register reads.
+
+### What Linux does (`/home/chrisk/source/aurora-linux`, `e4735882`)
+
+| Step | Where | Panel / DART |
+| --- | --- | --- |
+| genpd powers `ps_disp0_cpu0` (parent `ps_disp0_fe`) for `dcp`, `dcp_mbox`, `dcp_dart`, `disp0_dart` | `t8103.dtsi:631,643,657,678`, `t8103-pmgr.dtsi:1006` | already on when the panel is lit; a power cycle would blank it |
+| DART drivers attach `dcp` (stream 0 of `dcp_dart`) and the `piodma` child (stream 4 of `disp0_dart`); m1n1's reserved-memory entries are mapped again | `t8103.dtsi:665,687`, `dcp.c:2165-2196`, `apple-dart.c:942` | rewrites live translation state; **needs DART**; not done here |
+| `dma_set_mask_and_coherent`, map `coproc`, panel properties, display registers, clock | `dcp.c:2455-2522` | no hardware effect |
+| `CPU_CONTROL \|= RUN` | `dcp.c:2533-2536` | no change when RUN is already set |
+| `devm_apple_rtkit_init(dev, dcp, "mbox", 0, &rtkit_ops)` | `dcp.c:2538` | mailbox interrupts on; nothing sent |
+| `apple_rtkit_wake`: IOP power state 0x220, then HELLO, endpoint map, start of the system endpoints, IOP power ack, AP power 0x20 | `dcp.c:2543`, `rtkit.c:1110-1130`, `:118`, `:155`, `:198`, `:1018` | management endpoint only |
+| during that, buffer requests on crashlog/syslog/ioreport/oslog go to `dcp_rtk_shmem_setup` | `rtkit.c:261-340`, `dcp.c:1416-1454` | with an iova (firmware-placed): `iommu_iova_to_phys` + `memremap`, **no reply** (`rtkit.c:324`); without: `dma_alloc_coherent` through `dcp_dart` and a reply. **Needs DART** either to read or to map |
+| later, from the DRM driver: `dcp_start`: system endpoint 0x20, on some machines iBoot 0x23 and DPTX 0x2a, then IOMFB 0x37 | `dcp.c:1883-1953` | **this is where the panel can change**; not done here |
+
+Minimum sequence to "endpoint map received": the two rows `devm_apple_rtkit_init` and
+`apple_rtkit_wake`, nothing before them when the domain is on and RUN is set, nothing after.
+`apple_rtkit_wake` goes past the map (it starts the system endpoints and waits for the power
+acks); the port's `rtkit.c` is used unmodified, so the probe runs it whole.
+
+### What state the DCP is in on this machine
+
+Not the one the research assumed. In the saved console of
+`runs/m1-desktop-010/pcie-enum-attempt-pd02` m1n1 does not take the "already initialized"
+exit of `display_init()` (`src/display.c:777`); it takes the power-cycle path (`:771-775`):
+
+```
+display: Internal display on t8103 or t8112 with Sequoia SFW, power cycling
+dart: dart /arm-io/dart-dcp at 0x23130c000 is a t8020 (locked)
+dart: dart /arm-io/dart-disp0 at 0x231304000 is a t8020
+rtkit(dcp): booting with version 12
+rtkit(dcp): unknown system endpoint 0x0a
+rtkit(dcp): unknown oslog message 103ff8000f0025f
+display: Modeset took 911 ms
+display: Quiescing DCP (internal)
+```
+
+So m1n1 itself boots the DCP's RTKit, sets the mode through the iBoot endpoint, and then
+quiesces it (`display_shutdown` -> `dcp_shutdown(dcp, false)` -> `rtkit_quiesce`,
+`src/display.c:805-809`, `src/dcp.c:309`, `src/rtkit.c:786-851`: AP power 0x10, then IOP
+power 0x10), frees its RTKit buffers and unmaps them from `dart-dcp`
+(`src/dcp.c:319-322`; `dart_shutdown` leaves a locked DART's registers alone,
+`src/dart.c:1089`). The hypervisor path (`proxyclient/m1n1/hv/__init__.py`) does not touch
+the DCP. The kernel therefore meets a DCP that is running, quiesced, at RTKit protocol 12,
+with `dart-dcp` reported locked and `dart-disp0` not. Quiesced-then-`apple_rtkit_wake` is
+the same hand-over Linux gets from m1n1 on this machine.
+
+That log also says what to expect: a system endpoint 0x0a, and an oslog buffer request
+`0x0103ff8000f0025f`, which in Linux's field layout is size 0x3ff8 at iova 0xf0025f000:
+placed by the firmware, no reply owed. Whether crashlog/syslog/ioreport are firmware-placed
+or need an allocation is not visible there (m1n1 prints nothing for either).
+
+### What the probe does
+
+| Stage (`PDRtkitProbe: dcp <stage>:`) | Action |
+| --- | --- |
+| `dt` | `/arm-io/dcp` from the device tree: ASC window, mailbox = reg 0 + 0x8000, the four AIC numbers. No access |
+| `power` | two PMGR reads, `DISP0_FE` and `DISP0_CPU0` (T8103 addresses, checked against `/arm-io` and the PMGR node). Stops unless `DISP0_CPU0` is powered |
+| `regs before` | four ASC reads. Stops unless `CPU_CONTROL.RUN` is set: the probe never starts the coprocessor |
+| `cpu` | Linux's RUN write is skipped (it would write the same value) |
+| `rtkit-init` | `apple_rtkit_init`; then a trace function is put in front of RTKit's receive function |
+| `wake` | `apple_rtkit_wake` |
+| `rx`, `hello`, `endpoint`, `endpoint-map`, `buffer-request`, `power` | from the trace: every received message (first 96 in full), every announced endpoint with its name, every buffer request with endpoint, size and iova |
+| `endpoints`, `summary`, `regs after`, `irq`, `done` | results |
+
+Buffer requests are never answered and nothing is mapped: `shmem_setup` returns an error. For
+a firmware-placed buffer that is what Linux puts on the wire too (nothing). For a request
+without an iova the firmware does not get the reply Linux would send; the `buffer-request`
+line then ends in `NOT answered (needs H2)` and is the specification for H2. Neither DART is
+read or written. Afterwards the coprocessor is left as it is: not quiesced, not put to sleep,
+the RTKit instance attached.
+
+Messages the probe causes to be sent, all by the unmodified `rtkit.c`: IOP power state 0x220,
+HELLO reply, endpoint-map replies, one start message per system endpoint in the map
+(below 0x20), AP power state 0x20 if the IOP ack arrives, and acknowledgments of syslog and
+ioreport notifications.
 
 ## Unverified
 
