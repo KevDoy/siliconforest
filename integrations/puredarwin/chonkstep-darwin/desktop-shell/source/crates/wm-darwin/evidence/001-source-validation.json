@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "status": "SOURCE_CHECKED_NOT_NATIVE_LINKED_OR_BOOTED",
+  "base_commit": "e0fe3a000aec71b1db46b940e2a75670be4e0f31",
+  "rust": "1.98.1 (48a229cea 2026-09-01)",
+  "source_set_sha256": "4ce52f26690e621ccfb2209a8dff56287f8b85a62472e7ed61b61876dd6d82a0",
+  "source_set_digest_format": "sha256(sorted path + NUL + file_sha256 + LF), excluding this report",
+  "files_sha256": {
+    "Cargo.lock": "33622017b138310ef4ff90d796cdd35671fd928efaf20e8ca050dad795948846",
+    "crates/wm-darwin/Cargo.toml": "af8b7c7dae484fb9bb98106769ea8656870eb2fab68c2611c68b323e0dde8fed",
+    "crates/wm-darwin/README.md": "609440a20983d8e958ce9d0a99967ca2700705f287dc768adca777811448aacd",
+    "crates/wm-darwin/src/lib.rs": "12fbffa1be9a2e942a9386ec1a396ed975eedd4ea411a659bcf1784d434bd4b7",
+    "crates/wm-darwin/src/main.rs": "37156fd67fbcd543f6d2fe729e72912dbb6c3b9027dac1cba2e69303fccdf6c8",
+    "crates/wm-darwin/src/pixels.rs": "474aea0c8f44d11355b7d01f08dce5d2ee0f8b741a45d3639c32a1810783f847",
+    "crates/wm-darwin/src/presenter.rs": "c551d5ed25f1c56f2104682ce90b21e41f28334d227d703274e8b704ea8f7a2c",
+    "crates/wm-darwin/src/scene.rs": "e2671f47c393739273e40027d197ad52796e1ef4d4918e55906e3cda3346fb29",
+    "crates/wm-darwin/src/server.rs": "303f427b55a04bec3829b42780bba4ebc564ad3eba2c201ec7a8d0c09d53ca27",
+    "crates/wm-darwin/tests/wayland_shm.rs": "84e1992049b79ba1e06156105901ae1269f50fb05493c7582fb9f889253c5a1c"
+  },
+  "checks": [
+    {
+      "command": "cargo check --offline -p wm-darwin --features darwin-backend",
+      "exit_code": 0,
+      "scope": "Linux host type check"
+    },
+    {
+      "command": "cargo check --offline -p wm-darwin --features darwin-backend --target aarch64-apple-darwin",
+      "exit_code": 0,
+      "scope": "Target type check including native PDGOP/IOKitCF FFI; no link"
+    },
+    {
+      "command": "cargo check --offline -p wm-darwin --no-default-features",
+      "exit_code": 0,
+      "scope": "Feature disabled"
+    },
+    {
+      "command": "cargo test --offline -p wm-darwin --features darwin-backend",
+      "exit_code": 0,
+      "tests_passed": 4,
+      "scope": "Two unit groups and two real host Wayland wire tests; no device"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "implemented": [
+    "Pure Smithay Wayland frontend, only wayland_frontend feature",
+    "Real wm-core WindowManager and wm-theme RasterThemeEngine",
+    "Owned SHM pixels, release, tiny-skia scene rendering, presentation-gated frame callbacks",
+    "xdg configure/ack, server decoration, title/parent/size hints, workspace visibility, unmap/remap and destruction",
+    "Native IOGOP class query, exact original 64-byte PDGOP ABI, bounded RGB8/RGB10 stores, dsb oshst, lifetime-owned teardown"
+  ],
+  "abi_correction": {
+    "before_native_execution": true,
+    "function": "kern_return_t IOObjectConformsTo(io_object_t, const char *, boolean_t *)",
+    "library": "IOKitCF",
+    "boolean_t_arm": "int / Rust i32",
+    "old_two_argument_declaration_removed": true
+  },
+  "native_link_prerequisites": [
+    "matching 64-byte-ABI libPDGOP",
+    "libIOKitCF and transitive PureDarwin dependencies",
+    "libxkbcommon",
+    "root-provided PureDarwin SDK/linker and libSystem"
+  ],
+  "unqualified": [
+    "Native link/runtime/syscalls",
+    "M1 PDGOP ownership, mapping, failure close and scanout",
+    "Physical panel",
+    "Native input; no wl_seat advertised",
+    "Popups, subsurfaces, cropped geometry, transformed/scaled buffers, clipboard, X11, GPU and privileged protocols"
+  ],
+  "linux_backend_modified": false,
+  "new_crate_and_lock_addition_only": true,
+  "hardware_accessed": false,
+  "toolchain_installed_by_this_agent": false,
+  "fetched": false,
+  "desktop_claim": false,
+  "next_owner": "Root owns native build and guest qualification; independent source review before a hardware candidate"
+}

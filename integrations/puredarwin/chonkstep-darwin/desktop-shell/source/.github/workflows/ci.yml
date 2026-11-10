@@ -1,0 +1,538 @@
+# Every change is checked for vulnerable dependencies, SDK regressions,
+# workspace-wide lint and documentation warnings, fresh Omarchy installation,
+# a live X11 smoke test, and a nested Wayland compositor end-to-end suite.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Only merged commits pay for native packaging. PRs keep their existing
+  # checks; tagging a green main commit promotes these exact attested files.
+  package:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Audit Rust dependencies for security advisories
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  agent-and-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+
+      - name: Run standalone dock SDK tests
+        run: |
+          python3 -m unittest discover -s dock/bindings/python/tests
+          python3 -m unittest discover -s dock/examples/chonk-switch/tests
+          python3 -m unittest discover -s dock/tests
+          cd dock/bindings/go/chonkdock && go test ./...
+
+      - name: Run the Omarchy agent plugin tests
+        run: python3 -m unittest discover omarchy/plugins/chonkstep.agents/tests
+
+      - name: Install image verification dependency
+        run: python3 -m pip install Pillow==12.3.0
+
+      - name: Run benchmark and preflight harness regression tests
+        run: scripts/check.sh harness
+
+  omarchy-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils shellcheck
+
+      - name: Validate package and installer scripts
+        run: |
+          bash -n \
+            dock/check.sh \
+            dock/check-x11.sh \
+            dock/install.sh \
+            packaging/arch/PKGBUILD \
+            packaging/arch/PKGBUILD-release \
+            scripts/check.sh \
+            scripts/check-vendored-smithay-tests.sh \
+            scripts/build-release.sh \
+            scripts/release-validation.sh \
+            scripts/release-metadata.sh \
+            scripts/verify-release-assets.sh \
+            scripts/e2e.sh \
+            scripts/install.sh \
+            scripts/uninstall.sh \
+            scripts/chonkstep-bugreport \
+            scripts/chonkrec \
+            scripts/omarchy-install-desktop-chonkstep \
+            scripts/omarchy-remove-desktop-chonkstep \
+            scripts/test-omarchy-install.sh \
+            scripts/verify-release-package.sh \
+            scripts/verify-install.sh \
+            scripts/wayland-session.sh
+          shellcheck \
+            dock/check.sh \
+            dock/check-x11.sh \
+            dock/install.sh \
+            scripts/check.sh \
+            scripts/check-vendored-smithay-tests.sh \
+            scripts/build-release.sh \
+            scripts/release-validation.sh \
+            scripts/release-metadata.sh \
+            scripts/verify-release-assets.sh \
+            scripts/e2e.sh \
+            scripts/chonkstep-bugreport \
+            scripts/chonkrec \
+            scripts/omarchy-install-desktop-chonkstep \
+            scripts/omarchy-remove-desktop-chonkstep \
+            scripts/test-omarchy-install.sh \
+            scripts/verify-release-package.sh \
+            scripts/verify-install.sh \
+            scripts/uninstall.sh
+
+      - name: Exercise fresh Omarchy login integration
+        run: scripts/test-omarchy-install.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Run the workspace test suite
+        # The Wayland crates are excluded here NOT because they are
+        # untested but because they are the wayland job's whole purpose
+        # (which installs their system libraries and builds+tests them);
+        # compiling Smithay twice per push buys nothing.
+        run: scripts/check.sh unit
+
+      - name: Install X11 smoke test dependencies
+        # libx11-dev is here for the undecorated-client probe built in
+        # the next step, and only for that; see its comment for why a
+        # compiled client rather than a shell one-liner.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth xterm x11-utils libx11-dev libgtk-3-bin
+
+      - name: Reject oversized X11 application properties
+        run: |
+          xvfb-run -a cargo test --locked -p wm-x11 hostile_properties -- --ignored
+          xvfb-run -a cargo test --locked -p wm-x11 native_system7 -- --ignored --test-threads=1
+          xvfb-run -a cargo test --locked -p wm-x11 native_modern -- --ignored --test-threads=1
+
+      - name: Exercise the standalone X11 dock
+        # The dock's X11 fixture builds the same standalone client against a
+        # private Xvfb, including popup grabs and workarea release on exit.
+        run: dock/check-x11.sh
+
+      - name: Build release binaries for X11 smoke test
+        run: cargo build --release -p chonkstep
+
+      # A client that asks not to be decorated, for the framing
+      # assertions in the smoke test below. `xprop -f _MOTIF_WM_HINTS
+      # 32c -set _MOTIF_WM_HINTS "0x2, 0, 0, 0, 0"` is the obvious way
+      # to conjure one without a compiler, and it is subtly the wrong
+      # one: xprop derives a property's *type* from its format letter
+      # and has no syntax for naming one, so it writes those five words
+      # typed CARDINAL, while Motif, GTK, Qt, Chromium and Electron all
+      # write them typed with the _MOTIF_WM_HINTS atom itself. The
+      # reader in wm-x11 deliberately asks for AnyPropertyType and so
+      # would accept either — but that is the point. A probe that
+      # writes a type no real application writes turns this job into
+      # evidence about xprop rather than evidence about Edge and
+      # LibreOffice, and it would keep passing through a future change
+      # that narrowed the read back to a typed GetProperty, which is
+      # precisely the regression worth catching.
+      #
+      # Setting the hints before the first map is the other half of the
+      # argument: the property written onto an already-mapped, already-
+      # framed window exercises the ChromeChanged re-read path, which
+      # is a different code path with an unmap/remap race in front of
+      # it. Testing the common case — an application that was born
+      # saying "I draw my own titlebar" — wants a client that says so
+      # before its first map request, which no external tool can do.
+      - name: Build the undecorated-client probe
+        run: |
+          set -eux
+          cat > undecorated-probe.c <<'EOF'
+          #include <X11/Xlib.h>
+          #include <X11/Xutil.h>
+          #include <stdio.h>
+
+          int main(void) {
+              Display *d = XOpenDisplay(NULL);
+              if (!d) { fprintf(stderr, "undecorated-probe: cannot open display\n"); return 1; }
+
+              int s = DefaultScreen(d);
+              Window w = XCreateSimpleWindow(d, RootWindow(d, s), 0, 0, 320, 200, 0,
+                                             BlackPixel(d, s), WhitePixel(d, s));
+
+              /* flags = MWM_HINTS_DECORATIONS (1 << 1), decorations = 0:
+               * "I have drawn my own chrome, do not frame me." Typed with
+               * the _MOTIF_WM_HINTS atom itself, as real clients do. */
+              Atom motif = XInternAtom(d, "_MOTIF_WM_HINTS", False);
+              long hints[5] = { 2, 0, 0, 0, 0 };
+              XChangeProperty(d, w, motif, motif, 32, PropModeReplace,
+                              (unsigned char *) hints, 5);
+
+              /* WM_CLASS is how the smoke test picks this window out of
+               * _NET_CLIENT_LIST without guessing at window ids. */
+              XClassHint class_hint = { (char *) "undecorated-probe", (char *) "UndecoratedProbe" };
+              XSetClassHint(d, w, &class_hint);
+              XStoreName(d, w, "undecorated-probe");
+
+              XMapWindow(d, w);
+              XFlush(d);
+              printf("undecorated-probe: mapped window 0x%lx\n", w);
+              fflush(stdout);
+
+              /* Stay alive and connected until the job kills us; a client
+               * that exits takes its window with it. */
+              for (;;) { XEvent e; XNextEvent(d, &e); }
+          }
+          EOF
+          cc -o undecorated-probe undecorated-probe.c -lX11
+
+      - name: X11 smoke test
+        # What this job can and cannot claim about XWayland. The rule
+        # being asserted here — a client that sets _MOTIF_WM_HINTS with
+        # the decorations bit clear is managed but never framed — lives
+        # in wm-core, above both backends, and an XWayland client
+        # reaches it through the same shared policy (its backend asks
+        # smithay, which reads the same five words off the same
+        # property). So this job genuinely covers the *policy* for
+        # XWayland clients. It does not cover the XWayland *plumbing*:
+        # the compositor's own surface handling, its frame geometry, or
+        # its property routing are not exercised by anything here, and
+        # cannot be — see the wayland job's comment for why a headless
+        # runner cannot boot a compositor at all.
+        run: |
+          set -eux
+
+          # Everything below polls rather than sleeps: a fixed sleep is
+          # either longer than the runner needs or shorter than it needs
+          # on a bad day, and the second kind of wrong is a flaky job.
+
+          # await <seconds> <command...> — run the command until it
+          # succeeds or the budget expires. Tracing is off inside the
+          # loop because a quarter-second poll under `set -x` buries the
+          # rest of the log in noise.
+          await() {
+            local deadline=$((SECONDS + $1)); shift
+            local rc=1
+            { set +x; } 2>/dev/null
+            while :; do
+              if "$@" >/dev/null 2>&1; then rc=0; break; fi
+              [ "$SECONDS" -lt "$deadline" ] || break
+              sleep 0.25
+            done
+            set -x
+            return "$rc"
+          }
+
+          # _NET_CLIENT_LIST comes back from xprop as
+          #   _NET_CLIENT_LIST(WINDOW): window id # 0x400003, 0x600003
+          # so drop everything through the '#' and split on commas.
+          client_ids() {
+            xprop -display :99 -root _NET_CLIENT_LIST 2>/dev/null \
+              | sed -n 's/.*#//p' | tr ',' '\n' | tr -d ' ' | grep '^0x' || true
+          }
+
+          client_ids_nonempty() { [ -n "$(client_ids)" ]; }
+
+          # The client window carrying WM_CLASS $1, searched only within
+          # _NET_CLIENT_LIST — so a hit is itself proof the window is
+          # managed rather than merely alive. It has to be the client
+          # window and not the frame: EWMH puts _NET_FRAME_EXTENTS on
+          # the client, which is also what _NET_CLIENT_LIST holds.
+          client_by_class() {
+            local id
+            for id in $(client_ids); do
+              if xprop -display :99 -id "$id" WM_CLASS 2>/dev/null | grep -q "\"$1\""; then
+                echo "$id"; return 0
+              fi
+            done
+            return 1
+          }
+
+          # left,right,top,bottom with the spaces squeezed out, or
+          # nothing at all when the property is absent — xprop prints
+          # "_NET_FRAME_EXTENTS:  not found." then, which has no '='.
+          frame_extents() {
+            xprop -display :99 -id "$1" _NET_FRAME_EXTENTS 2>/dev/null \
+              | sed -n 's/^_NET_FRAME_EXTENTS[^=]*= *//p' | tr -d ' '
+          }
+
+          # A framed window has a titlebar, so its top edge is the one
+          # that must be non-zero; left/right/bottom are theme border
+          # widths and a theme is entitled to make them 0.
+          framed() {
+            local top; top=$(frame_extents "$1" | cut -d, -f3)
+            [ -n "$top" ] && [ "$top" -gt 0 ] 2>/dev/null
+          }
+
+          # Not "no property": EWMH wants the WM to publish all-zero
+          # extents for a window it does not frame, and the difference
+          # between that and silence is the difference between a
+          # deliberate policy and a code path that never ran.
+          unframed() { [ "$(frame_extents "$1")" = "0,0,0,0" ]; }
+
+          fail() {
+            echo "FAIL: $1"
+            echo "--- chonkstep log ---"
+            cat chonkstep.log || true
+            echo "--- undecorated-probe log ---"
+            cat probe.log || true
+            echo "--- Xvfb log ---"
+            cat xvfb.log || true
+            echo "--- root window properties ---"
+            xprop -display :99 -root || true
+            echo "--- managed clients ---"
+            for id in $(client_ids); do
+              xprop -display :99 -id "$id" WM_CLASS WM_NAME _MOTIF_WM_HINTS _NET_FRAME_EXTENTS || true
+            done
+            exit 1
+          }
+
+          # A headless X server; :99 avoids any display the runner
+          # might already have. Its own output is captured rather than
+          # left on the job's stderr because the polling below opens a
+          # connection per attempt and Xvfb greets each one with the
+          # same block of xkbcomp warnings.
+          Xvfb :99 -screen 0 1280x800x24 > xvfb.log 2>&1 &
+          XVFB_PID=$!
+          await 15 xprop -display :99 -root \
+            || fail "Xvfb never accepted a connection on :99"
+
+          # The crate's real-server selection tests, including a GTK
+          # consumer reading the fractional DPI pair. These are ignored
+          # in the display-free workspace pass by design; this is the
+          # display-bearing job that makes them required instead of
+          # silently skipped.
+          DISPLAY=:99 cargo test -p chonk-xsettings --test live_manager -- --ignored --test-threads=1 \
+            || fail "the live XSETTINGS manager tests failed"
+
+          # The WM under test. Logs are captured so an assertion
+          # failure below can show what the WM itself saw.
+          DISPLAY=:99 RUST_LOG=info ./target/release/chonkstep > chonkstep.log 2>&1 &
+          WM_PID=$!
+
+          # EWMH handshake: a compliant WM publishes a window id in
+          # _NET_SUPPORTING_WM_CHECK on the root. Its absence means
+          # chonkstep never became the WM (or died on startup).
+          wm_took_over() { xprop -display :99 -root _NET_SUPPORTING_WM_CHECK | grep -q "0x"; }
+          await 20 wm_took_over \
+            || fail "_NET_SUPPORTING_WM_CHECK missing on the root window"
+
+          # EWMH is explicit that a client must treat an atom missing
+          # from _NET_SUPPORTED as unsupported, so publishing frame
+          # extents without advertising them is publishing them to
+          # nobody: a client computing its own geometry from the frame
+          # has no reason to look.
+          xprop -display :99 -root _NET_SUPPORTED | grep -qw _NET_FRAME_EXTENTS \
+            || fail "_NET_FRAME_EXTENTS is not advertised in _NET_SUPPORTED"
+
+          # Two real clients: one that expresses no preference and must
+          # therefore be framed, one that asked not to be.
+          DISPLAY=:99 xterm &
+          XTERM_PID=$!
+          DISPLAY=:99 ./undecorated-probe > probe.log 2>&1 &
+          PROBE_PID=$!
+
+          # Client management, the coarse version first: an empty or
+          # missing list means map requests are not being handled at
+          # all, which is worth distinguishing from either individual
+          # client failing to arrive.
+          await 30 client_ids_nonempty || fail "_NET_CLIENT_LIST is empty or missing"
+
+          await 30 client_by_class xterm \
+            || fail "the xterm never appeared in _NET_CLIENT_LIST"
+          XTERM_WIN=$(client_by_class xterm)
+
+          # The probe being in _NET_CLIENT_LIST is half the assertion:
+          # "do not decorate this window" must not be read as "ignore
+          # this window". It has to be focusable, movable, stackable
+          # and on a workspace like anything else — being in the list
+          # is the outside-visible proof that it is managed.
+          await 30 client_by_class UndecoratedProbe \
+            || fail "the undecorated probe never appeared in _NET_CLIENT_LIST — it was ignored, not merely left unframed"
+          PROBE_WIN=$(client_by_class UndecoratedProbe)
+
+          # Extents are published once the frame exists, which is a
+          # round trip or two after the window joins the client list.
+          await 15 framed "$XTERM_WIN" \
+            || fail "the xterm ($XTERM_WIN) is not framed: _NET_FRAME_EXTENTS is '$(frame_extents "$XTERM_WIN")', wanted a non-zero top edge"
+
+          # The two-titlebar bug, stated as an assertion.
+          await 15 unframed "$PROBE_WIN" \
+            || fail "the undecorated probe ($PROBE_WIN) was framed anyway: _NET_FRAME_EXTENTS is '$(frame_extents "$PROBE_WIN")', wanted 0,0,0,0"
+
+          echo "smoke test passed: WM handshake present, both clients managed, framing follows _MOTIF_WM_HINTS"
+          kill "$PROBE_PID" "$XTERM_PID" "$WM_PID" "$XVFB_PID" || true
+
+  # The Wayland half of the dual architecture. Weston headless is the
+  # host display for the nested backend, so this job does considerably
+  # more than compile: after the backend's unit tests it boots a fresh
+  # real compositor per scenario, launches real clients, injects input,
+  # and checks the protocol ledger and captured pixels. The hardware
+  # session backend still needs a DRM device and a seat a hosted runner
+  # cannot provide; compiling it against the real system libraries is
+  # the gate for that half.
+  #
+  # Both backends are compiled in unconditionally (there is no cargo
+  # feature gating the session half — see wm-wayland/Cargo.toml), so
+  # this job installs the union of what they link: the nested/rendering
+  # set (libxkbcommon for the keymap machinery, EGL/GLES for the
+  # renderer, the Wayland client libraries winit itself links) plus the
+  # hardware-session set (libdrm for mode setting, libgbm for buffer
+  # allocation, libinput for devices, libudev for discovering them,
+  # libseat for opening them without root). The names are taken from
+  # Smithay 0.7.0's own CI, minus the ones for features this compositor
+  # does not enable — no libsystemd-dev/libdbus-1-dev (the logind
+  # session backend is not used; libseat's own logind support needs no
+  # build-time dependency), no libpixman-1-dev (renderer_pixman is
+  # off), no libdisplay-info-dev.
+  wayland:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install Wayland build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri libwayland-dev \
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev \
+            weston xwayland foot xterm alacritty zenity grim wayland-utils wlr-randr wtype \
+            wl-clipboard wf-recorder ffmpeg libnotify-bin xdg-user-dirs xdg-utils \
+            nautilus libreoffice-writer libreoffice-gtk3 \
+            fcitx5 python3-gi gir1.2-gtk-4.0
+
+      # --locked: the compositor pins Smithay 0.7.0, and a silent
+      # re-resolution here would test a different dependency tree than
+      # the one the repository actually ships.
+      - name: Build the Wayland compositor and binary
+        run: cargo build -p wm-wayland -p chonkstep-wayland --locked
+
+      - name: Run the Wayland library and binary test suites
+        run: scripts/check.sh wayland-unit
+
+      - name: Run surfaceless GLES and vendored renderer regressions
+        run: scripts/check.sh gles
+
+      # Weston provides the host display a nested compositor needs,
+      # with Mesa's software renderer on runners that expose no GPU.
+      #
+      # Every client the suite drives is installed above, and a missing
+      # one is now a failure rather than a skip: `require_client`
+      # panics under `CI` for anything not on its documented
+      # `CI_CANNOT_INSTALL` list. `wlr-randr` and `wtype` are in the list
+      # above because each owns a unique real-client protocol regression;
+      # leaving either out would make that coverage disappear.
+      # Chromium comes with the runner image; the same guard is what
+      # turns the day it stops coming into a red build instead of a
+      # quietly smaller suite.
+      - name: Run the nested compositor end-to-end suite
+        env:
+          # This is the software-renderer gate, not hardware coverage.
+          # Avoid probing Zink or an incidental runner GPU before falling back.
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          # Check the real IME path early: a library/handshake failure should
+          # produce its protocol artifacts before the broad desktop suite.
+          scripts/e2e.sh --headless --test mac_mode command_shortcuts_survive_a_real_input_method_keyboard_grab
+          scripts/e2e.sh --headless
+
+      - name: Preserve failed nested-session logs and screenshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wayland-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/chonk-testkit/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Lint. This job exists because of one specific incident and one
+  # specific class of bug.
+  #
+  # On 2026-08-29 the dock's wifi tile sampled the system by calling
+  # `nmcli dev wifi` straight from `DockWidget::tick()`, which runs on
+  # the compositor's single repaint thread. `nmcli dev wifi` defaults to
+  # `--rescan auto` and blocks for a real hardware scan whenever
+  # NetworkManager's cache is older than thirty seconds — ~3.6s at a
+  # time, once every ~34s — and for all of it the compositor drew
+  # nothing, read no input, and left the page-flip completion sitting
+  # unread in its DRM fd. Its own stall watchdog then reported the
+  # display driver, which was idle and correct throughout. Four agents
+  # and a tour of DRM internals later, the culprit was a wifi icon.
+  #
+  # Nothing in CI could have caught that, because CI had no lint step at
+  # all: the tests passed, the builds passed, and the diff that
+  # introduced it looked like every other diff. `clippy.toml` at the
+  # repository root now bans the blocking process APIs outright, with
+  # one narrowly-scoped `#[allow]` plus a written justification at each
+  # of the four call sites where blocking is genuinely correct (sampler
+  # worker threads, off-thread click handlers, the launcher's per-child
+  # reaper). This job is what makes that ban real rather than advisory.
+  #
+  # System libraries are installed here for the same reason the wayland
+  # job installs them: the ban is only worth having if it also covers
+  # `wm-wayland`, which is where a blocking call would do the most
+  # damage, and clippy has to link what it lints.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install Wayland build dependencies
+        # Same set, same reasoning, as the wayland job's — see the long
+        # comment there for why each package is on the list.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libegl-dev libgles-dev libwayland-dev \
+            libdrm-dev libgbm-dev libinput-dev libudev-dev libseat-dev
+
+      - name: Deny clippy warnings workspace-wide
+        # Shared with local preflight: do not replace this with a weaker
+        # `-D warnings` invocation that omits the opt-in safety/blocking lints.
+        run: scripts/check.sh lint
+
+      - name: Deny broken links and warnings in public Rust documentation
+        run: scripts/check.sh docs
