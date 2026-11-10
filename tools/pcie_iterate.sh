@@ -44,4 +44,4 @@ ssh -o BatchMode=yes -o ServerAliveInterval=15 $M5 "sudo -n sh -c 'cd $W/lab-pci
 R=$RUN/pcie-enum-attempt-$N; mkdir -p $R
 ssh -o BatchMode=yes $M5 "sudo -n sh -c 'cd $W/pcie-m2-cycles && d=\$(ls -td cycle-*/001 | head -1) && tar -cf - -C \$d guest/console.bin guest/worker.log result.json'" | tar -xf - -C $R
 grep -a 'PCIE_LINKUP\|CPUFREQ\|gpu probe' $R/guest/worker.log || true
-strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-9]|WMBENCH|WMSTAT|PDRust|pd-dhcp|pd-netd|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
+strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-9]|WMBENCH|WMSTAT|PDRust|PDGpuDT|PDRtkit|PDAgx|PDDrm|pd-dhcp|pd-netd|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true

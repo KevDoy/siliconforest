@@ -24,3 +24,13 @@ Measured:
 Consequences for the driver port: Darwin must power GFX itself (same PMGR walk the PCIe kext
 does); the coprocessor is stopped with clean mailboxes, the state the Linux driver expects at
 probe; nothing has been started and no message has been sent to the GPU firmware yet.
+
+## From Darwin (boot `gd01`)
+
+`PDGpuDT.kext` (`integrations/puredarwin/m1-gpu-dt/`) powered GFX itself from the kernel
+(0x0f002300 -> 0x0f0023ff, one register write), read the same identification registers and core
+mask, and produced the Linux-style GPU properties from Apple's device tree. Its checksum over the
+70 properties that can be compared with Linux is `0xb9740392`, equal to the checksum the host test
+computes from this M1's Linux device tree. All 26 predicted log lines matched. Firmware 13.5,
+seven operating points (0 to 1278 MHz), the three firmware memory regions as listed above.
+Publishing the nodes into the registry (`pdgpudt=2`) has not been run.
