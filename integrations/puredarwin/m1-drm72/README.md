@@ -51,6 +51,7 @@ nix-build $F x86-breakage.nix --no-out-link            # what breaks in amdgpu/n
 | 0006 drm_drv | `__drm_dev_alloc()`; `drm_dev_alloc()` built on it as in 7.2 | hand edit |
 | 0007 drm_syncobj | `drm_syncobj_set_wait_hint()` and the two `drm_file` fields | hand edit; the hint is stored, not acted on |
 | 0008 GEM shmem helper | `drm_gem_shmem_helper.[ch]`, new | 7.2 file, ported (next section) |
+| 0009 shmem: pages for a dma-buf descriptor mmap | `drm_gem_shmem_helper.c` | PureDarwin: `drm_gem_shmem_mmap()` answers the page question of layer patch 0023 (`struct pd_vma_pages`) |
 
 `patches/puredarwin/` (against the PureDarwin tree):
 

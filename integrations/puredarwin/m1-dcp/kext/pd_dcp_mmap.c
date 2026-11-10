@@ -99,6 +99,45 @@ pd_dcp_gem_dma_mmap_pages(struct linux_file *filp, off_t offset, size_t size, in
 }
 
 /*
+ * dma_mmap_wc() as drm_gem_dma_mmap() calls it (pd_dcp_compat.h). The only mmap that reaches
+ * it is the one of a dumb buffer's dma-buf descriptor: the layer walks dma_buf_mmap_internal
+ * -> drm_gem_dmabuf_mmap -> drm_gem_prime_mmap -> drm_gem_dma_object_mmap with a vma that
+ * asks for the pages (struct pd_vma_pages, linux/mm.h). drm_gem_dma_mmap() has made
+ * vm_pgoff relative to the buffer. The object reference drm_gem_prime_mmap() took is the
+ * mapping's; drm_gem_dma_vm_ops.close (drm_gem_vm_close) drops it.
+ */
+int
+pd_dcp_dma_mmap_wc(struct device *dev, struct vm_area_struct *vma, void *cpu_addr, size_t size)
+{
+	struct pd_vma_pages *rq = vma->pd_pages;
+	size_t first = vma->vm_pgoff, n = size >> PAGE_SHIFT;
+	uint32_t *all;
+	int ret;
+
+	if (rq == NULL)
+		return -ENODEV;
+	if (cpu_addr == NULL || n == 0)
+		return -EINVAL;
+	if (first == 0)
+		ret = pd_dma_buffer_pages(dev, cpu_addr, size, rq->pages);
+	else {
+		/* the DART backend lists a buffer from its start */
+		all = kvmalloc_array(first + n, sizeof(*all), GFP_KERNEL);
+		if (all == NULL)
+			return -ENOMEM;
+		ret = pd_dma_buffer_pages(dev, cpu_addr, (first + n) << PAGE_SHIFT, all);
+		if (ret == 0)
+			memcpy(rq->pages, all + first, n * sizeof(*all));
+		kvfree(all);
+	}
+	if (ret)
+		return ret;
+	rq->wimg = PD_DCP_WIMG_WCOMB;	/* as linux: dma_mmap_wc */
+	rq->filled = true;
+	return 0;
+}
+
+/*
  * mode_config_funcs.fb_create. Linux 6.17 added the format info as a third parameter; the
  * layer's DRM core (6.14) calls fb_create(dev, file, mode_cmd). The driver names the pin's
  * four-argument drm_gem_fb_create() there, which then took mode_cmd for the format info

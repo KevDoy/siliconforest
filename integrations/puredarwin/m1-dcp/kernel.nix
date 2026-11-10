@@ -41,5 +41,6 @@ in base.overrideAttrs (old:
     patches = [
       ./kernel-patches/0001-xnu-pdlfile-descriptors-are-sendable.patch
       ./kernel-patches/0002-xnu-pdlfile-select-poll-kevent-waiters.patch
+      ./kernel-patches/0003-xnu-pdlfile-mmap.patch
     ];
   } else { }))

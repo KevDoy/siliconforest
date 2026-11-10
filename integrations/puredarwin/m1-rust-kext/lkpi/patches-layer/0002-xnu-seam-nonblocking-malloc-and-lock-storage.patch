@@ -51,6 +51,18 @@ UPSTREAM: yes.
  void *pdos_mtx_alloc(const char *name);
  void pdos_mtx_free(void *m);
  void pdos_mtx_lock(void *m);
+@@ -89,6 +118,11 @@
+ 
+ // kernel threads
+ void *pdos_thread_start(void (*fn)(void *), void *arg);
++// the same for a thread that must not wait behind ordinary kernel threads (a linux
++// WQ_HIGHPRI work queue): started above them, unless the boot-arg pdlkpi_wq_highpri=0
++void *pdos_thread_start_highpri(void (*fn)(void *), void *arg);
++// spawn_kernel_thread() priority that asks for pdos_thread_start_highpri()
++#define PD_THREAD_PRI_HIGH	(-0x5048)
+ void *pdos_thread_current(void);
+ void pdos_thread_exit(void) __attribute__((noreturn));
+ void pdos_thread_set_priority(void *thread, int prio);
 --- a/src/Kernel/fbsdkpi/xnu/pd_fbsd_os.cpp
 +++ b/src/Kernel/fbsdkpi/xnu/pd_fbsd_os.cpp
 @@ -6,6 +6,7 @@
@@ -406,10 +418,69 @@ UPSTREAM: yes.
  	lck_rw_free((lck_rw_t *)rw, sGroup);
  }
  
-@@ -991,6 +1232,57 @@
+@@ -974,8 +1215,31 @@
+ 	pdos_thread_exit();
+ }
+ 
+-void *
+-pdos_thread_start(void (*fn)(void *), void *arg)
++// linux runs WQ_HIGHPRI work (the RTKit receive queue) on high-priority workers. Here
++// every layer thread was a kernel thread at the default priority (81), so such work waited
++// its turn behind any other kernel thread, a scheduler quantum at worst. Precedence +8 puts
++// it at 89: above ordinary kernel threads, below the preemption band (92 and up).
++// pdlkpi_wq_highpri=0 keeps the default priority, for comparison.
++#define PD_HIGHPRI_IMPORTANCE	8
++
++static bool
++pdos_highpri_enabled(void)
++{
++	static int enabled = -1;
++
++	if (enabled < 0) {
++		uint32_t value = 1;
++
++		PE_parse_boot_argn("pdlkpi_wq_highpri", &value, sizeof(value));
++		enabled = value != 0;
++		kprintf("fbsdkpi: WQ_HIGHPRI work queue threads run at %s (pdlkpi_wq_highpri=%u)\n",
++		    enabled ? "precedence +8" : "the default kernel priority", value);
++	}
++	return enabled != 0;
++}
++
++static void *
++pdos_thread_start_common(void (*fn)(void *), void *arg, bool highpri)
+ {
+ 	pd_start *start = (pd_start *)IOMalloc(sizeof(pd_start));
+ 	if (start == NULL)
+@@ -987,11 +1251,83 @@
+ 		IOFree(start, sizeof(pd_start));
+ 		return NULL;
+ 	}
++	if (highpri && pdos_highpri_enabled()) {
++		thread_precedence_policy_data_t precedence = { PD_HIGHPRI_IMPORTANCE };
++		kern_return_t kr = thread_policy_set(thread, THREAD_PRECEDENCE_POLICY,
++		    (thread_policy_t)&precedence, THREAD_PRECEDENCE_POLICY_COUNT);
++
++		if (kr != KERN_SUCCESS)
++			kprintf("fbsdkpi: thread_policy_set(precedence +%d) failed: 0x%x\n",
++			    PD_HIGHPRI_IMPORTANCE, kr);
++	}
+ 	thread_deallocate(thread);
  	return thread;
  }
  
+ void *
++pdos_thread_start(void (*fn)(void *), void *arg)
++{
++	return pdos_thread_start_common(fn, arg, false);
++}
++
++void *
++pdos_thread_start_highpri(void (*fn)(void *), void *arg)
++{
++	return pdos_thread_start_common(fn, arg, true);
++}
++
 +// xnu's unique thread id: differs when a thread_t address is reused by a new thread
 +uint64_t
 +pdos_thread_tid(void *thread)
@@ -461,6 +532,7 @@ UPSTREAM: yes.
 +	return sPressureEvents;
 +}
 +
- void *
++void *
  pdos_thread_current(void)
  {
+ 	return current_thread();

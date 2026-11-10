@@ -650,12 +650,15 @@ Not run on the target. What the compositor must provide is in `WAYLAND-NEEDS.md`
   machine. `mesa-darwin.nix` is unchanged (same derivation as before; both now call
   `mesa-darwin-build.nix`). `libgallium` and `libEGL` differ between the two builds,
   `libGLESv2` does not.
-- Two more patches, applied only to the Wayland build:
+- Five more patches, applied only to the Wayland build:
 
   | File | Lines | Reason |
   |---|---|---|
   | `0006-egl-wayland-open-render-node-without-feedback.patch` | 37 | with a linux-dmabuf v3 server (no feedback, and `wl_drm` is not built) Mesa has no device and falls back to software; on Darwin it now opens the first DRM device with a render node, found through libdrm's sysctl enumeration |
   | `0007-loader-wayland-ppoll-for-darwin.patch` | 31 | `ppoll` for Mesa's Wayland dispatch helper, as PureDarwin's own Mesa recipe shims it |
+  | `0008-egl-pointer-check-without-mincore-on-darwin.patch` | 19 | `_eglPointerIsDereferenceable` used `mincore`, which on XNU succeeds for unmapped addresses; Mesa then took a `wl_egl_window`'s version field (3) for a pointer to an old-layout `wl_surface` and crashed in `wl_proxy_create_wrapper` (boot wl02). On 64-bit Darwin the check is now `address >= 4 GiB` (`__PAGEZERO`) |
+  | `0009-report-why-a-window-buffer-could-not-be-exported.patch` | 118 | diagnostics only: `agx_bo_make_shared` names the step and errno when an export fails, and `create_wl_buffer` says why it made no `wl_buffer` (failed modifier query with errno, modifier not advertised with the compositor's list, failed fd query) |
+  | `0010-asahi-export-wait-for-writer-when-fence-import-fails.patch` | 32 | on export, if the pending writer's fence cannot be attached to the dma-buf (`DMA_BUF_IOCTL_IMPORT_SYNC_FILE`), wait for the writer and export anyway, with a message, instead of failing the export; the submit path already falls back the same way |
 
 - `test/agx-wl-demo.c` (`agx-wl-demo.nix`): xdg-shell toplevel, `wl_egl_window`,
   `eglCreateWindowSurface`, GLES3, the three scenes at 800x600 (or the size the compositor

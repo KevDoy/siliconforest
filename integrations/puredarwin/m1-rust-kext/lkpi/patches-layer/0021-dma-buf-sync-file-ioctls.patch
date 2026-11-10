@@ -3,9 +3,11 @@ fbsdkpi: drm: DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE
 Both returned ENOTTY. Mesa calls them for every shared buffer on every submission and
 falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
 dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
-line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
+line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file. DMA_BUF_IOCTL_SYNC,
+which returned 0 for anything, is the pin's case of dma_buf_ioctl() as well (flags
+validated, dma_buf_begin/end_cpu_access).
 
-The two functions are a port of GPL-2.0-only code, so they are in a file of their own,
+The functions are a port of GPL-2.0-only code, so they are in a file of their own,
 drm/src/pd_dma_buf_syncfile.c, with that licence and the original notice (pd_dma_buf.c is
 MIT and only forwards the two commands). drm.cmake lists the file apart from the MIT ones.
 UPSTREAM: yes; the tree then carries a GPL-2.0-only file in the DRM layer, and every DRM
@@ -25,7 +27,7 @@ kext that links the layer links it.
  set(PD_DRM_KCONFIG APERTURE_HELPERS ARCH_HAVE_NMI_SAFE_CMPXCHG
 --- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
-@@ -94,11 +96,18 @@
+@@ -94,11 +96,16 @@
  	return 0;
  }
  
@@ -38,16 +40,14 @@ kext that links the layer links it.
 -	return cmd == _IOW('b', 0, uint64_t) ? 0 : -ENOTTY;
 +	struct dma_buf *db = filp->private_data;
 +
-+	if (cmd == _IOW('b', 0, uint64_t))
-+		return 0;
-+	// DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE (pd_dma_buf_syncfile.c), else -ENOTTY
++	// DMA_BUF_IOCTL_SYNC, EXPORT_SYNC_FILE and IMPORT_SYNC_FILE (pd_dma_buf_syncfile.c), else -ENOTTY
 +	return pd_dma_buf_sync_file_ioctl(db, cmd, arg);
  }
  
  // libdrm sizes an imported buffer with lseek(SEEK_END)
 --- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf_syncfile.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_dma_buf_syncfile.c
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,180 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * DMA_BUF_IOCTL_EXPORT_SYNC_FILE and DMA_BUF_IOCTL_IMPORT_SYNC_FILE on a dma-buf descriptor.
@@ -170,12 +170,58 @@ kext that links the layer links it.
 +	return ret;
 +}
 +
++// DMA_BUF_IOCTL_SYNC, the case of dma_buf_ioctl() (lines 565-591 there): brackets a CPU
++// access through a mapping of the descriptor
++struct pd_dma_buf_sync {
++	uint64_t flags;
++};
++#define PD_DMA_BUF_SYNC_END	(1 << 2)
++#define PD_DMA_BUF_SYNC_VALID_FLAGS_MASK	(PD_DMA_BUF_SYNC_RW | PD_DMA_BUF_SYNC_END)
++#define PD_DMA_BUF_IOCTL_SYNC	_IOW('b', 0, struct pd_dma_buf_sync)
++
++static long
++pd_dma_buf_sync(struct dma_buf *dmabuf, unsigned long arg)
++{
++	struct pd_dma_buf_sync sync;
++	enum dma_data_direction direction;
++	int ret;
++
++	if (copy_from_user(&sync, (void *)arg, sizeof(sync)))
++		return -EFAULT;
++
++	if (sync.flags & ~PD_DMA_BUF_SYNC_VALID_FLAGS_MASK)
++		return -EINVAL;
++
++	switch (sync.flags & PD_DMA_BUF_SYNC_RW) {
++	case PD_DMA_BUF_SYNC_READ:
++		direction = DMA_FROM_DEVICE;
++		break;
++	case PD_DMA_BUF_SYNC_WRITE:
++		direction = DMA_TO_DEVICE;
++		break;
++	case PD_DMA_BUF_SYNC_RW:
++		direction = DMA_BIDIRECTIONAL;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (sync.flags & PD_DMA_BUF_SYNC_END)
++		ret = dma_buf_end_cpu_access(dmabuf, direction);
++	else
++		ret = dma_buf_begin_cpu_access(dmabuf, direction);
++
++	return ret;
++}
++
 +long pd_dma_buf_sync_file_ioctl(struct dma_buf *db, unsigned int cmd, unsigned long arg);
 +
 +// -ENOTTY for any other command
 +long
 +pd_dma_buf_sync_file_ioctl(struct dma_buf *db, unsigned int cmd, unsigned long arg)
 +{
++	if (cmd == PD_DMA_BUF_IOCTL_SYNC)
++		return pd_dma_buf_sync(db, arg);
 +	if (cmd == PD_DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
 +		return pd_dma_buf_export_sync_file(db, arg);
 +	if (cmd == PD_DMA_BUF_IOCTL_IMPORT_SYNC_FILE)

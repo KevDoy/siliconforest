@@ -90,6 +90,10 @@ Counts are added/removed lines.
 | 0020 select/poll/kqueue on DRM fds wake on events (also patches PDDRMDri) | see file |
 | 0021 dma-buf sync-file ioctls (a GPL-2.0-only file: ported from the pin's dma-buf.c) | see file |
 | 0022 select/poll/kevent on sync_file and dma-buf descriptors (two GPL-2.0-only files; needs the kernel of `../m1-dcp/kernel.nix`) | see file |
+| 0023 mmap of a dma-buf descriptor (a GPL-2.0-only file; needs kernel patch 0003 and, for shmem objects, `../m1-drm72/patches/drm-kmod/0009`) | see file |
+| 0024 a sync_file made by another DRM kext is recognised | see file |
+| 0025 WQ_HIGHPRI work queues run above ordinary kernel threads (boot-arg `pdlkpi_wq_highpri=0` for the old behaviour) | see file |
+| 0026 a linux file's descriptor ops run in the layer copy that made the file (EFAULT on every ioctl of the other kext's dma-buf, boot mm01) | see file |
 
 Counts for 0002, 0005, 0008 and 0011 above are from an earlier state; each patch's first
 lines say what it holds now (0002 also carries the seam halves of 0009, 0011, 0014, 0015; 0008

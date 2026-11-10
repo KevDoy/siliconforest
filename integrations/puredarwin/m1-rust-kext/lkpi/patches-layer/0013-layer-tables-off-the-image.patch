@@ -8,7 +8,7 @@ UPSTREAM: yes (saves 850 KiB of collection space per LinuxKPI kext).
 
 --- a/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
 +++ b/src/Kernel/fbsdkpi/pd/pd_haiku_kernel.cpp
-@@ -910,7 +962,18 @@
+@@ -910,7 +964,18 @@
  
  enum { AREA_FREE = 0, AREA_CONTIG, AREA_PHYS };
  

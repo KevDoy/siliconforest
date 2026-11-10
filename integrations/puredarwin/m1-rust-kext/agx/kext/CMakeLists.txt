@@ -66,6 +66,11 @@ _fbsdkpi_objects(PDAgx_drm SOURCES ${core}
 
 # mailbox + RTKit and this kext's LinuxKPI-side glue (pre-probe, the sysfs PD_STUB); none of
 # the driver's own C (sysfs.c, g17/*.c) is built
+# The RTKit receive queue is WQ_HIGHPRI on linux. m1-gpu-rtkit's compat header creates it
+# with linux_create_workqueue_common(), dropping the flag; here that one call makes the
+# layer's high-priority queue (layer patch 0025, boot-arg pdlkpi_wq_highpri=0 for the old way).
+set_source_files_properties("${RTKIT}/rtkit.c" PROPERTIES
+    COMPILE_DEFINITIONS "linux_create_workqueue_common=linux_create_workqueue_highpri")
 _fbsdkpi_objects(PDAgx_agx SOURCES
         "${RTKIT}/mailbox.c" "${RTKIT}/rtkit.c" "${RTKIT}/rtkit-crashlog.c" "${RTKIT}/pd_rtkit_compat.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/pd_agx_linux.c"

@@ -63,6 +63,9 @@ in pkgs.stdenv.mkDerivation {
   ] ++ lib.optionals wayland [
     ./patches/0006-egl-wayland-open-render-node-without-feedback.patch
     ./patches/0007-loader-wayland-ppoll-for-darwin.patch
+    ./patches/0008-egl-pointer-check-without-mincore-on-darwin.patch
+    ./patches/0009-report-why-a-window-buffer-could-not-be-exported.patch
+    ./patches/0010-asahi-export-wait-for-writer-when-fence-import-fails.patch
   ];
 
   postPatch = ''

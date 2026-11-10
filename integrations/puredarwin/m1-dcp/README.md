@@ -123,14 +123,14 @@ node matching, `of_find_compatible_node` over published nodes).
 
 | Path | What |
 | --- | --- |
-| `test/dcp-flip-test.c`, `dcp-flip-test.nix` | KMS through the card node whose driver is `apple`: modeset, page flips with flip-complete events, `--wait read|poll|select|kqueue`, `--prime-from auto` (buffers of the GPU driver imported for scanout), `--scm-rights` (the GPU buffers come from a child process over a Unix socket), `--fence poll|select|kqueue` (waits on the CRTC out-fence sync_file and on a dma-buf holding it); prints where a flip's time goes (kernel event timestamps, commit call) |
-| `supervisor/darwin-dcp-{flip,prime,wait,scm,fence,newkernel}-test.in` | guest scripts (DL43, DL44, DL45, DL47, DL48 lines; `newkernel` is DL45 + DL48 + DL47 in one boot); `tools/dcp_boot.sh` stages them with `DCP_TEST=1|prime|wait|scm|fence|newkernel`. The last three need the kernel below |
+| `test/dcp-flip-test.c`, `dcp-flip-test.nix` | KMS through the card node whose driver is `apple`: modeset, page flips with flip-complete events, `--wait read|poll|select|kqueue`, `--prime-from auto` (buffers of the GPU driver imported for scanout), `--scm-rights` (the GPU buffers come from a child process over a Unix socket), `--fence poll|select|kqueue` (waits on the CRTC out-fence sync_file and on a dma-buf holding it); prints where a flip's time goes (kernel event timestamps, commit call); `--dmabuf-mmap` (maps a buffer's dma-buf descriptor, writes through it, the owner reads back; with `--prime-from auto --scm-rights` across two processes and two drivers); `--in-fence` (the GPU driver's sync_file as the plane's IN_FENCE_FD) |
+| `supervisor/darwin-dcp-{flip,prime,wait,scm,fence,newkernel,mmap,timing}-test.in` | guest scripts (DL43, DL44, DL45, DL47, DL48 lines; `newkernel` is DL45 + DL48 + DL47 in one boot; `mmap` is DL49, dma-buf descriptor mmap, and DL50, IN_FENCE_FD; `timing` is DL51, 3 x 20 s of flips for comparing `pdlkpi_wq_highpri=0` against the default); `tools/dcp_boot.sh` stages them with `DCP_TEST=1|prime|wait|scm|fence|newkernel|mmap|timing`. All but the first three need the kernel below |
 | `kext/pd_dcp_mmap.c` | user mmap of dumb buffers (PDDRMDri resolver) and the 3-argument `fb_create` adapter |
 | `kext/pd_dcp_prime.c` | import of a dma-buf exported by another DRM kext, for scanout without a copy |
 | `tools/symbolize.sh` | names kext addresses from a panic, from the link map kept with each build |
 | `kernel-patches/`, `kernel.nix`, `kernel-swap.nix` | the kernel the collections here and in `m1-rust-kext` are built on; see below |
 | `build-kc.nix --arg agx true` | PDAgx and PDDcp in one collection |
-| `build-kc.nix --arg agx true --arg wifi true --arg slim true` | Wi-Fi, PDAgx and PDDcp in one collection; see "Space in the collection" |
+| `build-kc.nix --arg agx true --arg wifi true` | Wi-Fi, PDAgx and PDDcp in one collection; see "Space in the collection" |
 
 ## The kernel (pd_lfile descriptors)
 
@@ -141,6 +141,7 @@ in `kernel-patches/`:
 | Patch | What |
 | --- | --- |
 | 0001 | `fg_sendable()` accepts `DTYPE_PDLFILE`: the descriptors can be sent with `SCM_RIGHTS` |
+| 0003 | `mmap()` of them (a dma-buf): `pd_lfile_ops.mmap_pages`, mapped through the device-pager path the DRM device nodes use; `MAP_SHARED` only |
 | 0002 | select/poll/kevent wait on them: one selinfo for all linux files, `pd_lfile_wakeup()` (exported) for the layer to call, and a kevent filter `EVFILTID_PDLFILE` built like `spec_filtops` |
 
 `kernel.nix` builds the lab's T8103 bring-up kernel with them: the flake's
@@ -173,7 +174,7 @@ from the kexts' load commands inside the collection and from the link maps):
   writes N_OSO/N_FUN stabs into the symbol table, which `-Wl,-x` does not remove. PDDcp:
   19,842 entries, 19,381 of them such; PDAgx 14,726 / 14,261. `strip -S` takes PDDcp's
   `__LINKEDIT` to 65,536 and PDAgx's to 81,920 bytes (819,200 saved) with `__TEXT`,
-  `__DATA_CONST` and `__DATA` byte-identical. `--arg slim true` does that, and Wi-Fi + PDAgx
+  `__DATA_CONST` and `__DATA` byte-identical. `slim` (the default since boots ws04 and ws05) does that, and Wi-Fi + PDAgx
   + PDDcp then passes the launcher's image gate with 69,632 bytes to spare.
 - The same is true of every kext in the base: in the Wi-Fi + PDAgx collection the 55 kexts
   have 9.6 MiB of segments and 6.0 MiB of `__LINKEDIT` (112,715 symbol-table entries, 81,216

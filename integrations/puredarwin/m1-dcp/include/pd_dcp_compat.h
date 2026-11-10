@@ -256,7 +256,10 @@ static inline struct device *drm_dev_dma_dev(struct drm_device *dev)
  */
 struct vm_area_struct;
 #define vm_flags_mod(vma, set, clear)	do { } while (0)
-#define dma_mmap_wc(dev, vma, cpu, dma, size)		(-ENODEV)
+/* drm_gem_dma_mmap(): the page list of a dma-buf descriptor's mmap (kext/pd_dcp_mmap.c) */
+struct vm_area_struct;
+int pd_dcp_dma_mmap_wc(struct device *dev, struct vm_area_struct *vma, void *cpu_addr, size_t size);
+#define dma_mmap_wc(dev, vma, cpu, dma, size)		pd_dcp_dma_mmap_wc(dev, vma, cpu, size)
 #define dma_mmap_pages(dev, vma, size, page)		(-ENODEV)
 /* only iomfb_v14_7.c (firmware 14.7 boards) asks for these */
 struct clk;

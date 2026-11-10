@@ -183,9 +183,11 @@ UPSTREAM: yes (PDDRMDri and fbsdkpi together).
 Both returned ENOTTY. Mesa calls them for every shared buffer on every submission and
 falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
 dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
-line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
+line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file. DMA_BUF_IOCTL_SYNC,
+which returned 0 for anything, is the pin's case of dma_buf_ioctl() as well (flags
+validated, dma_buf_begin/end_cpu_access).
 
-The two functions are a port of GPL-2.0-only code, so they are in a file of their own,
+The functions are a port of GPL-2.0-only code, so they are in a file of their own,
 drm/src/pd_dma_buf_syncfile.c, with that licence and the original notice (pd_dma_buf.c is
 MIT and only forwards the two commands). drm.cmake lists the file apart from the MIT ones.
 UPSTREAM: yes; the tree then carries a GPL-2.0-only file in the DRM layer, and every DRM
@@ -222,6 +224,84 @@ sync_file_get_fence() (it compares f_op, as is_dma_buf_file() did before 0019), 
 fence cannot be given to the display driver as IN_FENCE_FD or imported into its dma-buf.
 UPSTREAM: yes, with the kernel patch; same licence note as 0021.
 """, []),
+ "0026-linux-file-ops-run-in-the-copy-that-made-the-file": ("""fbsdkpi: drm: a linux file's descriptor ops run in the layer copy that made the file
+
+With two DRM kexts loaded, every ioctl on a dma-buf or sync_file descriptor of the kext
+that registered its pd_lfile ops first failed with EFAULT (boot mm01: DMA_BUF_IOCTL_SYNC
+and EXPORT_SYNC_FILE on the GPU driver's dma-buf; Mesa's IMPORT_SYNC_FILE at every swap).
+xnu's pd_lfile has one ops table, the last registrant's. Its ioctl op parks the argument
+buffer in its own copy's `current` task and calls the file's unlocked_ioctl, which is the
+other kext's code: that copy's copy_from_user() looks in its own `current`, where no
+buffer is parked.
+
+linux_file gains pd_lfile_owner, set when the file gets its first descriptor (always from
+the copy that made it), and every op (hold, release, poll, ioctl, seek, mmap_pages) hands
+a file of another copy to that copy's op. A file is then handled by one copy throughout.
+UPSTREAM: yes; unnecessary once the layer is shared between the DRM kexts.
+""", []),
+ "0025-wq-highpri-queues-run-above-kernel-threads": ("""fbsdkpi: WQ_HIGHPRI work queues run above ordinary kernel threads
+
+alloc_workqueue() and alloc_ordered_workqueue() dropped their flags, and every layer
+thread is a kernel thread at the default priority. linux runs WQ_HIGHPRI work on
+high-priority workers; the one that matters here is the RTKit receive queue, where the
+display coprocessor's swap-complete message is handled and timestamped. Boot nk01 showed
+one completion processed about 14 ms late (kernel event timestamps 30.6 ms then 3.0 ms
+apart) with nothing wrong on the panel.
+
+- linux/workqueue.h: the two macros call linux_create_workqueue_highpri() for WQ_HIGHPRI.
+- linux_work.c: that function; its taskqueue threads are spawned with a priority value
+  spawn_kernel_thread() (pd_haiku_kernel.cpp) hands to pdos_thread_start_highpri().
+- xnu seam (in 0002, with the other seam halves): pdos_thread_start_highpri() sets thread
+  precedence +8 (priority 89: above default kernel threads at 81, below the preemption
+  band at 92). Boot-arg pdlkpi_wq_highpri=0 keeps the default priority; one kprintf line
+  says which is in effect.
+
+system_highpri_wq is still the shared short queue. No DRM core or driver code in the
+PDAgx/PDDcp kexts asks for WQ_HIGHPRI except RTKit, whose compat header bypasses the
+macro; the kexts redirect that one call (their CMakeLists).
+UPSTREAM: yes.
+""", []),
+ "0024-sync-file-of-another-kext-is-a-sync-file": ("""fbsdkpi: drm: a sync_file made by another DRM kext is recognised
+
+sync_file_get_fence() and the merge ioctl compared the file's f_op with this kext's own
+table, so a sync_file made by the GPU kext was "not a sync_file" to the display kext: a
+GPU fence could not be given to the display driver as IN_FENCE_FD, nor imported into one
+of its dma-bufs. As 0019 did for dma-bufs: sync_file_create() marks the linux_file
+(pd_kind = PD_LFILE_KIND_SYNC_FILE) and the check accepts the mark. The fence inside is
+used through its own ops (wait, callbacks, release), which is how the display driver
+already waits on the fences of an imported buffer's reservation object.
+
+Limit that stays while each DRM kext has its own copy of the layer: dma_fence_is_array()
+and dma_fence_is_chain() compare ops pointers, so the other kext's fence array is one
+opaque fence here (waited on as a whole, not unwrapped or merged element by element).
+UPSTREAM: yes.
+""", []),
+ "0023-dma-buf-descriptor-mmap": ("""fbsdkpi: drm: mmap of a dma-buf descriptor
+
+mmap() of a dma-buf descriptor failed with EINVAL in xnu itself. With the kernel side
+(integrations/puredarwin/m1-dcp/kernel-patches/0003: pd_lfile_ops.mmap_pages) a shared
+mapping is made the way the DRM device nodes' are: xnu asks once for the physical pages.
+
+- linux/mm.h: struct pd_vma_pages and vm_area_struct.pd_pages, the page question carried
+  down an mmap op in the vma.
+- pd_lfile_lkpi.c: the mmap_pages op. For a dma-buf file it builds the vma and calls
+  dma_buf_mmap_internal(); the vma lives as long as the mapping, holds the file reference
+  linux's vma->vm_file holds, and vm_ops->close() runs (from a work item) when xnu drops
+  the last mapping. An exporter whose mmap op succeeds without answering is refused.
+- pd_dma_buf_mmap.c: dma_buf_mmap_range_check() and dma_buf_mmap_internal() of the pin's
+  drivers/dma-buf/dma-buf.c (GPL-2.0-only, own file, as 0021 and 0022). The exporter is
+  reached through dmabuf->ops->mmap, so the file may belong to another DRM kext.
+
+The exporters: drm_gem_dmabuf_mmap() and drm_gem_prime_mmap() are the DRM core's,
+unchanged. shmem objects (PDAgx) answer in drm_gem_shmem_mmap() (m1-drm72 patch 0009), DMA
+objects (PDDcp) in the dma_mmap_wc() that drm_gem_dma_mmap() calls (m1-dcp).
+
+DMA_BUF_IOCTL_SYNC (in 0021's file) is now the pin's: flags validated, and
+dma_buf_begin/end_cpu_access called. Neither exporter has cpu-access ops, so it changes
+nothing for them but the validation.
+Not done: MAP_PRIVATE (EINVAL), and a mapping is never revoked.
+UPSTREAM: yes, with the kernel patch.
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -246,6 +326,11 @@ def topic(path, hunk, lineno):
     if path.endswith("pd_drm_cdev.c") and re.search(r"pd_dri_event_wake|event_wait|wait_queue_t wake|drm_file.h", hunk): return "0020-dri-fds-wake-select-poll-kqueue"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
+    if path.endswith(("linux/mm.h", "pd_dma_buf_mmap.c")) or (path.endswith("drm.cmake") and "pd_dma_buf_mmap" in hunk): return "0023-dma-buf-descriptor-mmap"
+    if path.endswith(("linux_work.c", "linux/workqueue.h")) or (path.endswith("pd_haiku_kernel.cpp") and "PD_THREAD_PRI_HIGH" in hunk): return "0025-wq-highpri-queues-run-above-kernel-threads"
+    if path.endswith(("pd_lfile_lkpi.c", "linux/fs.h")) and re.search(r"pd_lfile_owner", hunk) and not any(l.startswith("+") and "pd_lfile_owner" not in l for l in hunk.split("\n")[1:]): return "0026-linux-file-ops-run-in-the-copy-that-made-the-file"
+    if path.endswith("pd_sync_file.c") and re.search(r"pd_kind", hunk): return "0024-sync-file-of-another-kext-is-a-sync-file"
+    if path.endswith("pd_lfile_lkpi.c") and re.search(r"mmap_pages|pd_lfile_mapping", hunk): return "0023-dma-buf-descriptor-mmap"
     if path.endswith("pd_dma_buf_syncfile.c") or (path.endswith("drm.cmake") and "pd_dma_buf_syncfile" in hunk): return "0021-dma-buf-sync-file-ioctls"
     if path.endswith(("pd_dma_buf_poll.c", "pd_sync_file_poll.c", "pd_sync_file.c", "linux/sync_file.h", "linux/poll.h", "pd_lfile_lkpi.c", "pd_drm_os.c", "linux/dma-buf.h", "drm.cmake")): return "0022-sync-file-and-dma-buf-fds-wake-select-poll-kevent"
     if path.endswith("pd_dma_buf.c") and re.search(r"pd_dma_buf_poll", hunk): return "0022-sync-file-and-dma-buf-fds-wake-select-poll-kevent"
@@ -262,12 +347,40 @@ def topic(path, hunk, lineno):
     if path.endswith("pd_haiku_kernel.cpp"):
         return "0004-allocator-exact-sizes-alignment-realloc" if re.search(r"heap|malloc", hunk) else "0003-haiku-locks-embed-the-xnu-lock"
     return "0004-allocator-exact-sizes-alignment-realloc"
+# One hunk, two topics: the added lines matching rx go to a later patch. Returns the hunk
+# without them and the hunk that adds only them (the rest as context, removals gone).
+def split_added(h, rx):
+    lines = h.split("\n"); head, body = lines[0], [l for l in lines[1:] if l != ""]
+    g = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)", head)
+    early = [l for l in body if not (l.startswith("+") and rx.search(l))]
+    late = [l if (l.startswith("+") and rx.search(l)) else " " + l[1:] for l in body if not l.startswith("-")]
+    def mk(start, ls):
+        # patch(1) takes a hunk with more leading than trailing context for one at the end
+        # of the file: keep three lines of context on each side, as diff does
+        start = int(start)
+        lead = next(i for i, l in enumerate(ls) if l[0] != " ")
+        if lead > 3: ls = ls[lead - 3:]; start += lead - 3
+        trail = next(i for i, l in enumerate(reversed(ls)) if l[0] != " ")
+        if trail > 3: ls = ls[:len(ls) - (trail - 3)]
+        old = sum(1 for l in ls if l[0] in " -"); new = sum(1 for l in ls if l[0] in " +")
+        return "@@ -%s,%d +%s,%d @@%s\n%s\n" % (start, old, start, new, g.group(3), "\n".join(ls))
+    e = mk(g.group(1), early) if any(l[0] in "+-" for l in early) else ""
+    return e, mk(g.group(2), late)
+SPLITS = [("pd_lfile_lkpi.c", re.compile(r"pd_lfile_owner"), "0026-linux-file-ops-run-in-the-copy-that-made-the-file"),
+          ("linux/fs.h", re.compile(r"pd_lfile_owner"), "0026-linux-file-ops-run-in-the-copy-that-made-the-file"),
+          ("pd_sync_file.c", re.compile(r"pd_kind|PD_LFILE_KIND_SYNC_FILE"), "0024-sync-file-of-another-kext-is-a-sync-file")]
 for f in files:
     m = re.match(r"--- (a/\S+).*\n\+\+\+ (b/\S+).*\n", f)
     path = m.group(1)[2:]
     hunks = re.split(r"(?m)^(?=@@ )", f[m.end():])
     per = {}
     for h in hunks:
+        if not h.strip(): continue
+        for suffix, rx, later in SPLITS:
+            if path.endswith(suffix) and any(l.startswith("+") and rx.search(l) for l in h.split("\n")) \
+               and any(l[:1] == "+" and not rx.search(l) for l in h.split("\n")[1:]):
+                h, late = split_added(h, rx)
+                per.setdefault(later, []).append(late)
         if not h.strip(): continue
         per.setdefault(topic(path, h, 0), []).append(h)
     for t, hs in per.items():

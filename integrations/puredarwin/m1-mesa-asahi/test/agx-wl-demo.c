@@ -30,6 +30,7 @@
 // usage: agx-wl-demo [--seconds N] [--size WxH] [--scenes plasma,quads,mesh]
 //                    [--require-renderer substr] [--allow-software] [--no-protocol-log] [--crash-test]
 
+#define _GNU_SOURCE
 #define main agx_panel_demo_main
 #include "agx-panel-demo.c"
 #undef main
@@ -290,6 +291,7 @@ int main(int argc, char **argv)
 	// libwayland's protocol log of this process goes to stderr: send stderr to a file
 	logfd = mkstemp(logname);
 	saved_stderr = dup(2);
+	setenv("EGL_LOG_LEVEL", "debug", 0);	// Mesa's reasons for EGL errors, on stderr
 	if (logfd >= 0) {
 		setenv("WAYLAND_DEBUG", "1", 1);
 		fflush(stderr);
@@ -516,7 +518,7 @@ connect:
 	wl_display_disconnect(dpy);
 
 	// what actually went over the wire
-	size_t dmabuf = 0, shm_pools = 0, attaches = 0, releases = 0, callbacks = 0;
+	size_t dmabuf = 0, shm_pools = 0, attaches = 0, releases = 0, callbacks = 0, params = 0, modifiers = 0;
 	int counted = 0;
 	if (logfd >= 0) {
 		fflush(stderr);
@@ -524,6 +526,27 @@ connect:
 		off_t len = lseek(logfd, 0, SEEK_END);
 		char *log = len > 0 ? calloc(1, (size_t)len + 1) : NULL;
 		if (log && pread(logfd, log, (size_t)len, 0) == len) {
+			// everything on stderr that is not protocol traffic is a message from Mesa or libwayland
+			int shown = 0;
+			for (char *line = log; line && *line; ) {
+				char *nl = strchr(line, '\n');
+				size_t n = nl ? (size_t)(nl - line) : strlen(line);
+				// (EGL's per-config validation chatter at debug level is left out)
+				if (n && line[0] != '[' && !(n > 20 && (memmem(line, n, "failed to validate config", 25) ||
+				    memmem(line, n, "conflicting surface type", 24))) && shown++ < 80)
+					printf("AGXWL_STDERR %.*s\n", (int)(n > 300 ? 300 : n), line);
+				line = nl ? nl + 1 : NULL;
+			}
+			// the compositor's modifier events as Mesa received them (its own bind of the global)
+			shown = 0;
+			for (char *q = log; (q = strstr(q, ".modifier(")) != NULL && shown < 12; q++, shown++) {
+				char *b = q, *e = strchr(q, '\n');
+				while (b > log && b[-1] != '\n')
+					b--;
+				printf("AGXWL_MODIFIER_EVENT %.*s\n", (int)((e ? e : q + strlen(q)) - b), b);
+			}
+			params = count_in(log, ".create_params(");
+			modifiers = count_in(log, ".modifier(");
 			dmabuf = count_in(log, ".create_immed(");
 			shm_pools = count_in(log, ".create_pool(");
 			attaches = count_in(log, ".attach(");
@@ -535,8 +558,8 @@ connect:
 		close(logfd);
 		unlink(logname);
 	}
-	printf("AGXWL_BUFFERS counted=%d dmabuf_create_immed=%zu shm_create_pool=%zu surface_attach=%zu buffer_release=%zu callback_done=%zu\n", counted,
-	    dmabuf, shm_pools, attaches, releases, callbacks);
+	printf("AGXWL_BUFFERS counted=%d dmabuf_create_immed=%zu shm_create_pool=%zu surface_attach=%zu buffer_release=%zu callback_done=%zu modifier_events=%zu create_params=%zu\n",
+	    counted, dmabuf, shm_pools, attaches, releases, callbacks, modifiers, params);
 	if (!allow_software && counted && (dmabuf == 0 || shm_pools > 0)) {
 		printf("AGXWL_FAIL call=\"dma-buf buffers\" errno=0 (%s)\n", shm_pools ? "wl_shm pools were created: shm fallback" : "no dma-buf wl_buffer was created");
 		failed = 1;

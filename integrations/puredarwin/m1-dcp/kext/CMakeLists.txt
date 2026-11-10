@@ -79,6 +79,11 @@ set_source_files_properties("${HERE}/pin/drm_gem_framebuffer_helper.c" PROPERTIE
 # the 6.14 core calls mode_config_funcs.fb_create with three arguments (kext/pd_dcp_mmap.c)
 set_source_files_properties("${HERE}/driver/apple_drv.c" PROPERTIES COMPILE_DEFINITIONS
     "drm_gem_fb_create=pd_dcp_gem_fb_create")
+# The RTKit receive queue is WQ_HIGHPRI on linux. m1-gpu-rtkit's compat header creates it
+# with linux_create_workqueue_common(), dropping the flag; here that one call makes the
+# layer's high-priority queue (layer patch 0025, boot-arg pdlkpi_wq_highpri=0 for the old way).
+set_source_files_properties("${RTKIT}/rtkit.c" PROPERTIES
+    COMPILE_DEFINITIONS "linux_create_workqueue_common=linux_create_workqueue_highpri")
 _fbsdkpi_objects(PDDcp_drv SOURCES ${drv} ${pin}
         "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c" "${HERE}/pd_dcp_prime.c"
         "${DART}/src/pd_dcp_iommu.c" "${DART}/src/pd_dart_table.c"

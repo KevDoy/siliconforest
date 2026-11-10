@@ -12,8 +12,8 @@
 # entries). A kext's __LINKEDIT is part of what it occupies in the collection: 540672 ->
 # 65536 bytes for PDDcp, 425984 -> 81920 for PDAgx. Code and data are not touched, and the
 # link maps (nix-support/*.map, tools/symbolize.sh) stay. Wi-Fi + PDAgx + PDDcp only fits
-# with this. Not the default until a slim collection has booted.
-{ agx ? false, wifi ? false, slim ? false }:
+# with this. The default since boots ws04 and ws05; `--arg slim false` keeps the debug map.
+{ agx ? false, wifi ? false, slim ? true }:
 let
   base = if wifi then import ../m1-bwfm/build-kc.nix else import ../m1-apcie-host/build-kc.nix;
   tc = (import ../m1-rust-kext/pins.nix).crossToolchain;

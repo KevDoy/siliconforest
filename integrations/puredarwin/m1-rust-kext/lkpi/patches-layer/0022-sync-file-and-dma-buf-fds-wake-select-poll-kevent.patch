@@ -130,7 +130,7 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
  	db->ops->release(db);
  	if (db->resv == &pdb->resv)
  		dma_resv_fini(&pdb->resv);
-@@ -117,6 +126,7 @@
+@@ -117,6 +124,7 @@
  }
  
  static const struct file_operations pd_dma_buf_fops = {
@@ -331,24 +331,19 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
  {
 --- a/src/Kernel/fbsdkpi/drm/src/pd_lfile_lkpi.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_lfile_lkpi.c
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,11 @@
  #include <linux/file.h>
  #include <linux/fs.h>
  #include <linux/poll.h>
 +#include <linux/wait.h>
++#include <linux/mm.h>
++#include <linux/dma-buf.h>
++#include <linux/workqueue.h>
 +#include <asm/processor.h>
  #include <linux/refcount.h>
  #include <linux/sched.h>
  #include <linux/slab.h>
-@@ -25,6 +27,7 @@
- void pd_lfile_unreserve(int fd);
- void pd_lfile_install(int fd, void *obj);
- void *pd_lfile_get(int fd);
-+void pd_lfile_wakeup(void *obj);
- 
- void
- pd_lkpi_fput(struct linux_file *filp)
-@@ -32,11 +35,52 @@
+@@ -32,11 +47,52 @@
  	if (filp == NULL || !refcount_release(&filp->f_count))
  		return;
  	linux_set_current(curthread);
@@ -401,7 +396,17 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
  struct linux_file *
  pd_lkpi_fget(unsigned int fd)
  {
-@@ -79,18 +123,31 @@
+@@ -70,27 +70,42 @@
+ {
+ 	struct linux_file *filp = obj;
+ 
++
+ 	refcount_acquire(&filp->f_count);
+ }
+ 
+ static void
+ pd_lfile_release(void *obj)
+ {
  	pd_lkpi_fput(obj);
  }
  
@@ -416,6 +421,7 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
 -	unsigned int mask;
 +	poll_table pt;
 +	unsigned int mask, want;
++
  
  	if (filp->f_op->poll == NULL)
  		return 1;
@@ -437,6 +443,14 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
  }
  
  static int
+@@ -100,6 +100,7 @@
+ 	struct task_struct *task;
+ 	long ret;
+ 
++
+ 	if (filp->f_op->unlocked_ioctl == NULL)
+ 		return ENOTTY;
+ 	linux_set_current(curthread);
 --- a/src/Kernel/fbsdkpi/drm/src/pd_sync_file.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_sync_file.c
 @@ -47,19 +47,12 @@
@@ -460,7 +474,7 @@ UPSTREAM: yes, with the kernel patch; same licence note as 0021.
  // the descriptor's file and its fence reference, or NULL
  struct sync_file *
  sync_file_create(struct dma_fence *fence)
-@@ -74,6 +67,7 @@
+@@ -74,6 +74,7 @@
  		return NULL;
  	}
  	sf->file->private_data = sf;

@@ -71,7 +71,7 @@ client_rc=not-run
 if [ -S "$runtime/wayland-0" ]; then
     sleep 1
     printf 'WMGL5_CLIENT_START agx-wl-demo start=%s\n' "$(date +%s)"
-    /usr/local/bin/agx-wl-demo --require-renderer "Apple M1" --seconds 12 2>&1
+    /usr/local/bin/agx-wl-demo --crash-test 2>&1 | head -12; /usr/local/bin/agx-wl-demo --require-renderer "Apple M1" --seconds 12 2>&1
     client_rc=$?
     printf 'WMGL5_CLIENT_RC=%s end=%s\n' "$client_rc" "$(date +%s)"
 else
