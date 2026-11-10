@@ -1,0 +1,13 @@
+PDApcieT8103Bridge.kext is licensed GPL-2.0.
+
+It is ported from Linux drivers/pci/controller/pcie-apple.c as carried in
+omacom/linux-aurora (SPDX-License-Identifier: GPL-2.0):
+  Copyright (C) 2021 Alyssa Rosenzweig <alyssa@rosenzweig.io>
+  Copyright (C) 2021 Google LLC
+  Copyright (C) 2021 Corellium LLC
+  Copyright (C) 2021 Mark Kettenis <kettenis@openbsd.org>
+  Author: Alyssa Rosenzweig <alyssa@rosenzweig.io>
+  Author: Marc Zyngier <maz@kernel.org>
+
+BAR0 window constants follow Linux brcmfmac/pcie.c (ISC, Broadcom Corporation).
+ADT register indices follow m1n1 src/pcie.c (MIT, The Asahi Linux Contributors).

@@ -246,8 +246,9 @@ The active goal remains unfinished. Its expanded objective and rules are in
 `planning/sprint-010.json`. Never block on Chris, ask questions, or wait for
 typing overnight. One unattended reply-ID-fix enumeration test is now authorized,
 followed by verified Linux recovery. Continue the display shell and CPU-rendered
-Wayland/Chonkstep path; GPU firmware and Wi-Fi belong to this same goal only
-after that desktop path is real. Keep using Herdr Astra Codex, Claude and Grok.
+Wayland/Chonkstep path; GPU firmware belongs to this same goal only after that
+desktop path is real (PCIe/Wi-Fi is no longer sequenced behind it; see the final
+section). Keep using Herdr Astra Codex, Claude and Grok.
 No Omarchy, Signal, DFU, partitioning, firmware flashing or boot-policy changes.
 Each permitted hardware test must end in verified Linux, with raw failures and
 host timeouts preserved. No host-generated input or service inventory is proof
@@ -267,8 +268,7 @@ The first CPU Chonkstep/Wayland frame is qualified in framebuffer memory in
 client produced 127 callbacks and the captured frame has its fresh nonce,
 correct colours and edges-mode chrome. This establishes the CPU rendering path;
 it does not establish fresh physical-panel scanout, input, GPU, Wi-Fi or console
-return after compositor exit. The goal remains active. Subsequent GPU/Wi-Fi
-source plans do not authorize bypassing DART or starting DMA/device firmware.
+return after compositor exit. The goal remains active.
 
 ## Real PTY desktop continuation (November 8)
 
@@ -369,12 +369,11 @@ diagnostic bytes must fail, and a recorded refusal must remain a refusal.
 
 The separate host opt-in is reviewed but remains isolated until the concrete
 collector/RAM/packet review. Normal desktop boot arguments remain unchanged.
-The survey reads through an exact power/clock guard, makes no register writes
-and must not be paired implicitly with `P_PCIE_INIT`. The pinned initializer
+The survey reads through an exact power/clock guard and makes no register
+writes. Fact to keep in mind when using `P_PCIE_INIT`: the pinned initializer
 changes shared PHY and storage-related PMGR ancestry, has alias bookkeeping
 and HV-ordering issues, and offers no port0-only API; see
-`reports/sprint-010/pcie-init-scope-plan.json`. Any future initialization is
-separate work requiring actual ownership and isolation mechanisms.
+`reports/sprint-010/pcie-init-scope-plan.json`.
 
 The reviewed survey host revision is now applied on root and M5 (25694c88);
 controller cce9803f and both input helpers are unchanged. Root applied-host
@@ -393,19 +392,15 @@ and the collector returned77. The native desktop closed, reaped its shell and
 restored fresh console text; the independent lifecycle check passed50/50. See
 `dart-survey-hardware-attempt-001.json` and
 `dart-survey-attempt001-native-lifecycle-qualification.json`. This establishes
-no DART register state, initialization, DMA or ownership. Next source work
-examines whether DART access truly needs PHY/port readiness, without changing
-the conservative guard or initializing PCIe on an assumption.
+no DART register state, initialization, DMA or ownership.
 
 The separate DART/raw/recovery qualification is now complete in
 `dart-survey-attempt001-independent-qualification.json`: genuine guard refusal,
 no DART reads, exact diagnostic receipt, sealed TX and verified Linux. Both
 independent prerequisite analyses (`dart-survey-phy-prerequisite-source-analysis.json`
 and `dart-mmio-prerequisites-source-review.json`) found no sufficient proof
-for DART reads while PHY/port readiness is absent. Keep the current guard;
-no new DART hardware candidate or PCIe initialization is authorized by those
-source analyses. The active goal continues through source work, with no
-hardware actor and the M1 left in verified Linux.
+for DART reads while PHY/port readiness is absent. The M1 was left in
+verified Linux.
 
 ## Trackpad enumeration preparation (November 8)
 
@@ -1357,968 +1352,80 @@ newLinuxPENDING. No secondboot/reset/actor; rootfinishesownedcycle.
 Rootread-onlyactual22source-recordschema/hashchecks passed beforegrading;
 no overallverdict run.
 
-## Latest user steering: PCIe/BCM4378 after active009 recovery
 
-Chris redirected work to PCIe and BCM4378. Do NOT interrupt/kill currently
-runningrootmaster009 exec88568/cycle-_pk66ah5; no secondboot. Finishcapture
-and newverifiedLinux, then STOP serialbridge line. No further desktop-network
-cycle/fix. First009saved-capture grade may close its record; no rerun/regrade
-oldreceipts. No read-onlyPCIeport-check BOOT until reviewedpacket exists; root
-owns hardwaredecision onlyafterLinuxback. SharedAPCIEPHYandPMGRwrites must
-remain COMPILEDOUT. SpareCodexalready owns host-onlyfake-devicechiptransport;
-do notduplicate. GPUobserver HOLD/noSignal unchanged.
-
-## 009 returned to Linux; serialbridge line STOPPED, PCIe priority active
-
-Rootexec88568 finished/consumed. cycle-_pk66ah5 returnedNEWverifiedLinux with
-one reset, latchabsent/lockfree; backend+tunnel+QEMU reaped/noKILL/errors.
-Backendfirsterror DLNET001 truncated preserved; first009grade mayclose its
-record only. No furtherdesktop-networkcycles, serialbridgefix orretry. Root
-nowownsPCIe/BCM4378decision. ExistingobserverSDK6a68c03f hasNO reviewedKC/packet
-yet: PCIeBOOT HOLD. SharedPHY/PMGRwrites COMPILEDOUT; no P_PCIE_INIT; existing
-HVpcie_shutdown isnotproofthatwholebootisPCIewrite-free. SpareCodex owns fake
-chiptransport; donotduplicate. GPUobserverHOLD/noSignal remainabsolute.
-
-## PCIe readonly packet003 prepared/reviewed; no PCIe actor yet
-
-Serialbridge remainsSTOPPED after009/Linux(full009999cdcbc17/70preserved).
-NewreadonlyobserverKCaf9d8ea7 builtlocally/51members=native50f882+observer
-6a68c03f. Source review485bb165 andindependentKC review9cf3f7bc approveoffline
-binding; all49retainedkexts byteidentical. Rootpreliminarysegmenthashreport used
-wrongrelativeoffsetbase; distinctcorrectionreport preserves/clarifiesit.
-
-Hostfreeze5b1081f5/binding3f1708bd usesisolated16files fromcanonical0cf9/cce9,
-NO DATAbridge. Host6a315987/controllere16d223b gateexactreadonly84B/native51/
-120s+240worker/sealedone-launcher. Collector63ba28d1, ARM64exe518d4ae7, decoder
-9923cace; 9groups/60466sanitizerassertions/15mutants. Supervisor602a70d0 accepts
-0OBSERVED/77GUARDED_NOT_READY records,othererrorsfail. PHY/PMGRwriterTUsabsent,
-noP_PCIE_INIT; wholebootstillcontainsunchangedHVpcie_shutdown,notwrite-free.
-
-Packetdraft001/002 failedofflineformat/provenancegates, preservedneverbooted.
-Correctedartifacts/m1-desktop-010/apcie-port-candidate-003 assembled317payloads:
-315retainedunchanged,supervisorreplacement+collectoraddition. NewconcreteKCdrv
-js745lha/outputld1bran, sourcepatchdigest+kernelaf9properlybound. Wholepacket
-reviewe114d527 statusAPPROVE_PACKET_BINDING_NO_CONCRETE_BLOCKER; criteriaff4b55dc
-fixedP1-P10. Required6checksaf8e7278 PASS. M5source16/payload7 delivery+actual
-verify/raw51/gates120240 passedwithoutdevicecontact; M5lab-apcie-port-001 and
-WORK/apcie-port-010/apcie-port-candidate-003. Actualfinalfullargvnoexecuteplan002
-PASS. Newmasterrun-apcie-port-once-001.py58849acb remainsUNARMED missingdecision
-002 andqualifierfreeze. Rootsoleactor; noPCIebootyet. Nativeagentfinishesruntime
-qualifiercode/tests; rootdecisionwillpincode+review+manifest, sourcereceiptpins
-decision (nohashcycle). Onlythenrootmayadmitonecycle, mandatorynewLinux. Shared
-APCIEPHY/PMGRwrites stayCOMPILEDOUT; GPUobserverHOLD/noSignal unchanged. Spare
-Codexowns hostfakeBCMtransport;donotduplicate.
-
-## One reviewed readonly PCIe cycle now admitted under root only
-
-Wholepacketreviewe114d527 covers exactcandidate003 manifest603012a9/317payloads.
-M5all16sources+7payloads/runtime120worker240 verifiedoffline andfullargvplan002
-passedwithout--execute. Rootdecision0024d452c55 APPROVED_ONE_READONLY_PCIE_CYCLE
-onlyafter009verifiedLinux. Qualifiercode4bcfef84/sourcefreeze27d65200 has9tests,
-fixedP1-P10 andexplicitNOT_READY/OBSERVATIONscope,noWiFi/chip/linkinitclaim.
-Master58849acb requiresmatchingdecision+qualifierfreeze beforeexecution. Root
-nowstartsrun-apcie-port-once-001.py. No otheractor/boot/reset. No DATAbridge/
-Signal/P_PCIE_INIT/GPUobserver. SharedPHY/PMGRwriterTUsremainabsent. Existing
-unchangedHVpcie_shutdown doesnotmakewholebootwrite-free. Mandatorynewverified
-Linux/maxoneexternalreset; noautoinit/retryifcoldguardreturns77.
-
-## Actual readonly PCIe actor active
-
-Rootexec34953 is runningrun-apcie-port-once-001.py, cycle-wygh0a8j under
-M5WORK/apcie-port-cycles-010. Uniqueverified-inputs matchesreviewed003build
-record. Capturedsnapshot/newLinuxPENDING. Do notstartanyotherboot/reset/actor.
-Finishownedcycle+mandatorynewverifiedLinux beforeany nextdecision. Compiled
-sharedAPCIEwriterTUsremainabsent/noDATA/GPUobserverHOLD/noSignal unchanged.
-
-## PCIe readonly001 finished, new verified Linux; no actor/no retry
-
-Rootexec34953 finished/consumed; cycle-wygh0a8j controller0/reset1/NEWLinux
-verified/latchabsent/lockfree. Savedcapture runs/m1-desktop-010/apcie-port-
-attempt-001 complete. Livecollector showed84B/result2 PHY_NOT_READY/9reads/
-stage2/valid15391/sourceRC77 andfullreturnedfooter; no panic. Firstfrozen
-qualifier4bcf grade pendingnativeagent. Do notclaimglobalPASSbeforethat.
-No initialization, no retry/newboot. SharedAPCIEPHY/PMGRwriterTUs remainabsent;
-noECAM/DART/BCMchipidentity/firmware/radio/associationclaim. SerialbridgeSTOPPED,
-GPUobserverHOLD/noSignal. SpareCodex hostfakechiptransport remainsseparate.
-
-## Readonly PCIe001 first grade preserved7/10; hardware STOP, Linux verified
-
-Fullreceipt637fe852 statusAPCIE_OBSERVATION_NOT_QUALIFIED7/10 isimmutable. Raw
-84B property independentlydecodedcoherently(result2/stage2/9reads/rc77), but
-strictIOLogagreement failedbecauseMACFrameworkoutputinterleavedtruncatedthe
-line. Hostworker timedout(-9) inpost-console diagnostics; diagnostics_complete
-false. Rawconsole finalized andfullreturnedfooterpresent. DoNOT relabelwhole
-trialPASS/regrade/retry. Separatequalifiedcontroller+savedfullbaseline proves
-NEWLinux/reset1/latchabsent/lockfree; P8aggregatealsorequireddiagcomplete,hence
-false despiteactualverifiedrecovery. Rootdecision003STOPrecordsboundaries.
-
-No actor now. NoRC/port/ECAM/actualchipidentity/firmware/WiFi readiness was
-observed. SharedPHY/PMGRwriterTUs stayCOMPILEDOUT/noP_PCIE_INIT/noauto-init.
-SerialbridgeSTOPPED/nofurtherdesktop-networkcycles, GPUobserverHOLD/noSignal.
-NextsafePCIe/BCMsourceworkmayconsume the scopedPHYguardfact; spareCodex owns
-hostfakechiptransport—donotduplicate/promote fakehardwareproof.
-
-## BCM4378 host-only composition continuation (November 9)
-
-The spare's transport, identity/firmware-name, fake DART, logical interrupt and
-fake ring models now have separate independent reviews. No concrete blocker
-was found within their documented serialized host-only contracts. Cross-object
-RID/SID/vector ownership, real backing and physical cleanup remain unimplemented.
-
-Root added tests only in `m1-apcie-bridge/bcm4378_integration/`, joining those
-unchanged implementations in one ordinary-RAM fixture. Source receipt
-`reports/sprint-010/bcm4378-composition-source-001.json` binds the three files,
-compiled dependencies and unchanged five predecessor freezes. Four groups pass
-under ASan/UBSan, including 282 callback positions in two failed-write models
-(564 fault cases), six compiled orchestrator mutants, default/KERNEL zero-I/O
-gates and negative builds. All six required local checks pass separately in
-`bcm4378-composition-required-checks-001.json`. The first lost-owner mutant
-survived; that failed run is recorded, and the final test adds post-close owner
-and duplicate-claim assertions. Never present initial survivors as detections.
-
-The fixture preflights PHY before endpoint work, keeps fabricated identity
-unverified, checks a numerical IOVA against the original codec, and retains all
-storage after logical close or failure. Synthetic consumer/interrupt events
-remain explicit test stimuli. This is no production ownership manager, real
-DMA/MSI, firmware load, Wi-Fi result or hardware admission. Prior readonly001
-failed7/10 and verified Linux recovery remain unchanged. No actor, new boot,
-initialization or retry; shared PHY/PMGR writes stay compiled out, serialbridge
-stays stopped, GPU observer stays held, and no Signal messages are authorized.
-
-Independent composition review `bcm4378-composition-independent-review-001.json`
-SHA123ab42b binds the frozen root test and reruns all four groups. No blocker
-within the test scope. Fault sweep is normal-doorbell register callbacks only;
-DAR is healthy-path only and firmware metadata callback faults are not injected.
-The separate `bcm4378-composition-handoff-001.json` records these coverage limits
-and the unchanged hardware STOP. No goal completion or physical readiness claim.
-
-## BCM4378 pinned identity facts and Linux metadata (November 9)
-
-`m1-apcie-bridge/identity-reference/` now records three additional exact-pin ISC
-headers, acquired explicitly with expected Git blobs and independently checked.
-Manifest8899709e and facts3c109525 close the numeric source gap for base/masks/
-shifts/IDs. BCM4378 CHIPID is0x4378=17272decimal. This is not an observed raw
-chip identity; frozen fake `numeric_profile_verified=0` remains unchanged.
-Independent header review cc768d91 binds the references. No registry update,
-driver implementation copy or firmware bytes were acquired.
-
-Root ran one read-only Linux SSH sysfs/name inventory (no config/BAR/MMIO/logs/
-firmware contents). Private metadata boot ID and kernel equal the prior verified
-Linux recovery. Public observation5ee1dd17 records brcmfmac14e4:4425,5GT/s x1,
-DMA translation and one MSI vector. These are Linux facts, not Darwin readiness.
-PCI revision0x03 is not ChipCommon revision; B1/B3 directory names do not prove
-loaded firmware or calibration. Keep the real IOMapper requirement; no bypass.
-
-Independent fake-item review5fe64bb3 admits only the exact opaque test bytes.
-Real lifecycle design483b107f specifies the next source slice: private central
-registry, generation-checked leases and an exposure ledger that journals possible
-effects before callbacks and retains uncertain claims/backing. No real ACTIVE
-or exposed retirement API exists. Full handoff is
-`reports/sprint-010/bcm4378-identity-and-lifecycle-handoff-002.json`.
-No new boot/reset/initialization, shared PHY/PMGR writes, GPU observer, serial
-bridge restart or Signal. Hardware STOP and unfinished active goal are unchanged.
-
-The next original core is now being implemented by `/root/gpu_uat_source` in a
-new `m1-apcie-bridge/private_lifecycle/` leaf, with `/root/native_terminal` assigned
-the independent frozen-source review. No hardware actor is involved. Planned
-scope is four-slot metadata ownership, copied bounded policy, generation leases,
-typed numeric span conflicts and an effect ticket/ledger. No real provider,
-ACTIVE, MMIO, allocation, callback, physical drain/unmap or exposed release API.
-Root must inspect actual current source/test state and frozen review before
-admitting this core; an agent assignment is not implementation evidence.
-
-## Private lifecycle core frozen/reviewed, source admission only (November 9)
-
-Core receipt c585fd8b/set6aafa01e freezes the five-file `private_lifecycle/` leaf.
-Independent review b90fed5b found no blocker within the metadata-only contract:
-four groups,482 checks per ordinary-host/KERNEL-defined host mode,22 compiled
-mutants and an independent1024-case matrix pass. Exact registry generations,
-live/quarantined cross-entry conflicts and monotonic effect history are enforced.
-Only never-exposed private metadata can retire. No provider/backing attestation,
-ACTIVE, hardware callback, physical drain/free or exposed-retirement API exists.
-The standalone core is not wired into the old integration test or real driver.
-
-Root target compile2da3a2e binds exact frozen source to cached pinned ARM64
-Mach-O OBJECT outputs atO0/O2. Only_memcpy imports; max individual frames144/96B.
-Libkern export779 was byte-compared with the pinned Git object. This is a
-freestanding C target compile with KERNEL define, not a kernel-framework/kext
-build, link, load or runtime result. Six required local checks3662b31d pass.
-Root admission is `bcm4378-private-lifecycle-source-admission-001.json`.
-
-New isolated port-diagnostics revision002 (sourceac4dfb96,review5e45d470) changes
-one constructor expression to skip optional framebuffer diagnostics in strict
-port mode. Actual old markers1..13 complete; marker14 framebuffer-pixels never
-completes. Underlying read/transport/completion cause is unresolved. Old637fe852
-7/10 failure and timeout remain unchanged. New host82d126fa is only in a private
-test tree; canonical/M5 host, controller, packet003 and actual capture untouched.
-Tests3focused+13gate+41host pass. No packet binds it and no deployment/boot is
-admitted. Desktop framebuffer capture is unchanged; skipped mode has no pixels.
-
-Pinned IOMapper contract06618930 establishes that unmap failures can be swallowed
-while caller bookkeeping/backing references clear. Native adapters need their
-own retained descriptor/preparation records; metadata cannot substitute for that.
-`/root/resolver_backend` is preparing the original native private-backing design
-only, no implementation or activation. Root remains sole hardware decision owner.
-No actor/new boot/retry/initialize, shared PHY/PMGR writes, GPU observer, serial
-bridge restart or Signal. Last verified Linux recovery remains preserved.
-
-## Native backing implementation in progress (November 9)
-
-Native private-backing design3e627305 and independent direction review397a037e
-permit an ORIGINAL source implementation only. Root mixed-C/C++ probe c4e7d163
-links/initializes frozen C core on host under ASan/UBSan with extern-C wrapping;
-unwrapped include fails as expected. Actual cached Kernel.framework API probe
-cf709bc5 compiles ARM64 OBJECT with C++17 plus both shared-pointer macros;
-255 compiler inputs hashed. Default C++14 OSPtr is raw and fails.detach, preserved
-as first probe. Two framework include warnings remain; no Werror/runtime claim.
-
-`/root/gpu_uat_source` is implementing mutable `m1-apcie-bridge/native_backing/`
-with actual IOKit adapter, C control manager and real-refcount host fixtures.
-Do not treat moving source, preliminary successful syntax checks or reported
-in-progress tests as frozen admission. Final manifest/independent review and
-root whole-source SDK compile/mixed link remain required. Producer says first
-host suite passes but is still refining conservative quarantine/domain halt.
-
-Root implementation clarifications: trusted protected PA/CPU data must be
-explicit, missing data blocks buffer allocation, no guessed VA-to-PA helper.
-Because newly allocated anchor addresses were unknowable before construction,
-native setup is now two-phase: pin empty control anchor, return opaque setup
-identity/typed CPU control span, then configure that exact identity with independently
-derived protections. No descriptor/buffer-view export or guessed opaqueIOLock
-extent. Provenance/completeness remain trusted platform obligations; current
-actual platform setup is not ready. Unknown/changed retained PA/view/identity
-must block new acquisition; reset uncertainty after metadata retirement must
-halt manager reuse, without claiming already-reset refs remain owned.
-
-Latest handoff: `bcm4378-native-backing-implementation-handoff-001.json`.
-No actor, new boot/reset, PHY/PMGR writes, GPU observer, serial bridge, Signal or
-old receipt regrade. Goal remains active and actual driver/runtime unfinished.
-
-## Native backing frozen, built and admitted as source only (November 9)
-
-Frozen provider receipt79b153f2/setf1778f4d now has independent source review
-a976dd51 and artifact review6fcc634e. Five groups pass:14,250 checks per host
-mode,17 actual-adapter/TEST-SDK scenarios,16 manager and5 adapter mutants.
-Root actual Kernel.framework build796a78e0 compiles all3 TUs atO0/O2 and
-mixed-links ARM64 MH_OBJECTs. No internal bpl/bpn imports remain;13 union kernel
-imports match IOKit/Libkern/Mach aliases and actual standalone kernel definitions.
-Max individual frames640/272B. Initial ordinary-I/pedantic header failure is
-preserved; system-header classification fixed it without source edits. No
-native allocation, kext, collection, image, deployment or runtime occurred.
-Six required checks9ee1b611 pass. Root source-only admission0fc72234 preserves
-the missing actual control-PA derivation and resident-module obligations.
-
-Root Nix object recipe `root-build/build-native-backing-objects-001.nix` builds
-only the frozen7 production inputs. Actual pinned package attribute is
-`xnu-headers-arm64`; internal `xnuHeadersArm64Build` was evaluated and rejected.
-Drv5j957p33/outputdngba0aw built with substitutions disabled; explicit sandbox
-`nix-store --realise --check` rebuilt the whole output identically. NAR is
-`sha256-gM3OKSPpa1M+ZqghxTd5RBd2p65oe5UQZIz2STvBSm0=`. All3 individual
-objects equal the independently reviewed directO2 objects byte-for-byte; partial
-link uses explicit macOS26.5 metadata. Report8655b998 binds recipe/output/logs;
-GC root is `runs/m1-desktop-010/nix-native-backing-objects-001`. Independent Nix
-recipe/artifact review is in progress; no runtime admission follows this build.
-
-Next source design51502d59 is
-`bcm4378-control-protection-derivation-design-001.json`. Pinned type/API probes
-establish real16B mutex footprint and supported IOLockGetMachLock; CPU pmap
-lookup requires explicit Unsupported kernel_pmap/pmap_find_phys dependencies.
-Only a design/type probe exists, no derivation helper implementation/execution.
-Review direction before implementing. Preserve frozen provider/core and keep
-hardware STOP, compiled-out PHY/PMGR writers, stopped serialbridge, GPU HOLD,
-no Signal and mandatory Linux recovery for any future separately admitted boot.
-
-Independent Nix review5aafced5 accepts recipe/object binding only: exact7 source
-guards, all3 objects equal directO2, mixed c7aaebd2 ARM64 MH_OBJECT/26.5/12imports,
-no init/term, recomputed NAR146640B matches gM3 hash and exact5 references.
-Sandbox=true is the recorded requested option, not independent namespace
-attestation. Root build handoff is `bcm4378-native-backing-build-handoff-002.json`.
-
-Control-helper author `/root/gpu_uat_source` has read51502 and prepared API/test
-choices, but NO implementation is authorized yet. `/root/native_terminal` is
-reviewing direction. Root prefers the high-level native wrapper itself call
-pin_empty after pure input validation, avoiding early arbitrary-pointer queries
-from caller-held setup. Low-level derive remains a trusted metadata/read-ops
-algorithm. Caller-owned workspace keeps full receipt/policies off kernel stack.
-Review and explicitly admit direction before coding; preserve frozen79 provider
-and c585 core. No current native protection metadata, runtime or boot admission.
-
-## Control protection source direction admitted (November 9)
-
-Independent direction review6381b6b6 accepts design51502 only with internal-pin
-wrapper, caller-owned workspace and preservation of original RAM boundaries.
-Root `bcm4378-control-protection-direction-admission-001.json` admits ORIGINAL
-source implementation in new `control_protection/` leaf; `/root/gpu_uat_source`
-owns it. Real high-level wrapper must obtain pin_empty itself after pure input
-validation, not translate arbitrary caller setup pointers before authentication.
-Eight pages/sixteen lookups, exact typed mutex, PPN<<14,36-bit guards, two-pass
-identity/policy consistency and atomic configure/output are required. Explicit
-Unsupported kernel_pmap/pmap_find_phys dependencies are new helper obligations;
-old provider's no-Unsupported claim remains limited to that isolated component.
-
-No helper code was admitted to runtime. Frozen79 provider/c585 core, old packets
-and original failures remain unchanged. Review final helper source and exact
-target/mixed link before any further admission. No hardware actor or boot now.
-
-## Control protection002 and owned composition002 admitted as source only (November 9)
-
-Helper frozen002 receipt ef00f73d/sete55ce2e9 has independent source review
-c8298294 (12/12,521 additional sanitizer cases) and actual ARM64 artifact review
-0efb044b. Root target ac304233 compiles5TUs atO0/O2 and mixed-links: per-function
-max672/544B,16unionimports match actual kernel and pinned exports, internal C
-APIs resolved; no TEST-SDK or init/term. New Unsupported kernel_pmap/pmap_find_phys
-dependency is explicit, not silently inherited from old provider. No APIs ran.
-
-Initial target001 failed1040B frame guard and remains exact (68956f44).002 only
-factors callback-free receipt assembly; guard stays1024. Original helper001 is
-archived under control_protection/revisions/001 with its receipt/validation.
-Nix recipe root-build/build-control-protection-objects-002.nix builds11 guarded
-production inputs; drv dylxdfax/output31vyil4p rebuilt whole-output identically.
-All5objects+mixed equal directO2. NAR nmu0 hash/248104B; GCroot
-runs/m1-desktop-010/nix-control-protection-objects-002. Report26e4ff01 binds it.
-
-New owned_composition002 (cba2f15e) replaces test Boolean with actual c585 leases
-and tickets, synthetic aligned host backing and bfi_submit. Root independent
-review e7f78793 reruns5groups/574registercallbackfaults/21compiledmutants.001
-mapping-only late-journal mutant really survived (a8b9e9f4), preserved in exact
-archive;002 pending-checked mapping/IRQ wrappers kill8individuallylateops. This
-is only the trusted host fixture; raw fake API bypass is not security-enforced.
-Native79 descriptors are not linked/exposed by this fixture. No sidecar owner.
-
-Root admission is bcm4378-control-protection-source-admission-002.json. All6
-required repository checks232f4afb pass separately and do not discover focused
-helper tests. Actual controlPA lookup/configuration, complete actualRAM policy,
-module residency and same-native-owner exposure join remain missing. New source
-design-only task gpu_uat_source: minimal NEW-version finite coordinator API, no
-field escape/raw export/second registry/history reset/exposedfree or activation.
-Preserve all frozen versions. No new actor/boot/SSH or initialization admitted.
-HardwareSTOP003, readonly001failed7/10, last verifiedLinux, compiled-out shared
-PHY/PMGRwriters, stopped serialbridge and GPUHOLD remain. Goal active/unfinished.
-
-## New same-owner provider and matching control helper frozen (November 9)
-
-New native_owned/ receipt0ee2101c/setb2e858d8 is independently source-reviewed
-c797ed9b and target/Nix reviewed0d0057e2. Root source admissiona44d5a82 binds
-10groups/private14250+effects16394 perhostmode/17+7TESTSDKscenarios/42mutants
-and independent128multicohort effects. Actual3TUs×O0/O2/2links have656/464max
-individual frames,13union supported imports. Nixsglpwrp9/vpidkpf4 rebuiltidentical;
-3objects+mixed equaldirectO2,NAR165760/nKvFhash,GCrootnix-native-owned-objects-001.
-No old79/helper002 implementations linked. Genericdispatch controlcode remains;
-only concreteTEST/nativebackend is absent. Real run validates thenUNAVAILABLE
-before nativequery/begin. Syntheticpermissionprofiles are notDMA/CPUauthority.
-No post-effect privatecomplete/refreset/retire,32entries perlease,notcontinuous.
-
-New owned_control/ receipt9844eb28/seta5859402 binds this exactnewowner0ee,
-not79. Independent source3d1aaf9f and directartifacte1ea94d0 accept source/object
-scope.6groups/1916permode/9isolated+17combinedactualhelper-owner-coreTESTSDK
-scenarios/21compiledmutants plus521independent cases pass. Fullnewtypedanchor
-span is derived fromthe same internalpin. Actual5TUs×O0/O2/2links be127989 have
-672/544individualframes,16unionimports includingexplicitUnsupportedpmap2.
-Nix0wn5mfmw/dh0pfqcb rebuiltidentical;5objects+mixed equaldirectO2,NAR266872/
-zQGLhash,GCrootnix-owned-control-objects-001. Source admission is
-bcm4378-owned-control-source-admission-001.json. No actualkernelAPI executed.
-All6required general checksb9440551 pass separately from focusedleaf tests.
-
-Source basepolicy contractb3eb3cf6 finds recordedinheritedguest envelope disjoint
-from3MCC/VRAM/109pmapIO/37physicalsegment records; it is not a freshmincap or
-globalexclusionproof. No trustedsamebootnativepolicyhandoff exists yet.
-Additionalartifacta9399268 proves realheaders+kernel58da readBootArgs tail0x478,
-while recordedrevision2writer uses0x2d8 (1152/1024vs736/608 layout). Actualfinal
-guestwire was notsaved: no runtimewrongvalue/crash or oldgrade change claimed.
-Selectedaf9KCbinding3994d145 proves kernelUUID+wholeTEXTEXEC/text bytes/layout
-equal58da. AnyfutureKC needs verification; not a symbolstringorcount proof.
-
-New native_bootargs/ codec67b03647/set15113fa3 preserves R2/V2/commonfields,
-encodesexplicitnative1152 profile/tails and pureimmutablewriteplan only. Source
-review41b5b37a reruns13groups/256roundtrips/11compiledPythonmutants plus120108
-independentcases. Source admission60245f47: no backend/write or host/m1n1patch.
-Zero-tailedlegacybytes can beindistinguishable; profileprovenance external.
-Current initialHVr2writer still limits actualhostargs,not expandedbycodec alone.
-
-Nextnewsource native_bootargs_abi/ is being implemented by gpu_uat_source with
-queued native_terminal review: boundedpureKCparser+hashpinnedABIprofile, unique
-com.apple.kernel/UUID/wholeexec layout+digests, absoluteoffset/outerVMcrosscheck.
-No arbitraryproductionprofile or occurrencecount; no writer/host/controller edits.
-Nativepolicyhandoff and isolated opt-infinalwriter remain separatefuturework.
-All frozenpredecessors and oldcaptures/grades stay unchanged. No newactor/boot/SSH
-or init admitted. HardwareSTOP003/lastverifiedLinux,sharedPHY/PMGRwriter exclusion,
-GPUHOLD andserialbridgeSTOP remain. Goalactive/unfinished;noSignal.
-
-## Isolated final BootArgs integration preparation (November 9)
-
-Selected-KC ABIbinding3994d145 is now frozen: selectedaf9KC com.apple.kernelUUID
-and entireTEXTEXEC segment/textsection bytes+VMlayout match standalone58da.
-Memberfile/sectionoffsets are absolute inthisKC,outerVMcrosschecked. It binds
-thenative0x478load tothatselectedimage but proves no past runtimevalue orcrash.
-FuturecodeABIverifier mustpermit consistentfileoffset relocation whilepinning
-UUID/VMlayout/flags/sizes/fullcodehashes; outerVMmapping mustalso agree, notmerely
-pointatagoldenunmappedblob. gpu_uat_source owns newnative_bootargs_abi/ source,
-withnative_terminal frozenreview queued. Productionprofile ishashpinned, never
-callerasserted; Pythonmutants mustcompileandfailassert,noterrors. No writer there.
-
-resolver_backend nowprepares SOURCEONLY native_bootargs_host_revision/001 from
-COPIES ofcanonicalhost0cf9ccc9/controllercce9803f. No canonical/M5fileschanged.
-Exacttypedmanifestoptin, actualKCverification beforepreboot+worker, helper/profile
-hashes/snapshots, defaultlegacyunchanged; newpath onlyatfinalBArewrite usesnative
-1152wire, checks existingBAallocation/guards, exactboundedreadback andprivatefinal
-wire+metadata capture beforehv.start. Do not change numericalR2/V2orm1n1/kernel.
-InitialpinnedHVr2serialization stilllimitsactualhostcmdline≤607. Codecs1023support
-isnotanexpandedlivepath. Thisrevision maynotfreezeunknownverifierhashes and needs
-independentsource/replay review beforeanyapplication/deployment/packet/boot.
-Nativepolicyhandoff remains aseparateunimplementedruntimeprerequisite. NoSignal,
-noGPUobserver, noAPCIEPHY/PMGRwriters ordesktop-networkrestart. HardwareSTOP003
-andlastverifiedLinuxremain;goalactive. Newsource integrationisnotbootadmission.
-
-## MCC facts and isolated BootArgs review progress (November 9)
-
-The new mcc_snapshot/ leaf (receipt 5060b3ba, set 9c75ea37) is admitted for
-source and ARM64 objects only by bcm4378-mcc-snapshot-source-admission-001.json
-(67db7d3e). Independent review dad25ba3 and target build 90e2f766 pass. The
-largest individual frames are 464/288 bytes at O0/O2; O0 memcpy/memset imports
-are covered, and O2 has none. Focused host tests make 12069 checks per mode;
-17 compiled mutants and 18210 independent cases pass. All six required general
-checks pass separately.
-
-The relative 96-read plan performs no mapping or physical read. The decoder
-requires exactly 384 bytes: two passes, four planes, four TZ slots, three words.
-Every word must be stable and all planes must agree. Every enabled malformed
-slot refuses. It uses OR with the DRAM base and retains exact 4KiB ranges and
-source provenance. FOUR_PLANES_FOUR_TZ_ONLY is not global exclusion coverage.
-The historical 80-byte compact list cannot substitute for these observations.
-
-native_bootargs_abi/001 remains blocked: e311f2c4 found an ignored smaller
-interior outer-VM shadow. Root 8db3cb14 reproduced it with a 16KiB-aligned
-shadow. The immutable 001 archive remains. Revision002 (receipt baab08e2,
-set bd402703, module 03df91f4) rejects any additional nonempty intersecting
-outer VM range, including zero-fill. Empty and adjacent ranges are allowed.
-Independent review ba39daaa ran 198404 interval oracle cases and refused both
-reproducers; root source admission is e5beadbd. No writer admission follows.
-
-The isolated host001 proposal (c11290c7, set 4d89ac7f) is frozen and unapplied.
-Canonical host0cf9/controllercce9 are unchanged. NativeTerminal found that its
-post-readback guard omits hv.guest_base and hv.bootargs_off, although HV.start
-consumes their sum. A fake readback-time mutation produces a successful local
-receipt for the old address and changed planned start pointer. The inherited
-ProgressCapture.cmd still checks actual seven-word start arguments before
-forwarding; no wrong jump or whole-pipeline bypass is demonstrated. HV.start
-also uploads the ADT through hv.adt_base before that guard; its stability needs
-checking too. Treat host001 as blocked. resolver_backend prepares a NEW002;
-all 001 bytes, tests and receipts must stay unchanged.
-
-The real-framework data-only reader API probe ded38fab has 251 dependencies
-and zero executable text. It is not a reader implementation. Retaining OSData
-or taking two reads does not make its storage immutable; trusted boot-phase
-quiescence remains required. A new bounded source-tagged facts codec is source
-work only, with no arbitrary complete flag or native configure authority.
-
-Hardware STOP003 and last verified Linux remain. Shared PHY/PMGR writes stay
-compiled out; GPU observer is held and the serial bridge is stopped. No SSH,
-boot, Signal, canonical application or M5 deployment occurred. Goal active.
-
-## Platform facts codec and corrected isolated writer frozen (November 9)
-
-native_policy_snapshot/ is frozen at receipt908e29b3, set45c921b1 (14 source
-files). Root source/object admission0982f9f2 checks all source/dependency/object
-hashes and ARM64 Mach-O formats. Exact1280+32*N wire is bounded to256 source
-records/9472bytes, six source classes, nonce24 and six expected identity hashes.
-Source hashes remain declared labels; structural status is not provenance or
-global coverage. All source records survive independently of the derived union8
-limit. Original RAM boundaries survive adjacency; full relevant exclusion ranges
-merge only at overlap/adjacency. Remap records are numerical source observations,
-not physical exclusions. Full384 MCC decode is linked unchanged; old80 refuses.
-No bpl_policy conversion, native configure, registry reader or producer exists
-in that leaf. Caller-owned workspace stays off stack; four spans disjoint;
-failure output unchanged.
-
-Validation:7Python+4C groups,13Python+16C compiled assertion mutants/errors0,
-1081 sanitizer checks perhostmode, independent15357wires/2048intervaloracles/
-16alias-null cases (caf36e7a). Actual4ARM64 compiles/2partiallinks (7006d0b3)
-have decoder416/128 and MCC464/288 maximum individual frames, imports only
-memcpy/memset covered by exact58da/exports. Required6 checks pass separately.
-Initial mutable harness/frame/sysroot failures are disclosed and preserved as
-available; reconstructed host frame repro is explicitly not contemporaneous.
-
-Isolated host002 is source-admitted by3f8fa944, NOT applied: receipt eb31b2b7,
-setdd3e62a9, hostafterf549dec1/controllerafter0ce772dc. Canonical host0cf9/cce9
-remain unchanged. It captures normalized guest_base,bootargs_off,checked sum,
-adt_base and entry; checks before/after readback and immediately before original
-start using a copied expected state. Independent ee1b0796 (157tests/7mutants/
-10extra drift boundaries) accepts this narrow consistency fix; inherited7Qguard
-and legacy/recovery path remain. No global immutability or wrong-jump claim.
-
-Review evidence collision: old001 review path now contains an ADMIT document
-3ad0ee0e, which differs from the announced BLOCKEDa8a437c1. Root preserved it
-(2cc1747c). Exact originala8 bytes were recovered at a NEW path,
-bcm4378-native-bootargs-host-blocked-review-001-recovered.json. External addendum
-348dc531 resolves the frozen002 review's mistaken3ad-as-blocked reference.
-Neither occupied path, frozen002 review nor source leaves were rewritten.
-The original001 finding remains local receipt consistency, not pipeline bypass.
-
-Next source work: gpu_uat_source owns standalone mcc_capture/ (relative-only,
-single-use fake/trusted callback; no physical adapter); native_terminal reviews
-it after freeze. resolver_backend owns NEW native_policy_reader/: fixed/chosen
-properties + common40-byte PE BootArgs, genuine APIs; explicit caller boot
-quiescence, retained refs do not imply immutable bytes. Only facts output, no
-configure authority. Require actual managed envelope equality and conservative
-boot-prefix reservation through bounded top; no native tail/full-size read.
-No frozen predecessor edits or canonical application. HardwareSTOP003 and last
-verified Linux remain; no SSH/boot/reset/Signal. Shared APCIE PHY/PMGR writes
-stay compiled out, GPU held, serial bridge stopped. Goal active and unfinished.
-
-## Raw MCC seam, native reader, and guest handoff source progress (November 9)
-
-mcc_capture/ is frozen d2114baa/set67fec005, productionab00b1d0. Root source
-admission16dc1c73 binds independent5dd7c7ff:7groups/576callbackfaults+
-576bindingchanges/96actualCrelativeplancomparisons/12assertionmutants and288
-independent boundary cases pass. Correct MCC profile is /arm-io/mcc reg1,
-compatible mcc,t8103, not reg0. It accepts only a supplied region-bound relative
-read callback, performs no mapping/proxy/native call, is single-use, and keeps
-attempt/completed-prefix counts separate. Even full384 output is
-RAW_COMPLETE_UNVALIDATED; mapping safety, callback bounds and source provenance
-remain trusted obligations. No capture is actually taken from hardware.
-
-native_policy_reader/ is frozen e892e8e3/set82c04120, root source/object
-admission00b8a090. Fixed genuine C++17 /chosen and three properties (dram-base,
-dram-size,darwin-lab-platform-facts), common40 BootArgs bytes only. R2/V2 is
-consistency, not native-versus-legacy layout authentication. It checks actual
-envelope/DRAM and a conservative declared boot prefix covering bounded top,
-retains/releases temporary objects, and commits only after checks/cleanup.
-External boot quiescence/accessibility is mandatory; retaining OSData/rechecking
-views does not establish it. 117sanitizer cases permode/18mutants plus15peer
-callee cases pass; independent59c0c99d checks8ARM64objects/2links/638dependency
-entries and7imports, including explicit Unsupported PE_state. No actualgenuine
-API ran. Largest individual frame464; native128/112, coordinator384/368.
-
-Pure native_policy_handoff/001 was frozen5aa650a3 but is BLOCKED fc7eae92:
-its modulo64 ADT VA calculation accepted inputs the cited unmasked Python
-loader/nativecodec cannot produce. All original7files/receipt/logs remain
-unchanged. Two earlier pre-freeze parser bugs (unterminated key and masked full
-length) were corrected and have preserved exact reproductions; they are not
-runtime failures. Initial chain-mutator construction failure was not counted.
-
-NEW sibling native_policy_handoff_002/ is frozen9c67dbb1/set53c09b5c, production
-087ece79. Root source admission194bce79 and peer b5775e62 accept the narrow fix:
-unmasked physical-physBase+virtBase, checked uint64 result/equality.7groups,
-25assertionmutants,1099independent cases/263golden payloads and513address-boundary
-cases pass. Exact historical17e ADT splice replay passes only metadata fidelity,
-not a new handoff/boot grade. The helper inserts one fixed guest-copy property,
-defines base hash by exact removal/count decrement, preserves other bytes,
-refuses resizing/replacement, binds supplied native wire and specific ADT/BA
-allocations before actualtop. It has no source-inventory derivation, loader
-object, actualwriter/readback or owner-policy authority. Six general checks
-bcm4378-policy-reader-handoff-required-checks-001 pass separately from all
-focused suites. Canonical host0cf9/controllercce9 and m1n1 remain unchanged.
-
-Next: resolver_backend owns NEW adt_source_inventory/ deriving exact pmapIO
-and physical/remap segment records from baseADT bytes, with bounded capacity,
-source/raw-property provenance and no omission/authority flag. It may reuse
-087ece79's parser only with an exact dependency binding. It must confirm raw
-segment/name layouts before code; no assumption of complete hardware coverage.
-Root will assemble a fresh source-bound facts producer later. No new actor or
-application is implied. HardwareSTOP003/lastverifiedLinux, sharedPHY/PMGRwriter
-exclusion, GPUHOLD and serialbridgeSTOP remain. NoSSH/boot/Signal. Goalactive.
-
-## Copied source producer and private policy join (November 9)
-
-ADT inventory is frozen at c55beefe (production 41863f68, set5850abdc).
-Root admission c846db74 binds independent889167c5: ten groups, 23 assertion
-mutants and eight independent cases pass. All physical/remap rows, repeated
-labels and zero numerical remaps survive; IOVA is opaque. Source capacity256
-is distinct from the later union8 limit. These are supplied ADT observations,
-not authentication, a global exclusion census or hardware mapping authority.
-
-The honest framebuffer source is the full named /vram/reg allocation, not
-visible pixels or an MCC union cover. Source note de4a8da4 binds the saved
-original and guest properties; historical declared extent contains the visible
-footprint and lies inside chosen DRAM. Existing framebuffer geometry rejects
-MCC overlap, so the proposed MCC-cover shortcut was rejected before code.
-Neither historical bytes nor hashes establish fresh allocation ownership.
-
-Pure producer is frozen5e869570 (production9dcfe813, setef9530eb), root admission
-09292e9c and independentad822f96. Eight groups,25 assertion mutants,384 MCC byte
-faults and486 independent cases pass. It requires full384 MCC bytes, all six
-source classes, explicit original736/native1152 profiles, preserved RAM high,
-and an outward-rounded retained prefix. Measurement precedes final encoding;
-production rederives all facts and uses handoff002 without resizing/writing.
-Two geometry false acceptances have exact private pre-fix reproductions. A
-separate missing alignment guard was challenged before freeze and is covered
-by final independent cases; do not claim a third preserved reproduction. See
-bcm4378-native-policy-producer-admission-evidence-clarification-001.json.
-Initial mutation-selector failures are not semantic kills.
-Do not reconstruct full384 or a final native wire from the historical80 list.
-
-Configuration-only native_private_policy is frozen7d41f394 (setd58451c8), root
-source/object admissiondfbac7d4, independent0e1b4b51. Four groups/93 cases per
-mode, three same-owner TEST-SDK processes,17 mutants and20610 independent cases
-pass. Twenty ARM64 compiles of ten TUs plus two mixed links have21 covered imports and maximum
-individual frames672/544; join400/128. The fixed entry reads actual facts then
-configures the same0ee owner through owned_control9844. Terminal failures
-consume its latch; output atomicity does not imply rollback. Configuration DOES
-allocate anchor/mutex controls, but acquires no backing descriptor. The trusted
-internal callback seam is callable, not a security barrier. No genuine native
-API ran. Known guards/private VM ownership assumptions are not DMA permission.
-Boot serialization, resident protected code/storage and one domain owner remain
-explicit caller obligations. Preserve legitimate control-page/boot-prefix
-overlap refusal; never shrink guards, punch holes or retry to force success.
-
-Six general repository checks pass in source-producer-private-join-required-
-checks-001, separately from focused suites. Acquisition/publication were dry
-runs. Canonical host0cf9/controllercce9 remain unchanged.
-
-In progress: resolver_backend owns isolated native_policy_host_revision/001,
-based on isolated native-wire002, not canonical code. Keep the original ADT
-capacity/reservation and every placement unchanged; refuse if the exact final
-payload cannot fit. Historical original377476 aligns to393216; guest340908,
-so the maximum9508-byte new property fits that sample only. No m1n1/u.ba resize.
-Actual HV.start ADT upload must be exact, read back and guarded before7Qstart;
-the pure plan is not upload evidence. Fresh policy nonce is independent of the
-legacy console-proof nonce. No application/deployment or packet exists yet.
-
-native_terminal owns a separate bounded private observer/collector source
-proposal. It may configure once, acquire one private lease, zero/copy16 nonce
-bytes once, inspect, and attempt public guarded retirement once after successful
-acquisition. No real effects or raw refs/CPU/PA/token exports. There is no public
-data-readback API: report data_readback=false. Inspection's owned_pairs is a
-historical count; after retirement it remains3 with balanced3/resets3 and zero
-identity records, not owned_pairs0. Gated/no-work snapshots have zero identity
-and cannot claim nonce freshness; missing property is failure. Observer output
-is a guest lifecycle self-report, never Wi-Fi proof. New source/object tests and
-independent review precede any kext/KC or concrete packet work.
-
-Mutable observer correction: actual frozen BNO_REFS_RELEASED is6 and
-BNO_QUARANTINED is7. Root caught an initial expected-phase7 before freeze; use
-the real enum static assertion and phase6 in the wire validator/decoder. Service
-metaclass module initialization is intentional and must be distinguished from
-the unchanged initializer-free ten-TU NPP closure. Its failed initial aggregate
-object guard is not a service compile/runtime failure. No observer freeze or
-source admission exists yet.
-
-Root pre-capture contract a472e7da is design-only, not a packet or boot
-admission. Producer evidence clarification aa71761f preserves the frozen report
-and limits the exact pre-fix reproductions to two; alignment is covered by final
-independent cases. Isolated host proposal has170 offline tests passing at the
-author's checkpoint; manifest/patch freeze and independent review remain pending.
-
-HardwareSTOP003 and last verified Linux remain. Serial bridge stopped, GPU held,
-shared APCIE PHY/PMGR writers compiled out. No SSH, actor, reset, boot or Signal
-in this source chunk. Goal active and unfinished.
-
-## Isolated host freeze and cached private-policy package (November 9)
-
-The previous goal turn was progress: it wrote three source admissions and the
-pre-capture contract. New authoritative host freeze is ad3242cf (seta6d9a743):
-after hostdd02e8c2, helpere099e953, controller38867b93. Independentde677794
-accepts11 scoped checks,170 supplied tests plus929 independent source/capture/
-start cases and53 actual7Q guard cases. Root source admissiondb99a694 checks
-all86 frozen files, dependencies and logs. This is composed from the unapplied
-native-wire002 tree, not a direct canonical patch. Do not partially apply it.
-No actual source acquisition/upload, probe artifact, runtime read safety or boot
-is admitted. Canonical0cf9/cce9 and M5 files remain unchanged.
-
-Root packaged the already-admitted ten-TU NPP core through cached offline Nix:
-root-build/build-private-policy-objects-001.nix3f0d481f and compilerf8888bed.
-Build record16f428fd, independent package reviewf8c50518 and root object-package
-admissionc4e10347 bind drv4nq9pd81/output8xmkzmam. Provider38120059 is46983B and
-byte-identical to the previously reviewed O2 combined object.23 production files,
-11 objects including partial link,20 O2 imports, max individual frame544,
-inline ldaxr/stlxr/stlr, no core init/term or TEST headers. The21-import number
-is the earlier O0/O2 union; an initial recipe-generator assertion confused these
-and stopped before creating a recipe/build. That failure is disclosed, not
-counted as a target failure or claimed as a saved contemporaneous log.
-
-Same-derivation check rebuild returned0 with the same provider hash. NAR
-sha256-wt9PUpLnvV1laaxFIGZUJwZdPtkU4JhJRoGB1A8uxQw=,577360B. Independent
-review verifies actual derivation,308 dependencies, all inputs/objects/imports
-and16 bounded guard negatives without a compiler invocation. This package is
-for later object linking only; configuration would allocate controls if called,
-but no native API, backing acquisition, service, kext, KC or target ran. The
-internal seam remains trusted/callable, not a security boundary.
-
-The new bounded observer/collector is frozen71e7e845, set45cb3d87 (18 files).
-Service36daa7fd, protocol176dec86, decoderd1d97666. Resolver_backend independently
-reviews it now. Final actual object build004 has13 TUs per mode, service320/176
-and closure672/544 maximum individual frames. Intentional service metaclass
-initialization is distinct from the unchanged initializer-free core.319 union
-imports have exact kernel coverage; ___dso_handle is a per-image linker symbol,
-not a kernel export. Collector SDK binaryd354b996 is linked with retained9fc/428
-and tinyIOKit, not executed. Five host groups,13 fault cases per mode,4604 bit
-refusals, five same-owner TEST-SDK scenarios and nine assertion mutants pass.
-Source/object results are not source admission, final bundle closure or runtime.
-
-Root prepared but has NOT RUN root-build/build-private-probe-bundle-001.nix
-(mutable preparation dd16c84f) and CMake b84bee5a. They compile only the three
-observer TUs and link the reviewed provider once; no core recompilation or
-duplication. The explicit stop hook and actual bundle imports/metadata still
-need final verification after observer source admission. No KC or packet exists.
-The six general checks pass in bcm4378-private-policy-host-package-required-
-checks-001 separately from focused suites; final two commands remain dry runs.
-
-HardwareSTOP003/last verified Linux, shared PHY/PMGR writer exclusion, GPU HOLD
-and serial-bridge STOP remain. No SSH, deployment, actor, boot, reset or Signal.
-Continue toward PCIe/BCM4378; the private lifecycle is a prerequisite, never a
-substitute success goal. No questions/presence/typing requested; goal active.
-
-Pre-capture allocation clarification: one acquire is one logical job/lease with
-THREE distinct16KiB IOBuffer backings (49152B requested total), not one physical
-allocation. One zero call covers all three, copy16 targets role2, and one retire
-balances/resets all three pairs. See bcm4378-private-probe-allocation-scope-
-clarification-001.json; original contract/source receipts are unchanged. Do not
-confuse historical pair counts with aliases to a single allocation or claim any
-readback/external mapping. No new hardware action accompanies this clarification.
-
-## Private observer SDK bundle and local KC binding (November 9)
-
-Observer source/object admission is8d1f9907, binding frozen71e7e845 and
-independent83e99d3b. The actual collector remains d354b996 with retained9fc/428.
-The source does not prove runtime residency or source authentication; no real
-private allocation, effect, readback or module load has occurred.
-
-Root built and check-rebuilt the SDK bundle after source admission. Recipe
-dd16c84f/CMakeb84bee5a produce drvhsxil6b8/outputac9sabqk, binary480e1653,
-149774B ARM64 MH_BUNDLE. Build report54bf4f0d, independent9a2a0e73 and local-link
-admissioneead2e24. Seven observer/plist and23 core/header inputs match. Only the
-three observer TUs plus generated kmod_info.c compile; the reviewed provider3812
-links once, with libkmod scaffolding. No SDK core recompilation. Frame1024 is
-an error guard; exact SDK .su maxima were not exported and must not be invented.
-
-Genuine ARM64 data-only layout probe proves packed kmod_info sizeof196,
-start180/stop188. Actual start/stop/antimain pointers and required rebases match;
-the private stop hook returns KERN_FAILURE5. The linker resolves the cxa_atexit
-third argument to the image header, without a standalone named DSO symbol.
-SDK typed OSObject allocation functions replace two manual-object operators;
-both are declared Libkern exports and defined by actual58da. All319 imports use
-generic/arm64/arm64.MacOSX target export files, not x86 lists. The remaining
-dyld_stub_binder exception was investigated at the KC level, not called an export.
-
-Initial root inspection let STABS duplicate names overwrite live symbols, then
-an overly narrow import-delta assertion missed typed allocator substitutions.
-Original inspection is preserved; inspection-final.json filters N_STAB and binds
-actual deltas. These are inspector failures, not source or artifact failures.
-No report or binary was silently rewritten to hide them.
-
-Root then built a LOCAL KC only from retained native50 plus this observer:
-root-build/build-private-probe-kc-001.nixfb8e3f5a, drval9jzaai/outputiaxwji3m,
-kernel2a2b9c12,39129080B. Combined build/binding reportca5ffac3. normal_image and
-native ABI verifier03df pass the actual collection. Exactly51 unique entries;
-no PDSerialHID, port/GPU/survey observer or writer bundle. Canonical/M5 host
-files still unchanged; no RAM packet or hardware boot is admitted.
-
-Independent retained reviewa4be3cca: all49 old kext headers and full file-backed
-segments, old11960320B region, kernel17498112B TEXT_EXEC/data, UUID, old50 entry
-locations,62 prelink dictionaries and173332 old format8 pointer nodes/encodings
-match baseline b40/f882. Only81 kernel header bytes and aggregate link metadata
-change; the private member and361 new pointers are appended.
-
-Independent new-member review38150aa2 verifies executable identity with480e,
-all1743 section-byte changes as exact fixes/kmod metadata,31 rebases and303
-ordinary binds, actual stop/constructor/DSO targets. Author source-facts43b39dea
-checks all27 lazy call slots and pinned builder05e5ed6 processing. Normal calls
-use eagerly bound slots; binder's own GOT resolves to _panic as intentional
-fallback, not a fabricated export. Static normal-path evidence is not a promise
-about arbitrary control flow, security or actual module execution.
-
-Before packet assembly root added a separate fixed launcher to observe the
-collector's completed process exit status: root-build/darwin-native-private-test.
-Frozen source record49e53dae and bounded peer reviewafb87d38 pass four groups.
-The fixed host command stays /usr/bin/darwin-native-private-test nonce; it will
-call unchanged d354 bytes at /usr/libexec/darwin-native-private-collector once.
-Both files require explicit RAM binding/modes/interpreter review. PROCESS_END
-collector_exit0 is required separately from strict DL32 raw-record decoding.
-Do not feed outer process lines into the exact-span decoder or filter interior
-noise. Missing/gated/nonzero exit is never qualification. Nothing staged yet.
-
-All local build sessions in this chunk are terminal and consumed:64527/51435
-(provider),33629(required6),50360(dry-run),92936/68417(bundle),33980(KC). No live
-hardware actor exists. Next safe action is concrete RAM/manifest assembly and
-whole-packet review, then a separate root hardware decision. Do not partially
-apply the composed isolated host proposal. HardwareSTOP003 and last recorded
-verified Linux remain; shared APCIE PHY/PMGR writers compiled out, GPU held,
-serial-bridge line stopped. No SSH, Signal, target reset, typing or new desktop
-network cycle. Goal remains full PCIe/BCM4378 and unfinished.
-
-## Private packet and evidence-auditor hold (November 9)
-
-Root staged a LOCAL RAM image only:129152ba,503316480B. Adapted stagercfc52665
-differs from qualified55329 only by exact basec571 and its directory depth.
-Independent02594b1b verifies all317 retained payloads and the whole tree:
-only wrapperaf05fe38 and collectord354b996 were added,0755 root/root links1;
-sh/zsh/libSystem9fc03/dyld428 remain unchanged. e2fsck0. No mount or target.
-
-Concrete native-private-probe-candidate-001 manifestde2fce86 binds kernel2a2b,
-RAM1291,source3ec333f2 and buildrecord43f61fb7. Its private probe uses one
-logical lease with three16KiB backings; it is not PCIe/chip/DMA/Wi-Fi work.
-Whole-packet review14336218 passes eight scoped static groups. Correct truthful
-development flags are present for the worker-only protection setter. Exactly
-51 KC entries; no port/survey/GPU observer or PDSerialHID. Runtime120/worker240.
-P1 static binding2109b241/contextcb7b4f79 exist; no P10 recovery document exists.
-
-Separate execution workspace runs/.../native-private-probe-execution-tree-001
-has exactly40 frozen-after files plus the unchanged bootstrap review manifest.
-Actual local full host/controller verify passes without Ops; independent
-workspace review255e4026 repeats it, checks all maps/packet bytes and rejects
-four false protection declarations. Original missing-asset and missing-window
-fixtures remain failed records. Source bytes WERE read: initial tree.json's
-no_source_or_target_access was loose wording; controller-verified/tree-final
-explicitly record source_reads_performedtrue, source_acquisitionfalse and no
-target contact. No canonical, frozen or M5 source was changed.
-
-Local deployment archive98b6b0ab has46 exact files, plan cb639c51. It has NOT
-been sent. Stager8298a2db and actor drafts are unexecuted and gated on absent
-root admissions. Actor001ea389faf has a reproduced stale-recovery-certificate
-acceptance (independent3b50f40a), so do not execute it. Separate actor002 adds
-an exclusively new per-attempt remote parent and fresh launch-ID intent;
-independent review is pending. Do not substitute old cycles for current recovery.
-
-Offline capture auditor001 is frozen2c3c6d7c (auditd6f03389) and BLOCKED by
-independent718dadc3: coherently saved too-short MCC aperture, invalid start/
-BootArgs placement and foreign launched source/build artifact hashes could
-each falsely qualify. Eleven passing author groups do not override these
-three exact reproductions. Preserve001; native_terminal owns a NEW sibling002
-with minimal fixes/tests, gpu_uat_source reviews it independently. No real
-capture has been graded by either auditor. No separate raw HV_START7Q frame
-is saved by the pinned host: only saved upload/readback/pointer metadata and
-executed-source guard consistency may be claimed, never invented transport data.
-
-Root static admission001efa6fbfb accepts packet/execution binding and expressly
-HOLDS staging/hardware on these defects. Six required repository commands each
-ran once/exit0 in1e5f5b33; lab plan remains BLOCKED/executionfalse, acquisition
-and publication dry runs. Actual reviewer negatives and inspector/report-fixture
-errors remain preserved; do not silently overwrite receipts or retry old boots.
-
-HardwareSTOP003/last independently verified Linux remain. No SSH, M5 deploy,
-actor, target reset or boot in this chunk. Shared APCIE PHY/PMGR writers stay
-compiled out, GPU held, serial bridge stopped. Continue PCIe/BCM4378 toward a
-reviewed next slice, no questions/typing/Signal/Omarchy. Goal active, unfinished.
-
-Auditor002 frozef64b1e65 (audit41270fad), with19 host groups. It fixes001's
-three counterexamples and a coherent entry+4 mismatch by inspecting actual
-kernel bytes through pinnedea369. Independent73cf04e5 still BLOCKS002: a saved
-guest_base/entry+16KiB and bootargs_off-16KiB coherent substitution preserves
-the BootArgs address but contradicts raw-derived load placement. Preserve002.
-NEW003 is explicitly running under native_terminal to derive that placement
-from original736/ADT sizes and actual kernel span. Nativephys_base remains a
-supplied source-bound starting point; do not invent raw heap/start observations.
-Root's private-placement-historical-source-check-001 matches the exact formula
-on an old saved capture without regrading it. Initial scratch tuple/dict mistake
-is disclosed there, not hidden or called a production failure.
-
-Actor0029f8e02f4 now has independent045ed472 (14 offline cases), stager8298a2db
-has independent48d2110b (five guards/46 archive members). Cycle-tools source
-freeze5dad3547 binds them; no staging or boot admission follows. Actor001's
-stale-certificate defect remains preserved under3b50f40a. Root stager mechanics
-fixtures exercise eight streaming/exclusive extraction cases with an explicitly
-stubbed verify; they are not actual controller/artifact proof. Corrected missing
-fake-window fixture is disclosed. All real source/canonical/M5 files still as
-above; no SSH/deploy/actor/boot/reset. Final auditor003 review is pending.
-
-## One private-cycle actor active (November 9, 14:22 UTC)
-
-Auditor003 is frozen da455f40 (audit7fb0bc19), independent09aa730b passes nine
-scoped checks,24 author groups, all five preserved counterexamples and75
-independent rounding cases. It derives exact load placement from original raw
-sources and actual kernel geometry. Original001/002 remain blocked/preserved.
-No private capture was graded by those source checks; nativephysbase remains
-source-bound, and separate raw7Q/start_calls are still not available/claimed.
-
-Root static admission00228bad8c7 authorized exact isolated staging only. Stager
-8298 ran ONCE: actual M5 full controller.verify passes, receiptfee13bb5,
-46files exact, no Ops/M1 contact during staging. M5 canonical lab/recovery files
-were not overwritten by that program. The new workspace is lab-private-probe-001.
-
-Root then issued hardware decision0013fc18b6e for ONE privateCPUVM cycle only,
-master run-native-private-probe-once-002.py9f8e02f4, packetde2fce86, runtime120,
-worker240, unchanged isolated controller38867b93. It explicitly does not lift
-the real-port STOP003, sharedPHY/PMGR exclusion, GPU HOLD or serialbridge STOP.
-Actual Linux baseline/lock/latch checks and verifiednewLinux recovery mandatory.
-
-That root actor WAS STARTED at2026-11-09T14:22:47UTC and is CURRENTLY RUNNING
-in local exec session95350. Do not start any second boot/actor/SSH target action.
-Do not rerun master001 or002. Controller log is native-private-probe-attempt001-
-controller.log; local capture directory/completed receipt are absent until the
-actor finishes recovery/export. Poll the EXISTING95350 handle; rootsoleactor.
-No current result, recovery certificate or P10 document exists yet. After it
-returns, bind actual capture/fresh intent/recovery before making any verdict.
-
-## Private cycle finished: Linux verified, full audit failed (November 9)
-
-The actor above FINISHED. Sessions54944(staging),95350(actor) and35849(audit)
-are terminal/consumed; do not poll/restart them or run any second cycle. Actual
-capture is runs/m1-desktop-010/native-private-probe-attempt-001, cycle-p2et5am_.
-Controller0, one reset, newLinux verified, latchabsent/lockfree. Independent
-recoveryd392ddec rechecks saved/raw seven-key Linux baselines with frozen
-check_linux; onlybootUUID changed.25 source snapshots bind. Final12/12diagnostic
-steps complete; initialcapture-core false is its earlier sourceordered snapshot,
-not an error to rewrite. Guestworker1/no-runtime-verdict remains explicit.
-Root externalP10 private9e521b67 binds actualconsole/core/cycle/baseline/return.
-Freshparent/intent equality is source-bound through executedactor002; intent
-rawbytes were not archived and are NOT independently hashed evidence.
-
-FROZEN003 actual audit07cc1e3c is UNQUALIFIED and preserved: P1/P9/P10PASS,
-P2FAILED, P3–8NOT_EVALUATED (3/1/6). Do not relabel it PASS. Original39 physical
-inventory properties/41segments become37/37 under pinnedHV18da: USB0acio-cpu0
-subtree removed and first OS_LOG row removed from AOP and itsnub. Independent
-diagnosis06722a26 proves exactlysix property differences and allother values
-unchanged; four removedphysicalrows numericallybelow nativeRAM, notglobalproof.
-003's equality predicate fails on this actualtransform. Separate latent parser
-bug: splitlines onCRCRLF produces an extra leadingCR-only span fragment.
-
-Separate source-author890bf264 decodes the UNTOUCHED physicalLFspan with frozen
-d1d976: raw7684ece0641, result0/stage10/mask255/error0, all8APIstatuses0 and
-collectorprocess0. One logicallease/three16KiB backings, zero/copy16/retire
-reported. Prephase3/identity3/owned3/balanced0/reset0; postphase6/identity0,
-historicalowned3/balanced3/resets3/core_retired1. Configuration2controlpages/
-4translations is distinct from3backings. No copied-byte readback, effects,
-independent216/fullsourcejoin, PCIe/chip/DMA/firmware/WiFi proof follows.
-
-Root hardware-attempt00105552232 and hardware-decision0027930a6ab STOP after
-this one cycle, Linux verified. No nextboot admitted; oldportSTOP003, sharedPHY/
-PMGR writer exclusion, GPU HOLD and serialbridge STOP remain. No Signal or
-Omarchy; fullPCIe/BCM4378 goal unfinished. Keep actualcapture/wholeaudit/logs/
-packet and all001/002/003 source/receipt failures unchanged.
-
-Next HOST-ONLY assignments: resolver_backend designs conservative originalrawADT
-+preparedbase source join/provenance, preserving original exclusions and allcaps,
-with no implementation or posthocqualification. native_terminal prepares NEW
-native_private_capture_004 with ONLY physicalLF extraction fix and regression
-tests; P2 equality/criteria stay unchanged, so no currentwholegrade/retry. Neither
-agent may SSH/boot/editcapture. Root must review each distinct new artifact before
-any later deployment/boot; do not reuse decision001 as an outstanding permission.
-
-## Host-only continuation after the private cycle (November 9)
-
-PhysicalLF-only auditor004 is frozen30a32c74 (audit4bb3403e), independent
-64cdef4d six scoped groups/27author tests/50independent cases, root source
-admission86a11a19. Exactlyone production extraction line changes; P2 andallother
-predicates remain unchanged. No actualwholecapture was regraded. Keep003's
-07cc UNQUALIFIED result and alloriginal sources/receipts immutable.
-
-Original/prepared join designe6e234ef and independentb103d9d3 approve only a
-narrow future source profile: exact pinned projection and injective prepared
-whole-row occurrence subset oforiginal, then emit EVERY original observation,
-order/duplicate/zero remap unchanged. Separate bothactualrawinputs/provenance;
-neverdrop an original guard or silentlydedup withinoneorigin. Reusing facts908e/
-core/sixliteralidentityslots is host-provenance-only: compositeclassdigests do
-not expose independentoriginal/prepared identities toguest; thatrequires wirev2.
-Capacity correction:209/7968in originaldesign are safeoverestimates, nottight.
-FrozenMCC emits atmost4enabledslots: tight197records/7584B, actualsaved3slots
-give196/7552 arithmeticonly. Existing record256/union8/cap9472 remain unchanged.
-
-Root implementation contract420374e7 explicitly starts TWO HOST-ONLY agents:
-resolver_backend owns NEW native_policy_producer_002; native_terminal owns NEW
-native_policy_host_revision/002 prep/tests. Profile is exactly
-t8103-original-prepared-subset-source-facts-v2, mandatorytyped USB0iodev4 and
-bothactualADTinputs to measure/produce. Immutablemeasurement adds originalADT
-hash/selector/exact source_join_receipt bytes; canonical privateJSON<=64KiB is
-compared acrossmeasure/produce. LiteralpreparedbaseSHA stays inidentityslot4.
-Hostnewoptin version2; persist actualselection witness andexactjoinreceipt.
-Preserve actualupload/readback/nativeABI/placement/capacity/runtime/recovery;
-no invented hash orfinalhostfreeze before producerfreeze. Oldmode1 undernewtree
-must refuse, never silently fall back toplainboot. FullAPI/requirements incontract.
-
-Both agents WERE explicitly followup_task-started and are working; send_message
-alone does not restart a completedagent. gpu_uat_source is available for frozen
-independentreview. No implementation/admission exists yet. Root has not admitted
-a kernel/RAM/packet rebuild, canonical/M5 apply, newgraderorcurrentcapture
-requalification, or any newhardwareboot. Linux remainslastverified; STOP7930
-andallPCIe/PHY/PMGR/GPU/serialbridge/Signal/Omarchy boundaries remain. Continue
-the active fullPCIe/BCM4378 goal with those host-only slices, no questions/typing.
+## PCIe and Wi-Fi: current direction (Chris, November 9; authoritative)
+
+Chris deleted the earlier PCIe/BCM4378 restrictions. This section replaces every
+older PCIe, PHY, PMGR, DART and Wi-Fi rule in this file and in
+`planning/sprint-010.json`. The removed status log (packets, admissions, holds,
+STOP decisions) is in git at `0531f40` for reference only; none of it is a rule.
+
+Goal: a working `en0` on the J293's BCM4378 as fast as possible.
+
+What is now allowed, without a separate admission, decision record or packet review:
+
+- m1n1 `P_PCIE_INIT` before HV start, and removing `pcie_shutdown` from the
+  launch path.
+- Real PMGR, shared-PHY, port-0, PERST#, SMC `gP0d` radio-enable, DART and MSI
+  writes, from proxyclient or from kexts. Delete the `APB_FAKE_REGISTER_FILE` /
+  `ARS_FAKE_GPIO_FILE` compile gates when the code is needed on hardware.
+- Loading Wi-Fi firmware into the chip. Use the firmware/NVRAM/CLM/txcap files
+  from this M1's own Linux install, staged into the private RAM rootfs.
+- Multiple boots per session, retries, and fixing forward. Evidence is the
+  serial log plus a short note of what was run. One reviewer is enough; no
+  independent-review, mutation or hash-binding ceremony is required for this track.
+
+Parked (do not extend; not on the path): `private_lifecycle`, `native_backing`,
+`control_protection`, `owned_*`, `native_policy_*`, `native_private_*`,
+`native_bootargs*`, `mcc_*` and the `bcm4378_fake_*` models. DMA ownership uses
+a normal `IOMapper` + `IODMACommand`. The fake transport may be reused as a
+host test harness for the driver port.
+
+Milestones:
+
+- M0 and M1: DONE on hardware, from the proxy without XNU
+  (`tools/m1_pcie_cycle.py`, `m1-apcie-bridge/proxy_linkup.py`; see
+  `reports/sprint-010/pcie-proxy-linkup-001.md`). Link is up and ECAM shows
+  `14e4:4425` (Wi-Fi) and `14e4:5f69` (Bluetooth). The link needs the SMC
+  `gP0d` radio-power write first; `dart-apcie0` is readable after `pcie_init`.
+- M2: DONE on hardware under Darwin (`integrations/puredarwin/m1-apcie-host/`,
+  `reports/sprint-010/pcie-darwin-enumeration-001.md`). IOPCIFamily enumerates
+  both functions and assigns BARs; a BAR0 read returns chip ID `0x4378` rev 3.
+  The launcher still brings the link up (after `hv.init()`, which shuts PCIe
+  down). Iterate with `tools/pcie_iterate.sh <n>`.
+- M3a (MSI): deferred. The first driver polls its interrupt handler on a timer.
+- M3b (DART): programmed on hardware under Darwin, not yet exercised by DMA.
+  `m1-apcie-host/dart/pd_dart_pool.cpp` (GPL-2.0, from `apple-dart.c`) maps a
+  fixed 16 MiB bounce pool at IOVA 0x4000000 on stream 1 of `dart-apcie0`; the
+  bridge programs RID-to-stream entries for bus 1. Drivers take DMA memory from
+  `pd_dart_pool_alloc()` and bounce packet data through it.
+- M4: DONE on hardware (`integrations/puredarwin/m1-bwfm/`,
+  `reports/sprint-010/wifi-darwin-scan-001.md`). Firmware boots, DMA through the
+  DART pool works, `en0` exists and `wifiutil scan` lists access points. Build
+  and boot with `PCIE_WIFI=1 tools/pcie_iterate.sh <n> 180`. Rules learned:
+  map PCI BARs with `kIOMapPostedWrite` (non-posted writes SError); nothing in
+  the RAM root names interfaces, so the driver asks IONetworkStack to.
+- M5: DONE on hardware, twice (`reports/sprint-010/wifi-darwin-join-dhcp-001.md`).
+  WPA2 join by the firmware supplicant, DHCP lease via `m1-bwfm/dhcp/pd-dhcp`,
+  ping to the gateway and 1.1.1.1, HTTP over TCP by address. Run with
+  `PCIE_WIFI=1 PCIE_WIFI_JOIN=1 tools/pcie_iterate.sh <n> 180`; credentials are
+  in `private/wifi.env` (never commit). Open: libc name resolution in the RAM
+  root fails even with a nameserver in `/etc/resolv.conf`.
+- M6 (next): name resolution, MSI instead of polling, link-up inside the kext
+  at 5 GT/s, remove bring-up logging, DHCP renewal, teardown, power management,
+  WPA3, Bluetooth coexistence.
+
+Licensing (Chris, November 9): port Omacom `linux-aurora` code directly. The
+PCIe host bridge and DART kexts are ported from `pcie-apple.c`, `apple-dart.c`
+and `io-pgtable-dart.c` and are licensed GPL-2.0; keep the SPDX line and the
+original copyright notices in every ported file and in the kext's Info.plist/
+NOTICE. ISC and MIT files (brcmfmac, pmgr-pwrstate, m1n1) keep their own licence.
+
+M2, M3a, M3b and M4 start immediately in parallel; only M0 -> M1 is serialized
+on hardware.
+
+Still in force: the Goal/truthfulness and Boundaries sections at the top (no
+DFU, partitioning, flashing or boot-policy changes; no firmware, credentials or
+device identifiers committed), no writes to the M1's internal storage, and the
+M1 is returned to Linux at the end of each session. The GPU observer and
+serial-bridge holds are unrelated to this track and unchanged.
