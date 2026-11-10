@@ -5,7 +5,7 @@ SiliconForest is a fork of PureDarwin (Darwin/XNU) for Apple Silicon Macs. First
 ## Where things stand (proven on the M1)
 - XNU boots under the m1n1 hypervisor to a CPU-rendered Wayland desktop with the internal keyboard and trackpad.
 - PCIe and Wi-Fi work end to end with no outside help: radio power, link at 5 GT/s, BCM4378 firmware, WPA2, DHCP, DNS, auto-rejoin.
-- Rust code runs in a kext.
+- Rust runs in a kext, and the Rust-for-Linux `kernel` crate's core runs on our Linux compatibility layer.
 - Not yet: more than one CPU, full CPU speed, GPU, real display driver, sound, Bluetooth, sleep, USB-C, an optimised quiet boot.
 
 ## Tickets

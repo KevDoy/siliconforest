@@ -29,7 +29,7 @@ Mesa's Asahi driver needs these from the OS; PureDarwin's `/dev/dri` path (used 
 | G2 | libdrm enumeration test for a platform render node | Test passes on an existing DRM target | 2 days | no |
 | G3 | Kernel file plumbing: sendable DRM/dma-buf/sync fds, a kqueue filter, select wakeups | A sync fd crosses a socket pair; `poll` blocks then wakes | 1 week | no |
 | G4 | dma-buf sync-file ioctls and mmap | Round-trip test passes | 1 week | no |
-| G5 | Off-screen render with readback (`pdgltri`, already in the tree) on asahi | Pixel hash equals the software-renderer reference. A renderer string is not evidence. | days | yes (SF-F F8) |
+| G5 | Off-screen render with readback (`pdgltri`, already in the tree) on asahi | Pixel hash equals the software-renderer reference. A renderer string is not evidence. | days | yes (SF-F F14) |
 | G6 | GL renderer in the compositor (Smithay GL on surfaceless EGL), readback to the framebuffer, behind the same renderer trait as SF-E | A nonce frame matches the CPU renderer; frame times logged and better than SF-E's | 2-3 weeks | yes |
 | G7 | Zero-copy clients: linux-dmabuf protocol, client-side EGL on Wayland | A GL client runs with no shared-memory copy | 2 weeks | yes; needs G3, G4 |
 | G8 | Vulkan (honeykrisp), then Zink | Headless triangle readback | 1-2 weeks | yes |
@@ -37,7 +37,7 @@ Mesa's Asahi driver needs these from the OS; PureDarwin's `/dev/dri` path (used 
 G1-G4 can start today, in parallel with SF-F.
 
 ## Dependencies
-SF-F (F8) for G5 onward. SF-E for the renderer trait. SF-H for vsync and tear-free output.
+SF-F (F14) for G5 onward. SF-E for the renderer trait. SF-H for vsync and tear-free output.
 
 ## Interfaces this ticket owns
 The Mesa nix variant; `fbsdkpi/pd` file-descriptor plumbing for DRM (`pd_lfile`, `pd_dma_buf`, `pd_sync_file`); the compositor's GL renderer.

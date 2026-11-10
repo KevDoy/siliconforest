@@ -193,9 +193,18 @@ let
   # that crate, all its rlib deps, core/alloc/compiler_builtins and the allocator shim
   # (__rust_alloc -> #[global_allocator]) into a single lib<name>.a.
   mkCrate =
-    { crateName, src, root ? "lib.rs", crateType ? "rlib", edition ? "2024", deps ? [ ], extraFlags ? [ ] }:
+    { crateName, src, root ? "lib.rs", crateType ? "rlib", edition ? "2024", deps ? [ ], extraFlags ? [ ]
+      # phase B: `--cfg` values, host proc-macro crates ({ name; lib; } with lib the .so) and
+      # their directory for crates that only depend on them indirectly, extra environment
+    , cfgs ? [ ], procMacros ? [ ], procMacroDirs ? [ ], env ? { }
+    }:
     let
       allDeps = lib.unique (lib.concatMap (d: [ d ] ++ d.passthru.rustTransitiveDeps) deps);
+      extraFlags' = extraFlags
+        ++ lib.concatMap (c: [ "--cfg" c ]) cfgs
+        ++ lib.concatMap (m: [ "--extern" "${m.name}=${m.lib}" ]) procMacros
+        ++ lib.concatMap (d: [ "-L" "dependency=${d}" ]) procMacroDirs;
+      crateEnvExports = lib.concatStrings (lib.mapAttrsToList (k: v: "\nexport ${k}=${lib.escapeShellArg v}") env);
     in
     pkgs.stdenvNoCC.mkDerivation {
       name = "rust-${targetName}-${crateName}";
@@ -203,14 +212,14 @@ let
       nativeBuildInputs = [ rustc ];
       buildPhase = ''
         runHook preBuild
-        ${rustcEnvExports}
+        ${rustcEnvExports}${crateEnvExports}
         mkdir -p $out/lib
         rustc ${flagsStr} --sysroot ${sysroot} \
           --edition=${edition} --crate-type ${crateType} --crate-name ${crateName} \
           --remap-path-prefix=${src}=${crateName} \
           ${lib.concatMapStringsSep " " (d: "--extern ${d.passthru.crateName}=${d}/lib/lib${d.passthru.crateName}.rlib") deps} \
           ${lib.concatMapStringsSep " " (d: "-L dependency=${d}/lib") allDeps} \
-          ${lib.escapeShellArgs extraFlags} \
+          ${lib.escapeShellArgs extraFlags'} \
           --out-dir $out/lib ${src}/${root}
         runHook postBuild
       '';
@@ -226,14 +235,17 @@ let
   # would route calls to them through stubs with weak-bind entries that kc-builder has to
   # resolve at collection time. Local, they are plain direct branches inside the kext.
   mkKextObject =
-    { name, staticlib, exports }:
+    { name, staticlib, exports
+      # phase B: static archives searched after the Rust one (the C helpers Rust calls)
+    , extraArchives ? [ ]
+    }:
     pkgs.runCommand "${name}.o" { } ''
       mkdir -p $out
       printf '%s\n' ${lib.escapeShellArgs exports} > exports.list
       ${crossToolchain}/bin/arm64-apple-darwin20.4-ld -r -arch arm64 \
         ${lib.concatMapStringsSep " " (s: "-u ${s}") exports} \
         -exported_symbols_list exports.list \
-        ${staticlib}/lib/lib${staticlib.passthru.crateName}.a \
+        ${staticlib}/lib/lib${staticlib.passthru.crateName}.a${lib.concatMapStrings (a: " ${a}") extraArchives} \
         -o $out/${name}.o
       cp exports.list $out/${name}.exports
     '';

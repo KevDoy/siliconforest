@@ -19,3 +19,14 @@ unaffected (join, DHCP, ping, lookup by name all passed).
 
 Not shown: the Rust-for-Linux `kernel` crate, bindgen against the Linux compatibility layer,
 or anything GPU. Those are the next phase.
+
+## Follow-up: the Rust-for-Linux kernel crate's core tier (boot r02, 2026-11-09)
+
+`PDRustLKPI` (`integrations/puredarwin/m1-rust-kext/lkpi/`) links PureDarwin's Linux compatibility
+layer and the `kernel` crate from Linux 7.2.11 (core tier). On the M1 it printed all 15 predicted
+lines, ending `PDRustLKPI: rust: done, 0 failed checks` / `PDRustLKPI: ALL OK`: logging through
+`kernel::print`, `KBox`/`KVec`/`KVVec`, `Mutex`, `SpinLock`, `Arc`, atomics, errno conversion,
+monotonic time across a 20 ms sleep, a workqueue item with a completion, and `CondVar`. `PDRustHello`
+and Wi-Fi passed in the same boot. As predicted, `KBox<u128>` fails because the layer's `kmalloc`
+only aligns to 8 bytes. The subsystem tier (device model, DRM wrappers, RTKit) is compile-only and
+mostly blocked; see `docs/roadmap/research/rust-kernel-crate-on-lkpi.md` and roadmap ticket SF-F.
