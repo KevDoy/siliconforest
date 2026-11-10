@@ -1,0 +1,10 @@
+/home/chrisk/src/darwin-lab/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/deps/wayland_sys-26ca7fb5647760ff.d: /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs
+
+/home/chrisk/src/darwin-lab/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/deps/libwayland_sys-26ca7fb5647760ff.rlib: /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs
+
+/home/chrisk/src/darwin-lab/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/deps/libwayland_sys-26ca7fb5647760ff.rmeta: /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs
+
+/home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs:
+/home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs:
+/home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs:
+/home/chrisk/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs:

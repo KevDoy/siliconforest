@@ -78,3 +78,26 @@ Then all of this is required, because at version ≥ 4 Mesa ignores `modifier` e
   on the build machine, wayland-protocols ≥ the version Mesa's meson asks for.
 - `ppoll` (Mesa's Wayland dispatch helper uses it; PureDarwin's Mesa recipe already shims it).
 - `poll` on the Wayland socket and `SCM_RIGHTS` for dma-buf fds.
+
+## Checked against `chonkstep-darwin/NEEDS.md` (as published on 10 November)
+
+The planned server surface (version 3; `modifier` events for XR24 and AR24, linear only;
+`create_immed`; `wl_buffer.release`; frame callbacks on flip-complete; no `wl_drm`, no
+feedback, no `wp_presentation`) is sufficient for the Mesa build here. Its section 2 is met:
+device discovery without compositor help is patch 0006, Mesa accepts a version 3 global, and
+with only the linear modifier on offer asahi allocates linear back buffers.
+
+One point differs from how Mesa behaves:
+
+- NEEDS.md says rendering must be complete at commit and suggests `glFinish()` before it.
+  `eglSwapBuffers` does **not** finish; it flushes and commits. `agx-wl-demo` calls
+  `glFinish` itself before every swap, so it complies. An ordinary Mesa client will not.
+  It is still safe as long as the compositor samples the buffer through Mesa's asahi driver
+  (as it does: `EGLImage` texture): the client's driver puts its render fence on the dma-buf
+  and the compositor's driver waits for that fence when its own submission uses the buffer.
+  That relies on the dma-buf sync-file ioctls of the current kernel (boot nk01) and has not
+  been seen working between two processes yet; `agx-wl-demo` does not depend on it.
+
+Smaller notes: Mesa attaches at offset 0,0 and never sets a buffer scale or transform; it keeps
+up to 4 buffers per surface and reuses a buffer only after `release`; with an XR24 config (the
+demo prefers one) alpha never matters.
