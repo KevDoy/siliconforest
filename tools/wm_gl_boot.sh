@@ -6,16 +6,28 @@
 # tools/dcp_boot.sh with pdagx=1 pddcp=2 (a collection with PDAgx and PDDcp is required).
 #   WM_GL_STEP=probe (default)  guest script darwin-wm-gl-probe.in: the KMS backend alone,
 #                               clear + page flip, WMGL lines
-#   WM_GL_BIN=<path>            compositor binary (default: the wm-darwin-gl desktop build)
+#   WM_GL_STEP=bench            darwin-wm-gl-bench.in: --bench with the GL renderer on KMS (pixel
+#                               check, the four scenarios, 5 s animation), then GL off-screen and
+#                               the CPU renderer for comparison; WMBENCH lines
+#   WM_GL_STEP=session          darwin-wm-gl-session.in: the shared-shell desktop with two
+#                               terminals on the GL renderer (or, without input nodes, the bare
+#                               compositor with the SHM test client); WMSTAT lines
+#   WM_GL_BIN=<path>            desktop binary (default: the wm-darwin-gl desktop build)
+#   WM_GL_BARE_BIN=<path>       bare compositor binary, staged for the session step
+#   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 200)
 #   WM_GL_TEMPLATE=<path>       another guest script
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
-KC=${2:-/nix/store/jz0v8c2ch0x7qjis2a3dvggp2adsnx9h-puredarwin-kc-arm64-0.1}
+KC=${2:-/nix/store/cszdgfpi4rx7j7rp0d4srn6wzznjkg5w-puredarwin-kc-arm64-0.1}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}
+STAGE_BARE=0
 case "${WM_GL_STEP:-probe}" in
   probe) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-probe.in ;;
+  bench) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
+  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
   *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
 esac
 TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
@@ -26,6 +38,10 @@ export PATH=$HOME/.nix-profile/bin:$PATH
 # The same Mesa bundle the zero-copy demo runs on (DCP_TEST=kms in tools/dcp_boot.sh).
 T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
 X="$BIN=/usr/bin/chonkstep-wm-gl"
+if [ "$STAGE_BARE" = 1 ]; then
+  [ -x "$BARE" ] || { echo "no bare compositor binary at $BARE" >&2; exit 2; }
+  X="$X;$BARE=/usr/bin/chonkstep-wm-gl-bare"
+fi
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do
   [ -r "$T/usr/local/lib/mesa-asahi/$l" ] || { echo "Mesa bundle has no $l (in $T)" >&2; exit 2; }
   X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"
@@ -33,8 +49,8 @@ done
 # The guest script replaces the supervisor directly, as the other DCP tests do.
 export PCIE_EXTRA_FILES="$X;$TEMPLATE=/usr/bin/darwin-desktop-test"
 if [ "${WM_GL_DRY_RUN:-0}" = 1 ]; then
-  echo "kc: $KC"; echo "boot-args: pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=2 pdagx=1 $EXTRA"
+  echo "kc: $KC"; echo "runtime: ${DCP_RUNTIME:-150}"; echo "boot-args: pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=2 pdagx=1 $EXTRA"
   echo "$PCIE_EXTRA_FILES" | tr ';' '\n'; exit 0
 fi
 DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|chonkstep-gl:\|chonkstep-darwin-desktop:\|WMSTAT\|WMBENCH\|panic' | cut -c1-${WM_GL_COLS:-330}
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

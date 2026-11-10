@@ -9,7 +9,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
-@@ -125,7 +228,8 @@
+@@ -125,7 +135,8 @@
  bool
  is_dma_buf_file(struct linux_file *filp)
  {
@@ -19,7 +19,7 @@ UPSTREAM: yes.
  }
  
  // the descriptor takes over the caller's reference on the buffer
-@@ -155,6 +259,7 @@
+@@ -155,6 +166,7 @@
  			return -ENOMEM;
  		}
  		filp->private_data = db;

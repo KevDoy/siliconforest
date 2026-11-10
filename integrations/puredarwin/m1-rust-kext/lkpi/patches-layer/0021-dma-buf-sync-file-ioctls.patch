@@ -4,30 +4,84 @@ Both returned ENOTTY. Mesa calls them for every shared buffer on every submissio
 falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
 dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
 line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
-UPSTREAM: yes.
 
+The two functions are a port of GPL-2.0-only code, so they are in a file of their own,
+drm/src/pd_dma_buf_syncfile.c, with that licence and the original notice (pd_dma_buf.c is
+MIT and only forwards the two commands). drm.cmake lists the file apart from the MIT ones.
+UPSTREAM: yes; the tree then carries a GPL-2.0-only file in the DRM layer, and every DRM
+kext that links the layer links it.
+
+--- a/src/Kernel/fbsdkpi/drm/drm.cmake
++++ b/src/Kernel/fbsdkpi/drm/drm.cmake
+@@ -40,6 +40,9 @@
+     pd_drm_testclient.c pd_lfile_lkpi.c)
+ set(PD_DRM_AMDGPU_PD_SOURCES pd_amdgpu_absent.c pd_amdgpu_absent_blocks.c
+     pd_amdgpu_fb.c pd_amdgpu_mmap.c)
++# From linux drivers/dma-buf/dma-buf.c, GPL-2.0-only (it makes a kext that links it a
++# GPL-2.0 work): the sync_file ioctls of a dma-buf descriptor
++list(APPEND PD_DRM_PD_SOURCES pd_dma_buf_syncfile.c)
+ 
+ # DRM_AMDGPU_CIK puts gcn2 (kaveri, kabini, mullins, bonaire, hawaii) in amdgpu's device table
+ set(PD_DRM_KCONFIG APERTURE_HELPERS ARCH_HAVE_NMI_SAFE_CMPXCHG
 --- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
-@@ -3,6 +3,10 @@
- // buffers go to userspace as file descriptors, one linux file per exported buffer
+@@ -94,11 +96,18 @@
+ 	return 0;
+ }
  
- // file.h renames struct file, so it comes before the dma-buf header uses it
++long pd_dma_buf_sync_file_ioctl(struct dma_buf *db, unsigned int cmd, unsigned long arg);
++
+ // DMA_BUF_IOCTL_SYNC brackets cpu access, a no-op for coherent buffers
+ static long
+ pd_dma_buf_file_ioctl(struct linux_file *filp, unsigned int cmd, unsigned long arg)
+ {
+-	return cmd == _IOW('b', 0, uint64_t) ? 0 : -ENOTTY;
++	struct dma_buf *db = filp->private_data;
++
++	if (cmd == _IOW('b', 0, uint64_t))
++		return 0;
++	// DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE (pd_dma_buf_syncfile.c), else -ENOTTY
++	return pd_dma_buf_sync_file_ioctl(db, cmd, arg);
+ }
+ 
+ // libdrm sizes an imported buffer with lseek(SEEK_END)
+--- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf_syncfile.c
++++ b/src/Kernel/fbsdkpi/drm/src/pd_dma_buf_syncfile.c
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * DMA_BUF_IOCTL_EXPORT_SYNC_FILE and DMA_BUF_IOCTL_IMPORT_SYNC_FILE on a dma-buf descriptor.
++ *
++ * From drivers/dma-buf/dma-buf.c of linux-aurora (Omacom, integration/aurora) at 6a08a08e:
++ *
++ * Framework for buffer objects that can be shared across devices/subsystems.
++ *
++ * Copyright(C) 2011 Linaro Limited. All rights reserved.
++ * Author: Sumit Semwal <sumit.semwal@ti.com>
++ *
++ * Many thanks to linaro-mm-sig list, and specially
++ * Arnd Bergmann <arnd@arndb.de>, Rob Clark <rob@ti.com> and
++ * Daniel Vetter <daniel@ffwll.ch> for their support in creation and
++ * refining of this idea.
++ */
++// file.h renames struct file, so it comes before the dma-buf header uses it
 +#include <linux/uaccess.h>
 +#include <linux/sync_file.h>
 +#include <linux/dma-fence-unwrap.h>
 +#include <linux/dma-fence.h>
- #include <linux/fs.h>
- #include <linux/file.h>
- #include <linux/ioctl.h>
-@@ -94,10 +98,109 @@
- 	return 0;
- }
- 
-+// DMA_BUF_IOCTL_EXPORT_SYNC_FILE / IMPORT_SYNC_FILE: dma_buf_export_sync_file() and
-+// dma_buf_import_sync_file() of drivers/dma-buf/dma-buf.c at the pin (linux-aurora 6a08a08e,
-+// lines 450-551), statement for statement, with include/uapi/linux/dma-buf.h's layouts: the
-+// buffer's implicit-sync fences as a sync_file, and a sync_file's fences added to the buffer.
-+// mesa calls both for every shared buffer on every submission.
++#include <linux/fs.h>
++#include <linux/file.h>
++#include <linux/ioctl.h>
++#include <linux/dma-buf.h>
++#include <linux/dma-resv.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++#include <linux/slab.h>
++
++// dma_buf_export_sync_file() and dma_buf_import_sync_file() (lines 450-551 there), statement
++// for statement, with include/uapi/linux/dma-buf.h's layouts: the buffer's implicit-sync
++// fences as a sync_file, and a sync_file's fences added to the buffer. mesa calls both for
++// every shared buffer on every submission.
 +struct pd_dma_buf_sync_file {
 +	uint32_t flags;		// DMA_BUF_SYNC_READ 1, DMA_BUF_SYNC_WRITE 2
 +	int32_t fd;
@@ -116,16 +170,15 @@ UPSTREAM: yes.
 +	return ret;
 +}
 +
- // DMA_BUF_IOCTL_SYNC brackets cpu access, a no-op for coherent buffers
- static long
- pd_dma_buf_file_ioctl(struct linux_file *filp, unsigned int cmd, unsigned long arg)
- {
-+	struct dma_buf *db = filp->private_data;
++long pd_dma_buf_sync_file_ioctl(struct dma_buf *db, unsigned int cmd, unsigned long arg);
 +
++// -ENOTTY for any other command
++long
++pd_dma_buf_sync_file_ioctl(struct dma_buf *db, unsigned int cmd, unsigned long arg)
++{
 +	if (cmd == PD_DMA_BUF_IOCTL_EXPORT_SYNC_FILE)
 +		return pd_dma_buf_export_sync_file(db, arg);
 +	if (cmd == PD_DMA_BUF_IOCTL_IMPORT_SYNC_FILE)
 +		return pd_dma_buf_import_sync_file(db, arg);
- 	return cmd == _IOW('b', 0, uint64_t) ? 0 : -ENOTTY;
- }
- 
++	return -ENOTTY;
++}

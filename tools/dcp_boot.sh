@@ -12,6 +12,16 @@ ln -sfn "$KC" runs/m1-desktop-010/apcie-host-kc-build-001/result
 # collection with PDAgx and PDDcp; adds pdagx=1.
 # DCP_TEST=wait: the flip loop once per way of waiting on the DRM fd (read, poll, select,
 # kqueue), DL45 lines. Works on a PDDcp-only or a combined collection.
+# The next three need a collection on the patched kernel (integrations/puredarwin/m1-dcp/kernel.nix):
+# DCP_TEST=scm: a child process sends GPU buffers to the parent over SCM_RIGHTS, which imports
+# and flips them (DL47 lines). PDAgx + PDDcp; adds pdagx=1.
+# DCP_TEST=fence: sync_file (out-fence) and dma-buf descriptors waited on with poll, select and
+# kevent (DL48 lines). The last of its four runs needs PDAgx; adds pdagx=1.
+# DCP_TEST=newkernel: DL45 (wait), DL48 and DL47 in one boot. PDAgx + PDDcp; adds pdagx=1.
+case "${DCP_TEST:-0}" in scm|fence|newkernel)
+  DCP_TEMPLATE=${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-$DCP_TEST-test.in}
+  EXTRA="pdagx=1 $EXTRA"; DCP_TEST=1;;
+esac
 if [ "${DCP_TEST:-0}" = wait ]; then
   DCP_TEMPLATE=${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-wait-test.in}
   DCP_TEST=1

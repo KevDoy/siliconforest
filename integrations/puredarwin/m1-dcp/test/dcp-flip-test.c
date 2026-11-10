@@ -11,6 +11,7 @@
  *
  *   dcp-flip-test [--device /dev/dri/cardN] [--seconds N] [--nonce HEX] [--no-flip]
  *                 [--prime-from auto|/dev/dri/renderDN] [--wait read|poll|select|kqueue]
+ *                 [--scm-rights] [--fence poll|select|kqueue]
  *
  * Without --device the display is the card node whose DRM driver is "apple"; --prime-from
  * auto is the render node whose driver is "asahi".
@@ -20,6 +21,21 @@
  * mapping, exported as PRIME fds and imported into the card node: the display then scans
  * out memory that belongs to the GPU driver, with no copy. This tests the cross-driver
  * import; the pixels are written by the CPU here, not rendered.
+ *
+ * --scm-rights (with --prime-from): the GPU buffers are made by a second process. The test
+ * forks; the child opens the render node, creates, fills and exports the two buffers and
+ * sends the two dma-buf descriptors over a Unix socket (SCM_RIGHTS), closing its own copies.
+ * The parent imports what it received into the card node and flips. At the end the child
+ * reads the buffers back through its mapping and reports, then exits, and the parent flips
+ * ten more times: the buffers are then kept alive by the display driver's import alone.
+ *
+ * --fence: every flip asks for the CRTC's OUT_FENCE_PTR, a sync_file descriptor that signals
+ * when the flip completes, and waits for it with poll(), select() or kevent() (1 s timeout)
+ * before reading the event. The fence is also imported into the other buffer's dma-buf
+ * (DMA_BUF_IOCTL_IMPORT_SYNC_FILE, write) and that descriptor is waited on the same way,
+ * then exported again (EXPORT_SYNC_FILE) and checked to be signalled. Counted: fences that
+ * were still pending right after the commit, timeouts, and the time from commit to wakeup.
+ * Fails on any timeout, and if no fence was ever seen pending (then no wakeup was tested).
  */
 #include <dirent.h>
 #include <errno.h>
@@ -32,9 +48,13 @@
 #include <string.h>
 #include <poll.h>
 #include <sys/event.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/uio.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -157,6 +177,9 @@ static void wait_readable(int fd)
 	}
 }
 
+/* The kernel's timestamp in the last flip-complete event, in microseconds. */
+static uint64_t event_us;
+
 /* Waits (see above), then read()s until a flip-complete event arrives. 0, or 1 after printing the failure. */
 static int wait_flip(int fd, const char *what)
 {
@@ -177,13 +200,72 @@ static int wait_flip(int fd, const char *what)
 		for (ssize_t off = 0; off + (ssize_t)sizeof(struct drm_event) <= n;) {
 			struct drm_event *ev = (struct drm_event *)(evbuf + off);
 
-			if (ev->type == DRM_EVENT_FLIP_COMPLETE)
+			if (ev->type == DRM_EVENT_FLIP_COMPLETE) {
+				if (ev->length >= sizeof(struct drm_event_vblank)) {
+					struct drm_event_vblank *vb = (struct drm_event_vblank *)ev;
+
+					event_us = (uint64_t)vb->tv_sec * 1000000ull + vb->tv_usec;
+				}
 				return 0;
+			}
 			if (ev->length < sizeof(*ev))
 				break;
 			off += ev->length;
 		}
 	}
+}
+
+/*
+ * include/uapi/linux/dma-buf.h at the pin. The numbers are built with this system's _IOWR,
+ * as the kernel side's are.
+ */
+struct dma_buf_export_sync_file { uint32_t flags; int32_t fd; };
+struct dma_buf_import_sync_file { uint32_t flags; int32_t fd; };
+#define DMA_BUF_SYNC_READ	(1 << 0)
+#define DMA_BUF_SYNC_WRITE	(2 << 0)
+#define DMA_BUF_IOCTL_EXPORT_SYNC_FILE	_IOWR('b', 2, struct dma_buf_export_sync_file)
+#define DMA_BUF_IOCTL_IMPORT_SYNC_FILE	_IOW('b', 3, struct dma_buf_import_sync_file)
+
+enum { FENCE_NONE, FENCE_POLL, FENCE_SELECT, FENCE_KQUEUE };
+static int fence_mode = FENCE_NONE;
+
+/* 1 if fd becomes readable within timeout_ms, 0 on timeout, -1 on error (errno set). */
+static int fd_readable(int fd, int how, int timeout_ms)
+{
+	if (how == FENCE_SELECT) {
+		fd_set rfds;
+		struct timeval tv = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
+
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+		return select(fd + 1, &rfds, NULL, NULL, &tv);
+	}
+	if (how == FENCE_KQUEUE) {
+		struct kevent ev, got;
+		struct timespec ts = { timeout_ms / 1000, (long)(timeout_ms % 1000) * 1000000 };
+		int kq = kqueue(), r, e;
+
+		if (kq < 0)
+			return -1;
+		EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+		r = kevent(kq, &ev, 1, &got, 1, &ts);
+		e = errno;
+		if (r > 0 && (got.flags & EV_ERROR)) {
+			e = (int)got.data;
+			r = -1;
+		}
+		close(kq);
+		errno = e;
+		return r;
+	}
+	struct pollfd pfd = { .fd = fd, .events = POLLIN };
+	int r = poll(&pfd, 1, timeout_ms);
+
+	if (r > 0 && !(pfd.revents & POLLIN)) {
+		errno = EIO;
+		return -1;
+	}
+	return r;
 }
 
 /*
@@ -250,6 +332,11 @@ static int make_prime_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint
 	out(P "step: PRIME export from the render node (handle %u)\n", create.handle);
 	if (drmPrimeHandleToFD(render_fd, create.handle, DRM_CLOEXEC | DRM_RDWR, &prime_fd))
 		return fail("drmPrimeHandleToFD (render node)");
+	if (fd < 0) {
+		/* --scm-rights, in the exporting process: the descriptor is sent, not imported */
+		b->handle = (uint32_t)prime_fd;
+		return 0;
+	}
 	out(P "step: PRIME import into the card node (fd %d)\n", prime_fd);
 	if (drmPrimeFDToHandle(fd, prime_fd, &b->handle))
 		return fail("drmPrimeFDToHandle (card node)");
@@ -258,11 +345,13 @@ static int make_prime_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint
 	return 0;
 }
 
+static void fill_buf(struct buf *b, uint32_t w, uint32_t h, uint32_t colour, uint32_t nonce);
+static int add_fb(int fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colour);
+
 static int make_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colour, uint32_t nonce)
 {
 	struct drm_mode_create_dumb create = { .width = w, .height = h, .bpp = 32 };
 	struct drm_mode_map_dumb map = { 0 };
-	uint32_t handles[4] = { 0 }, pitches[4] = { 0 }, offsets[4] = { 0 };
 
 	if (render_fd >= 0) {
 		if (make_prime_buf(fd, render_fd, b, w, h))
@@ -283,6 +372,12 @@ static int make_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint32_t h
 	if (b->map == MAP_FAILED)
 		return fail("mmap of the dumb buffer");
 fill:
+	fill_buf(b, w, h, colour, nonce);
+	return add_fb(fd, b, w, h, colour);
+}
+
+static void fill_buf(struct buf *b, uint32_t w, uint32_t h, uint32_t colour, uint32_t nonce)
+{
 	for (uint32_t y = 0; y < h; y++) {
 		uint32_t *row = (uint32_t *)((uint8_t *)b->map + (size_t)y * b->pitch);
 
@@ -297,6 +392,12 @@ fill:
 			for (uint32_t x = bit * 32; x < bit * 32 + 32; x++)
 				row[x] = (nonce >> (31 - bit)) & 1 ? 0x00ffffff : 0x00000000;
 		}
+}
+
+static int add_fb(int fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colour)
+{
+	uint32_t handles[4] = { 0 }, pitches[4] = { 0 }, offsets[4] = { 0 };
+
 	handles[0] = b->handle;
 	pitches[0] = b->pitch;
 	out(P "step: ADDFB2\n");
@@ -304,6 +405,266 @@ fill:
 		return fail("drmModeAddFB2 (XRGB8888)");
 	out(P "buffer handle %u pitch %u size %" PRIu64 " fb %u colour 0x%06x\n", b->handle, b->pitch,
 	       b->size, b->fb, colour);
+	return 0;
+}
+
+
+static uint32_t count_bad(const struct buf *b, uint32_t w, uint32_t h, uint32_t want)
+{
+	uint32_t bad = 0;
+
+	for (uint32_t y = 64; y < h; y++) {
+		const uint32_t *row = (const uint32_t *)((const uint8_t *)b->map + (size_t)y * b->pitch);
+
+		for (uint32_t x = 0; x < w; x++)
+			bad += row[x] != want;
+	}
+	return bad;
+}
+
+/* --scm-rights: what travels with the two descriptors, and the child's answer at the end */
+struct scm_msg {
+	uint32_t pitch[2];
+	uint64_t size[2];
+};
+
+/* The exporting process. Does not return. */
+static void scm_child(int sock, uint32_t w, uint32_t h, uint32_t nonce)
+{
+	static const uint32_t colours[2] = { 0x00203080, 0x00804020 };
+	struct buf b[2] = { { 0 }, { 0 } };
+	struct scm_msg m = { { 0 }, { 0 } };
+	struct iovec iov = { &m, sizeof(m) };
+	union {
+		char buf[CMSG_SPACE(2 * sizeof(int))];
+		struct cmsghdr align;
+	} u;
+	struct msghdr mh = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = sizeof(u.buf) };
+	struct cmsghdr *c;
+	char rpath[64] = "", cmd;
+	uint32_t bad[2];
+	int fds[2], render_fd;
+
+	render_fd = open_by_driver("renderD", "asahi", rpath, sizeof(rpath));
+	if (render_fd < 0) {
+		out(P "child: FAIL no /dev/dri/renderD* with DRM driver \"asahi\"\n");
+		_exit(2);
+	}
+	out(P "child %d: buffers come from the GPU driver on %s\n", (int)getpid(), rpath);
+	for (int k = 0; k < 2; k++) {
+		if (make_prime_buf(-1, render_fd, &b[k], w, h))
+			_exit(2);
+		fds[k] = (int)b[k].handle;
+		fill_buf(&b[k], w, h, colours[k], k ? ~nonce : nonce);
+		m.pitch[k] = b[k].pitch;
+		m.size[k] = b[k].size;
+	}
+	memset(&u, 0, sizeof(u));
+	c = CMSG_FIRSTHDR(&mh);
+	c->cmsg_level = SOL_SOCKET;
+	c->cmsg_type = SCM_RIGHTS;
+	c->cmsg_len = CMSG_LEN(2 * sizeof(int));
+	memcpy(CMSG_DATA(c), fds, 2 * sizeof(int));
+	out(P "child: step: sendmsg with SCM_RIGHTS, descriptors %d and %d\n", fds[0], fds[1]);
+	if (sendmsg(sock, &mh, 0) != (ssize_t)sizeof(m)) {
+		fail("child: sendmsg (SCM_RIGHTS, two dma-buf descriptors)");
+		_exit(3);
+	}
+	close(fds[0]);
+	close(fds[1]);
+	out(P "child: sent and closed both descriptors\n");
+	/* the parent asks for the readback when its flips are done */
+	if (read(sock, &cmd, 1) != 1) {
+		fail("child: read of the parent's request");
+		_exit(3);
+	}
+	for (int k = 0; k < 2; k++)
+		bad[k] = count_bad(&b[k], w, h, colours[k]);
+	if (write(sock, bad, sizeof(bad)) != (ssize_t)sizeof(bad))
+		_exit(3);
+	_exit(bad[0] || bad[1] ? 4 : 0);
+}
+
+static int scm_receive(int sock, int fds[2], struct scm_msg *m)
+{
+	struct iovec iov = { m, sizeof(*m) };
+	union {
+		char buf[CMSG_SPACE(2 * sizeof(int))];
+		struct cmsghdr align;
+	} u;
+	struct msghdr mh = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = sizeof(u.buf) };
+	struct cmsghdr *c;
+	ssize_t n;
+
+	do
+		n = recvmsg(sock, &mh, 0);
+	while (n < 0 && errno == EINTR);
+	if (n != (ssize_t)sizeof(*m)) {
+		out(P "recvmsg returned %zd (the exporting process failed before sending?): ", n);
+		return fail("recvmsg from the exporting process");
+	}
+	c = CMSG_FIRSTHDR(&mh);
+	if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS ||
+	    c->cmsg_len != CMSG_LEN(2 * sizeof(int))) {
+		out(P "FAIL the message carries no SCM_RIGHTS with two descriptors (msg_flags 0x%x)\n", mh.msg_flags);
+		return 1;
+	}
+	memcpy(fds, CMSG_DATA(c), 2 * sizeof(int));
+	return 0;
+}
+
+/* --fence: one flip's out-fence, see the comment at the top */
+static struct {
+	unsigned fences, pending, timeouts, errors;
+	unsigned buf_pending, buf_timeouts, buf_errors, export_unsignalled;
+	uint64_t min_ns, max_ns;
+} fs = { .min_ns = UINT64_MAX };
+
+static int fence_step(int fd, int fence_fd, const struct buf *other, uint64_t t_commit)
+{
+	struct dma_buf_import_sync_file imp = { .flags = DMA_BUF_SYNC_WRITE, .fd = fence_fd };
+	struct dma_buf_export_sync_file ex = { .flags = DMA_BUF_SYNC_READ, .fd = -1 };
+	int dfd = -1, r;
+
+	if (fence_fd < 0) {
+		out(P "FAIL the commit stored no descriptor through OUT_FENCE_PTR (%d)\n", fence_fd);
+		return 1;
+	}
+	fs.fences++;
+	r = fd_readable(fence_fd, FENCE_POLL, 0);
+	if (r < 0)
+		return fail("poll with no timeout on the out-fence sync_file");
+	fs.pending += r == 0;
+
+	if (drmPrimeHandleToFD(fd, other->handle, DRM_CLOEXEC | DRM_RDWR, &dfd))
+		return fail("drmPrimeHandleToFD (card node, for the fence import)");
+	if (ioctl(dfd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &imp))
+		return fail("DMA_BUF_IOCTL_IMPORT_SYNC_FILE (write)");
+	r = fd_readable(dfd, FENCE_POLL, 0);
+	if (r < 0)
+		return fail("poll with no timeout on the dma-buf");
+	fs.buf_pending += r == 0;
+
+	r = fd_readable(fence_fd, fence_mode, 1000);
+	if (r > 0) {
+		uint64_t lat = now_ns() - t_commit;
+
+		if (lat < fs.min_ns)
+			fs.min_ns = lat;
+		if (lat > fs.max_ns)
+			fs.max_ns = lat;
+	} else if (r == 0) {
+		fs.timeouts++;
+	} else {
+		if (!fs.errors)
+			out(P "wait on the sync_file failed: errno %d (%s)\n", errno, strerror(errno));
+		fs.errors++;
+	}
+	r = fd_readable(dfd, fence_mode, 1000);
+	if (r == 0) {
+		fs.buf_timeouts++;
+	} else if (r < 0) {
+		if (!fs.buf_errors)
+			out(P "wait on the dma-buf failed: errno %d (%s)\n", errno, strerror(errno));
+		fs.buf_errors++;
+	}
+	if (ioctl(dfd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &ex))
+		return fail("DMA_BUF_IOCTL_EXPORT_SYNC_FILE (read)");
+	if (fd_readable(ex.fd, FENCE_POLL, 0) != 1)
+		fs.export_unsignalled++;
+	close(ex.fd);
+	close(dfd);
+	close(fence_fd);
+	return 0;
+}
+
+/*
+ * Where a flip's time goes, to tell a late completion in the kernel from a late wakeup here:
+ *   interval    between two events as this process sees them (after its read() returned)
+ *   kernel      between the timestamps the kernel put into the two events
+ *   commit      the time the non-blocking commit call took
+ *   late        events whose kernel interval was more than 1.5 frames (a missed frame), and
+ *   early       less than half a frame, at 60 Hz
+ */
+struct flip_stats {
+	unsigned flips, busy_retries, late, early;
+	uint64_t min_iv, max_iv, min_kiv, max_kiv, min_commit, max_commit, sum_commit;
+	double elapsed;
+};
+
+/* Flips between the two buffers for `seconds`, or for max_flips flips if that is not 0. */
+static int flip_loop(int fd, uint32_t plane_id, uint32_t p_fb, uint32_t crtc_id, uint32_t p_out_fence,
+		     const struct buf *bufs, double seconds, unsigned max_flips, struct flip_stats *st)
+{
+	uint64_t start = now_ns(), last = start, end = start + (uint64_t)(seconds * 1e9);
+	uint64_t last_event_us = event_us;
+	unsigned next = 1;
+
+	memset(st, 0, sizeof(*st));
+	st->min_iv = st->min_kiv = st->min_commit = UINT64_MAX;
+	while (max_flips ? st->flips < max_flips : now_ns() < end) {
+		int tries = 0, ret;
+		int32_t out_fence = -1;
+		uint64_t t_commit;
+
+		/*
+		 * EBUSY means the previous commit on the CRTC is not finished although its event
+		 * has been read; counted, retried at most 100 times 1 ms apart, and reported.
+		 */
+		for (;;) {
+			drmModeAtomicReq *req = drmModeAtomicAlloc();
+
+			drmModeAtomicAddProperty(req, plane_id, p_fb, bufs[next].fb);
+			if (p_out_fence)
+				drmModeAtomicAddProperty(req, crtc_id, p_out_fence, (uint64_t)(uintptr_t)&out_fence);
+			t_commit = now_ns();
+			ret = drmModeAtomicCommit(fd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK,
+						  (void *)(uintptr_t)(st->flips + 1));
+			drmModeAtomicFree(req);
+			if (!ret) {
+				uint64_t took = now_ns() - t_commit;
+
+				if (took < st->min_commit)
+					st->min_commit = took;
+				if (took > st->max_commit)
+					st->max_commit = took;
+				st->sum_commit += took;
+			}
+			if (!ret || errno != EBUSY || ++tries > 100)
+				break;
+			st->busy_retries++;
+			usleep(1000);
+		}
+		if (ret) {
+			out(P "flip %u (after %d EBUSY retries): ", st->flips + 1, tries);
+			return fail("drmModeAtomicCommit (PAGE_FLIP_EVENT | NONBLOCK)");
+		}
+		if (p_out_fence && fence_step(fd, out_fence, &bufs[next ^ 1], t_commit))
+			return 1;
+		if (wait_flip(fd, "flip"))
+			return 1;
+		uint64_t t = now_ns(), iv = t - last;
+
+		uint64_t kiv = event_us - last_event_us;
+
+		if (st->flips > 0) {
+			if (iv < st->min_iv)
+				st->min_iv = iv;
+			if (iv > st->max_iv)
+				st->max_iv = iv;
+			if (kiv < st->min_kiv)
+				st->min_kiv = kiv;
+			if (kiv > st->max_kiv)
+				st->max_kiv = kiv;
+			st->late += kiv > 25000;
+			st->early += kiv < 8333;
+		}
+		last_event_us = event_us;
+		last = t;
+		st->flips++;
+		next ^= 1;
+	}
+	st->elapsed = (double)(last - start) / 1e9;
 	return 0;
 }
 
@@ -315,6 +676,7 @@ int main(int argc, char **argv)
 	uint32_t nonce = 0x5d0c0f11;
 	int do_flip = 1;
 	const char *prime_from = NULL;
+	int scm_rights = 0;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--device") && i + 1 < argc)
@@ -330,8 +692,18 @@ int main(int argc, char **argv)
 
 			wait_mode = !strcmp(m, "poll") ? WAIT_POLL : !strcmp(m, "select") ? WAIT_SELECT :
 				    !strcmp(m, "kqueue") ? WAIT_KQUEUE : WAIT_READ;
-		} else if (!strcmp(argv[i], "--no-flip"))
+		} else if (!strcmp(argv[i], "--fence") && i + 1 < argc) {
+			const char *m = argv[++i];
+
+			fence_mode = !strcmp(m, "select") ? FENCE_SELECT : !strcmp(m, "kqueue") ? FENCE_KQUEUE : FENCE_POLL;
+		} else if (!strcmp(argv[i], "--scm-rights"))
+			scm_rights = 1;
+		else if (!strcmp(argv[i], "--no-flip"))
 			do_flip = 0;
+	}
+	if (scm_rights && !prime_from) {
+		fprintf(stderr, P "--scm-rights needs --prime-from\n");
+		return 2;
 	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	console_fd = open("/dev/console", O_WRONLY | O_NOCTTY);
@@ -460,8 +832,51 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	uint32_t p_out_fence = 0;
+	if (fence_mode != FENCE_NONE) {
+		p_out_fence = prop_id(fd, crtc_id, DRM_MODE_OBJECT_CRTC, "OUT_FENCE_PTR", NULL);
+		if (!p_out_fence) {
+			out(P "FAIL the CRTC has no OUT_FENCE_PTR property\n");
+			return 1;
+		}
+	}
+
 	struct buf bufs[2] = { { 0 }, { 0 } };
-	int render_fd = -1;
+	int render_fd = -1, scm_sock = -1;
+	pid_t scm_pid = -1;
+	if (scm_rights) {
+		static const uint32_t colours[2] = { 0x00203080, 0x00804020 };
+		struct scm_msg m;
+		int sv[2], got[2];
+
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv))
+			return fail("socketpair");
+		out(P "step: fork; the child exports, the parent (pid %d) imports\n", (int)getpid());
+		fflush(stdout);
+		scm_pid = fork();
+		if (scm_pid < 0)
+			return fail("fork");
+		if (scm_pid == 0) {
+			close(sv[0]);
+			close(fd);
+			scm_child(sv[1], mode.hdisplay, mode.vdisplay, nonce);
+		}
+		close(sv[1]);
+		scm_sock = sv[0];
+		if (scm_receive(scm_sock, got, &m))
+			return 1;
+		out(P "received descriptors %d and %d over SCM_RIGHTS from pid %d\n", got[0], got[1], (int)scm_pid);
+		for (int k = 0; k < 2; k++) {
+			bufs[k].pitch = m.pitch[k];
+			bufs[k].size = m.size[k];
+			out(P "step: PRIME import of the received descriptor %d into the card node\n", got[k]);
+			if (drmPrimeFDToHandle(fd, got[k], &bufs[k].handle))
+				return fail("drmPrimeFDToHandle (card node, descriptor received over SCM_RIGHTS)");
+			close(got[k]);
+			if (add_fb(fd, &bufs[k], mode.hdisplay, mode.vdisplay, colours[k]))
+				return 1;
+		}
+	} else {
 	if (prime_from) {
 		char rpath[64] = "";
 
@@ -482,6 +897,7 @@ int main(int argc, char **argv)
 	if (make_buf(fd, render_fd, &bufs[0], mode.hdisplay, mode.vdisplay, 0x00203080, nonce) ||
 	    make_buf(fd, render_fd, &bufs[1], mode.hdisplay, mode.vdisplay, 0x00804020, ~nonce))
 		return 1;
+	}
 
 	uint32_t mode_blob = 0;
 	if (drmModeCreatePropertyBlob(fd, &mode, sizeof(mode), &mode_blob))
@@ -516,72 +932,51 @@ int main(int argc, char **argv)
 	}
 
 	out(P "step: flipping\n");
-	uint64_t start = now_ns(), last = start, min_iv = UINT64_MAX, max_iv = 0, end = start + (uint64_t)(seconds * 1e9);
-	unsigned flips = 0, next = 1;
+	struct flip_stats st;
 
-	unsigned busy_retries = 0;
-
-	while (now_ns() < end) {
-		int tries = 0, ret;
-
-		/*
-		 * EBUSY means the previous commit on the CRTC is not finished although its event
-		 * has been read; counted, retried at most 100 times 1 ms apart, and reported.
-		 */
-		for (;;) {
-			req = drmModeAtomicAlloc();
-			drmModeAtomicAddProperty(req, plane_id, pp[0], bufs[next].fb);
-			ret = drmModeAtomicCommit(fd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK,
-						  (void *)(uintptr_t)(flips + 1));
-			drmModeAtomicFree(req);
-			if (!ret || errno != EBUSY || ++tries > 100)
-				break;
-			busy_retries++;
-			usleep(1000);
-		}
-		if (ret) {
-			out(P "flip %u (after %d EBUSY retries): ", flips + 1, tries);
-			return fail("drmModeAtomicCommit (PAGE_FLIP_EVENT | NONBLOCK)");
-		}
-		if (wait_flip(fd, "flip"))
-			return 1;
-		uint64_t t = now_ns(), iv = t - last;
-
-		if (flips > 0) {
-			if (iv < min_iv)
-				min_iv = iv;
-			if (iv > max_iv)
-				max_iv = iv;
-		}
-		last = t;
-		flips++;
-		next ^= 1;
-	}
-	double elapsed = (double)(last - start) / 1e9;
+	if (flip_loop(fd, plane_id, pp[0], crtc_id, p_out_fence, bufs, seconds, 0, &st))
+		return 1;
 
 	/*
 	 * The buffers, read back through the mapping they were written through (for
-	 * --prime-from: the render node's), must still hold what was written: the display
-	 * only reads them.
+	 * --prime-from: the render node's; for --scm-rights: in the exporting process), must
+	 * still hold what was written: the display only reads them.
 	 */
-	for (int k = 0; k < 2; k++) {
-		uint32_t want = k == 0 ? 0x00203080 : 0x00804020, bad = 0;
+	if (scm_rights) {
+		uint32_t bad[2] = { ~0u, ~0u };
+		int status = 0;
 
-		for (uint32_t y = 64; y < mode.vdisplay; y++) {
-			const uint32_t *row = (const uint32_t *)((const uint8_t *)bufs[k].map + (size_t)y * bufs[k].pitch);
-
-			for (uint32_t x = 0; x < mode.hdisplay; x++)
-				bad += row[x] != want;
-		}
-		out(P "readback of buffer %d below the nonce rows: %u pixels differ from 0x%06x%s\n", k, bad, want,
-		    bad ? " FAILED" : "");
-		if (bad)
+		out(P "step: readback in the exporting process\n");
+		if (write(scm_sock, "r", 1) != 1 || read(scm_sock, bad, sizeof(bad)) != (ssize_t)sizeof(bad))
+			return fail("readback request to the exporting process");
+		for (int k = 0; k < 2; k++)
+			out(P "readback of buffer %d in pid %d: %u pixels differ%s\n", k, (int)scm_pid, bad[k],
+			    bad[k] ? " FAILED" : "");
+		if (waitpid(scm_pid, &status, 0) != scm_pid)
+			return fail("waitpid for the exporting process");
+		out(P "exporting process exited: status 0x%x%s\n", status,
+		    WIFEXITED(status) && WEXITSTATUS(status) == 0 ? "" : " FAILED");
+		if (bad[0] || bad[1] || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
 			return 1;
+	} else {
+		for (int k = 0; k < 2; k++) {
+			uint32_t want = k == 0 ? 0x00203080 : 0x00804020;
+			uint32_t bad = count_bad(&bufs[k], mode.hdisplay, mode.vdisplay, want);
+
+			out(P "readback of buffer %d below the nonce rows: %u pixels differ from 0x%06x%s\n", k, bad, want,
+			    bad ? " FAILED" : "");
+			if (bad)
+				return 1;
+		}
 	}
 
-	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms, %u EBUSY retries\n", flips,
-	       elapsed, elapsed > 0 ? flips / elapsed : 0.0, flips > 1 ? min_iv / 1e6 : 0.0,
-	       flips > 1 ? max_iv / 1e6 : 0.0, busy_retries);
+	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms, %u EBUSY retries\n", st.flips,
+	    st.elapsed, st.elapsed > 0 ? st.flips / st.elapsed : 0.0, st.flips > 1 ? st.min_iv / 1e6 : 0.0,
+	    st.flips > 1 ? st.max_iv / 1e6 : 0.0, st.busy_retries);
+	if (st.flips > 1)
+		out(P "timing: kernel event timestamps min %.3f ms max %.3f ms apart, %u late (> 25 ms), %u early "
+		    "(< 8.3 ms); commit call min %.3f ms mean %.3f ms max %.3f ms\n", st.min_kiv / 1e3, st.max_kiv / 1e3,
+		    st.late, st.early, st.min_commit / 1e6, st.sum_commit / 1e6 / st.flips, st.max_commit / 1e6);
 	{
 		static const char *const wn[] = { "read", "poll", "select", "kqueue" };
 
@@ -590,9 +985,33 @@ int main(int argc, char **argv)
 		if (wait_timeouts || wait_errors)
 			return 1;
 	}
-	if (flips < 2) {
+	if (fence_mode != FENCE_NONE) {
+		static const char *const fn[] = { "none", "poll", "select", "kqueue" };
+		int bad = fs.timeouts || fs.errors || fs.buf_timeouts || fs.buf_errors || fs.export_unsignalled ||
+			  !fs.pending || !fs.buf_pending;
+
+		out(P "fence wait %s: %u out-fences, %u pending after the commit, %u timeouts, %u errors, "
+		    "commit to wakeup min %.3f ms max %.3f ms\n", fn[fence_mode], fs.fences, fs.pending, fs.timeouts,
+		    fs.errors, fs.fences > fs.timeouts + fs.errors ? fs.min_ns / 1e6 : 0.0, fs.max_ns / 1e6);
+		out(P "fence in the dma-buf: %u pending after the import, %u timeouts, %u errors, "
+		    "%u exported sync_files not signalled%s\n", fs.buf_pending, fs.buf_timeouts, fs.buf_errors,
+		    fs.export_unsignalled, bad ? " FAILED" : "");
+		if (!fs.pending || !fs.buf_pending)
+			out(P "no fence was seen pending, so no wakeup was tested FAILED\n");
+		if (bad)
+			return 1;
+	}
+	if (st.flips < 2) {
 		out(P "FAIL fewer than two flips completed\n");
 		return 1;
+	}
+	if (scm_rights) {
+		struct flip_stats st2;
+
+		out(P "step: ten flips after the exporting process exited\n");
+		if (flip_loop(fd, plane_id, pp[0], crtc_id, 0, bufs, 0, 10, &st2))
+			return 1;
+		out(P "%u flips after the exporting process exited\n", st2.flips);
 	}
 	out(P "PASS\n");
 	return 0;

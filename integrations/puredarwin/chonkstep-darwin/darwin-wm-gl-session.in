@@ -1,0 +1,86 @@
+#!/bin/sh
+# Guest side of the GPU desktop session test (PDAgx + PDDcp, pdagx=1 pddcp=2): one boot that
+# shows an interactive-capable desktop composited on the GPU and presented by page flip.
+#
+# Part A, the real desktop: chonkstep-darwin-desktop (shared shell, both-seat PDHID input,
+# two explicitly requested managed terminals, as darwin-shared-desktop-live-test) with
+# --renderer gl for 40 s. Needs /dev/usb_hid_kbd and /dev/usb_hid_mouse; the script runs the
+# same enumeration helper and endpoint wait as the existing test, without failing on them.
+# Nobody injects input: whoever is at the machine may type and move the pointer.
+# Part B, when the input nodes or the terminal are missing or part A did not come up: the bare
+# compositor (input off) with the GL renderer and the finite SHM test client for 20 s, which
+# still proves client buffer -> texture -> page flip -> frame callback.
+#
+# Lines: "WMSTAT selected renderer=gl output=kms ..." once, then WMSTAT every 60 frames and a
+# final one (frames, fps, flips, missed_refreshes); "chonkstep-gl: step:" before each
+# first-time display call; DL10_CLIENT_* from the test client; WMGL3_* from this script.
+# Stage: <chonkstep-darwin-desktop>=/usr/bin/chonkstep-wm-gl and
+#        <chonkstep-darwin>=/usr/bin/chonkstep-wm-gl-bare.
+# (@SSID@/@PSK@ are unused; the placeholders exist because the assembler fills templates.)
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
+case "$nonce" in *[!0-9a-f]*|'') session=000000000000000000000000000000000000000000000001 ;; *) session=$nonce ;; esac
+[ "${#session}" -eq 48 ] || session=000000000000000000000000000000000000000000000001
+runtime=/private/var/run/wm-gl-session
+mkdir -p "$runtime" && chmod 0700 "$runtime"
+export XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-0
+export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
+export CHONKSTEP_DARWIN_FRAME_STATS=60
+printf '\nWMGL3_BEGIN_%s\n' "$nonce"
+ls -l /dev/dri 2>&1 | head -6
+for f in /usr/bin/chonkstep-wm-gl /usr/bin/chonkstep-wm-gl-bare /usr/bin/chonk-terminal-darwin /usr/bin/darwin-wayland-client /usr/bin/darwin-trackpad-enum /usr/share/darwin-desktop/DejaVuSans.ttf /usr/share/X11/xkb/rules/evdev; do
+    [ -e "$f" ] && s=present || s=MISSING
+    printf 'WMGL3_FILE %s %s\n' "$s" "$f"
+done
+
+# ---- Part A: the shared-shell desktop on GL ----
+a_rc=skipped
+if [ -x /usr/bin/darwin-trackpad-enum ]; then
+    /usr/bin/darwin-trackpad-enum --nonce "$session"
+    printf 'WMGL3_ENUM rc=%s\n' "$?"
+fi
+count=0
+while [ ! -c /dev/usb_hid_kbd ] || [ ! -c /dev/usb_hid_mouse ]; do
+    count=$((count + 1))
+    [ "$count" -le 100 ] || break
+    sleep 0.1
+done
+printf 'WMGL3_ENDPOINT_WAIT missing_checks=%s max_sleeps=100\n' "$count"
+if [ -c /dev/usb_hid_kbd ] && [ -c /dev/usb_hid_mouse ] && [ -x /usr/bin/chonk-terminal-darwin ]; then
+    records=$runtime/session-$session
+    mkdir -m 0700 "$records"
+    printf 'WMGL3_DESKTOP_START renderer=gl seconds=40 terminals=2 start=%s\n' "$(date +%s)"
+    /usr/bin/chonkstep-wm-gl --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 40 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
+    a_rc=$?
+    printf 'WMGL3_DESKTOP_RC=%s end=%s\n' "$a_rc" "$(date +%s)"
+    [ -r "$records/session-result.txt" ] && sed 's/^/WMGL3_RESULT /' "$records/session-result.txt" | head -20
+else
+    printf 'WMGL3_DESKTOP_SKIPPED kbd=%s mouse=%s terminal=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes || echo no)" "$([ -c /dev/usb_hid_mouse ] && echo yes || echo no)" "$([ -x /usr/bin/chonk-terminal-darwin ] && echo yes || echo no)"
+fi
+
+# ---- Part B: bare compositor on GL with the SHM test client ----
+b_rc=skipped
+if [ "$a_rc" != 0 ] && [ -x /usr/bin/chonkstep-wm-gl-bare ] && [ -x /usr/bin/darwin-wayland-client ]; then
+    rm -f "$runtime/wayland-0" "$runtime/wayland-0.lock"
+    printf 'WMGL3_BARE_START renderer=gl input=off start=%s\n' "$(date +%s)"
+    CHONKSTEP_DARWIN_RENDERER=gl /usr/bin/chonkstep-wm-gl-bare --run --socket "$runtime/wayland-0" 2>&1 &
+    compositor=$!
+    count=0
+    while [ ! -S "$runtime/wayland-0" ] && kill -0 "$compositor" 2>/dev/null; do
+        count=$((count + 1))
+        [ "$count" -le 100 ] || break
+        sleep 0.1
+    done
+    if [ -S "$runtime/wayland-0" ]; then
+        /usr/bin/darwin-wayland-client --socket "$runtime/wayland-0" --nonce "$session" --seconds 20 2>&1 | tail -12
+        printf 'WMGL3_CLIENT_DONE end=%s\n' "$(date +%s)"
+    else
+        printf 'WMGL3_BARE_NO_SOCKET\n'
+    fi
+    kill -TERM "$compositor" 2>/dev/null
+    wait "$compositor"
+    b_rc=$?
+    printf 'WMGL3_BARE_RC=%s end=%s\n' "$b_rc" "$(date +%s)"
+fi
+printf 'WMGL3_RESULT desktop=%s bare=%s\n' "$a_rc" "$b_rc"
+printf 'WMGL3_END_%s\n' "$nonce"

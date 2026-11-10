@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MIT
+# The lab's T8103 bring-up kernel with ./kernel-patches applied.
+#
+# Every collection in this lab links one prebuilt kernel,
+#   /nix/store/1ys1x1hzkq3v0l8bc14v2bq1jm5i46zn-puredarwin-kernel-arm64-t8103-bringup-0.1
+# (m1-display/console-return/build-kc.nix), whose recipe is m1-bringup/kernel-bringup.nix:
+# mkPureDarwinBuild, target xnu, DEBUG, PUREDARWIN_ARM64_MACHINE_CONFIG=T8103. The flake does
+# not export mkPureDarwinBuild, so this takes the flake's kernel-arm64-t8010-debug (the same
+# call but for the machine config) and changes the machine config, the name and the source.
+#
+# The source and the three toolchain paths are the ones recorded in that kernel's derivation
+# (nix derivation show /nix/store/dbhji9n78qw3kk70f8wxbi5i06jsz4b3-...-bringup-0.1.drv). With
+# `--arg patched false` this evaluates to a derivation whose environment equals the pinned
+# one in every variable but `out` (compared attribute by attribute; the output path differs
+# because the inputs are named as store paths here and as derivations there).
+#
+#   nix-build kernel.nix --no-out-link                       # the patched kernel
+#   nix-build kernel.nix --arg patched false --no-out-link   # control: the pinned recipe
+#
+# kernel-swap.nix puts the result into a collection recipe.
+{ patched ? true }:
+let
+  pins = import ../m1-rust-kext/pins.nix;
+  sp = builtins.storePath;
+  toolchain = sp "/nix/store/c17dkymcla7drga7i6l4qpppfffwz54g-darwin-cross-toolchain-nix";
+  base = pins.pd.packages.x86_64-linux.kernel-arm64-t8010-debug.override {
+    arm64CrossToolchain = toolchain;
+    nativeLd = sp "/nix/store/wq3qfxl2hqyp3afaw5lldazn6whsx57q-puredarwin-native-ld-0.1";
+    compilerRtArm64 = sp "/nix/store/qk6gj9gmf1vlj523ps88v9qxjaglvi1w-puredarwin-compiler-rt-21.1.8";
+  };
+  needle = "MACHINE_CONFIG=T8010";
+in base.overrideAttrs (old:
+  assert builtins.stringLength old.configurePhase
+    != builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] old.configurePhase);
+  {
+    pname = "puredarwin-kernel-arm64-t8103-bringup";
+    name = "puredarwin-kernel-arm64-t8103-bringup-0.1";
+    src = sp "/nix/store/fzwhq5qb2cn381dd6hza7ffisclc1vxk-source";
+    configurePhase = builtins.replaceStrings [ needle ] [ "MACHINE_CONFIG=T8103" ] old.configurePhase;
+  } // (if patched then {
+    patches = [
+      ./kernel-patches/0001-xnu-pdlfile-descriptors-are-sendable.patch
+      ./kernel-patches/0002-xnu-pdlfile-select-poll-kevent-waiters.patch
+    ];
+  } else { }))

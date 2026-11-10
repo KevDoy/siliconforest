@@ -184,7 +184,43 @@ Both returned ENOTTY. Mesa calls them for every shared buffer on every submissio
 falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
 dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
 line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
-UPSTREAM: yes.
+
+The two functions are a port of GPL-2.0-only code, so they are in a file of their own,
+drm/src/pd_dma_buf_syncfile.c, with that licence and the original notice (pd_dma_buf.c is
+MIT and only forwards the two commands). drm.cmake lists the file apart from the MIT ones.
+UPSTREAM: yes; the tree then carries a GPL-2.0-only file in the DRM layer, and every DRM
+kext that links the layer links it.
+""", []),
+ "0022-sync-file-and-dma-buf-fds-wake-select-poll-kevent": ("""fbsdkpi: drm: select(), poll() and kevent on sync_file and dma-buf descriptors
+
+A sync_file's poll only reported whether the fence had signalled and a dma-buf had no
+poll at all (always ready), and nothing woke a waiter: xnu's pd_lfile select routine
+recorded nothing. Needs the kernel side (integrations/puredarwin/m1-dcp/kernel-patches/
+0002: pd_lfile_wakeup(), a selinfo, a kevent filter); with it:
+
+- linux/poll.h: poll_table carries linux's _key, with poll_requested_events().
+- pd_lfile_lkpi.c: linux_poll_wait() (it was an empty function in pd_drm_os.c) queues the
+  file on the wait queue its poll names, the first time a poll with a table names it, and
+  the queue's wake_up then calls pd_lfile_wakeup(); the file leaves the queue when its
+  last reference goes. pd_lfile's poll op passes a table and maps select's direction to
+  events the way linux's select does (POLLIN_SET, POLLOUT_SET, POLLEX_SET). A poll called
+  with a NULL table (the DRM device nodes, patch 0020) is unchanged.
+- sync_file (pd_sync_file_poll.c, sync_file.h): wq, flags and cb, and sync_file_poll(),
+  fence_check_cb_func() and the release/alloc parts of the pin's drivers/dma-buf/
+  sync_file.c: the first poll puts a callback on the fence that wakes the queue.
+- dma-buf (pd_dma_buf_poll.c, dma-buf.h): poll, cb_in and cb_out, and dma_buf_poll(),
+  dma_buf_poll_cb() and dma_buf_poll_add_cb() of the pin's dma-buf.c. One difference:
+  the callback's fput() of the reference dma_buf_poll() took is done by a work item,
+  because this layer's fput() runs the final release immediately, in the fence's
+  signalling context (linux's defers it).
+
+The two new files are ports of GPL-2.0-only code and carry that licence and the original
+notices; drm.cmake lists them apart.
+
+Not done: a sync_file made by another DRM kext is still not recognised by
+sync_file_get_fence() (it compares f_op, as is_dma_buf_file() did before 0019), so a GPU
+fence cannot be given to the display driver as IN_FENCE_FD or imported into its dma-buf.
+UPSTREAM: yes, with the kernel patch; same licence note as 0021.
 """, []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
@@ -210,7 +246,10 @@ def topic(path, hunk, lineno):
     if path.endswith("pd_drm_cdev.c") and re.search(r"pd_dri_event_wake|event_wait|wait_queue_t wake|drm_file.h", hunk): return "0020-dri-fds-wake-select-poll-kqueue"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
-    if path.endswith("pd_dma_buf.c") and re.search(r"sync_file|SYNC_FILE|dma-resv.h|dma-fence", hunk): return "0021-dma-buf-sync-file-ioctls"
+    if path.endswith("pd_dma_buf_syncfile.c") or (path.endswith("drm.cmake") and "pd_dma_buf_syncfile" in hunk): return "0021-dma-buf-sync-file-ioctls"
+    if path.endswith(("pd_dma_buf_poll.c", "pd_sync_file_poll.c", "pd_sync_file.c", "linux/sync_file.h", "linux/poll.h", "pd_lfile_lkpi.c", "pd_drm_os.c", "linux/dma-buf.h", "drm.cmake")): return "0022-sync-file-and-dma-buf-fds-wake-select-poll-kevent"
+    if path.endswith("pd_dma_buf.c") and re.search(r"pd_dma_buf_poll", hunk): return "0022-sync-file-and-dma-buf-fds-wake-select-poll-kevent"
+    if path.endswith("pd_dma_buf.c") and re.search(r"sync_file|SYNC_FILE", hunk): return "0021-dma-buf-sync-file-ioctls"
     if path.endswith(("linux/fs.h", "pd_dma_buf.c")): return "0019-dma-buf-of-another-kext-is-a-dma-buf"
     if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"

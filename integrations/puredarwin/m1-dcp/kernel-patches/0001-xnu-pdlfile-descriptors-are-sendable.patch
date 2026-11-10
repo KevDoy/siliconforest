@@ -6,10 +6,8 @@ was not among them, so a GPU-rendering client could not hand a buffer to a compo
 The fileglob is shared as for any other type; pd_lfile's close runs once, at the last
 reference.
 
-NOT APPLIED ANYWHERE: this is a kernel change, and the collections built under
-integrations/puredarwin/m1-dcp and m1-rust-kext take the kernel from the pinned flake. It
-needs a kernel rebuild by whoever owns that. /dev/dri device descriptors are vnodes and are
-sendable already.
+Applied by ../kernel.nix, the kernel the collections of m1-dcp and m1-rust-kext are built
+on. /dev/dri device descriptors are vnodes and were sendable already.
 UPSTREAM: yes.
 
 --- a/src/Kernel/xnu/bsd/kern/kern_descrip.c

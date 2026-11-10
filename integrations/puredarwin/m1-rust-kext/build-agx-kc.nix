@@ -14,6 +14,9 @@ let
   agx = import ./build-agx-kext.nix;
   gpuDt = import ../m1-gpu-dt/build-kext.nix;
   needle = "  -o kernel";
+  # the kernel with ../m1-dcp/kernel-patches (pd_lfile descriptors: SCM_RIGHTS, select/poll/
+  # kevent wakeups) in place of the pinned one; the layer needs its pd_lfile_wakeup
+  onKernel = import ../m1-dcp/kernel-swap.nix;
   pkgs = (import ./pins.nix).pkgs;
   marginPages = 4;
 in base.overrideAttrs (old:
@@ -27,7 +30,7 @@ in base.overrideAttrs (old:
       '' + builtins.replaceStrings [ needle ] [ ''  -kext "${gpuDt}/System/Library/Extensions/PDGpuDT.kext" \
       -kext "${agx}/System/Library/Extensions/PDDRMDri.kext" \
       -kext "${agx}/System/Library/Extensions/PDAgx.kext" \
-      -o kernel'' ] old.buildPhase + ''
+      -o kernel'' ] (onKernel old.buildPhase) + ''
       } 2>&1 | tee kc-build.log
       # kc-builder accepts a payload that ends exactly at the kernel's __TEXT, and the
       # launcher's image check then rejects the collection (boot ag02: "Overlapping
