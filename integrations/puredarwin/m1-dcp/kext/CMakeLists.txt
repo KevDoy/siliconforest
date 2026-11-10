@@ -29,6 +29,13 @@ set(lkpiinc ${drminc}
 set(lkpiopt "SHELL:-include ${FBSDKPI_DIR}/pd/fbsd-extra/pd_lkpi_pre.h"
     ${drmopts} -Werror=implicit-function-declaration)
 
+# Space (one collection has to hold PDAgx and PDDcp, each with its own DRM core): TTM and the
+# DisplayPort/HDMI/DSC helper library are for drivers that use them; neither this driver nor
+# the DRM core itself references them. PD_DRM_KEEP_ALL=ON builds the full list again.
+option(PD_DRM_KEEP_ALL "Build TTM and the display helper library into the DRM core" OFF)
+if(NOT PD_DRM_KEEP_ALL)
+    list(FILTER PD_DRM_CORE_SOURCES EXCLUDE REGEX "^(ttm|display)/")
+endif()
 set(core)
 foreach(src IN LISTS PD_DRM_CORE_SOURCES)
     list(APPEND core "${drmkmod}/drivers/gpu/drm/${src}")
@@ -73,7 +80,7 @@ set_source_files_properties("${HERE}/pin/drm_gem_framebuffer_helper.c" PROPERTIE
 set_source_files_properties("${HERE}/driver/apple_drv.c" PROPERTIES COMPILE_DEFINITIONS
     "drm_gem_fb_create=pd_dcp_gem_fb_create")
 _fbsdkpi_objects(PDDcp_drv SOURCES ${drv} ${pin}
-        "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c"
+        "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c" "${HERE}/pd_dcp_prime.c"
         "${DART}/src/pd_dcp_iommu.c" "${DART}/src/pd_dart_table.c"
         "${RTKIT}/mailbox.c" "${RTKIT}/rtkit.c" "${RTKIT}/rtkit-crashlog.c" "${RTKIT}/pd_rtkit_compat.c"
     INCLUDES "${HERE}/pininc" "${HERE}/driver" "${HERE}/include" "${DART}/include"
@@ -103,6 +110,18 @@ add_fbsdkpi_driver(PDDcp
         "${DART}/src/pd_dart.cpp"
         "${HERE}/PDDcpHost.cpp"
 )
+# Space: the layer's own objects are compiled without -O by the tree. In this kext they get
+# -Os too (PDAgx keeps the tree's setting), which is what lets PDAgx and PDDcp share one
+# collection. PDDCP_LAYER_O0=ON builds them as the tree does.
+option(PDDCP_LAYER_O0 "Compile the layer objects of PDDcp without optimisation" OFF)
+if(NOT PDDCP_LAYER_O0)
+    foreach(t PDDcp_core PDDcp_lkpi PDDcp_lkpiglue PDDcp_driver PDDcp_iflib)
+        if(TARGET ${t})
+            target_compile_options(${t} PRIVATE -Os)
+        endif()
+    endforeach()
+endif()
+
 target_compile_definitions(PDDcp.kext PRIVATE PDDRM_OPT_IN_BOOTARG="pddcp"
     PDDRMFramebuffer=PDDRMFramebufferDcp PDDRMPresenter=PDDRMPresenterDcp)
 target_include_directories(PDDcp.kext PRIVATE "${RTKIT}" "${DART}/include"

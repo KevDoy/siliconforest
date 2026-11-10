@@ -13,10 +13,12 @@ in pkgs.stdenv.mkDerivation {
   name = "darwin-lab-dcp-flip-test-arm64-darwin";
   dontUnpack = true;
   buildPhase = ''
+    # the GPU driver's uAPI (for --prime-from), from the pin; its "drm.h" is libdrm's
+    mkdir uapi && cp ${/home/chrisk/src/darwin-lab/sources/gpu-plan/linux-aurora/include/uapi/drm/asahi_drm.h} uapi/asahi_drm.h
     ${tc}/bin/${triple}-clang -std=gnu11 -O2 -Wall -Wextra \
       -isysroot ${sdkRoot} -mmacosx-version-min=26.5 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
       -fno-stack-protector -I${libSystem}/usr/include \
-      -I${libdrm}/include -I${libdrm}/include/libdrm \
+      -I${libdrm}/include -I${libdrm}/include/libdrm -Iuapi \
       ${./test/dcp-flip-test.c} \
       -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib -L${libdrm}/lib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \

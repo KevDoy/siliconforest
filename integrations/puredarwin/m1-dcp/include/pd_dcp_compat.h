@@ -364,6 +364,19 @@ void pd_dcp_dmam_free_coherent(struct device *dev, size_t size, void *vaddr, dma
 #undef dmam_free_coherent
 #define dmam_free_coherent(dev, size, vaddr, handle)	pd_dcp_dmam_free_coherent((dev), (size), (vaddr), (handle))
 
+/*
+ * drm_driver.gem_prime_import: buffers exported by another DRM kext are imported by
+ * kext/pd_dcp_prime.c. The driver names its GEM ops through this macro (apple_drv.c:186).
+ */
+#include <drm/drm_gem_dma_helper.h>
+struct dma_buf;
+struct drm_gem_object *pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
+#undef DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE
+#define DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(dumb_create_func)		\
+	.dumb_create		   = (dumb_create_func),			\
+	.gem_prime_import_sg_table = drm_gem_dma_prime_import_sg_table,		\
+	.gem_prime_import	   = pd_dcp_prime_import
+
 /* patches/0002: the IOMFB callback dispatcher reports each callback (kext/pd_dcp_linux.c) */
 void pd_dcp_note_callback(struct device *dev, int tag, const char *fourcc, u32 in_len, u32 out_len,
 			  unsigned int context, bool handled);

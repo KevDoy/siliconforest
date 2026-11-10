@@ -7,6 +7,12 @@ N=${1:?name}; KC=${2:?kernel collection store path}; EXTRA=${3:-}
 ln -sfn "$KC" runs/m1-desktop-010/apcie-host-kc-build-001/result
 # DCP_TEST=1: build the KMS flip test (integrations/puredarwin/m1-dcp/dcp-flip-test.nix), stage it
 # with its libdrm and the guest script that runs it (DL43 lines), and boot with pddcp=2.
+# DCP_TEST=prime: the same test binary with the cross-driver script (DL44 lines): needs a
+# collection with PDAgx and PDDcp; adds pdagx=1.
+if [ "${DCP_TEST:-0}" = prime ]; then
+  DCP_TEMPLATE=${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-prime-test.in}
+  EXTRA="pdagx=1 $EXTRA"; DCP_TEST=1
+fi
 if [ "${DCP_TEST:-0}" = 1 ]; then
   export PATH=$HOME/.nix-profile/bin:$PATH
   T=$(cd integrations/puredarwin/m1-dcp && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes dcp-flip-test.nix --no-out-link)

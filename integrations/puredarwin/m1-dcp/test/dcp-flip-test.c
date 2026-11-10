@@ -9,8 +9,19 @@
  * Events are taken with a blocking read() on the DRM fd (select() on it is not relied on).
  * Exit status 0 only if every step worked; a failure names the call and errno.
  *
- *   dcp-flip-test [--device /dev/dri/card0] [--seconds N] [--nonce HEX] [--no-flip]
+ *   dcp-flip-test [--device /dev/dri/cardN] [--seconds N] [--nonce HEX] [--no-flip]
+ *                 [--prime-from auto|/dev/dri/renderDN]
+ *
+ * Without --device the display is the card node whose DRM driver is "apple"; --prime-from
+ * auto is the render node whose driver is "asahi".
+ *
+ * --prime-from: the two buffers are not dumb buffers of the display driver but GEM objects
+ * of the GPU driver (asahi GEM_CREATE on the render node), filled through the render node's
+ * mapping, exported as PRIME fds and imported into the card node: the display then scans
+ * out memory that belongs to the GPU driver, with no copy. This tests the cross-driver
+ * import; the pixels are written by the CPU here, not rendered.
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -26,6 +37,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
+#include <asahi_drm.h>	/* the pin's include/uapi/drm, see dcp-flip-test.nix */
 
 #define P "dcp-flip-test: "
 
@@ -92,18 +104,115 @@ static uint32_t prop_id(int fd, uint32_t obj, uint32_t type, const char *name, u
 	return id;
 }
 
+/* Blocks in read() until a flip-complete event arrives. 0, or 1 after printing the failure. */
+static int wait_flip(int fd, const char *what)
+{
+	char evbuf[256];
+
+	for (;;) {
+		ssize_t n = read(fd, evbuf, sizeof(evbuf));
+
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n < (ssize_t)sizeof(struct drm_event)) {
+			out(P "%s: read returned %zd: ", what, n);
+			return fail("read of the DRM event");
+		}
+		for (ssize_t off = 0; off + (ssize_t)sizeof(struct drm_event) <= n;) {
+			struct drm_event *ev = (struct drm_event *)(evbuf + off);
+
+			if (ev->type == DRM_EVENT_FLIP_COMPLETE)
+				return 0;
+			if (ev->length < sizeof(*ev))
+				break;
+			off += ev->length;
+		}
+	}
+}
+
+/*
+ * Nodes are found by driver name, never by number: with both drivers loaded card0 is the GPU
+ * (boot cb02). Scans /dev/dri for entries starting with `prefix` whose DRM driver is `driver`
+ * and returns an open fd, with the path in `path`. -1 if there is none.
+ */
+static int open_by_driver(const char *prefix, const char *driver, char *path, size_t path_len)
+{
+	DIR *d = opendir("/dev/dri");
+	struct dirent *e;
+	int found = -1;
+
+	if (!d)
+		return -1;
+	while (found < 0 && (e = readdir(d)) != NULL) {
+		drmVersion *v;
+		int fd;
+
+		if (strncmp(e->d_name, prefix, strlen(prefix)))
+			continue;
+		snprintf(path, path_len, "/dev/dri/%s", e->d_name);
+		fd = open(path, O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		v = drmGetVersion(fd);
+		out(P "%s: driver %s\n", path, v ? v->name : "(no version)");
+		if (v && !strcmp(v->name, driver))
+			found = fd;
+		else
+			close(fd);
+		drmFreeVersion(v);
+	}
+	closedir(d);
+	return found;
+}
+
 struct buf {
 	uint32_t handle, pitch, fb;
 	uint64_t size;
 	uint32_t *map;
 };
 
-static int make_buf(int fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colour, uint32_t nonce)
+/* A GPU-driver buffer: created and mapped on the render node, imported into the card node. */
+static int make_prime_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint32_t h)
+{
+	struct drm_asahi_gem_create create = { 0 };
+	struct drm_asahi_gem_mmap_offset mo = { 0 };
+	int prime_fd = -1;
+
+	b->pitch = w * 4;
+	b->size = ((uint64_t)b->pitch * h + 0x3fff) & ~0x3fffull;
+	create.size = b->size;
+	out(P "step: asahi GEM_CREATE %" PRIu64 " bytes on the render node\n", b->size);
+	if (drmIoctl(render_fd, DRM_IOCTL_ASAHI_GEM_CREATE, &create))
+		return fail("DRM_IOCTL_ASAHI_GEM_CREATE");
+	mo.handle = create.handle;
+	if (drmIoctl(render_fd, DRM_IOCTL_ASAHI_GEM_MMAP_OFFSET, &mo))
+		return fail("DRM_IOCTL_ASAHI_GEM_MMAP_OFFSET");
+	out(P "step: mmap of the GPU buffer through the render node\n");
+	b->map = mmap(NULL, b->size, PROT_READ | PROT_WRITE, MAP_SHARED, render_fd, (off_t)mo.offset);
+	if (b->map == MAP_FAILED)
+		return fail("mmap of the GPU buffer");
+	out(P "step: PRIME export from the render node (handle %u)\n", create.handle);
+	if (drmPrimeHandleToFD(render_fd, create.handle, DRM_CLOEXEC | DRM_RDWR, &prime_fd))
+		return fail("drmPrimeHandleToFD (render node)");
+	out(P "step: PRIME import into the card node (fd %d)\n", prime_fd);
+	if (drmPrimeFDToHandle(fd, prime_fd, &b->handle))
+		return fail("drmPrimeFDToHandle (card node)");
+	close(prime_fd);
+	out(P "GPU buffer: render handle %u -> card handle %u\n", create.handle, b->handle);
+	return 0;
+}
+
+static int make_buf(int fd, int render_fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colour, uint32_t nonce)
 {
 	struct drm_mode_create_dumb create = { .width = w, .height = h, .bpp = 32 };
 	struct drm_mode_map_dumb map = { 0 };
 	uint32_t handles[4] = { 0 }, pitches[4] = { 0 }, offsets[4] = { 0 };
 
+	if (render_fd >= 0) {
+		if (make_prime_buf(fd, render_fd, b, w, h))
+			return 1;
+		goto fill;
+	}
 	out(P "step: CREATE_DUMB %ux%u\n", w, h);
 	if (drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create))
 		return fail("DRM_IOCTL_MODE_CREATE_DUMB");
@@ -117,6 +226,7 @@ static int make_buf(int fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colo
 	b->map = mmap(NULL, b->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)map.offset);
 	if (b->map == MAP_FAILED)
 		return fail("mmap of the dumb buffer");
+fill:
 	for (uint32_t y = 0; y < h; y++) {
 		uint32_t *row = (uint32_t *)((uint8_t *)b->map + (size_t)y * b->pitch);
 
@@ -143,10 +253,12 @@ static int make_buf(int fd, struct buf *b, uint32_t w, uint32_t h, uint32_t colo
 
 int main(int argc, char **argv)
 {
-	const char *device = "/dev/dri/card0";
+	const char *device = NULL;	/* default: the card node whose driver is "apple" */
+	char found_path[64] = "";
 	double seconds = 2.0;
 	uint32_t nonce = 0x5d0c0f11;
 	int do_flip = 1;
+	const char *prime_from = NULL;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--device") && i + 1 < argc)
@@ -155,16 +267,29 @@ int main(int argc, char **argv)
 			seconds = atof(argv[++i]);
 		else if (!strcmp(argv[i], "--nonce") && i + 1 < argc)
 			nonce = (uint32_t)strtoul(argv[++i], NULL, 16);
+		else if (!strcmp(argv[i], "--prime-from") && i + 1 < argc)
+			prime_from = argv[++i];
 		else if (!strcmp(argv[i], "--no-flip"))
 			do_flip = 0;
 	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	console_fd = open("/dev/console", O_WRONLY | O_NOCTTY);
-	out(P "start: device %s, %.1f s, nonce %08x\n", device, seconds, nonce);
+	out(P "start: device %s, %.1f s, nonce %08x\n", device ? device : "(by driver name)", seconds, nonce);
 
-	int fd = open(device, O_RDWR | O_CLOEXEC);
-	if (fd < 0)
-		return fail(device);
+	int fd;
+	if (device) {
+		fd = open(device, O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			return fail(device);
+	} else {
+		fd = open_by_driver("card", "apple", found_path, sizeof(found_path));
+		if (fd < 0) {
+			out(P "FAIL no /dev/dri/card* with DRM driver \"apple\" (the display driver)\n");
+			return 1;
+		}
+		device = found_path;
+	}
+	out(P "display node %s\n", device);
 	drmVersion *v = drmGetVersion(fd);
 	if (v) {
 		out(P "driver %s %d.%d.%d (%s)\n", v->name, v->version_major, v->version_minor,
@@ -267,8 +392,26 @@ int main(int argc, char **argv)
 	}
 
 	struct buf bufs[2] = { { 0 }, { 0 } };
-	if (make_buf(fd, &bufs[0], mode.hdisplay, mode.vdisplay, 0x00203080, nonce) ||
-	    make_buf(fd, &bufs[1], mode.hdisplay, mode.vdisplay, 0x00804020, ~nonce))
+	int render_fd = -1;
+	if (prime_from) {
+		char rpath[64] = "";
+
+		if (!strcmp(prime_from, "auto")) {
+			render_fd = open_by_driver("renderD", "asahi", rpath, sizeof(rpath));
+			if (render_fd < 0) {
+				out(P "FAIL no /dev/dri/renderD* with DRM driver \"asahi\" (the GPU driver)\n");
+				return 1;
+			}
+			prime_from = rpath;
+		} else {
+			render_fd = open(prime_from, O_RDWR | O_CLOEXEC);
+			if (render_fd < 0)
+				return fail(prime_from);
+		}
+		out(P "buffers come from the GPU driver on %s\n", prime_from);
+	}
+	if (make_buf(fd, render_fd, &bufs[0], mode.hdisplay, mode.vdisplay, 0x00203080, nonce) ||
+	    make_buf(fd, render_fd, &bufs[1], mode.hdisplay, mode.vdisplay, 0x00804020, ~nonce))
 		return 1;
 
 	uint32_t mode_blob = 0;
@@ -284,10 +427,18 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 10; i++)
 		drmModeAtomicAddProperty(req, plane_id, pp[i], pv[i]);
 	out(P "step: atomic commit with ALLOW_MODESET\n");
-	if (drmModeAtomicCommit(fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL))
-		return fail("drmModeAtomicCommit (ALLOW_MODESET, first frame)");
+	uint64_t t_commit = now_ns();
+	if (drmModeAtomicCommit(fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_PAGE_FLIP_EVENT, NULL))
+		return fail("drmModeAtomicCommit (ALLOW_MODESET | PAGE_FLIP_EVENT, first frame)");
 	drmModeAtomicFree(req);
-	out(P "first frame committed: fb %u, nonce %08x\n", bufs[0].fb, nonce);
+	uint64_t t_returned = now_ns();
+	out(P "first frame committed: fb %u, nonce %08x; the blocking commit took %.3f ms\n", bufs[0].fb, nonce,
+	    (t_returned - t_commit) / 1e6);
+	/* a client must not flip again before the previous commit's event: wait for it */
+	if (wait_flip(fd, "first frame"))
+		return 1;
+	out(P "first frame's flip-complete event arrived %.3f ms after the commit returned\n",
+	    (now_ns() - t_returned) / 1e6);
 
 	if (!do_flip) {
 		sleep((unsigned)seconds);
@@ -299,38 +450,32 @@ int main(int argc, char **argv)
 	uint64_t start = now_ns(), last = start, min_iv = UINT64_MAX, max_iv = 0, end = start + (uint64_t)(seconds * 1e9);
 	unsigned flips = 0, next = 1;
 
-	while (now_ns() < end) {
-		char evbuf[256];
-		ssize_t n;
-		int got = 0;
+	unsigned busy_retries = 0;
 
-		req = drmModeAtomicAlloc();
-		drmModeAtomicAddProperty(req, plane_id, pp[0], bufs[next].fb);
-		if (drmModeAtomicCommit(fd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK,
-					(void *)(uintptr_t)(flips + 1))) {
-			out(P "flip %u: ", flips + 1);
+	while (now_ns() < end) {
+		int tries = 0, ret;
+
+		/*
+		 * EBUSY means the previous commit on the CRTC is not finished although its event
+		 * has been read; counted, retried at most 100 times 1 ms apart, and reported.
+		 */
+		for (;;) {
+			req = drmModeAtomicAlloc();
+			drmModeAtomicAddProperty(req, plane_id, pp[0], bufs[next].fb);
+			ret = drmModeAtomicCommit(fd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK,
+						  (void *)(uintptr_t)(flips + 1));
+			drmModeAtomicFree(req);
+			if (!ret || errno != EBUSY || ++tries > 100)
+				break;
+			busy_retries++;
+			usleep(1000);
+		}
+		if (ret) {
+			out(P "flip %u (after %d EBUSY retries): ", flips + 1, tries);
 			return fail("drmModeAtomicCommit (PAGE_FLIP_EVENT | NONBLOCK)");
 		}
-		drmModeAtomicFree(req);
-		/* blocking read of the flip-complete event */
-		while (!got) {
-			n = read(fd, evbuf, sizeof(evbuf));
-			if (n < 0 && errno == EINTR)
-				continue;
-			if (n < (ssize_t)sizeof(struct drm_event)) {
-				out(P "flip %u: read returned %zd: ", flips + 1, n);
-				return fail("read of the DRM event");
-			}
-			for (ssize_t off = 0; off + (ssize_t)sizeof(struct drm_event) <= n;) {
-				struct drm_event *ev = (struct drm_event *)(evbuf + off);
-
-				if (ev->type == DRM_EVENT_FLIP_COMPLETE)
-					got = 1;
-				if (ev->length < sizeof(*ev))
-					break;
-				off += ev->length;
-			}
-		}
+		if (wait_flip(fd, "flip"))
+			return 1;
 		uint64_t t = now_ns(), iv = t - last;
 
 		if (flips > 0) {
@@ -345,8 +490,9 @@ int main(int argc, char **argv)
 	}
 	double elapsed = (double)(last - start) / 1e9;
 
-	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms\n", flips, elapsed,
-	       elapsed > 0 ? flips / elapsed : 0.0, flips > 1 ? min_iv / 1e6 : 0.0, flips > 1 ? max_iv / 1e6 : 0.0);
+	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms, %u EBUSY retries\n", flips,
+	       elapsed, elapsed > 0 ? flips / elapsed : 0.0, flips > 1 ? min_iv / 1e6 : 0.0,
+	       flips > 1 ? max_iv / 1e6 : 0.0, busy_retries);
 	if (flips < 2) {
 		out(P "FAIL fewer than two flips completed\n");
 		return 1;

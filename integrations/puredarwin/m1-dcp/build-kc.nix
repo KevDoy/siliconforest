@@ -10,12 +10,14 @@ let
   agxKext = import ../m1-rust-kext/build-agx-kext.nix;
   gpuDt = import ../m1-gpu-dt/build-kext.nix;
   needle = "  -o kernel";
+  pkgs = (import ../m1-rust-kext/pins.nix).pkgs;
   extra = if agx then ''  -kext "${agxKext}/System/Library/Extensions/PDAgx.kext" \
       '' else "";
 in base.overrideAttrs (old:
   assert builtins.stringLength old.buildPhase
     != builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] old.buildPhase);
   {
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.python3 ];
     buildPhase = ''
       set -o pipefail
       {
@@ -24,16 +26,9 @@ in base.overrideAttrs (old:
       ${extra}-kext "${dcp}/System/Library/Extensions/PDDcp.kext" \
       -o kernel'' ] old.buildPhase + ''
       } 2>&1 | tee kc-build.log
-      last=$(grep -E '^ *kext\[[0-9]+\] .*vmaddr=0x[0-9a-f]+ size=0x[0-9a-f]+' kc-build.log | tail -1)
-      khdr=$(grep -oE 'fileset: kernel hdr vmaddr=0x[0-9a-f]+' kc-build.log | tail -1 | grep -oE '0x[0-9a-f]+')
-      va=$(printf '%s' "$last" | grep -oE 'vmaddr=0x[0-9a-f]+' | cut -d= -f2)
-      sz=$(printf '%s' "$last" | grep -oE 'size=0x[0-9a-f]+' | cut -d= -f2)
-      test -n "$va" -a -n "$sz" -a -n "$khdr"
-      end=$(( (va & 0xffffffffff) + sz )); lim=$(( khdr & 0xffffffffff ))
-      echo "kext area ends at +$(printf %x $end), kernel header at +$(printf %x $lim), free $(( lim - end )) bytes"
-      if [ $(( lim - end )) -lt 65536 ]; then
-        echo "the kext area reaches the kernel's __TEXT: this collection does not boot" >&2
-        exit 1
-      fi
+      # The launcher's image gate, reproduced (tools/kc_overlap.py): kc-builder puts the
+      # collection's __PRELINK_INFO after the last kext and accepts it running into the
+      # kernel's __TEXT; such a collection is refused at boot time.
+      python3 ${../m1-rust-kext/tools/kc_overlap.py} kernel
     '';
   })

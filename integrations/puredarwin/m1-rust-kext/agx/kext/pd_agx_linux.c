@@ -402,3 +402,16 @@ memset_pattern16(void *b, const void *pattern16, size_t len)
 	for (i = 0; i < len; i++)
 		d[i] = p[i & 15];
 }
+
+/*
+ * PD_STUB: TTM is not built into this kext's DRM core (kext/CMakeLists.txt, PD_DRM_KEEP_ALL).
+ * The layer's pd_drm_gem_helpers.c still carries the GEM-TTM helpers for drivers that use
+ * TTM and names these three; no driver in this kext has a TTM object, so they are not
+ * reached. Defined so that the collection has no unresolved symbol.
+ */
+struct ttm_buffer_object;
+struct vm_area_struct;
+struct iosys_map;
+int ttm_bo_mmap_obj(struct vm_area_struct *vma, struct ttm_buffer_object *bo) { return (-ENODEV); }
+int ttm_bo_vmap(struct ttm_buffer_object *bo, struct iosys_map *map) { return (-ENODEV); }
+void ttm_bo_vunmap(struct ttm_buffer_object *bo, struct iosys_map *map) { }

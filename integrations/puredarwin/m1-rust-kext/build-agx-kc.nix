@@ -14,11 +14,13 @@ let
   agx = import ./build-agx-kext.nix;
   gpuDt = import ../m1-gpu-dt/build-kext.nix;
   needle = "  -o kernel";
+  pkgs = (import ./pins.nix).pkgs;
   marginPages = 4;
 in base.overrideAttrs (old:
   assert builtins.stringLength old.buildPhase
     != builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] old.buildPhase);
   {
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.python3 ];
     buildPhase = ''
       set -o pipefail
       {
@@ -31,17 +33,9 @@ in base.overrideAttrs (old:
       # launcher's image check then rejects the collection (boot ag02: "Overlapping
       # file-backed segments map different bytes"). Require the last kext to end at least
       # ${toString marginPages} pages before the kernel header.
-      last=$(grep -E '^ *kext\[[0-9]+\] .*vmaddr=0x[0-9a-f]+ size=0x[0-9a-f]+' kc-build.log | tail -1)
-      khdr=$(grep -oE 'fileset: kernel hdr vmaddr=0x[0-9a-f]+' kc-build.log | tail -1 | grep -oE '0x[0-9a-f]+')
-      va=$(printf '%s' "$last" | grep -oE 'vmaddr=0x[0-9a-f]+' | cut -d= -f2)
-      sz=$(printf '%s' "$last" | grep -oE 'size=0x[0-9a-f]+' | cut -d= -f2)
-      test -n "$va" -a -n "$sz" -a -n "$khdr"
-      # 64-bit kernel addresses: compare the low 40 bits
-      end=$(( (va & 0xffffffffff) + sz )); lim=$(( khdr & 0xffffffffff ))
-      echo "kext area ends at +$(printf %x $end), kernel header at +$(printf %x $lim), free $(( lim - end )) bytes"
-      if [ $(( lim - end )) -lt $(( ${toString marginPages} * 16384 )) ]; then
-        echo "the kext area reaches the kernel's __TEXT (less than ${toString marginPages} pages free): this collection does not boot" >&2
-        exit 1
-      fi
+      # The launcher's image gate, reproduced (tools/kc_overlap.py): kc-builder puts the
+      # collection's __PRELINK_INFO after the last kext and accepts it running into the
+      # kernel's __TEXT; such a collection is refused at boot time.
+      python3 ${./tools/kc_overlap.py} kernel
     '';
   })

@@ -158,6 +158,15 @@ for_each_matching_node over "apple,dcp"). Now a pre-order walk from the tree roo
 returns the first match after `from`. Found and written by m1-dcp-dart (ANSWERS.md, item 3).
 UPSTREAM: yes.
 """, []),
+ "0019-dma-buf-of-another-kext-is-a-dma-buf": ("""fbsdkpi: drm: a dma-buf file made by another DRM kext is recognised
+
+is_dma_buf_file() compared the file's operations with this kext's own table. Every DRM kext
+links its own copy of pd_dma_buf.c, so a dma-buf exported by one (PDAgx's render node) was
+not a dma-buf to another (PDDcp's card node): dma_buf_get() returned -EINVAL. linux_file gets
+a kind word, set for dma-buf files; both copies are built from the same sources, so the
+structures match.
+UPSTREAM: yes.
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -180,6 +189,7 @@ def topic(path, hunk, lineno):
     if path.endswith(("bus_dma.cpp", "dma-mapping.h")): return "0010-dma-map-sg-for-platform-devices"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
+    if path.endswith(("linux/fs.h", "pd_dma_buf.c")): return "0019-dma-buf-of-another-kext-is-a-dma-buf"
     if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"
     if path.endswith("pd_linux_of.c") and "pd_of_next" in hunk: return "0018-of-find-compatible-node-continues-after-from"

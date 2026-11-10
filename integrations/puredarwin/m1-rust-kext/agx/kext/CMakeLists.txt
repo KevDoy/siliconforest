@@ -38,6 +38,13 @@ set(lkpiopt "SHELL:-include ${FBSDKPI_DIR}/pd/fbsd-extra/pd_lkpi_pre.h"
 if(NOT "drm_gem_shmem_helper.c" IN_LIST PD_DRM_CORE_SOURCES)
     list(APPEND PD_DRM_CORE_SOURCES drm_gem_shmem_helper.c)
 endif()
+# Space (one collection has to hold PDAgx and PDDcp, each with its own DRM core): TTM and the
+# DisplayPort/HDMI/DSC helper library are for drivers that use them; neither this driver nor
+# the DRM core itself references them. PD_DRM_KEEP_ALL=ON builds the full list again.
+option(PD_DRM_KEEP_ALL "Build TTM and the display helper library into the DRM core" OFF)
+if(NOT PD_DRM_KEEP_ALL)
+    list(FILTER PD_DRM_CORE_SOURCES EXCLUDE REGEX "^(ttm|display)/")
+endif()
 set(core)
 foreach(src IN LISTS PD_DRM_CORE_SOURCES)
     list(APPEND core "${drmkmod}/drivers/gpu/drm/${src}")
@@ -81,6 +88,18 @@ add_fbsdkpi_driver(PDAgx
         "${RTKIT}/PDRtkitPlatform.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PDAgxHost.cpp"
 )
+# Space: the layer's own objects, compiled without -O by the tree, get -Os in this kext as they
+# do in PDDcp; with both, PDAgx and PDDcp fit one collection with room for its prelink info.
+# PDAGX_LAYER_O0=ON builds them as the tree does.
+option(PDAGX_LAYER_O0 "Compile the layer objects of PDAgx without optimisation" OFF)
+if(NOT PDAGX_LAYER_O0)
+    foreach(t PDAgx_core PDAgx_lkpi PDAgx_lkpiglue PDAgx_driver PDAgx_iflib)
+        if(TARGET ${t})
+            target_compile_options(${t} PRIVATE -Os)
+        endif()
+    endforeach()
+endif()
+
 # default off: the driver attaches only when asked to with the pdagx=1 boot-arg
 target_compile_definitions(PDAgx.kext PRIVATE PDDRM_OPT_IN_BOOTARG="pdagx"
     PDDRMFramebuffer=PDDRMFramebufferAgx PDDRMPresenter=PDDRMPresenterAgx)

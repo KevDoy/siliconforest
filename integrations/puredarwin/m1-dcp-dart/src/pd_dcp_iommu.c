@@ -399,6 +399,54 @@ void pd_dma_free_attrs(struct device *dev, size_t size, void *cpu_addr, dma_addr
 	pd_alloc_drop(a, a->npages);
 }
 
+/*
+ * Map `n` physical pages, in order, at one contiguous device address of the device's stream
+ * (added for PDDcp's import of a buffer another kext owns: the pages are the exporter's and
+ * stay pinned by it; nothing is allocated or copied here). One invalidate for the range.
+ * Returns 0 and the address, -ENODEV for a device not behind a DART, -ENOMEM/-EIO otherwise.
+ */
+int pd_dma_map_phys_pages(struct device *dev, const u64 *phys, unsigned int n, dma_addr_t *dma_handle)
+{
+	struct pd_iommu_domain *dom = pd_domain(dev);
+	unsigned int i;
+	u64 iova;
+
+	if (!dom)
+		return -ENODEV;
+	if (!phys || !n || !dma_handle)
+		return -EINVAL;
+	for (i = 0; i < n; i++)
+		if (phys[i] & (PD_DART_PAGE - 1))
+			return -EINVAL;
+	if (pd_dart_iova_alloc(dom->pd_stream, (u64)n << PD_DART_PAGE_SHIFT, &iova))
+		return -ENOMEM;
+	for (i = 0; i < n; i++) {
+		if (pd_dart_map_deferred(dom->pd_stream, iova + ((u64)i << PD_DART_PAGE_SHIFT), phys[i],
+					 PD_DART_PAGE, PD_DART_PROT_READ | PD_DART_PROT_WRITE))
+			break;
+	}
+	if (pd_dart_flush(dom->pd_stream) || i < n) {
+		pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+		pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+		return -EIO;
+	}
+	*dma_handle = pd_to_dma(iova);
+	return 0;
+}
+
+/* Undo pd_dma_map_phys_pages(): unmap, invalidate, give the address range back. */
+void pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n)
+{
+	struct pd_iommu_domain *dom = pd_domain(dev);
+	u64 iova;
+
+	if (!dom || !n)
+		return;
+	iova = dma_handle & dom->pd_mask;
+	pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+	pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+}
+
 void *pd_dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp)
 {
 	return pd_dma_alloc_attrs(dev, size, dma_handle, gfp, 0);

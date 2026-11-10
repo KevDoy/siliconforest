@@ -120,6 +120,9 @@ void pd_dma_unmap_sgtable(struct device *dev, struct sg_table *sgt, enum dma_dat
 int pd_dma_buffer_pages(struct device *dev, void *cpu_addr, size_t size, uint32_t *pages);
 
 /* Counters and the last error of the DART behind a device, one line to the kernel log. */
+/* a list of physical pages at one contiguous device address (PDDcp's cross-kext import) */
+int pd_dma_map_phys_pages(struct device *dev, const u64 *phys, unsigned int n, dma_addr_t *dma_handle);
+void pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n);
 void pd_dcp_iommu_report(struct device *dev, const char *when);
 
 #ifndef PD_DCP_IOMMU_NO_REDIRECT
