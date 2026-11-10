@@ -1,0 +1,40 @@
+#!/bin/bash
+# Boot the Chonkstep compositor's GPU/KMS steps once. Usage:
+#   tools/wm_gl_boot.sh <new-name> [kc-store-path] [extra boot-args]
+# Stages the compositor binary as /usr/bin/chonkstep-wm-gl, the Mesa bundle (libEGL, libGLESv2,
+# libgallium, libdrm under /usr/local/lib/mesa-asahi) and a guest script, then boots through
+# tools/dcp_boot.sh with pdagx=1 pddcp=2 (a collection with PDAgx and PDDcp is required).
+#   WM_GL_STEP=probe (default)  guest script darwin-wm-gl-probe.in: the KMS backend alone,
+#                               clear + page flip, WMGL lines
+#   WM_GL_BIN=<path>            compositor binary (default: the wm-darwin-gl desktop build)
+#   WM_GL_TEMPLATE=<path>       another guest script
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
+N=${1:?name}
+KC=${2:-/nix/store/jz0v8c2ch0x7qjis2a3dvggp2adsnx9h-puredarwin-kc-arm64-0.1}
+EXTRA=${3:-}
+BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+case "${WM_GL_STEP:-probe}" in
+  probe) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-probe.in ;;
+  *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
+esac
+TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
+[ -x "$BIN" ] || { echo "no compositor binary at $BIN" >&2; exit 2; }
+[ -r "$TEMPLATE" ] || { echo "no guest script at $TEMPLATE" >&2; exit 2; }
+[ -d "$KC" ] || { echo "no kernel collection at $KC" >&2; exit 2; }
+export PATH=$HOME/.nix-profile/bin:$PATH
+# The same Mesa bundle the zero-copy demo runs on (DCP_TEST=kms in tools/dcp_boot.sh).
+T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
+X="$BIN=/usr/bin/chonkstep-wm-gl"
+for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do
+  [ -r "$T/usr/local/lib/mesa-asahi/$l" ] || { echo "Mesa bundle has no $l (in $T)" >&2; exit 2; }
+  X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"
+done
+# The guest script replaces the supervisor directly, as the other DCP tests do.
+export PCIE_EXTRA_FILES="$X;$TEMPLATE=/usr/bin/darwin-desktop-test"
+if [ "${WM_GL_DRY_RUN:-0}" = 1 ]; then
+  echo "kc: $KC"; echo "boot-args: pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=2 pdagx=1 $EXTRA"
+  echo "$PCIE_EXTRA_FILES" | tr ';' '\n'; exit 0
+fi
+DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|chonkstep-gl:\|chonkstep-darwin-desktop:\|WMSTAT\|WMBENCH\|panic' | cut -c1-${WM_GL_COLS:-330}

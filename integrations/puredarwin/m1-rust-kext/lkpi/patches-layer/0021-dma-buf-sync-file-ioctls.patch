@@ -1,8 +1,9 @@
 fbsdkpi: drm: DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE
 
 Both returned ENOTTY. Mesa calls them for every shared buffer on every submission and
-falls back to waiting on the CPU when they fail. Implemented as Linux's dma-buf.c does, on
-the layer's dma_resv, dma_fence_unwrap and sync_file.
+falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
+dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
+line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
 UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/drm/src/pd_dma_buf.c
@@ -18,11 +19,13 @@ UPSTREAM: yes.
  #include <linux/fs.h>
  #include <linux/file.h>
  #include <linux/ioctl.h>
-@@ -94,10 +98,102 @@
+@@ -94,10 +98,109 @@
  	return 0;
  }
  
-+// DMA_BUF_IOCTL_EXPORT_SYNC_FILE / IMPORT_SYNC_FILE (linux drivers/dma-buf/dma-buf.c): the
++// DMA_BUF_IOCTL_EXPORT_SYNC_FILE / IMPORT_SYNC_FILE: dma_buf_export_sync_file() and
++// dma_buf_import_sync_file() of drivers/dma-buf/dma-buf.c at the pin (linux-aurora 6a08a08e,
++// lines 450-551), statement for statement, with include/uapi/linux/dma-buf.h's layouts: the
 +// buffer's implicit-sync fences as a sync_file, and a sync_file's fences added to the buffer.
 +// mesa calls both for every shared buffer on every submission.
 +struct pd_dma_buf_sync_file {
@@ -97,13 +100,18 @@ UPSTREAM: yes.
 +	usage = (arg.flags & PD_DMA_BUF_SYNC_WRITE) != 0 ? DMA_RESV_USAGE_WRITE : DMA_RESV_USAGE_READ;
 +	dma_fence_unwrap_for_each(f, &iter, fence)
 +		n++;
-+	dma_resv_lock(db->resv, NULL);
-+	ret = dma_resv_reserve_fences(db->resv, n);
-+	if (ret == 0) {
-+		dma_fence_unwrap_for_each(f, &iter, fence)
-+			dma_resv_add_fence(db->resv, f, usage);
++	// as the pin's dma_buf_import_sync_file(): a sync file whose fences have all signalled
++	// unwraps to nothing, and then the reservation object is not touched at all
++	ret = 0;
++	if (n > 0) {
++		dma_resv_lock(db->resv, NULL);
++		ret = dma_resv_reserve_fences(db->resv, n);
++		if (ret == 0) {
++			dma_fence_unwrap_for_each(f, &iter, fence)
++				dma_resv_add_fence(db->resv, f, usage);
++		}
++		dma_resv_unlock(db->resv);
 +	}
-+	dma_resv_unlock(db->resv);
 +	dma_fence_put(fence);
 +	return ret;
 +}

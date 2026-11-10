@@ -181,8 +181,9 @@ UPSTREAM: yes (PDDRMDri and fbsdkpi together).
  "0021-dma-buf-sync-file-ioctls": ("""fbsdkpi: drm: DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE
 
 Both returned ENOTTY. Mesa calls them for every shared buffer on every submission and
-falls back to waiting on the CPU when they fail. Implemented as Linux's dma-buf.c does, on
-the layer's dma_resv, dma_fence_unwrap and sync_file.
+falls back to waiting on the CPU when they fail. dma_buf_export_sync_file() and
+dma_buf_import_sync_file() of the pin's drivers/dma-buf/dma-buf.c (lines 450-551), compared
+line by line, on the layer's dma_resv, dma_fence_unwrap and sync_file.
 UPSTREAM: yes.
 """, []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
