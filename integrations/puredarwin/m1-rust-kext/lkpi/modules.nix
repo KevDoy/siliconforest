@@ -22,6 +22,16 @@ rec {
   plat = phaseC ++ [ "device" "device_id" "driver" "platform" "devres" "of" "acpi" "dma"
     "revocable" "impl_flags" ];
 
+  # D4: everything the Asahi driver (common code + G13) is written against.
+  agx = plat ++ [ "drm" "drm_device" "drm_driver" "drm_file" "drm_ioctl" "drm_gem" "drm_mm"
+    "drm_sched" "drm_gpuvm" "drm_syncobj" "dma_fence" "dma_buf" "scatterlist" "ioctl" "soc"
+    "soc_apple_rtkit" "soc_apple_mailbox" "bitfield"
+    # m1-lkpi-extras
+    "xarray" "module_param" "mm" "seq_file" ];
+  agxConfig = [ "CONFIG_DRM" ''CONFIG_DRM="y"'' "CONFIG_DMA_SHARED_BUFFER"
+    "CONFIG_RUST_DRM_GEM_SHMEM_HELPER" "CONFIG_RUST_DRM_GPUVM"
+    ''CONFIG_RUST_APPLE_RTKIT="y"'' ''CONFIG_RUST_APPLE_MAILBOX="y"'' ];
+
   # Kconfig as rustc sees it (Linux: include/generated/rustc_cfg). Only what the tree's
   # CONFIG_ cfgs can truthfully be on this platform.
   config = [

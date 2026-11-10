@@ -39,6 +39,12 @@
 # gives Rust as usize: same size and layout, a different Rust type (rtkit.rs assigns a u64).
 --blocklist-type dma_addr_t
 --raw-line 'pub type dma_addr_t = u64;'
+# The same for the other two address-sized types Linux defines as u64 on arm64 and the
+# kernel crate and the driver use as such (`.into()` from u32, arithmetic with u64).
+--blocklist-type phys_addr_t
+--raw-line 'pub type phys_addr_t = u64;'
+--blocklist-type resource_size_t
+--raw-line 'pub type resource_size_t = u64;'
 
 # pd/fbsd-extra: #define acpi_device _device (FreeBSD's ACPI device is its newbus device)
 --raw-line 'pub type acpi_device = _device;'

@@ -32,6 +32,26 @@ let
   # other kext is affected (each kext compiles its own copy of the layer). Every patch says
   # in its header whether it has to go upstream into src/Kernel/fbsdkpi.
   pristineTree = drmKext.src;
+  # m1-lkpi-extras (SF-F F11): xarray, module_param, mm, seq_file and the driver's direct
+  # bindings. Its files are used from that directory as they are; its README lists the steps.
+  extras = ../../m1-lkpi-extras;
+  # the driver's uAPI header, from the driver's tree, and the "drm.h" it includes
+  asahiUapi = /home/chrisk/src/darwin-lab/sources/gpu-plan/linux-aurora/include/uapi/drm/asahi_drm.h;
+  extrasInclude = pkgs.runCommand "pd-lkpi-extras-include" { } ''
+    mkdir -p $out/uapi/drm
+    cp ${extras + "/c/include/pd_lkpi_extras.h"} $out/pd_lkpi_extras.h
+    cp ${asahiUapi} $out/uapi/drm/asahi_drm.h
+    cp ${extras + "/bindgen/uapi/drm/drm.h"} $out/uapi/drm/drm.h
+  '';
+  # helper overlay: this directory's files plus the extras' (no name may occur twice)
+  helpersDir = pkgs.runCommand "pd-lkpi-rust-helpers-overlay" { } ''
+    mkdir -p $out
+    cp ${./helpers}/*.c $out/
+    for f in ${extras + "/helpers"}/*.c; do
+      if [ -e $out/$(basename $f) ]; then echo "helper $(basename $f) is in both directories" >&2; exit 1; fi
+      cp $f $out/
+    done
+  '';
   tree = pkgs.runCommand "puredarwin-tree-lkpi-layer-patched" { nativeBuildInputs = [ pkgs.patch ]; } ''
     cp -R ${pristineTree} $out
     chmod -R u+w $out
@@ -43,6 +63,9 @@ let
     # (patches-layer/0005 adds the file to the LinuxKPI source list and the headers; 0006 is
     # that directory's pd_linux_of.patch re-made, which does not apply as written)
     cp ${../../m1-gpu-dt/kernel/pd_linux_fwnode.c} $out/src/Kernel/fbsdkpi/pd/lkpi/pd_linux_fwnode.c
+    # m1-lkpi-extras' xarray functions, as they are (patches-layer/0007 lists the source)
+    cp ${extras + "/c/pd_xarray.c"} $out/src/Kernel/fbsdkpi/pd/lkpi/pd_xarray.c
+    cp ${extras + "/c/include/linux/pd_xarray.h"} $out/src/Kernel/fbsdkpi/pd/lkpi-override/linux/pd_xarray.h
   '';
   drmkmod = pd.packages.x86_64-linux.drm-kmod-src;
   # Phase D: what the kexts are really built from. `drmkmod` and `tree` above keep their
@@ -86,17 +109,17 @@ let
       export LIBCLANG_PATH=${libclang}/lib
       mkdir -p lnk $out/status $out/objtree/rust/bindings $out/objtree/rust/uapi $out/lib $out/c
       ln -s ${linuxRust}/helpers lnk/linux-helpers
-      CC=(${clang} ${lib.escapeShellArgs cflags.cc} -I${./include} -I${rtkitSrc}/include -I$PWD/lnk)
+      CC=(${clang} ${lib.escapeShellArgs cflags.cc} -I${./include} -I${extrasInclude} -I${rtkitSrc}/include -I$PWD/lnk)
 
       echo "== reduce bindings_helper.h, uapi_helper.h, helpers/"
       python3 ${./tools/subset.py} headers ${linuxRust}/bindings/bindings_helper.h \
         bindings_helper.h $out/status/bindings-headers.tsv -- "''${CC[@]}"
-      cat ${./include/pd_bindings_extra.h} >> bindings_helper.h
+      cat ${./include/pd_bindings_extra.h} ${extras + "/bindgen/pd_bindings_extra_add.h"} >> bindings_helper.h
       python3 ${./tools/subset.py} headers ${linuxRust}/uapi/uapi_helper.h \
         uapi_helper.h $out/status/uapi-headers.tsv -- "''${CC[@]}"
       cat ${./include/pd_uapi_extra.h} >> uapi_helper.h
       HD=(${lib.concatMapStringsSep " " (d: "-D${d}") cflags.helperDefines})
-      python3 ${./tools/subset.py} helpers ${linuxRust}/helpers ${./helpers} \
+      python3 ${./tools/subset.py} helpers ${linuxRust}/helpers ${helpersDir} \
         helpers.c $out/status/helpers.tsv -- "''${CC[@]}" "''${HD[@]}"
 
       echo "== bindgen"
@@ -105,7 +128,8 @@ let
       # the name twice once the prefix is stripped.
       set -f  # the parameters contain regexes; stdenv's nullglob would delete them
       eval "PARAMS=($(grep -Ev '^#|^$' ${linuxRust}/bindgen_parameters | tr '\n' ' ') \
-                    $(grep -Ev '^#|^$' ${./bindgen_parameters_pd} | tr '\n' ' '))"
+                    $(grep -Ev '^#|^$' ${./bindgen_parameters_pd} | tr '\n' ' ') \
+                    $(grep -Ev '^#|^$' ${extras + "/bindgen/bindgen_parameters_add"} | tr '\n' ' '))"
       for n in $(grep -o '^const [a-z_A-Z0-9 ]* RUST_CONST_HELPER_[A-Za-z0-9_]*' bindings_helper.h \
                  | sed 's/.*RUST_CONST_HELPER_//'); do
         PARAMS+=(--blocklist-item "$n")
@@ -117,7 +141,7 @@ let
         BGC+=("$a")
         if [ "$a" = ${cflags.lkpiPre} ]; then BGC+=(-include ${./include/pd_bindgen_pre.h}); fi
       done
-      BGC+=(-I${./include} -I${rtkitSrc}/include -I$PWD/lnk -w -fno-builtin -D__BINDGEN__ -DMODULE
+      BGC+=(-I${./include} -I${extrasInclude} -I${rtkitSrc}/include -I$PWD/lnk -w -fno-builtin -D__BINDGEN__ -DMODULE
             -resource-dir ${libclang}/lib/clang/21)
       BG=(bindgen ${lib.escapeShellArgs bindgenFlags})
       gen=$out/objtree/rust
@@ -127,6 +151,9 @@ let
       # sys/malloc.h: #define free pd_fbsd_free renames every struct member called `free`
       # (drm_gem_object_funcs, kernel_param_ops, idr). Same member, Linux's name back.
       sed -Ei 's/\bpub pd_fbsd_free:/pub free:/' $gen/bindings/bindings_generated.rs
+      # linux/fs.h: #define file linux_file does the same to members called `file`
+      # (drm_debugfs_entry.file, drm_syncobj.file, fd.file); m1-lkpi-extras step 5
+      sed -Ei 's/\bpub linux_file:/pub file:/' $gen/bindings/bindings_generated.rs
       "''${BG[@]}" uapi_helper.h "''${PARAMS[@]}" -o $gen/uapi/uapi_generated.rs -- "''${BGC[@]}" 2> bindgen.log \
         || { grep -v ' WARN ' bindgen.log | head -40; exit 1; }
       # `struct spinlock` is LinuxKPI's spinlock_t (a FreeBSD struct mtx), but the name that
@@ -177,7 +204,7 @@ let
     python3 ${./tools/gate.py} $out/kernel > $out/pd-delta/modules
     python3 ${./tools/gate_errnos.py} $out/kernel/error.rs \
       ${bindingsGen}/objtree/rust/bindings/bindings_generated.rs > $out/pd-delta/errnos-gated
-    for p in ${./patches}/*.patch; do
+    for p in ${./patches}/*.patch ${extras + "/rust/patches"}/*.patch; do
       echo "applying $(basename $p)"
       patch -d $out -p1 --no-backup-if-mismatch < $p
     done
@@ -186,7 +213,7 @@ let
     {
       echo "modules gated (1 added line each): $(wc -w < $out/pd-delta/modules)"
       echo "errnos gated (1 added line each): $(wc -w < $out/pd-delta/errnos-gated)"
-      for p in ${./patches}/*.patch; do
+      for p in ${./patches}/*.patch ${extras + "/rust/patches"}/*.patch; do
         echo "$(basename $p): +$(grep -c '^+[^+]' $p) -$(grep -c '^-[^-]' $p)"
       done
       echo "total against pristine rust/: +$(grep -c '^+' $out/pd-delta/all-lines) -$(grep -c '^-' $out/pd-delta/all-lines)"
@@ -348,9 +375,48 @@ let
     exports = [ "_pd_rust_plat_register" ];
     extraArchives = [ "${bindingsGen}/lib/libhelpers.a" ];
   };
+  kernelAgx = kernelWith modules.agx modules.agxConfig;
+
+  # D4: the Asahi driver, common code + G13 (--cfg pd_g13), from the driver tree with
+  # ../agx/patches applied. `agxSrc` is also where the kext takes the driver's C from.
+  asahiDriver = builtins.path {
+    path = /home/chrisk/src/darwin-lab/sources/gpu-plan/linux-aurora/drivers/gpu/drm/asahi;
+    name = "linux-aurora-7.2.11-drm-asahi";
+  };
+  agxSrc = pkgs.runCommand "drm-asahi-for-pd" { nativeBuildInputs = [ pkgs.patch ]; } ''
+    cp -r ${asahiDriver} $out
+    chmod -R u+w $out
+    for p in ${../agx/patches}/*.patch; do
+      echo "applying $(basename $p)"
+      patch -d $out -p1 -F0 --no-backup-if-mismatch < $p
+    done
+  '';
+  asahi = linuxCrate {
+    crateName = "asahi";
+    crateType = "staticlib";
+    src = agxSrc;
+    root = "asahi_core.rs";
+    deps = [ kernelAgx pin_init ];
+    procMacros = [ (pm "macros") ];
+    cfgs = modules.config ++ modules.agxConfig ++ [ "CONFIG_DRM_ASAHI" "pd_g13" ];
+    # module! reads it (m1-lkpi-extras step 8)
+    env = { RUST_MODFILE = "drivers/gpu/drm/asahi/asahi"; };
+    # scripts/Makefile.build: every kernel module is no_std with rust_allowed_features
+    extraFlags = [ "-Zcrate-attr=no_std"
+      "-Zcrate-attr=feature(arbitrary_self_types,derive_coerce_pointee,used_with_arg,asm_goto,inline_const,lint_reasons,offset_of_nested,raw_ref_op,slice_ptr_len,strict_provenance,trivial_bounds,use_extern_macros,impl_trait_in_assoc_type,allocator_api,const_trait_impl,generic_const_exprs,adt_const_params)" ];
+  };
+  agxObject = rust.mkKextObject {
+    name = "asahi";
+    staticlib = asahi;
+    # the kext's start calls __asahi_init(), which reads the boot-args and registers the driver
+    # _dev_printk: the kext prints one self-test line through the helper the driver's dev_info!
+    # uses (boot rp01 did not show a dev_info! line)
+    exports = [ "___asahi_init" "___asahi_exit" "_pd_dev_printk_selftest" ];
+    extraArchives = [ "${bindingsGen}/lib/libhelpers.a" ];
+  };
 in
 {
-  inherit kernelPlat pdrustplat platObject finalTree finalDrmkmod drmKextFinal rtkitSrc drmKextOnPatchedLayer matrixOnly matrixQuick matrix rust cflags modules linuxRust tree pristineTree drmkmod drmKext
+  inherit agxSrc asahi agxObject extras kernelAgx kernelPlat pdrustplat platObject finalTree finalDrmkmod drmKextFinal rtkitSrc drmKextOnPatchedLayer matrixOnly matrixQuick matrix rust cflags modules linuxRust tree pristineTree drmkmod drmKext
     bindingsGen rustTree hostMacros ffi build_error pin_init zerocopy bindings uapi kernel kernelWith
     pdrustlkpi object linuxCrate pm;
 }

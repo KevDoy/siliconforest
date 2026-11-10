@@ -7,7 +7,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/pd_fbsd_os.h
 +++ b/src/Kernel/fbsdkpi/pd_fbsd_os.h
-@@ -26,7 +26,17 @@
+@@ -26,7 +26,18 @@
  void pdos_sleep_us(uint64_t us);
  
  // memory, sizes are remembered by the backend
@@ -22,10 +22,11 @@ UPSTREAM: yes.
 +int64_t pdos_malloc_live(void);
 +// the kernel's page size
 +size_t pdos_page_size(void);
++uint64_t pdos_physmem(void);
  void pdos_free(void *ptr);
  size_t pdos_malloc_size(void *ptr);
  void *pdos_malloc_contig(size_t size, size_t align, uint64_t maxaddr, uint64_t *phys);
-@@ -50,6 +60,16 @@
+@@ -50,6 +61,16 @@
  int pdos_dma_has_mapper(void *pcidev);
  
  // sleepable mutexes, kernel thread context only
@@ -121,7 +122,7 @@ UPSTREAM: yes.
  	return block + 1;
  }
  
-@@ -154,7 +191,26 @@
+@@ -154,7 +191,39 @@
  	if (ptr == NULL)
  		return;
  	pd_block *block = (pd_block *)ptr - 1;
@@ -146,10 +147,23 @@ UPSTREAM: yes.
 +pdos_page_size(void)
 +{
 +	return PAGE_SIZE;
++}
++
++// the machine's memory in bytes (hw.memsize), 0 when the kernel does not say
++extern "C" int sysctlbyname(const char *, void *, size_t *, void *, size_t);
++uint64_t
++pdos_physmem(void)
++{
++	uint64_t bytes = 0;
++	size_t len = sizeof(bytes);
++
++	if (sysctlbyname("hw.memsize", &bytes, &len, NULL, 0) != 0 || len != sizeof(bytes))
++		return 0;
++	return bytes;
  }
  
  size_t
-@@ -785,16 +841,52 @@
+@@ -785,16 +854,52 @@
  
  // locks
  
@@ -202,7 +216,7 @@ UPSTREAM: yes.
  	lck_mtx_free((lck_mtx_t *)m, sGroup);
  }
  
-@@ -820,12 +912,14 @@
+@@ -820,12 +925,14 @@
  pdos_spin_alloc(void)
  {
  	pdos_xnu_init();
@@ -217,7 +231,7 @@ UPSTREAM: yes.
  	lck_spin_free((lck_spin_t *)s, sGroup);
  }
  
-@@ -857,12 +951,14 @@
+@@ -857,12 +964,14 @@
  pdos_rw_alloc(void)
  {
  	pdos_xnu_init();
