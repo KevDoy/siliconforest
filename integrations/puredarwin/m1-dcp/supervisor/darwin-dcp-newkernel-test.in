@@ -9,7 +9,7 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
 run() { # tag, label, test arguments...
     tag=$1; label=$2; shift 2
     out=$(dcp-flip-test "$@" 2>&1); rc=$?
-    printf '%s\n' "$out" | grep -e 'flips' -e 'wait mode' -e 'fence' -e 'child' -e 'received' -e 'readback' \
+    printf '%s\n' "$out" | grep -e 'flips' -e 'timing:' -e 'wait mode' -e 'fence' -e 'child' -e 'received' -e 'readback' \
         -e 'exporting process' -e FAIL -e 'failed' -e PASS | cut -c1-240 | sed "s/^/$tag /"
     printf '%s_%s_RC=%s\n' "$tag" "$label" "$rc"
 }

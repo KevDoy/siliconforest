@@ -14,8 +14,8 @@
 # Lines: "WMSTAT selected renderer=gl output=kms ..." once, then WMSTAT every 60 frames and a
 # final one (frames, fps, flips, missed_refreshes); "chonkstep-gl: step:" before each
 # first-time display call; DL10_CLIENT_* from the test client; WMGL3_* from this script.
-# Stage: <chonkstep-darwin-desktop>=/usr/bin/chonkstep-wm-gl and
-#        <chonkstep-darwin>=/usr/bin/chonkstep-wm-gl-bare.
+# Both new binaries are staged over the RAM root's own /usr/bin/chonkstep-darwin-desktop and
+# /usr/bin/chonkstep-darwin (tools/wm_gl_boot.sh), replacing the old ones.
 # (@SSID@/@PSK@ are unused; the placeholders exist because the assembler fills templates.)
 nonce=${1:-none}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
@@ -28,7 +28,7 @@ export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
 export CHONKSTEP_DARWIN_FRAME_STATS=60
 printf '\nWMGL3_BEGIN_%s\n' "$nonce"
 ls -l /dev/dri 2>&1 | head -6
-for f in /usr/bin/chonkstep-wm-gl /usr/bin/chonkstep-wm-gl-bare /usr/bin/chonk-terminal-darwin /usr/bin/darwin-wayland-client /usr/bin/darwin-trackpad-enum /usr/share/darwin-desktop/DejaVuSans.ttf /usr/share/X11/xkb/rules/evdev; do
+for f in /usr/bin/chonkstep-darwin-desktop /usr/bin/chonkstep-darwin /usr/bin/chonk-terminal-darwin /usr/bin/darwin-wayland-client /usr/bin/darwin-trackpad-enum /usr/share/darwin-desktop/DejaVuSans.ttf /usr/share/X11/xkb/rules/evdev; do
     [ -e "$f" ] && s=present || s=MISSING
     printf 'WMGL3_FILE %s %s\n' "$s" "$f"
 done
@@ -50,7 +50,7 @@ if [ -c /dev/usb_hid_kbd ] && [ -c /dev/usb_hid_mouse ] && [ -x /usr/bin/chonk-t
     records=$runtime/session-$session
     mkdir -m 0700 "$records"
     printf 'WMGL3_DESKTOP_START renderer=gl seconds=40 terminals=2 start=%s\n' "$(date +%s)"
-    /usr/bin/chonkstep-wm-gl --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 40 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
+    /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 40 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
     a_rc=$?
     printf 'WMGL3_DESKTOP_RC=%s end=%s\n' "$a_rc" "$(date +%s)"
     [ -r "$records/session-result.txt" ] && sed 's/^/WMGL3_RESULT /' "$records/session-result.txt" | head -20
@@ -60,10 +60,10 @@ fi
 
 # ---- Part B: bare compositor on GL with the SHM test client ----
 b_rc=skipped
-if [ "$a_rc" != 0 ] && [ -x /usr/bin/chonkstep-wm-gl-bare ] && [ -x /usr/bin/darwin-wayland-client ]; then
+if [ "$a_rc" != 0 ] && [ -x /usr/bin/chonkstep-darwin ] && [ -x /usr/bin/darwin-wayland-client ]; then
     rm -f "$runtime/wayland-0" "$runtime/wayland-0.lock"
     printf 'WMGL3_BARE_START renderer=gl input=off start=%s\n' "$(date +%s)"
-    CHONKSTEP_DARWIN_RENDERER=gl /usr/bin/chonkstep-wm-gl-bare --run --socket "$runtime/wayland-0" 2>&1 &
+    CHONKSTEP_DARWIN_RENDERER=gl /usr/bin/chonkstep-darwin --run --socket "$runtime/wayland-0" 2>&1 &
     compositor=$!
     count=0
     while [ ! -S "$runtime/wayland-0" ] && kill -0 "$compositor" 2>/dev/null; do

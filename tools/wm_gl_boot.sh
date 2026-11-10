@@ -1,7 +1,10 @@
 #!/bin/bash
 # Boot the Chonkstep compositor's GPU/KMS steps once. Usage:
 #   tools/wm_gl_boot.sh <new-name> [kc-store-path] [extra boot-args]
-# Stages the compositor binary as /usr/bin/chonkstep-wm-gl, the Mesa bundle (libEGL, libGLESv2,
+# Stages the new desktop binary over the RAM root's own /usr/bin/chonkstep-darwin-desktop (and,
+# for the session step, the new bare compositor over /usr/bin/chonkstep-darwin): entries with
+# the same destination replace the base ones, so the old binaries' 38 MB are reclaimed and the
+# new compositor is the default binary of the root. Adds the Mesa bundle (libEGL, libGLESv2,
 # libgallium, libdrm under /usr/local/lib/mesa-asahi) and a guest script, then boots through
 # tools/dcp_boot.sh with pdagx=1 pddcp=2 (a collection with PDAgx and PDDcp is required).
 #   WM_GL_STEP=probe (default)  guest script darwin-wm-gl-probe.in: the KMS backend alone,
@@ -14,6 +17,9 @@
 #                               compositor with the SHM test client); WMSTAT lines
 #   WM_GL_BIN=<path>            desktop binary (default: the wm-darwin-gl desktop build)
 #   WM_GL_BARE_BIN=<path>       bare compositor binary, staged for the session step
+#   WM_GL_ASSEMBLE_ONLY=1       stop after the offline assemble (RAM root staged and checked,
+#                               nothing delivered or booted); prints the free space
+#   WM_GL_DRY_RUN=1             print the staging list only
 #   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 200)
 #   WM_GL_TEMPLATE=<path>       another guest script
 set -euo pipefail
@@ -37,10 +43,10 @@ TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
 export PATH=$HOME/.nix-profile/bin:$PATH
 # The same Mesa bundle the zero-copy demo runs on (DCP_TEST=kms in tools/dcp_boot.sh).
 T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
-X="$BIN=/usr/bin/chonkstep-wm-gl"
+X="$BIN=/usr/bin/chonkstep-darwin-desktop"
 if [ "$STAGE_BARE" = 1 ]; then
   [ -x "$BARE" ] || { echo "no bare compositor binary at $BARE" >&2; exit 2; }
-  X="$X;$BARE=/usr/bin/chonkstep-wm-gl-bare"
+  X="$X;$BARE=/usr/bin/chonkstep-darwin"
 fi
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do
   [ -r "$T/usr/local/lib/mesa-asahi/$l" ] || { echo "Mesa bundle has no $l (in $T)" >&2; exit 2; }
@@ -51,6 +57,12 @@ export PCIE_EXTRA_FILES="$X;$TEMPLATE=/usr/bin/darwin-desktop-test"
 if [ "${WM_GL_DRY_RUN:-0}" = 1 ]; then
   echo "kc: $KC"; echo "runtime: ${DCP_RUNTIME:-150}"; echo "boot-args: pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=2 pdagx=1 $EXTRA"
   echo "$PCIE_EXTRA_FILES" | tr ';' '\n'; exit 0
+fi
+if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
+  # The same assemble step tools/pcie_iterate.sh runs, and nothing after it.
+  python3 -B tools/pcie_assemble.py "pcie-enum-candidate-$N" | tail -2
+  grep -h '"free_bytes"' "artifacts/m1-desktop-010/pcie-enum-candidate-$N/ramdisk.record.json"
+  exit 0
 fi
 DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
 strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

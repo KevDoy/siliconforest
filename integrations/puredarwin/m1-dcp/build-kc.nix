@@ -5,11 +5,28 @@
 # Boot-args: the ones m1-gpu-dt documents for publishing the display nodes, and pddcp=1|2.
 # Fails when fewer than 4 pages are left before the kernel's __TEXT (see
 # ../m1-rust-kext/build-agx-kc.nix for why).
-{ agx ? false }:
+#
+# `--arg wifi true`: on ../m1-bwfm/build-kc.nix (bridge + IO80211Family + PDBwfm) instead.
+# `--arg slim true`: PDDcp, PDDRMDri and PDAgx go in without their debug map (`strip -S`: the
+# N_OSO/N_FUN stabs the linker writes for -g objects; 19381 of PDDcp's 19842 symbol-table
+# entries). A kext's __LINKEDIT is part of what it occupies in the collection: 540672 ->
+# 65536 bytes for PDDcp, 425984 -> 81920 for PDAgx. Code and data are not touched, and the
+# link maps (nix-support/*.map, tools/symbolize.sh) stay. Wi-Fi + PDAgx + PDDcp only fits
+# with this. Not the default until a slim collection has booted.
+{ agx ? false, wifi ? false, slim ? false }:
 let
-  base = import ../m1-apcie-host/build-kc.nix;
-  dcp = import ./build-kext.nix;
-  agxKext = import ../m1-rust-kext/build-agx-kext.nix;
+  base = if wifi then import ../m1-bwfm/build-kc.nix else import ../m1-apcie-host/build-kc.nix;
+  tc = (import ../m1-rust-kext/pins.nix).crossToolchain;
+  noDebugMap = kext: if !slim then kext else pkgs.runCommand "${kext.name}-no-debug-map" { } ''
+    mkdir -p $out
+    cp -R ${kext}/System ${kext}/nix-support $out/
+    chmod -R u+w $out
+    for b in $out/System/Library/Extensions/*.kext/Contents/MacOS/*; do
+      ${tc}/bin/arm64-apple-darwin20.4-strip -S "$b"
+    done
+  '';
+  dcp = noDebugMap (import ./build-kext.nix);
+  agxKext = noDebugMap (import ../m1-rust-kext/build-agx-kext.nix);
   gpuDt = import ../m1-gpu-dt/build-kext.nix;
   needle = "  -o kernel";
   # the kernel with ../m1-dcp/kernel-patches (pd_lfile descriptors: SCM_RIGHTS, select/poll/

@@ -88,7 +88,8 @@ Counts are added/removed lines.
 | 0018 of_find_compatible_node continues after `from` | see file |
 | 0019 a dma-buf made by another DRM kext is recognised | see file |
 | 0020 select/poll/kqueue on DRM fds wake on events (also patches PDDRMDri) | see file |
-| 0021 dma-buf sync-file ioctls | see file |
+| 0021 dma-buf sync-file ioctls (a GPL-2.0-only file: ported from the pin's dma-buf.c) | see file |
+| 0022 select/poll/kevent on sync_file and dma-buf descriptors (two GPL-2.0-only files; needs the kernel of `../m1-dcp/kernel.nix`) | see file |
 
 Counts for 0002, 0005, 0008 and 0011 above are from an earlier state; each patch's first
 lines say what it holds now (0002 also carries the seam halves of 0009, 0011, 0014, 0015; 0008

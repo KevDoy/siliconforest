@@ -10,6 +10,6 @@ nonce=${1:-none}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
 printf '\nDL47_SCM_BEGIN_%s\n' "$nonce"
 out=$(dcp-flip-test --seconds 2 --prime-from auto --scm-rights 2>&1); rc=$?
-printf '%s\n' "$out" | grep -e 'child' -e 'received' -e 'readback' -e 'exporting process' -e 'flips' -e 'wait mode' -e FAIL -e PASS | cut -c1-200 | sed 's/^/DL47 /'
+printf '%s\n' "$out" | grep -e 'child' -e 'received' -e 'readback' -e 'exporting process' -e 'flips' -e 'timing:' -e 'wait mode' -e FAIL -e PASS | cut -c1-200 | sed 's/^/DL47 /'
 printf 'DL47_SCM_RC=%s\n' "$rc"
 printf 'DL47_SCM_END_%s\n' "$nonce"

@@ -123,10 +123,65 @@ node matching, `of_find_compatible_node` over published nodes).
 
 | Path | What |
 | --- | --- |
-| `test/dcp-flip-test.c`, `dcp-flip-test.nix` | KMS through the card node whose driver is `apple`: modeset, page flips with flip-complete events, `--wait read|poll|select|kqueue`, `--prime-from auto` (buffers of the GPU driver imported for scanout) |
-| `supervisor/darwin-dcp-{flip,prime,wait}-test.in` | guest scripts (DL43, DL44, DL45 lines); `tools/dcp_boot.sh` stages them with `DCP_TEST=1|prime|wait` |
+| `test/dcp-flip-test.c`, `dcp-flip-test.nix` | KMS through the card node whose driver is `apple`: modeset, page flips with flip-complete events, `--wait read|poll|select|kqueue`, `--prime-from auto` (buffers of the GPU driver imported for scanout), `--scm-rights` (the GPU buffers come from a child process over a Unix socket), `--fence poll|select|kqueue` (waits on the CRTC out-fence sync_file and on a dma-buf holding it); prints where a flip's time goes (kernel event timestamps, commit call) |
+| `supervisor/darwin-dcp-{flip,prime,wait,scm,fence,newkernel}-test.in` | guest scripts (DL43, DL44, DL45, DL47, DL48 lines; `newkernel` is DL45 + DL48 + DL47 in one boot); `tools/dcp_boot.sh` stages them with `DCP_TEST=1|prime|wait|scm|fence|newkernel`. The last three need the kernel below |
 | `kext/pd_dcp_mmap.c` | user mmap of dumb buffers (PDDRMDri resolver) and the 3-argument `fb_create` adapter |
 | `kext/pd_dcp_prime.c` | import of a dma-buf exported by another DRM kext, for scanout without a copy |
 | `tools/symbolize.sh` | names kext addresses from a panic, from the link map kept with each build |
-| `kernel-patches/` | changes that need a kernel rebuild and are applied nowhere here |
+| `kernel-patches/`, `kernel.nix`, `kernel-swap.nix` | the kernel the collections here and in `m1-rust-kext` are built on; see below |
 | `build-kc.nix --arg agx true` | PDAgx and PDDcp in one collection |
+| `build-kc.nix --arg agx true --arg wifi true --arg slim true` | Wi-Fi, PDAgx and PDDcp in one collection; see "Space in the collection" |
+
+## The kernel (pd_lfile descriptors)
+
+dma-buf, sync_file and DRM syncobj descriptors are XNU `DTYPE_PDLFILE` files
+(`bsd/kern/pd_lfile.c` in the PureDarwin tree). Two things about them needed kernel changes,
+in `kernel-patches/`:
+
+| Patch | What |
+| --- | --- |
+| 0001 | `fg_sendable()` accepts `DTYPE_PDLFILE`: the descriptors can be sent with `SCM_RIGHTS` |
+| 0002 | select/poll/kevent wait on them: one selinfo for all linux files, `pd_lfile_wakeup()` (exported) for the layer to call, and a kevent filter `EVFILTID_PDLFILE` built like `spec_filtops` |
+
+`kernel.nix` builds the lab's T8103 bring-up kernel with them: the flake's
+`kernel-arm64-t8010-debug` with the machine config changed to T8103 and the source and three
+toolchain paths taken from the derivation of the kernel every collection used so far
+(`/nix/store/1ys1x1hz...-puredarwin-kernel-arm64-t8103-bringup-0.1`). Check that was done:
+`nix-build kernel.nix --arg patched false` evaluates to the pinned derivation's environment
+(every variable but `out`), and its kernel binary differs from the pinned one in 34 bytes: the
+build date in the version string and the Mach-O UUID. A kernel build takes about six minutes
+and is cached by nix.
+
+`kernel-swap.nix` replaces the pinned kernel's path in a collection recipe's build phase;
+`build-kc.nix` here and `../m1-rust-kext/build-agx-kc.nix` use it. The layer's patch 0022 calls
+`pd_lfile_wakeup`, so a DRM kext built from it does not link against the pinned kernel.
+
+The wakeup is not per object: any linux file's wakeup makes every select/kevent waiter on a
+linux file poll once more.
+
+## Space in the collection
+
+Measured on the collections of this state (`tools/` has no script for it; the numbers are
+from the kexts' load commands inside the collection and from the link maps):
+
+- The kexts have 16 MiB (`__PRELINK_TEXT` + `__PRELINK_INFO` must end before the kernel's
+  `__TEXT`). A kext occupies its segments and its `__LINKEDIT`.
+- Bridge collection 12,140,544 bytes; PDGpuDT + PDDRMDri + PDAgx add 2,686,976; PDDcp adds
+  1,720,320 (1,179,648 of segments, 540,672 of `__LINKEDIT`); IO80211Family + PDBwfm add
+  819,200. All three: 17,367,040, which is 753,664 too many.
+- `__LINKEDIT` is almost all debug map: the objects are built with `-g`, and the linker then
+  writes N_OSO/N_FUN stabs into the symbol table, which `-Wl,-x` does not remove. PDDcp:
+  19,842 entries, 19,381 of them such; PDAgx 14,726 / 14,261. `strip -S` takes PDDcp's
+  `__LINKEDIT` to 65,536 and PDAgx's to 81,920 bytes (819,200 saved) with `__TEXT`,
+  `__DATA_CONST` and `__DATA` byte-identical. `--arg slim true` does that, and Wi-Fi + PDAgx
+  + PDDcp then passes the launcher's image gate with 69,632 bytes to spare.
+- The same is true of every kext in the base: in the Wi-Fi + PDAgx collection the 55 kexts
+  have 9.6 MiB of segments and 6.0 MiB of `__LINKEDIT` (112,715 symbol-table entries, 81,216
+  of them local). That is where the room is; it is the base recipes' to take.
+- One copy of the shared code instead of two: PDAgx and PDDcp each link 233.7 KiB of layer
+  (Haiku compat, FreeBSD LinuxKPI, PureDarwin's), 367-373 KiB of DRM core (drm-kmod 6.14 +
+  m1-drm72), 12.9 KiB of dma-buf/fence/resv, 21.1 KiB of DRM glue and 32.8 KiB of RTKit:
+  about 670 KiB of code and data per kext, plus about 31 KiB of bss. A shared kext would save
+  roughly that once, less its export table. It is not needed for space any more; the reason
+  left for it is correctness across the two copies (a fence array or sync_file of one kext is
+  not recognised by the other, see patch 0022's "Not done").
