@@ -712,6 +712,36 @@ cc -O2 -I. -o agx-wl-demo agx-wl-demo.c xdg-shell-protocol.c \
   checkable here: anything with dma-bufs, patch 0006 (Darwin-only code), the Darwin
   libwayland at run time, and Mesa's own v3 path against a real server.
 
+## 11. Boot wl01: the client died in EGL/Wayland start-up; what was established
+
+- The staged files were intact: all seven files of the bundle, extracted from that boot's
+  `ramdisk.img` with `debugfs`, have the SHA-256 of the store files.
+- "Text page corruption detected for pid N" was not corruption. XNU prints it on the exit path
+  of a crashing process (`bsd/kern/kern_exit.c`, `proc_prepareexit` →
+  `revalidate_text_page` in `osfmk/vm/vm_fault.c`) when the code-signature hash of the 16 KiB
+  page holding the pc, the page before it, or the page holding the caller's return address
+  does not match. Every file both bundles ship had exactly one stale hash, that of its first
+  4 KiB (the Mach-O header): the linker signs ad hoc, and `install_name_tool` then rewrites
+  load commands in that page when the recipes relocate the libraries. Nothing enforces the
+  hash, so everything runs; the message only says that the crash was within the first 32 KiB
+  of some image or was called from the first 16 KiB of one. In this bundle that points at
+  libwayland-client's core (`wl_proxy_*`, `wl_display_*`, `dispatch_event`,
+  `wl_connection_*`, all between 0x4000 and 0x8000), `eglInitialize` itself (0x6d7c in
+  libEGL), all of libwayland-egl, or the GL entry stubs of libGLESv2. Which one is not known.
+- `tools/cs-rehash.py` recomputes the hash table of an ad-hoc signature in place (there is no
+  `codesign` in the toolchain; an ad-hoc signature is only that table). `agx-wl-demo.nix` now
+  runs it after relocation and checks the result, so from this bundle on the kernel message
+  means what it says. The other bundle (`agx-offscreen-test.nix`) is left as it was proven,
+  stale first-page hashes included.
+- `agx-wl-demo` now reports for itself: `step:` lines before every call from
+  `wl_display_connect` to the second `eglSwapBuffers`, and a signal handler that prints
+  `AGXWL_CRASH signal=.. fault_addr=.. pc=.. <image>+0x<offset> last_step=".."`, one
+  `AGXWL_CRASH_FRAME` per return address up the frame-pointer chain, and one
+  `AGXWL_CRASH_IMAGE base=.. name=..` per loaded image. `<image>+0x<offset>` is the address
+  `nm` prints for a dylib of the bundle (for the executable, minus 0x100000000).
+  `--crash-test` faults on purpose; `--no-protocol-log` runs without `WAYLAND_DEBUG` and the
+  stderr redirection, which removes libwayland's debug printing from the picture.
+
 ## Files
 
 ```
@@ -731,6 +761,7 @@ test/agx-wl-demo.c             GPU-rendered Wayland client
 WAYLAND-NEEDS.md               what a Mesa Wayland client needs from the compositor
 supervisor/                    guest scripts (darwin-agx-panel-demo.in is the demo's)
 KERNEL-NEEDS.md                kernel-side gaps met by the Mesa work, with call sites
+tools/cs-rehash.py             rewrite the page hashes of an ad-hoc code signature after relocation
 trace/ioctl-trace.c            LD_PRELOAD ioctl/mmap logger
 trace/summarize.py             condenses a log
 trace/shim-g13g-trace.txt      recorded log

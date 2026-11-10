@@ -3,12 +3,16 @@
 Written by the compositor side (`sources/chonkstep-darwin`, local branch `wm-darwin`).
 Read by the Mesa side (Wayland EGL platform on the Darwin Mesa build, GLES Wayland client).
 
-Status on 10 November: **nothing in section 1 is implemented yet.** This is the surface the
-compositor will implement next, so both sides can build to it. The line "Implemented in
-commit ..." will be added here when it exists; until then a client finds no
-`zwp_linux_dmabuf_v1` global and must fall back to `wl_shm`.
+Status on 10 November: **section 1 is implemented** on the local `wm-darwin` branch (commits
+`5597bc5` linux-dmabuf, `d59e0d9` implicit sync and checks) and built into the binaries
+`tools/wm_gl_boot.sh` stages. Checked on the host by wire tests of the protocol and buffer
+lifetime (with file-backed stand-in fds); importing a real client dma-buf into the
+compositor's GL context has **not run on the M1 yet** (`WM_GL_STEP=wlgpu` and
+`WM_GL_STEP=dmabuf` are the boots for that). It agrees with
+`m1-mesa-asahi/WAYLAND-NEEDS.md`; the one point that differed (synchronisation) is changed
+below.
 
-## 1. Server protocol surface for dma-buf clients (planned)
+## 1. Server protocol surface for dma-buf clients
 
 Global: `zwp_linux_dmabuf_v1`, **version 3** (no feedback objects; a client that binds 4 or 5
 will find the global advertised at 3).
@@ -32,8 +36,12 @@ Requests the server handles:
   one plane only (`plane_idx` 0). A second plane is a protocol error (`plane_idx`).
 - `zwp_linux_buffer_params_v1.create_immed(buffer_id, width, height, format, flags)` and
   `.create(width, height, format, flags)` (answered with `created` or `failed`).
-  `flags` must be 0: `y_invert`, `interlaced` and `bottom_first` are refused
-  (`create_immed`: protocol error `invalid_wl_buffer`; `create`: `failed`).
+  The buffer is imported into the compositor's GL context at this point, and the request
+  succeeds only if that import does. A refused description (`y_invert` or other flags, a
+  second plane, `stride < width * 4`, a modifier that is not advertised, an import EGL
+  rejects) is `failed` for `create` and the protocol error `invalid_wl_buffer` for
+  `create_immed`. A **format** that was never advertised is the protocol error
+  `invalid_format` for both.
 - `zwp_linux_buffer_params_v1.destroy`
 
 What a client buffer must be:
@@ -56,9 +64,16 @@ Surface semantics, the same as for `wl_shm` buffers on this compositor today:
   `release` is sent when the surface has a newer buffer committed and the frame showing the
   newer one has been handed to the display. A client therefore needs at least two buffers,
   three to never stall.
-- Rendering must be complete when the client commits: the compositor does not wait on a
-  fence of the client's. `glFinish()` before `commit` is correct. (Implicit sync through the
-  dma-buf sync-file ioctls can be agreed later; write the request in section 3.)
+- **Implicit sync: the client need not finish before it commits.** (Changed after
+  `WAYLAND-NEEDS.md`: ordinary Mesa clients only flush at `eglSwapBuffers`.) What the
+  compositor does: before it renders a frame it polls the dma-buf fd of every freshly
+  committed buffer for readability, without blocking, and holds the frame back until all are
+  readable (their write fences have signalled); its loop wakes on that fd. A buffer still not
+  readable after 100 ms is counted (`WMDMABUF total ... fence_timeouts=`) and the frame is
+  rendered anyway. On top of that the compositor samples the buffer through the same Mesa
+  asahi driver, which waits for the fence in its own submission. Neither path has been seen
+  working between two processes yet; a client that calls `glFinish()` before the swap (as
+  `agx-wl-demo` does) depends on neither.
 - `wl_surface.frame` callbacks fire on the display's flip-complete event (60 Hz), one per
   presented frame. Use them to pace rendering.
 - `xdg_wm_base` / `xdg_toplevel` as for shm clients; window size comes from the first
@@ -84,6 +99,12 @@ None open. (When something is needed it goes here with the exact call and errno.
   nodes) will not advertise `zwp_linux_dmabuf_v1` at all.
 - Socket: `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`, as the session scripts set them
   (`integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in`).
-- A client of ours for testing the server side (allocates on the render node, fills on the
-  CPU, attaches through `zwp_linux_dmabuf_v1`) will live in
-  `integrations/puredarwin/chonkstep-darwin/client-dmabuf/` when it exists.
+- Our own client for testing the server side (allocates on the render node, fills on the
+  CPU, attaches through `zwp_linux_dmabuf_v1`) is
+  `integrations/puredarwin/chonkstep-darwin/client-dmabuf/`.
+- What the compositor prints about dma-buf clients: `WMDMABUF import id= size= format=
+  modifier= stride= zero_copy=1` for the first eight buffers; `WMDMABUF check window=
+  commit=30|150 ... differing_pixels= max_channel_diff=` (the window's region of the
+  compositor's own GL frame against the client's buffer read through a CPU `mmap` of the
+  dma-buf fd, so **the fd should be mappable read-only**; if it is not, the line says
+  `not-mappable` and gives a hash and `flat=` instead); `WMDMABUF total ...` at exit.

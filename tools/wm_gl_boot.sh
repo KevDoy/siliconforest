@@ -16,6 +16,14 @@
 #                               terminals on the GL renderer (or, without input nodes, the bare
 #                               compositor with the SHM test client), driven unattended by the
 #                               compositor's own synthetic input script; WMSTAT and WMAUTO lines
+#   WM_GL_STEP=dmabuf           darwin-wm-gl-dmabuf.in: the bare compositor on GL with the dma-buf
+#                               test client (integrations/.../client-dmabuf): a client's GPU
+#                               buffers shown without a copy; WMSTAT, DMACLIENT and WMEXT lines
+#   WM_GL_STEP=wlgpu            darwin-wm-gl-wlgpu.in: a GPU-rendered application. The session on
+#                               GL plus the Mesa EGL Wayland demo client (agx-wl-demo and its
+#                               Mesa bundle from m1-mesa-asahi/agx-wl-demo.nix, staged under
+#                               /usr/local/lib/mesa-asahi-wl); AGXWL, WMDMABUF and WMSTAT lines
+#   WM_GL_WL_BUNDLE=<store>     that bundle (default: nix-build of agx-wl-demo.nix)
 #   WM_GL_BIN=<path>            desktop binary (default: the wm-darwin-gl desktop build)
 #   WM_GL_BARE_BIN=<path>       bare compositor binary, staged for the session step
 #   WM_GL_ASSEMBLE_ONLY=1       stop after the offline assemble (RAM root staged and checked,
@@ -31,9 +39,14 @@ EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}
 STAGE_BARE=0
+STAGE_DMABUF_CLIENT=0
+STAGE_WL=0
+DMABUF_CLIENT=${WM_GL_DMABUF_CLIENT:-$ROOT/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/darwin-wayland-dmabuf-client}
 case "${WM_GL_STEP:-probe}" in
   probe) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-probe.in ;;
   bench) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
+  dmabuf) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-dmabuf.in; STAGE_BARE=1; STAGE_DMABUF_CLIENT=1; export DCP_RUNTIME=${DCP_RUNTIME:-150} ;;
+  wlgpu) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-wlgpu.in; STAGE_BARE=1; STAGE_WL=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
   session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
   *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
 esac
@@ -53,6 +66,17 @@ for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2
   [ -r "$T/usr/local/lib/mesa-asahi/$l" ] || { echo "Mesa bundle has no $l (in $T)" >&2; exit 2; }
   X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"
 done
+if [ "$STAGE_DMABUF_CLIENT" = 1 ]; then
+  [ -x "$DMABUF_CLIENT" ] || { echo "no dma-buf client at $DMABUF_CLIENT (build: see client-dmabuf/README.md)" >&2; exit 2; }
+  X="$X;$DMABUF_CLIENT=/usr/bin/darwin-wayland-dmabuf-client"
+fi
+if [ "$STAGE_WL" = 1 ]; then
+  # The GPU client and the Mesa it runs on (Wayland EGL platform), in its own prefix.
+  WL=${WM_GL_WL_BUNDLE:-$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-wl-demo.nix --no-out-link 2>/dev/null | tail -1)}
+  [ -x "$WL/usr/local/bin/agx-wl-demo" ] || { echo "no agx-wl-demo bundle (got '$WL')" >&2; exit 2; }
+  X="$X;$WL/usr/local/bin/agx-wl-demo=/usr/local/bin/agx-wl-demo"
+  for l in "$WL"/usr/local/lib/mesa-asahi-wl/*.dylib; do X="$X;$l=/usr/local/lib/mesa-asahi-wl/$(basename "$l")"; done
+fi
 # The guest script replaces the supervisor directly, as the other DCP tests do.
 export PCIE_EXTRA_FILES="$X;$TEMPLATE=/usr/bin/darwin-desktop-test"
 if [ "${WM_GL_DRY_RUN:-0}" = 1 ]; then
@@ -66,4 +90,4 @@ if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
   exit 0
 fi
 DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|WMEXT\|WMDMABUF\|DMACLIENT\|AGXWL\|agx-wl-demo:\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

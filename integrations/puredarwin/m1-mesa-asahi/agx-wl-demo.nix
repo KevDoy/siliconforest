@@ -54,6 +54,9 @@ in pkgs.stdenv.mkDerivation {
         done
       done
     done
+    # install_name_tool edited the first page of every file after the linker signed it
+    ${pkgs.python3}/bin/python3 ${./tools/cs-rehash.py} $out/usr/local/bin/* $lib/*.dylib
+    ${pkgs.python3}/bin/python3 ${./tools/cs-rehash.py} --check $out/usr/local/bin/* $lib/*.dylib
     { echo "# otool -L after relocation"; for f in $out/usr/local/bin/* $lib/*.dylib; do "$OTOOL" -L "$f"; done; } > $out/LINKAGE.txt
     if grep -n '@rpath\|/nix/store/.*dylib (' $out/LINKAGE.txt | grep -v '^[0-9]*:/nix/store/[^ ]*:$'; then
       echo "unrelocated library reference" >&2; exit 1

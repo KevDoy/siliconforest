@@ -20,8 +20,15 @@
 // The scenes, shaders and helpers are agx-panel-demo.c's, included as source (its main() is
 // renamed and not called), so both programs draw the same pictures.
 //
+// Self-diagnosis: a "step:" line on stdout and /dev/console before each call from
+// wl_display_connect to the first eglSwapBuffers, and on Darwin a handler for SIGSEGV, SIGBUS,
+// SIGILL, SIGABRT, SIGTRAP and SIGFPE that prints the fault address, the pc, the return
+// addresses up the frame-pointer chain, each as image+offset, and the base of every loaded
+// image (AGXWL_CRASH lines).  --crash-test faults on purpose to show the report works;
+// --no-protocol-log leaves stderr and WAYLAND_DEBUG alone (then buffers are not counted).
+//
 // usage: agx-wl-demo [--seconds N] [--size WxH] [--scenes plasma,quads,mesh]
-//                    [--require-renderer substr] [--allow-software]
+//                    [--require-renderer substr] [--allow-software] [--no-protocol-log] [--crash-test]
 
 #define main agx_panel_demo_main
 #include "agx-panel-demo.c"
@@ -34,8 +41,125 @@
 #include <wayland-egl.h>
 #include "xdg-shell-client-protocol.h"
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <mach-o/loader.h>
+#include <sys/ucontext.h>
+#endif
+
 #ifndef EGL_PLATFORM_WAYLAND_KHR
 #define EGL_PLATFORM_WAYLAND_KHR 0x31D8
+#endif
+
+// ---- self-diagnosis: step lines and a crash report ----
+static int wl_console_fd = -1;
+static char last_step[200] = "(none)";
+
+static void emit(const char *line, size_t n)
+{
+	(void)!write(1, line, n);
+	if (wl_console_fd >= 0)
+		(void)!write(wl_console_fd, line, n);
+}
+
+// Announced before each call that has not run on this OS before, on stdout and /dev/console.
+static void wstep(const char *fmt, ...)
+{
+	char line[300];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(last_step, sizeof(last_step), fmt, ap);
+	va_end(ap);
+	int n = snprintf(line, sizeof(line), T "step: %s\n", last_step);
+	fflush(stdout);
+	emit(line, (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1));
+}
+
+#ifdef __APPLE__
+// Which loaded image an address belongs to: "name+0xoffset" (offset from the image's header,
+// which for a dylib is the address nm prints and for the executable that minus 0x100000000).
+static void attribute(uint64_t addr, char *out, size_t n)
+{
+	uint32_t count = _dyld_image_count();
+	for (uint32_t i = 0; i < count; i++) {
+		const struct mach_header_64 *mh = (const struct mach_header_64 *)_dyld_get_image_header(i);
+		if (!mh || (uint64_t)(uintptr_t)mh > addr)
+			continue;
+		const struct load_command *lc = (const struct load_command *)(mh + 1);
+		uint64_t text_vmaddr = 0, end = 0;
+		for (uint32_t c = 0; c < mh->ncmds; c++, lc = (const struct load_command *)((const char *)lc + lc->cmdsize)) {
+			if (lc->cmd != LC_SEGMENT_64)
+				continue;
+			const struct segment_command_64 *sg = (const struct segment_command_64 *)lc;
+			if (!strcmp(sg->segname, "__TEXT"))
+				text_vmaddr = sg->vmaddr;
+			if (strcmp(sg->segname, "__PAGEZERO") && sg->vmaddr + sg->vmsize > end)
+				end = sg->vmaddr + sg->vmsize;
+		}
+		uint64_t base = (uint64_t)(uintptr_t)mh;
+		if (addr < base + (end - text_vmaddr)) {
+			const char *name = _dyld_get_image_name(i), *slash = name ? strrchr(name, '/') : NULL;
+			snprintf(out, n, "%s+0x%llx", slash ? slash + 1 : name ? name : "?", (unsigned long long)(addr - base));
+			return;
+		}
+	}
+	snprintf(out, n, "(no image)");
+}
+
+static void on_crash(int sig, siginfo_t *info, void *uctx)
+{
+	ucontext_t *uc = uctx;
+	uint64_t pc = uc->uc_mcontext->__ss.__pc, lr = uc->uc_mcontext->__ss.__lr, fp = uc->uc_mcontext->__ss.__fp;
+	uint64_t sp = uc->uc_mcontext->__ss.__sp;
+	char line[400], where[160];
+	int n;
+
+	attribute(pc, where, sizeof(where));
+	n = snprintf(line, sizeof(line), "\nAGXWL_CRASH signal=%d code=%d fault_addr=0x%llx pc=0x%llx %s last_step=\"%s\"\n", sig, info->si_code,
+	    (unsigned long long)(uintptr_t)info->si_addr, (unsigned long long)pc, where, last_step);
+	emit(line, (size_t)n);
+	attribute(lr, where, sizeof(where));
+	n = snprintf(line, sizeof(line), "AGXWL_CRASH_FRAME n=lr addr=0x%llx %s sp=0x%llx fp=0x%llx\n", (unsigned long long)lr, where,
+	    (unsigned long long)sp, (unsigned long long)fp);
+	emit(line, (size_t)n);
+	// the frame-pointer chain: [fp] = caller's fp, [fp + 8] = return address
+	for (int f = 0; f < 24 && fp >= sp && fp - sp < (64u << 20) && !(fp & 7); f++) {
+		uint64_t next = ((uint64_t *)(uintptr_t)fp)[0], ret = ((uint64_t *)(uintptr_t)fp)[1];
+		attribute(ret, where, sizeof(where));
+		n = snprintf(line, sizeof(line), "AGXWL_CRASH_FRAME n=%d addr=0x%llx %s\n", f, (unsigned long long)ret, where);
+		emit(line, (size_t)n);
+		if (next <= fp)
+			break;
+		fp = next;
+	}
+	uint32_t count = _dyld_image_count();
+	for (uint32_t i = 0; i < count; i++) {
+		const char *name = _dyld_get_image_name(i);
+		n = snprintf(line, sizeof(line), "AGXWL_CRASH_IMAGE base=0x%llx name=%s\n", (unsigned long long)(uintptr_t)_dyld_get_image_header(i),
+		    name ? name : "?");
+		emit(line, (size_t)n);
+	}
+	// SA_RESETHAND: returning re-executes the faulting instruction with the default action
+}
+
+static void install_crash_handler(void)
+{
+	static char altstack[65536];
+	stack_t ss = { .ss_sp = altstack, .ss_size = sizeof(altstack) };
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = on_crash;
+	sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+	sigaltstack(&ss, NULL);
+	sigaction(SIGSEGV, &sa, NULL);
+	sigaction(SIGBUS, &sa, NULL);
+	sigaction(SIGILL, &sa, NULL);
+	sigaction(SIGABRT, &sa, NULL);
+	sigaction(SIGTRAP, &sa, NULL);
+	sigaction(SIGFPE, &sa, NULL);
+}
+#else
+static void install_crash_handler(void) { }
 #endif
 
 static struct {
@@ -136,7 +260,8 @@ int main(int argc, char **argv)
 {
 	const char *require = NULL, *scenes = "plasma,quads,mesh";
 	double seconds = 10.0;
-	int allow_software = 0, failed = 0;
+	int allow_software = 0, failed = 0, no_protocol_log = 0, crash_test = 0;
+	int logfd = -1, saved_stderr = -1;
 	char logname[] = "/tmp/agx-wl-demo.XXXXXX";
 
 	W = 800;
@@ -147,17 +272,24 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--scenes") && i + 1 < argc) scenes = argv[++i];
 		else if (!strcmp(argv[i], "--require-renderer") && i + 1 < argc) require = argv[++i];
 		else if (!strcmp(argv[i], "--allow-software")) allow_software = 1;
+		else if (!strcmp(argv[i], "--no-protocol-log")) no_protocol_log = 1;
+		else if (!strcmp(argv[i], "--crash-test")) crash_test = 1;
 		else {
-			printf("usage: %s [--seconds N] [--size WxH] [--scenes plasma,quads,mesh] [--require-renderer substr] [--allow-software]\n", argv[0]);
+			printf("usage: %s [--seconds N] [--size WxH] [--scenes plasma,quads,mesh] [--require-renderer substr] [--allow-software] [--no-protocol-log] [--crash-test]\n", argv[0]);
 			return 2;
 		}
 	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
+	wl_console_fd = open("/dev/console", O_WRONLY | O_NOCTTY);
+	install_crash_handler();
+	if (no_protocol_log)
+		goto connect;
 
 	// libwayland's protocol log of this process goes to stderr: send stderr to a file
-	int logfd = mkstemp(logname), saved_stderr = dup(2);
+	logfd = mkstemp(logname);
+	saved_stderr = dup(2);
 	if (logfd >= 0) {
 		setenv("WAYLAND_DEBUG", "1", 1);
 		fflush(stderr);
@@ -166,12 +298,19 @@ int main(int argc, char **argv)
 		printf(T "no temporary file for the protocol log (%s); buffer types cannot be counted\n", strerror(errno));
 	}
 
+connect:
+	if (crash_test) {
+		wstep("deliberate fault at address 0x10 (--crash-test)");
+		*(volatile int *)(uintptr_t)0x10 = 1;
+	}
+	wstep("wl_display_connect");
 	struct wl_display *dpy = wl_display_connect(NULL);
 	if (!dpy) {
 		printf("AGXWL_FAIL call=\"wl_display_connect\" errno=%d (%s) WAYLAND_DISPLAY=%s XDG_RUNTIME_DIR=%s\n", errno, strerror(errno),
 		    getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "(unset)", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "(unset)");
 		return 2;
 	}
+	wstep("wl_display_get_registry and first roundtrip");
 	struct wl_registry *registry = wl_display_get_registry(dpy);
 	wl_registry_add_listener(registry, &reg_listener, NULL);
 	wl_display_roundtrip(dpy);
@@ -186,13 +325,17 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	wstep("eglGetProcAddress(eglGetPlatformDisplayEXT)");
 	PFNEGLGETPLATFORMDISPLAYEXTPROC get_display = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	wstep("eglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_KHR)");
 	EGLDisplay edpy = get_display ? get_display(EGL_PLATFORM_WAYLAND_KHR, dpy, NULL) : EGL_NO_DISPLAY;
 	EGLint major, minor, ncfg = 0;
+	wstep("eglInitialize (Mesa: own event queue, registry, linux-dmabuf v3 bind, render node by enumeration, screen)");
 	if (edpy == EGL_NO_DISPLAY || !eglInitialize(edpy, &major, &minor)) {
 		printf("AGXWL_FAIL call=\"eglInitialize (Wayland platform)\" errno=0 (EGL error 0x%x)\n", eglGetError());
 		return 2;
 	}
+	wstep("eglInitialize returned: EGL %d.%d; eglChooseConfig", major, minor);
 	eglBindAPI(EGL_OPENGL_ES_API);
 	EGLConfig cfgs[64], cfg = NULL;
 	static const EGLint want[] = { EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_RED_SIZE, 8,
@@ -219,8 +362,10 @@ int main(int argc, char **argv)
 	eglGetConfigAttrib(edpy, cfg, EGL_ALPHA_SIZE, &alpha);
 	eglGetConfigAttrib(edpy, cfg, EGL_NATIVE_VISUAL_ID, &visual);
 	static const EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+	wstep("eglCreateContext (%d configs, alpha %d, visual %.4s)", ncfg, alpha, (const char *)&visual);
 	EGLContext ctx = eglCreateContext(edpy, cfg, EGL_NO_CONTEXT, ctx_attribs);
 
+	wstep("wl_surface, xdg_surface, xdg_toplevel, first commit, wait for configure");
 	struct wl_surface *surface = wl_compositor_create_surface(wl.compositor);
 	struct xdg_surface *xs = xdg_wm_base_get_xdg_surface(wl.wm_base, surface);
 	struct xdg_toplevel *top = xdg_surface_get_toplevel(xs);
@@ -237,12 +382,16 @@ int main(int argc, char **argv)
 		W = wl.new_w;
 		H = wl.new_h;
 	}
+	wstep("wl_egl_window_create %dx%d", W, H);
 	struct wl_egl_window *win = wl_egl_window_create(surface, W, H);
+	wstep("eglCreateWindowSurface");
 	EGLSurface esurf = win ? eglCreateWindowSurface(edpy, cfg, (EGLNativeWindowType)win, NULL) : EGL_NO_SURFACE;
+	wstep("eglMakeCurrent (context %s, surface %s)", ctx == EGL_NO_CONTEXT ? "missing" : "ok", esurf == EGL_NO_SURFACE ? "missing" : "ok");
 	if (ctx == EGL_NO_CONTEXT || esurf == EGL_NO_SURFACE || !eglMakeCurrent(edpy, esurf, esurf, ctx)) {
 		printf("AGXWL_FAIL call=\"eglCreateWindowSurface / eglMakeCurrent\" errno=0 (EGL error 0x%x)\n", eglGetError());
 		return 2;
 	}
+	wstep("eglSwapInterval(0), glGetString");
 	eglSwapInterval(edpy, 0);	// pacing is this program's own frame callback, not Mesa's
 	const char *renderer = (const char *)glGetString(GL_RENDERER);
 	int software = !renderer || strstr(renderer, "llvmpipe") || strstr(renderer, "softpipe") || strstr(renderer, "swrast");
@@ -255,6 +404,7 @@ int main(int argc, char **argv)
 		failed = 1;
 	}
 
+	wstep("framebuffer object, shaders and geometry of the three scenes");
 	GLuint depth;
 	glGenRenderbuffers(1, &depth);
 	glBindRenderbuffer(GL_RENDERBUFFER, depth);
@@ -278,6 +428,7 @@ int main(int argc, char **argv)
 		// fixed frame: window back buffer against an ordinary framebuffer object
 		int bbox[4], first[2];
 		char hex[65];
+		wstep("%s: fixed frame into the window's back buffer (first use allocates the dma-buf), glReadPixels", scene_names[scene]);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		draw_scene_ex(scene, HASH_FRAME, 0, 0);
 		glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, a);
@@ -322,12 +473,16 @@ int main(int argc, char **argv)
 			if (n < MAXF)
 				render_us[n++] = now_us() - t0;
 			wl.frame_done = 0;
+			if (frame < 2)
+				wstep("%s: frame %d: wl_surface.frame, eglSwapBuffers (create_immed, attach, commit)", scene_names[scene], frame);
 			wl_callback_add_listener(wl_surface_frame(surface), &frame_listener, NULL);
 			if (!eglSwapBuffers(edpy, esurf)) {
 				printf("AGXWL_FAIL call=\"eglSwapBuffers\" errno=0 (EGL error 0x%x)\n", eglGetError());
 				failed = 1;
 				break;
 			}
+			if (frame < 2)
+				wstep("%s: frame %d: waiting for the frame callback", scene_names[scene], frame);
 			int r = wait_for(dpy, &wl.frame_done, 2000);
 			if (r != 1) {
 				printf("AGXWL_FAIL call=\"wl_surface.frame callback\" errno=%d (%s)\n", r < 0 ? errno : 0,
@@ -349,6 +504,7 @@ int main(int argc, char **argv)
 		    scene_names[scene], n, elapsed, elapsed > 0 ? n / elapsed : 0.0, r_med, r_p99, ms_at(iv_us, niv, 0.5), iv_max / 1000.0);
 	}
 	GLenum err = glGetError();
+	wstep("teardown");
 	eglMakeCurrent(edpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 	eglDestroySurface(edpy, esurf);
 	wl_egl_window_destroy(win);
