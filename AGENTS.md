@@ -1456,3 +1456,20 @@ guest script, `pdagx_diag=1` turns on the driver pre-flight). Stack and how to r
 `m1-gpu-dt`, `m1-gpu-rtkit`, `m1-drm72`, `m1-lkpi-extras`, `m1-mesa-asahi`. Evidence:
 `reports/sprint-010/gpu-first-render-001.md`, `gpu-panel-demo-001.md`. The M1's Linux
 rate-limits SSH: batch commands into one session.
+
+## Bench addresses and pace (November 10, by Chris)
+
+- The Thunderbolt dock moved from the M1 to the M5. The M5 controller is `10.1.1.70` (Wi-Fi) and
+  `10.1.1.127` (dock Ethernet, the M1's old address); the M1's Linux is `10.1.1.211` (Wi-Fi). Host keys
+  are unchanged. `tools/pcie_iterate.sh` targets `${M5_HOST:-10.1.1.70}`.
+- Chris explicitly authorised re-pinning the frozen recovery controller for this: in the lab launcher
+  tree, `tools/m1_kernel_cycle.py` has `HOST = '10.1.1.211'` and `tools/m1_bringup_cycle.py` carries the
+  new `BASE_SHA`; on the M5, `controller-ssh-008/known_hosts` names `10.1.1.211` (original kept as
+  `known_hosts.orig-127`). The M1 accepts the bench key from `.93`, `.70` and `.127`.
+- Kernel reference for all display and GPU work: Omacom `linux-aurora`, branch `integration/aurora`, at
+  `6a08a08e`, in `sources/gpu-plan/linux-aurora`. Do not read `/home/chrisk/source/aurora-linux` for this
+  project (7.1.12, another fork).
+- Direction from Chris: move fast, reuse the Omacom code wherever it exists, and do not add cautious
+  intermediate test stages that the Linux driver does not need.
+- The M5's disk fills up: delivered packets under `pcie-m2/` are copies of `artifacts/` here and can be
+  deleted there.
