@@ -60,9 +60,14 @@ C code the Rust side wraps and that must exist: Apple RTKit and mailbox (2,948 l
 - Gallium driver `src/gallium/drivers/asahi`: 24,225 lines; winsys 77 lines; shared compiler and
   libraries under `src/asahi` (the raw count, 783,977 lines, is dominated by generated and
   test data and includes the Vulkan driver).
-- The kernel and Mesa copies of `asahi_drm.h` at the lab's two pins **do not match**: 63 lines
-  differ in substance (render/compute program structs, feature and VM-create flags). The pins
-  are not a matched pair; a matched pair must be chosen before any work.
+- Matched pair (corrected 2026-11-09): the M1 in this lab runs `mesa-aurora
+  26.3.0_devel.20261025.147a62f6190` (omacom/mesa, branch `integration/aurora`, not `main`) on
+  `linux-aurora 7.2.11.aurora6`, and that combination works daily. Use Mesa commit `147a62f6190`
+  with the 7.2.11 kernel driver. Their copies of `asahi_drm.h` still differ textually (9 lines only
+  in Mesa, 25 only in the kernel: newer feature bits on the kernel side, extra command-struct
+  variants on the Mesa side); the interface is negotiated through feature bits and sizes, so a
+  textual difference is not a mismatch. My earlier "the pins do not match" reading was wrong for
+  the shipped pair. The lab's Mesa pin `a1969111` is newer than what ships and should be replaced.
 
 ## Gaps this makes visible
 
@@ -73,4 +78,4 @@ C code the Rust side wraps and that must exist: Apple RTKit and mailbox (2,948 l
 3. LinuxKPI holes for the 122 direct C symbols and whatever the used `kernel` modules call
    (cpufreq/freq_qos, shrinker, maple tree, `of_*` over the Apple device tree, RTKit).
 4. The device-tree properties m1n1 normally synthesises for the GPU.
-5. A matched kernel/Mesa pair, then Mesa's Asahi driver on PureDarwin's `/dev/dri` path.
+5. Mesa `147a62f6190` (the shipped pair) built for PureDarwin's `/dev/dri` path.
