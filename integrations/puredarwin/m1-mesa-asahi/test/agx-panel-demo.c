@@ -28,10 +28,30 @@
 // Whatever was on the panel (the text console) is saved first and put back after every present
 // run and at exit; lines are printed only while the saved image is on the panel.
 //
+// Diagnostics, for localising a difference between two systems without moving an image
+// (coordinates are in readback-buffer space: x from the left, y = row of the buffer, which is the
+// bottom-up GL row for rgba8 and the top-down panel row for rgb10):
+//   --tiles            AGXTILES: a 16x10 grid of 32-bit tile hashes per fixed frame, one line per
+//                      row; AGXSTAT: byte-lane sums and the count of pixels equal to the first;
+//                      AGXDIFFHIST: histogram of the rgba8-versus-rgb10 differences
+//   --repeat-hash N    AGXREPEAT: the fixed frame N more times in the same process; stable or not
+//   --variants         AGXVAR: the rgb10 frame again with glFinish before the readback, and with
+//                      a depth buffer of its own; AGXDEPTH: the depth buffer left by each mesh
+//                      frame, sampled by 60 depth-tested planes after the frame was read back
+//   --fresh            AGXGEM: fresh kernel GEM objects scanned for non-zero bytes (twice, the
+//                      first set dirtied and freed); AGXFRESH: never-written GL targets read back
+//   --fp-out FILE      write 16x16-block hashes of every fixed frame (the reference side)
+//   --fp-ref FILE      compare with such a file: AGXFPDIFF lists differing blocks, AGXPIX dumps
+//                      the pixels of the first three
+//   --pixels S:T:X:Y   AGXPIX dump of the 16x16 block at X,Y of scene S target T (up to 8 times)
+//   --no-bench         fixed frames and diagnostics only
+//   --diag             --tiles --repeat-hash 3 --variants
+//
 // usage: agx-panel-demo [--size WxH] [--frames N] [--budget seconds] [--scenes plasma,quads,mesh]
 //                       [--no-present] [--hold-ms N] [--require-renderer substr] [--dump prefix]
 
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <signal.h>
 #include <stdint.h>
@@ -40,6 +60,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -558,11 +580,14 @@ static void run(int scene, int mode, int path, int frames, uint64_t cap_us, stru
 	free(total); free(rd); free(cp);
 }
 
+static int opt_tiles, opt_repeat, opt_variants, opt_fresh, opt_no_bench;
+
 // rgba8 frame (bottom row first) against the panel words of the rgb10 frame (top row first)
 static int check_paths(int scene, const uint8_t *rgba, const uint8_t *words)
 {
-	size_t differ = 0, flat = 1;
-	unsigned max_diff = 0;
+	size_t differ = 0, flat = 1, hist[7] = { 0 };
+	unsigned max_diff = 0, wv[6] = { 0 };
+	int wx = 0, wy = 0;
 	// a frame of one single value is a failed render, however well the two paths agree
 	for (size_t i = 1; i < (size_t)W * H && flat; i++)
 		flat = memcmp(rgba, rgba + 4 * i, 4) == 0;
@@ -576,14 +601,343 @@ static int check_paths(int scene, const uint8_t *rgba, const uint8_t *words)
 				unsigned d = a > b ? a - b : b - a;
 				if (d > worst) worst = d;
 			}
-			if (worst > max_diff) max_diff = worst;
+			if (worst > max_diff) {
+				max_diff = worst; wx = x; wy = y;
+				for (int ch = 0; ch < 3; ch++) {
+					wv[ch] = src[4 * x + ch];
+					wv[3 + ch] = (w[x] >> (20 - 10 * ch)) & 0x3ff;
+				}
+			}
+			hist[worst == 0 ? 0 : worst == 1 ? 1 : worst < 4 ? 2 : worst < 8 ? 3 : worst < 16 ? 4 : worst < 64 ? 5 : 6]++;
 			differ += worst > 16;
 		}
 	}
 	int ok = differ * 50 <= (size_t)W * H && !flat;
-	printf("AGXCHECK scene=%s differ_px=%zu of=%d max_diff=%u flat=%d result=%s\n", scene_names[scene], differ,
-	    W * H, max_diff, (int)flat, ok ? "ok" : "FAIL");
+	printf("AGXCHECK scene=%s differ_px=%zu of=%d max_diff=%u flat=%d result=%s worst_at=%d,%d worst_rgba8=%u,%u,%u worst_rgb10=%u,%u,%u\n",
+	    scene_names[scene], differ, W * H, max_diff, (int)flat, ok ? "ok" : "FAIL", wx, wy, wv[0], wv[1], wv[2],
+	    wv[3], wv[4], wv[5]);
+	if (opt_tiles)
+		printf("AGXDIFFHIST scene=%s d0=%zu d1=%zu d2_3=%zu d4_7=%zu d8_15=%zu d16_63=%zu d64_up=%zu\n", scene_names[scene],
+		    hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6]);
 	return ok;
+}
+
+
+// ---- diagnostics ----
+#define BLK 16
+static FILE *fp_out;
+static char *fp_ref;
+static struct { const char *scene, *target; int x, y; } pix_req[8];
+static int pix_reqs;
+static GLuint prog_probe, depth_rb;
+
+static uint32_t fnv_block(const uint8_t *px, int x0, int y0, int w, int h)
+{
+	uint32_t hsh = 2166136261u;
+	for (int y = 0; y < h; y++) {
+		const uint8_t *r = px + ((size_t)(y0 + y) * W + x0) * 4;
+		for (int i = 0; i < w * 4; i++)
+			hsh = (hsh ^ r[i]) * 16777619u;
+	}
+	return hsh;
+}
+
+static void dump_block(const char *scene, const char *target, const uint8_t *px, int x0, int y0)
+{
+	for (int y = y0; y < y0 + BLK && y < H; y++) {
+		printf("AGXPIX scene=%s target=%s x=%d y=%d", scene, target, x0, y);
+		for (int x = x0; x < x0 + BLK && x < W; x++) {
+			uint32_t w;
+			memcpy(&w, px + ((size_t)y * W + x) * 4, 4);
+			printf(" %08x", w);
+		}
+		printf("\n");
+	}
+}
+
+// blocks of BLK x BLK pixels in which two frames differ
+static size_t diff_blocks(const uint8_t *a, const uint8_t *b, int bbox[4], int first[2])
+{
+	size_t n = 0;
+	bbox[0] = W; bbox[1] = H; bbox[2] = bbox[3] = -1;
+	for (int y = 0; y < H; y += BLK)
+		for (int x = 0; x < W; x += BLK) {
+			int w = W - x < BLK ? W - x : BLK, h = H - y < BLK ? H - y : BLK, d = 0;
+			for (int r = 0; r < h && !d; r++)
+				d = memcmp(a + ((size_t)(y + r) * W + x) * 4, b + ((size_t)(y + r) * W + x) * 4, (size_t)w * 4) != 0;
+			if (!d)
+				continue;
+			if (!n) { first[0] = x; first[1] = y; }
+			n++;
+			if (x < bbox[0]) bbox[0] = x;
+			if (y < bbox[1]) bbox[1] = y;
+			if (x + w - 1 > bbox[2]) bbox[2] = x + w - 1;
+			if (y + h - 1 > bbox[3]) bbox[3] = y + h - 1;
+		}
+	return n;
+}
+
+// everything that describes one fixed frame without the frame itself
+static void report_frame(const char *scene, const char *target, const uint8_t *px)
+{
+	if (opt_tiles) {
+		uint64_t lane[4] = { 0 }, same = 0;
+		for (int ty = 0; ty < 10; ty++) {
+			printf("AGXTILES scene=%s target=%s row=%d", scene, target, ty);
+			for (int tx = 0; tx < 16; tx++) {
+				int x0 = tx * W / 16, y0 = ty * H / 10;
+				printf(" %08x", fnv_block(px, x0, y0, (tx + 1) * W / 16 - x0, (ty + 1) * H / 10 - y0));
+			}
+			printf("\n");
+		}
+		for (size_t i = 0; i < (size_t)W * H; i++) {
+			for (int l = 0; l < 4; l++)
+				lane[l] += px[4 * i + l];
+			same += memcmp(px, px + 4 * i, 4) == 0;
+		}
+		printf("AGXSTAT scene=%s target=%s same_as_first_px=%llu lane_sums=%llu,%llu,%llu,%llu\n", scene, target,
+		    (unsigned long long)same, (unsigned long long)lane[0], (unsigned long long)lane[1],
+		    (unsigned long long)lane[2], (unsigned long long)lane[3]);
+	}
+	const int nbx = (W + BLK - 1) / BLK, nby = (H + BLK - 1) / BLK;
+	if (fp_out) {
+		fprintf(fp_out, "F %s %s %d %d\n", scene, target, W, H);
+		for (int by = 0; by < nby; by++) {
+			for (int bx = 0; bx < nbx; bx++)
+				fprintf(fp_out, "%08x ", fnv_block(px, bx * BLK, by * BLK, W - bx * BLK < BLK ? W - bx * BLK : BLK,
+				    H - by * BLK < BLK ? H - by * BLK : BLK));
+			fprintf(fp_out, "\n");
+		}
+	}
+	if (fp_ref) {
+		char head[128];
+		snprintf(head, sizeof(head), "F %s %s %d %d\n", scene, target, W, H);
+		char *q = strstr(fp_ref, head);
+		if (!q) {
+			printf("AGXFPDIFF scene=%s target=%s result=no-reference\n", scene, target);
+		} else {
+			size_t n = 0;
+			int bbox[4] = { W, H, -1, -1 }, list[24][2];
+			q += strlen(head);
+			for (int by = 0; by < nby; by++)
+				for (int bx = 0; bx < nbx; bx++) {
+					uint32_t ref = (uint32_t)strtoul(q, &q, 16);
+					int x = bx * BLK, y = by * BLK;
+					if (ref == fnv_block(px, x, y, W - x < BLK ? W - x : BLK, H - y < BLK ? H - y : BLK))
+						continue;
+					if (n < 24) { list[n][0] = x; list[n][1] = y; }
+					n++;
+					if (x < bbox[0]) bbox[0] = x;
+					if (y < bbox[1]) bbox[1] = y;
+					if (x > bbox[2]) bbox[2] = x;
+					if (y > bbox[3]) bbox[3] = y;
+				}
+			printf("AGXFPDIFF scene=%s target=%s blocks_differ=%zu of=%d", scene, target, n, nbx * nby);
+			if (n) {
+				printf(" bbox=%d,%d-%d,%d blocks=", bbox[0], bbox[1], bbox[2] + BLK - 1, bbox[3] + BLK - 1);
+				for (size_t i = 0; i < n && i < 24; i++)
+					printf("%s%d,%d", i ? ";" : "", list[i][0], list[i][1]);
+			}
+			printf("\n");
+			for (size_t i = 0; i < n && i < 3; i++)
+				dump_block(scene, target, px, list[i][0], list[i][1]);
+		}
+	}
+	for (int i = 0; i < pix_reqs; i++)
+		if (!strcmp(pix_req[i].scene, scene) && !strcmp(pix_req[i].target, target) && pix_req[i].x >= 0 &&
+		    pix_req[i].y >= 0 && pix_req[i].x < W && pix_req[i].y < H)
+			dump_block(scene, target, px, pix_req[i].x, pix_req[i].y);
+}
+
+static void capture(int scene, int panel, GLuint fbo, uint8_t *buf, int finish_first)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	draw_scene(scene, HASH_FRAME, panel);
+	if (finish_first)
+		glFinish();
+	glReadPixels(0, 0, W, H, GL_RGBA, panel ? GL_UNSIGNED_INT_2_10_10_10_REV : GL_UNSIGNED_BYTE, buf);
+}
+
+static void report_compare(const char *tag, const char *scene, const char *target, const char *what,
+    const uint8_t *base, const uint8_t *other)
+{
+	int bbox[4], first[2] = { 0, 0 };
+	size_t n = diff_blocks(base, other, bbox, first);
+	printf("%s scene=%s target=%s %s same_as_base=%s blocks_differ=%zu", tag, scene, target, what, n ? "no" : "yes", n);
+	if (n)
+		printf(" bbox=%d,%d-%d,%d first_block=%d,%d", bbox[0], bbox[1], bbox[2], bbox[3], first[0], first[1]);
+	printf("\n");
+	if (n) {
+		dump_block(scene, "base", base, first[0], first[1]);
+		dump_block(scene, "other", other, first[0], first[1]);
+	}
+}
+
+// What the depth buffer shared by fbo8 and fbo10 holds now, as a picture: 60 full-screen planes
+// at window depths between the nearest and the farthest torus are drawn depth-tested (LESS, no
+// depth writes) and each adds 4 to every channel, so a pixel reads 4 x (planes in front of the
+// stored depth): 0 = nearer than all planes, 240 = behind all of them (background).  It runs
+// after the frame was read back, so the depth has to survive a store and a load.
+static void depth_probe(GLuint fbo, uint8_t *buf)
+{
+	static const float tri[] = { -1, -1, 3, -1, -1, 3 };
+	static GLuint vao;
+	if (!vao) {
+		GLuint vbo;
+		glGenVertexArrays(1, &vao);
+		glBindVertexArray(vao);
+		glGenBuffers(1, &vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(tri), tri, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+		prog_probe = program(
+		    "#version 300 es\nlayout(location=0) in vec2 a_pos; uniform float u_z;\n"
+		    "void main() { gl_Position = vec4(a_pos, u_z, 1.0); }\n",
+		    "#version 300 es\nprecision mediump float;\nout vec4 frag;\nvoid main() { frag = vec4(4.0 / 255.0); }\n");
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glViewport(0, 0, W, H);
+	glClearColor(0, 0, 0, 0);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	glUseProgram(prog_probe);
+	glBindVertexArray(vao);
+	for (int k = 0; k < 60; k++) {
+		glUniform1f(glGetUniformLocation(prog_probe, "u_z"), 0.80f + 0.13f * (float)k / 59.0f);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+	}
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+	glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+}
+
+static void report_depth(const char *scene, const char *after, const uint8_t *px)
+{
+	size_t zero = 0, far = 0, odd = 0;
+	char hex[65], target[32];
+	for (size_t i = 0; i < (size_t)W * H; i++) {
+		zero += px[4 * i] == 0;
+		far += px[4 * i] == 240;
+		odd += (px[4 * i] & 3) != 0 || px[4 * i] > 240;
+	}
+	sha256_hex(px, (size_t)W * H * 4, hex);
+	printf("AGXDEPTH scene=%s after=%s nearest_px=%zu background_px=%zu between_px=%zu unexpected_px=%zu sha256=%s\n",
+	    scene, after, zero, far, (size_t)W * H - zero - far, odd, hex);
+	snprintf(target, sizeof(target), "depth-after-%s", after);
+	report_frame(scene, target, px);
+}
+
+static size_t nonzero_bytes(const uint8_t *p, size_t n, size_t *first)
+{
+	size_t c = 0;
+	for (size_t i = 0; i < n; i++)
+		if (p[i]) {
+			if (!c) *first = i;
+			c++;
+		}
+	return c;
+}
+
+// Fresh GEM objects straight from the kernel, with no Mesa in between: are their pages zero?
+// Round 1 creates and scans eight 4 MiB objects, fills them with 0xa5 and frees them; round 2
+// does it again, which is where a kernel that recycles pages without clearing them shows.
+static void fresh_gem(void)
+{
+	struct { int32_t major, minor, patch; size_t name_len; char *name; size_t date_len; char *date; size_t desc_len; char *desc; } ver;
+	struct gem_create { uint64_t size; uint32_t flags, vm_id, handle, pad; };
+	struct gem_mmap { uint32_t handle, flags; uint64_t offset; };
+	struct gem_close { uint32_t handle, pad; };
+	enum { N = 8, SZ = 4 << 20 };
+	char path[64], name[32];
+	int fd = -1;
+	for (int n = 128; n < 136 && fd < 0; n++) {
+		snprintf(path, sizeof(path), "/dev/dri/renderD%d", n);
+		fd = open(path, O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		memset(&ver, 0, sizeof(ver));
+		memset(name, 0, sizeof(name));
+		ver.name = name;
+		ver.name_len = sizeof(name) - 1;
+		if (ioctl(fd, _IOWR('d', 0x00, ver), &ver) || strcmp(name, "asahi")) {
+			close(fd);
+			fd = -1;
+		}
+	}
+	if (fd < 0) {
+		printf("AGXGEM result=skipped reason=no-asahi-node\n");
+		return;
+	}
+	for (int round = 1; round <= 2; round++) {
+		size_t nonzero = 0, first = 0, firstobj = 0, bytes = 0;
+		void *map[N] = { 0 };
+		uint32_t handle[N] = { 0 };
+		int made = 0;
+		for (int i = 0; i < N; i++) {
+			struct gem_create c = { .size = SZ };	// shared object: no VM needed
+			struct gem_mmap m = { 0 };
+			if (ioctl(fd, _IOWR('d', 0x45, struct gem_create), &c))
+				break;
+			handle[i] = m.handle = c.handle;
+			made++;
+			if (ioctl(fd, _IOWR('d', 0x46, struct gem_mmap), &m))
+				break;
+			map[i] = mmap(NULL, SZ, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)m.offset);
+			if (map[i] == MAP_FAILED) {
+				map[i] = NULL;
+				break;
+			}
+			size_t f = 0, c2 = nonzero_bytes(map[i], SZ, &f);
+			if (c2 && !nonzero) { first = f; firstobj = (size_t)i; }
+			nonzero += c2;
+			bytes += SZ;
+		}
+		printf("AGXGEM round=%d objects=%d scanned_bytes=%zu nonzero_bytes=%zu", round, made, bytes, nonzero);
+		if (nonzero)
+			printf(" first=object%zu+0x%zx value=0x%02x", firstobj, first, ((uint8_t *)map[firstobj])[first]);
+		printf(" result=%s\n", !bytes ? "no-data" : nonzero ? "NOT-ZEROED" : "zero");
+		for (int i = 0; i < N; i++) {
+			if (map[i]) {
+				memset(map[i], 0xa5, SZ);
+				munmap(map[i], SZ);
+			}
+			if (handle[i]) {
+				struct gem_close cl = { .handle = handle[i] };
+				ioctl(fd, _IOW('d', 0x09, struct gem_close), &cl);
+			}
+		}
+	}
+	close(fd);
+}
+
+// A GL target that was never drawn to or uploaded, read back.  Non-zero bytes mean an
+// application can see stale memory (from the kernel or from Mesa's buffer cache).  Zero is weak
+// evidence: the driver may answer for an uninitialised target without touching its memory.
+static void fresh_gl(const char *kind, GLenum internal, GLenum type, int w, int h, uint8_t *buf)
+{
+	GLuint fbo, tex;
+	size_t first = 0, n;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexStorage2D(GL_TEXTURE_2D, 1, internal, w, h);
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+	memset(buf, 0, (size_t)w * h * 4);
+	glReadPixels(0, 0, w, h, GL_RGBA, type, buf);
+	n = nonzero_bytes(buf, (size_t)w * h * 4, &first);
+	printf("AGXFRESH kind=%s size=%dx%d nonzero_bytes=%zu", kind, w, h, n);
+	if (n)
+		printf(" first_offset=0x%zx value=0x%02x", first, buf[first]);
+	printf(" gl_error=0x%x\n", glGetError());
+	glDeleteFramebuffers(1, &fbo);
+	glDeleteTextures(1, &tex);
 }
 
 static GLuint make_fbo(GLenum internal, GLuint depth)
@@ -620,9 +974,32 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--require-renderer") && i + 1 < argc) require = argv[++i];
 		else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
 		else if (!strcmp(argv[i], "--no-present")) no_present = 1;
+		else if (!strcmp(argv[i], "--tiles")) opt_tiles = 1;
+		else if (!strcmp(argv[i], "--variants")) opt_variants = 1;
+		else if (!strcmp(argv[i], "--fresh")) opt_fresh = 1;
+		else if (!strcmp(argv[i], "--no-bench")) opt_no_bench = 1;
+		else if (!strcmp(argv[i], "--diag")) { opt_tiles = opt_variants = 1; opt_repeat = 3; }
+		else if (!strcmp(argv[i], "--repeat-hash") && i + 1 < argc) opt_repeat = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--fp-out") && i + 1 < argc) {
+			if (!(fp_out = fopen(argv[++i], "w"))) { printf(T "cannot write %s\n", argv[i]); return 2; }
+		} else if (!strcmp(argv[i], "--fp-ref") && i + 1 < argc) {
+			FILE *f = fopen(argv[++i], "r");
+			long len;
+			if (!f || fseek(f, 0, SEEK_END) || (len = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) || !(fp_ref = calloc(1, (size_t)len + 1)) ||
+			    fread(fp_ref, 1, (size_t)len, f) != (size_t)len) { printf(T "cannot read %s\n", argv[i]); return 2; }
+			fclose(f);
+		} else if (!strcmp(argv[i], "--pixels") && i + 1 < argc && pix_reqs < 8) {
+			char *a = strdup(argv[++i]), *c1 = strchr(a, ':'), *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
+			if (!c2 || sscanf(c2 + 1, "%d:%d", &pix_req[pix_reqs].x, &pix_req[pix_reqs].y) != 2) { printf(T "bad --pixels\n"); return 2; }
+			*c1 = *c2 = 0;
+			pix_req[pix_reqs].scene = a;
+			pix_req[pix_reqs++].target = c1 + 1;
+		}
 		else {
 			printf("usage: %s [--size WxH] [--frames N] [--budget s] [--scenes plasma,quads,mesh] "
-			    "[--no-present] [--hold-ms N] [--require-renderer substr] [--dump prefix]\n", argv[0]);
+			    "[--no-present] [--hold-ms N] [--require-renderer substr] [--dump prefix]\n"
+			    "  diagnostics: [--tiles] [--repeat-hash N] [--variants] [--fresh] [--diag] [--no-bench]\n"
+			    "               [--fp-out file] [--fp-ref file] [--pixels scene:target:x:y]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -667,8 +1044,9 @@ int main(int argc, char **argv)
 	}
 	pixels = malloc((size_t)W * H * 4);
 	uint8_t *pixels8 = malloc((size_t)W * H * 4);
+	uint8_t *scratch = malloc((size_t)W * H * 4);
 	sink.row = malloc((size_t)W * 4);
-	if (!pixels || !pixels8 || !sink.row || (!no_present && !sink.base)) {
+	if (!pixels || !pixels8 || !scratch || !sink.row || (!no_present && !sink.base)) {
 		printf(T "out of memory\n");
 		return 2;
 	}
@@ -710,6 +1088,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (opt_fresh)
+		fresh_gem();	// before Mesa has allocated anything of size
 	GLuint depth;
 	glGenRenderbuffers(1, &depth);
 	glBindRenderbuffer(GL_RENDERBUFFER, depth);
@@ -728,8 +1108,28 @@ int main(int argc, char **argv)
 		have10 = fmt == GL_RGBA && type == GL_UNSIGNED_INT_2_10_10_10_REV;
 		printf(T "RGB10_A2 read format 0x%x type 0x%x: 10-bit path %s\n", fmt, type, have10 ? "on" : "off");
 	}
+	depth_rb = depth;
 	glDisable(GL_DITHER);
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	if (opt_fresh) {
+		// the two render targets themselves have not been written yet
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo8);
+		glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, scratch);
+		size_t first = 0, n = nonzero_bytes(scratch, (size_t)W * H * 4, &first);
+		printf("AGXFRESH kind=fbo-rgba8 size=%dx%d nonzero_bytes=%zu first_offset=0x%zx\n", W, H, n, first);
+		if (fbo10) {
+			glBindFramebuffer(GL_FRAMEBUFFER, fbo10);
+			glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, scratch);
+			n = nonzero_bytes(scratch, (size_t)W * H * 4, &first);
+			printf("AGXFRESH kind=fbo-rgb10 size=%dx%d nonzero_bytes=%zu first_offset=0x%zx\n", W, H, n, first);
+		}
+		fresh_gl("tex-rgba8", GL_RGBA8, GL_UNSIGNED_BYTE, 1000 < W ? 1000 : W, 1000 < H ? 1000 : H, scratch);
+		fresh_gl("tex-rgba8", GL_RGBA8, GL_UNSIGNED_BYTE, 64, 64, scratch);
+		fresh_gl("tex-rgb10", GL_RGB10_A2, GL_UNSIGNED_INT_2_10_10_10_REV, 1000 < W ? 1000 : W, 1000 < H ? 1000 : H, scratch);
+		// the never-cleared depth buffer, seen through the plane probe (0 everywhere = depth 0)
+		depth_probe(fbo8, scratch);
+		report_depth("none", "fresh", scratch);
+	}
 	setup_plasma();
 	setup_quads();
 	setup_mesh();
@@ -764,6 +1164,7 @@ int main(int argc, char **argv)
 			}
 		}
 		printf("AGXHASH scene=%s target=rgba8 frame=%d size=%dx%d sha256=%s\n", scene_names[scene], HASH_FRAME, W, H, hex);
+		report_frame(scene_names[scene], "rgba8", pixels8);
 		if (have10) {
 			glBindFramebuffer(GL_FRAMEBUFFER, fbo10);
 			draw_scene(scene, HASH_FRAME, 1);
@@ -771,8 +1172,53 @@ int main(int argc, char **argv)
 			sha256_hex(pixels, (size_t)W * H * 4, hex);
 			printf("AGXHASH scene=%s target=rgb10 frame=%d size=%dx%d sha256=%s\n", scene_names[scene], HASH_FRAME, W, H, hex);
 			checks_failed += !check_paths(scene, pixels8, pixels);
+			report_frame(scene_names[scene], "rgb10", pixels);
 		}
-		for (unsigned k = 0; k < sizeof(plan) / sizeof(plan[0]) && !stop_requested; k++) {
+		// Diagnostics come after both fixed frames, so those are produced exactly as without them.
+		for (int panel = 0; panel <= have10 && opt_repeat > 0; panel++) {
+			const uint8_t *base = panel ? pixels : pixels8;
+			int bad = 0, shown = 0;
+			for (int r = 0; r < opt_repeat; r++) {
+				capture(scene, panel, panel ? fbo10 : fbo8, scratch, 0);
+				if (!memcmp(base, scratch, (size_t)W * H * 4))
+					continue;
+				bad++;
+				if (!shown++) {
+					char what[32];
+					snprintf(what, sizeof(what), "repeat=%d", r + 1);
+					report_compare("AGXREPEATDIFF", scene_names[scene], panel ? "rgb10" : "rgba8", what, base, scratch);
+				}
+			}
+			printf("AGXREPEAT scene=%s target=%s n=%d differing_runs=%d stable=%s\n", scene_names[scene],
+			    panel ? "rgb10" : "rgba8", opt_repeat, bad, bad ? "no" : "yes");
+		}
+		if (opt_variants && have10) {
+			static GLuint fbo10own;
+			capture(scene, 1, fbo10, scratch, 1);
+			report_compare("AGXVAR", scene_names[scene], "rgb10", "variant=finish-before-read", pixels, scratch);
+			if (!fbo10own) {
+				GLuint d2;
+				glGenRenderbuffers(1, &d2);
+				glBindRenderbuffer(GL_RENDERBUFFER, d2);
+				glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
+				fbo10own = make_fbo(GL_RGB10_A2, d2);
+			}
+			if (fbo10own) {
+				capture(scene, 1, fbo10own, scratch, 0);
+				report_compare("AGXVAR", scene_names[scene], "rgb10", "variant=own-depth-buffer", pixels, scratch);
+			}
+		}
+		if (opt_variants && scene == SCENE_MESH) {
+			capture(scene, 0, fbo8, scratch, 0);
+			depth_probe(fbo8, scratch);
+			report_depth(scene_names[scene], "rgba8", scratch);
+			if (have10) {
+				capture(scene, 1, fbo10, scratch, 0);
+				depth_probe(fbo8, scratch);
+				report_depth(scene_names[scene], "rgb10", scratch);
+			}
+		}
+		for (unsigned k = 0; k < sizeof(plan) / sizeof(plan[0]) && !stop_requested && !opt_no_bench; k++) {
 			if (plan[k].path != PATH_RGBA8 && !have10)
 				continue;
 			if (plan[k].mode == MODE_PRESENT && no_present)
@@ -787,6 +1233,8 @@ int main(int argc, char **argv)
 		}
 	}
 	GLenum err = glGetError();
+	if (fp_out)
+		fclose(fp_out);
 	sink_restore(&sink);
 #ifdef HAVE_PDGOP
 	if (sink.open)

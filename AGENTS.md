@@ -1448,3 +1448,11 @@ earlier GPU observer hold is lifted. GPU power-domain writes, starting the GPU c
 and loading the GPU driver are allowed under the same rules as the PCIe/Wi-Fi track. Plan and
 state: GitHub issue SF-F (`docs/roadmap/issues/SF-F-gpu-kernel.md`); first hardware facts in
 `reports/sprint-010/gpu-power-and-id-probe-001.md`.
+
+GPU status (November 10): working on hardware. `tools/agx_boot.sh <new-name> [boot-args]` builds
+the Wi-Fi + GPU collection and boots it with the Mesa tests staged (`AGX_TEMPLATE=` selects the
+guest script, `pdagx_diag=1` turns on the driver pre-flight). Stack and how to rebuild:
+`integrations/puredarwin/m1-rust-kext/README.md` ("GPU driver: how it is built"); pieces in
+`m1-gpu-dt`, `m1-gpu-rtkit`, `m1-drm72`, `m1-lkpi-extras`, `m1-mesa-asahi`. Evidence:
+`reports/sprint-010/gpu-first-render-001.md`, `gpu-panel-demo-001.md`. The M1's Linux
+rate-limits SSH: batch commands into one session.

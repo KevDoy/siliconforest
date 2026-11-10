@@ -24,7 +24,12 @@ mapping on one E core. The old CPU compositor needed 290 ms per full frame, the 
 one 37 ms. Faster presentation needs the display controller path (scanout of GPU buffers,
 ticket SF-H), more CPU cores (SF-C), or both.
 
-Correctness: the two readback paths agree with each other in every scene. Of the six
-full-resolution frame hashes, five equal Linux's; one differs: the mesh scene on the 10-bit
-target (Darwin `b27160c9...`, Linux `fd04cc04...`, stable over three Linux runs). Cause unknown;
-not yet known how many pixels differ or whether Darwin's value is stable. Open defect.
+Correctness (boot `pd02`, with per-block fingerprints from Linux staged into the guest): five of
+the six full-resolution frames are identical to Linux in all 16,000 blocks. The sixth (mesh
+scene, 10-bit target) differs in exactly 2 of 4,096,000 pixels, each by one step of 1023 in one
+colour channel (pixels 1234,518 and 2156,203). The difference is deterministic (5 of 5 repeats
+equal), the depth buffers are identical to Linux's, freshly allocated GPU buffers are zeroed
+(two rounds of 32 MiB checked), and waiting before readback or using a separate depth buffer
+changes nothing. Cause not established; a last-bit difference in CPU-side maths (the scene's
+matrices come from libm, which differs between the two systems) would produce exactly this, but
+that is a guess. The 8-bit target of the same scene is bit-identical.

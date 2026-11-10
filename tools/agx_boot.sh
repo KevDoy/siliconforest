@@ -9,6 +9,7 @@ T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-f
 X="$T/usr/local/bin/agx-offscreen-test=/usr/local/bin/agx-offscreen-test"
 [ -f "$T/usr/local/bin/agx-panel-demo" ] && X="$X;$T/usr/local/bin/agx-panel-demo=/usr/local/bin/agx-panel-demo"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+[ -n "${AGX_EXTRA:-}" ] && X="$X;$AGX_EXTRA"
 PCIE_BOOTARGS="pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 $EXTRA" PCIE_EXTRA_FILES="$X" \
 PCIE_GUEST_TEMPLATE=${AGX_TEMPLATE:-$ROOT/integrations/puredarwin/m1-mesa-asahi/supervisor/darwin-agx-offscreen-test.in} \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "${AGX_RUNTIME:-150}" 2>&1 | grep -a '"status"\|Error' | cut -c1-200

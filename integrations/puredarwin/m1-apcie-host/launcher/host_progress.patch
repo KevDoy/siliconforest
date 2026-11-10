@@ -1,5 +1,5 @@
---- integrations/puredarwin/m1-apcie-port-packet/host/overlay/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-08 23:32:08.142192283 -0800
-+++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 23:38:15.397893642 -0800
+--- runs/m1-desktop-010/apcie-port-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-08 23:32:08.141503728 -0800
++++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-10 01:11:57.054095970 -0800
 @@ -651,7 +651,9 @@
                    for k in record), 'Conflicting APCIE experiment fields')
      image.require(native_trackpad_child_enabled(inputs), 'APCIE observer requires sealed native child')
@@ -28,7 +28,28 @@
                        type(timeout) is int and timeout == 240,
                        'APCIE observer requires runtime120 and worker240')
  
-@@ -1088,6 +1090,14 @@
+@@ -690,10 +692,19 @@
+     return (BOOTARGS + (' pdm1kbd=1' if keyboard or native or child else '') +
+             (' pddartsurvey=1' if survey else '') +
+             (' pdm1trackpadenum=1' if trackpad or child else '') +
+-            (' pdm1trackpadchild=1' if child else '') +
++            (' pdm1trackpadchild=1' if child else '') + extra_bootargs() +
+             (' pdapciebridge=1' if apcie else ''))
+ 
+ 
++def extra_bootargs():
++    # Extra kernel boot arguments for one run, from extra_bootargs.txt next to this file
++    # (written by tools/pcie_iterate.sh from PCIE_BOOTARGS; empty by default).
++    f = Path(__file__).with_name('extra_bootargs.txt')
++    text = f.read_text().strip() if f.exists() else ''
++    image.require(bool(re.fullmatch(r'[A-Za-z0-9_=,. -]*', text)), 'Invalid extra boot arguments')
++    return (' ' + text) if text else ''
++
++
+ def keyboard_command(nonce):
+     image.require(bool(re.fullmatch('[0-9a-f]{48}', nonce)), 'Invalid keyboard nonce')
+     return ("/usr/bin/darwin-keyboard-test '" + nonce + "'\r").encode('ascii')
+@@ -1088,6 +1099,14 @@
                                 inventory_sha256=inputs.inventory_sha256, reservation=reservation))
          hv = backend.new_hv()
          hv.init()

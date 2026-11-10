@@ -96,8 +96,8 @@ nix-build $F agx-offscreen-test-linux.nix --no-out-link # builder-side test + io
 | Host tools `mesa_clc`, `vtn_bindgen2`, `asahi_clc`; Linux x86-64 asahi + llvmpipe + softpipe, surfaceless EGL, `libasahi_noop_drm_shim.so` | builds, links, runs on the builder | `/nix/store/3x55f3rsqbhnx90a4fxk89vpix187c6z-darwin-lab-mesa-asahi-native-26.3.0-devel-147a62f6190` |
 | `src/asahi` (isa, genxml, libagx, compiler, clc, layout, lib) for arm64 Darwin | builds | part of the next row |
 | Gallium `asahi` + `softpipe`, winsys, EGL (surfaceless), GLES2/3: `libgallium-26.3.0-devel.dylib` (31 MB), `libEGL.1.dylib`, `libGLESv2.2.dylib` | builds, links (1203 ninja steps, 5 patches) | `/nix/store/xz1bzz7vr50xvqygzksk9zvx1s7r885a-darwin-lab-mesa-asahi-arm64-darwin-26.3.0-devel-147a62f6190` |
-| `agx-offscreen-test` and `agx-panel-demo` Mach-O arm64 + relocated library bundle | builds, links | `/nix/store/jmq22ikc80xv8ffyqhca9xlmxpnmixhk-darwin-lab-agx-offscreen-test-arm64-darwin` |
-| Builder-side test, panel demo, tracer, `run-shim`, `run-sw` | builds, runs | `/nix/store/22k517ii7vlaz5ri0i42755bbviavqsv-darwin-lab-agx-offscreen-test-linux` |
+| `agx-offscreen-test` and `agx-panel-demo` Mach-O arm64 + relocated library bundle | builds, links | `/nix/store/ysmyxlscs86id9inwvhx0jpvwl8ygwsn-darwin-lab-agx-offscreen-test-arm64-darwin` |
+| Builder-side test, panel demo, tracer, `run-shim`, `run-sw` | builds, runs | `/nix/store/hjb277ycmm5zqg0i568ks7zhfiynqzkl-darwin-lab-agx-offscreen-test-linux` |
 | GBM, Vulkan (honeykrisp), Wayland/X11 platforms | not attempted (`-Dgbm=disabled`, no Vulkan drivers, `-Dplatforms=`) | |
 
 The Darwin test is dynamically linked; that is how PureDarwin's own Mesa is used
@@ -517,6 +517,67 @@ Order: run section 6 and read the numbers; option 1; then G3 (fd passing and wak
 Mesa GBM/Wayland build and `linux-dmabuf` in the compositor, with G4 for speed; Vulkan and
 scanout later. Option 2 is about 4 to 5 weeks on top of option 1, most of it kernel file
 plumbing that does not need the GPU driver.
+
+## 8. Chasing a frame that differs between Linux and Darwin (demo diagnostics)
+
+Case: on the M1, `AGXHASH scene=mesh target=rgb10` differs between Darwin and Linux while the
+other five fixed frames are equal (`reports/sprint-010/gpu-panel-demo-001.md`). The diagnostics
+below are in `agx-panel-demo`; on the builder they have run on llvmpipe, softpipe and the
+drm-shim only. Coordinates are in readback-buffer space (x from the left, y = buffer row: the
+bottom-up GL row for `rgba8`, the top-down panel row for `rgb10`).
+
+| Option | Lines | What it answers |
+|---|---|---|
+| `--tiles` (passive) | `AGXTILES` x10 per frame: 16x10 grid of 32-bit hashes of 160x160 tiles; `AGXSTAT`: byte-lane sums, pixels equal to the first pixel (background); `AGXDIFFHIST`: histogram of the per-pixel `rgba8`-versus-`rgb10` difference | which tiles differ; whether a difference is a few pixels or a region |
+| `--fp-out F` / `--fp-ref F` (passive) | reference side writes hashes of every 16x16 block (about 150 KiB per frame at 2560x1600); the other side prints `AGXFPDIFF ... blocks_differ=N bbox=... blocks=x,y;...` and `AGXPIX` (16 rows of 16 raw 32-bit words) for the first three differing blocks | the exact blocks and the pixels in them, in one boot |
+| `--pixels scene:target:x:y` | `AGXPIX` for that 16x16 block | the same block on the other system |
+| `AGXCHECK` (always) now ends with `worst_at=x,y worst_rgba8=r,g,b worst_rgb10=r,g,b` | | where the one pixel with `max_diff=370` is, and its two values |
+| `--repeat-hash N` | `AGXREPEAT ... differing_runs=K stable=yes/no`, and for the first differing run `AGXREPEATDIFF` with block count, bounding box and both versions of the first block | nondeterminism against a deterministic difference |
+| `--variants` | `AGXVAR variant=finish-before-read`, `AGXVAR variant=own-depth-buffer`: the `rgb10` frame again, `same_as_base=yes/no`; for the mesh, `AGXDEPTH after=rgba8/rgb10`: a picture of the depth buffer after the frame was read back, with its tile hashes | readback racing the render; the depth buffer shared by both targets; depth lost or altered across a store and load |
+| `--fresh` | `AGXGEM round=1/2`: eight fresh 4 MiB GEM objects straight from the kernel (no Mesa), scanned for non-zero bytes, filled with `0xa5`, freed, and eight more scanned; `AGXFRESH`: never-written GL targets read back | whether the kernel hands out non-zeroed or recycled pages |
+| `--no-bench`, `--diag` | | fixed frames and diagnostics only; `--diag` = `--tiles --repeat-hash 3 --variants` |
+
+Passive options only hash frames the run reads anyway, so the run's `AGXHASH` values are those
+of a plain run. The active ones add renders and allocations after both fixed frames of a
+scene, which changes what later scenes see; the guest script therefore uses them in a second,
+mesh-only process.
+
+`AGXGEM` is a real detector: on the drm-shim, which recycles memory without clearing it, round
+1 reports `zero` and round 2 `NOT-ZEROED` (33554432 of 33554432 bytes, value `0xa5`).
+`AGXFRESH` is weaker in the zero direction: the driver may answer for an uninitialised target
+without touching its memory, so only a non-zero count means something.
+
+### Reference on Linux, then Darwin
+
+```
+./agx-panel-demo --require-renderer "Apple M1" --frames 30 --tiles --fp-out panel-linux.fp | tee panel-linux.txt
+./agx-panel-demo --require-renderer "Apple M1" --no-present --no-bench --scenes mesh --diag --repeat-hash 5 --fresh \
+    --fp-out panel-linux-mesh.fp | tee panel-linux-mesh.txt
+```
+
+Stage the two `.fp` files as `/usr/local/share/agx/panel-linux.fp` and
+`/usr/local/share/agx/panel-linux-mesh.fp` (optional; without them the script still prints
+tiles). `supervisor/darwin-agx-panel-demo.in` now runs the benchmark with `--tiles` and the
+reference (`DL42_PANEL_RC`), then the mesh-only diagnostic process (`DL42_DIAG_BEGIN` ...
+`DL42_DIAG_RC`). The benchmark took 17.8 s on the target; the additions are a few seconds.
+
+### Reading the result
+
+| Observation on Darwin | Points to |
+|---|---|
+| run 1 `AGXFPDIFF mesh rgb10`: a handful of blocks on torus outlines or where tori overlap | a depth-test outcome differing in single pixels: depth precision or depth store/load, not memory contents |
+| the same, but whole 32x32-aligned squares or rows of them | a tile that was loaded or stored differently (partial render when the tiler's buffer fills, or stale tile memory) |
+| `AGXREPEAT mesh rgb10 stable=no` | a race or uninitialised input; `AGXREPEATDIFF` shows where |
+| run 2 (fresh process, mesh only) gives Linux's hash for its own run 2, while run 1 does not | dependence on what ran before: recycled buffers or driver/kernel state grown by the earlier scenes |
+| `AGXVAR own-depth-buffer same_as_base=no` on one system only | the shared depth buffer: what the `rgba8` frame left in it reaches the `rgb10` frame |
+| `AGXVAR finish-before-read same_as_base=no` | the readback does not wait for the render |
+| `AGXDEPTH after=rgb10` hash differs from Linux while `after=rgba8` agrees | the depth buffer itself differs for the flipped frame; colour is a consequence |
+| `AGXGEM ... NOT-ZEROED` | the kernel's GEM allocation; fix that first and re-run |
+
+Not checked by anything here: `GEM_MADVISE`. A kernel that ignores it keeps buffer contents,
+which Mesa allows for; one that discards pages and still reports them retained would hand
+Mesa's cache zeroed buffers, which Mesa does not rely on either. It would not explain a
+deterministic single-frame difference.
 
 ## Files
 
