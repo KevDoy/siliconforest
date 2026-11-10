@@ -579,6 +579,66 @@ which Mesa allows for; one that discards pages and still reports them retained w
 Mesa's cache zeroed buffers, which Mesa does not rely on either. It would not explain a
 deterministic single-frame difference.
 
+## 9. Zero-copy present: `agx-panel-demo --kms`
+
+Not run on the target at the time of writing. Kernel-side findings go to `KERNEL-NEEDS.md`.
+
+Route: each of three 2560x1600 buffers is a GEM object of the GPU driver, created with the
+asahi `GEM_CREATE` ioctl on the render node exactly as `m1-dcp/test/dcp-flip-test.c
+--prime-from auto` does, and exported as a PRIME fd. The fd is imported into the card node
+(`ADDFB2` XRGB8888, pitch 10240) and into GL: `eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)` with
+fourcc ARGB8888 (XRGB8888 if refused), `DRM_FORMAT_MOD_LINEAR`, then
+`glEGLImageTargetTexture2DOES` on a texture attached to an FBO with the demo's depth
+renderbuffer. No Mesa change was needed for this: the Darwin build already contains the
+import code (`dri2_create_image_dma_buf`, `dri2_from_dma_bufs`, `agx_resource_from_handle`),
+the extension is advertised when the kernel answers `DRM_CAP_PRIME` (patch 0004), and on the
+drm-shim the asahi driver lists the linear modifier (`0x0`) for AR24 and XR24.
+`agx_resource_from_handle` accepts a linear import whose pitch is a multiple of 16.
+
+Scenes are drawn y-flipped (buffer row 0 is the top scanline) and without the channel swap
+(GL writes B,G,R,A bytes for this format, which is XRGB8888 to the display).
+
+Per scene:
+
+- `AGXKMSCHECK scene=S frame=7 gl_vs_cpu_map=equal|different blocks_differ=N
+  kms_vs_render_path=equal|different blocks_differ=N of=16000 flat=0|1 sha256=... result=ok|FAIL`:
+  the fixed frame rendered into a scanout buffer; `glReadPixels` of it against the CPU's view
+  of the same memory through the render-node mapping, and against the same frame rendered
+  into an ordinary GL-allocated RGBA8 target (alpha ignored). On a difference, `AGXKMSDIFF`
+  gives the bounding box and `AGXPIX` both versions of the first differing 16x16 block. With
+  `--fp-ref`, `AGXFPDIFF ... target=kms` compares with the reference's `rgba8flip` section.
+- then `--kms-seconds` (default 5) of: draw frame N into a buffer that is neither on screen
+  nor pending, `glFinish`, block in `read()` for the previous flip's event, atomic commit of
+  `FB_ID` with `PAGE_FLIP_EVENT | NONBLOCK` (first commit: `ALLOW_MODESET`, blocking):
+  `AGXKMS scene=S frames=N seconds=.. fps=.. render_ms_median=.. render_ms_p99=..
+  flip_wait_ms_median=.. missed_vblanks=.. ebusy_retries=.. flips=.. interval_ms_min=..
+  interval_ms_max=.. event_sequence_span=.. present=kms`. `missed_vblanks` counts intervals
+  between flip-complete events above 25 ms; `event_sequence_span` is the kernel's own vblank
+  count over the scene (flips - 1 when none was missed, if the driver counts).
+- `AGXKMS_FAIL call="..." errno=N (...)` names the first call that failed; `AGXKMS_DONE
+  status=ok|check-failed|gl-error|interrupted`.
+
+`--kms-first`: one buffer, the fixed frame of the first scene, its check, one modeset commit,
+its event (`AGXKMS_FIRST ... result=flipped`), exit. `--kms-noflip`: no card node; everything
+else, including the dma-buf import into GL (for Linux, where a compositor owns the display).
+
+```
+# Linux reference on the M1 (libdrm is now needed to build the demo)
+cc -O2 -o agx-panel-demo agx-panel-demo.c $(pkg-config --cflags --libs egl glesv2 libdrm) -lm
+./agx-panel-demo --require-renderer "Apple M1" --kms-noflip --kms-seconds 2 --fp-out panel-linux-kms.fp | tee panel-linux-kms.txt
+
+# Darwin, one command (collection with PDAgx and PDDcp)
+DCP_TEST=kms [DCP_KMS_REF=panel-linux-kms.fp] tools/dcp_boot.sh <name> <kc-store-path>
+```
+
+`DCP_TEST=kms` stages `agx-panel-demo`, the four libraries and
+`supervisor/darwin-agx-kms-demo.in` (markers `DL46_KMS_BEGIN_`, `DL46_FIRST_RC`,
+`DL46_KMS_RC`, `DL46_RC`, `DL46_KMS_END_`) and adds `pdagx=1`, `pddcp=2`. The script runs
+`--kms-first --scenes plasma`, and the full `--kms` only if that passed.
+
+Not handled: the demo does not restore the text console after the last flip; what the panel
+shows after the card node is closed is the display driver's business.
+
 ## Files
 
 ```
@@ -592,6 +652,7 @@ compat/sys/sysmacros.h         include shim
 test/agx-offscreen-test.c      the test
 test/agx-panel-demo.c          on-screen demo and benchmark
 supervisor/                    guest scripts (darwin-agx-panel-demo.in is the demo's)
+KERNEL-NEEDS.md                kernel-side gaps met by the Mesa work, with call sites
 trace/ioctl-trace.c            LD_PRELOAD ioctl/mmap logger
 trace/summarize.py             condenses a log
 trace/shim-g13g-trace.txt      recorded log

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Boot a display-driver (PDDcp) collection once. Usage: tools/dcp_boot.sh <new-name> <kc-store-path> [extra boot-args]
 #   DCP_TEST=1 tools/dcp_boot.sh ...   also stages and runs dcp-flip-test in the guest, with pddcp=2
+#   DCP_TEST=kms tools/dcp_boot.sh ... stages and runs the zero-copy GL present demo (m1-mesa-asahi)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}; KC=${2:?kernel collection store path}; EXTRA=${3:-}
@@ -21,6 +22,19 @@ if [ "${DCP_TEST:-0}" = 1 ]; then
   export PCIE_EXTRA_FILES="$PCIE_EXTRA_FILES;${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-flip-test.in}=/usr/bin/darwin-desktop-test"
   DCP_MODE=${DCP_MODE:-2}
 fi
+# DCP_TEST=kms: the zero-copy present demo (integrations/puredarwin/m1-mesa-asahi): agx-panel-demo
+# with its Mesa libraries and libdrm, guest script darwin-agx-kms-demo.in (DL46 lines). Needs a
+# collection with PDAgx and PDDcp; adds pdagx=1, pddcp=2. Optional reference fingerprint:
+# DCP_KMS_REF=<panel-linux-kms.fp>.
+if [ "${DCP_TEST:-0}" = kms ]; then
+  export PATH=$HOME/.nix-profile/bin:$PATH
+  T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
+  X="$T/usr/local/bin/agx-panel-demo=/usr/local/bin/agx-panel-demo"
+  for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+  [ -n "${DCP_KMS_REF:-}" ] && X="$X;$DCP_KMS_REF=/usr/local/share/agx/panel-linux-kms.fp"
+  export PCIE_EXTRA_FILES="$X;${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-mesa-asahi/supervisor/darwin-agx-kms-demo.in}=/usr/bin/darwin-desktop-test"
+  EXTRA="pdagx=1 $EXTRA"; DCP_MODE=${DCP_MODE:-2}
+fi
 PCIE_BOOTARGS="pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=${DCP_MODE:-1} $EXTRA" PCIE_SKIP_BUILD=1 LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "${DCP_RUNTIME:-150}" 2>&1 | grep -a '"status"\|rror\|No space' | cut -c1-200
-strings -n 6 runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin | grep -a 'PDDcp\|pd platform: no\|panic\|PD_STUB\|Backtrace\|IOMemoryDescriptor phys\|DL4[0-9]' | grep -av 'PDDcp:   reg \|interrupt controller none\|dart-regs\|dart-l1' | cut -c1-${DCP_COLS:-260}
+strings -n 6 runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin | grep -a 'PDDcp\|pd platform: no\|panic\|PD_STUB\|Backtrace\|IOMemoryDescriptor phys\|DL4[0-9]\|^AGX\|agx-panel-demo:' | grep -av 'PDDcp:   reg \|interrupt controller none\|dart-regs\|dart-l1' | cut -c1-${DCP_COLS:-260}

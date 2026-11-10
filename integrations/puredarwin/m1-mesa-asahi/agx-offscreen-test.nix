@@ -35,11 +35,12 @@ in pkgs.stdenv.mkDerivation {
     ${tc}/bin/${triple}-clang -std=gnu11 -O2 -Wall -Wextra -DHAVE_PDGOP \
       -isysroot ${sdkRoot} -mmacosx-version-min=26.5 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
       -fno-stack-protector -I${libSystem}/usr/include -I${mesa}/usr/include -I${pdgop}/include \
+      -I${libdrm}/include -I${libdrm}/include/libdrm \
       ${./test/agx-panel-demo.c} pdgop/*.o \
-      -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib -L${mesa}/usr/lib \
+      -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib -L${mesa}/usr/lib -L${libdrm}/lib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains \
-      -lEGL -lGLESv2 -lSystem -o agx-panel-demo
+      -lEGL -lGLESv2 -ldrm -lSystem -o agx-panel-demo
   '';
   installPhase = ''
     INT=${tc}/bin/${triple}-install_name_tool

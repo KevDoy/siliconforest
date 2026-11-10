@@ -47,13 +47,28 @@
 //   --no-bench         fixed frames and diagnostics only
 //   --diag             --tiles --repeat-hash 3 --variants
 //
+// KMS present path (--kms): three linear 32-bit buffers that are GL render targets and KMS
+// framebuffers at once, no CPU copy.  Each is a GEM object of the GPU driver (asahi GEM_CREATE on
+// the render node), exported as a PRIME fd; the fd is imported into the display's card node
+// (ADDFB2 XRGB8888) and into GL (EGL_EXT_image_dma_buf_import, DRM_FORMAT_MOD_LINEAR, EGLImage,
+// texture on an FBO).  Per scene: a fixed-frame check (AGXKMSCHECK: glReadPixels of the buffer
+// against a CPU mapping of the same buffer and against the same frame rendered into an ordinary
+// GL target), then --kms-seconds (default 5) of render, glFinish, atomic page flip, blocking
+// read() of the flip-complete event (AGXKMS line).  Nodes are picked by DRM driver name
+// ("asahi" render node, "apple" card node).  Every risky call is announced first on stdout and
+// on /dev/console ("step:" lines).
+//   --kms-first     one buffer, one frame, its check, one modeset commit, exit
+//   --kms-noflip    no card node: buffers, import, rendering and checks only (Linux reference)
+//
 // usage: agx-panel-demo [--size WxH] [--frames N] [--budget seconds] [--scenes plasma,quads,mesh]
 //                       [--no-present] [--hold-ms N] [--require-renderer substr] [--dump prefix]
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +81,10 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
+
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <drm_fourcc.h>
 
 #ifdef HAVE_PDGOP
 #include <PDGOP.h>
@@ -392,12 +411,12 @@ static const char *const scene_names[NSCENES] = { "plasma", "quads", "mesh" };
 
 // Draw frame `frame` of a scene into the bound framebuffer. panel != 0 selects the y-flipped,
 // red/blue-swapped output of the rgb10 path.
-static void draw_scene(int scene, int frame, int panel)
+static void draw_scene_ex(int scene, int frame, int yflip, int swap)
 {
-	const float t = (float)frame / 60.0f, flip = panel ? -1.0f : 1.0f, bgr = panel ? 1.0f : 0.0f;
+	const float t = (float)frame / 60.0f, flip = yflip ? -1.0f : 1.0f, bgr = swap ? 1.0f : 0.0f;
 	const float aspect = (float)W / (float)H;
 	float bg[3] = { 0.05f, 0.07f, 0.12f };
-	if (panel) { float s = bg[0]; bg[0] = bg[2]; bg[2] = s; }
+	if (swap) { float s = bg[0]; bg[0] = bg[2]; bg[2] = s; }
 
 	glViewport(0, 0, W, H);
 	if (scene == SCENE_PLASMA) {
@@ -451,6 +470,11 @@ static void draw_scene(int scene, int frame, int panel)
 		}
 		glDisable(GL_DEPTH_TEST);
 	}
+}
+
+static void draw_scene(int scene, int frame, int panel)
+{
+	draw_scene_ex(scene, frame, panel, panel);
 }
 
 // ---- the panel (or a heap stand-in with the same layout) ----
@@ -630,6 +654,7 @@ static char *fp_ref;
 static struct { const char *scene, *target; int x, y; } pix_req[8];
 static int pix_reqs;
 static GLuint prog_probe, depth_rb;
+static const char *fp_section;	// when set: compare against this section of --fp-ref, write nothing
 
 static uint32_t fnv_block(const uint8_t *px, int x0, int y0, int w, int h)
 {
@@ -700,7 +725,7 @@ static void report_frame(const char *scene, const char *target, const uint8_t *p
 		    (unsigned long long)lane[2], (unsigned long long)lane[3]);
 	}
 	const int nbx = (W + BLK - 1) / BLK, nby = (H + BLK - 1) / BLK;
-	if (fp_out) {
+	if (fp_out && !fp_section) {
 		fprintf(fp_out, "F %s %s %d %d\n", scene, target, W, H);
 		for (int by = 0; by < nby; by++) {
 			for (int bx = 0; bx < nbx; bx++)
@@ -711,7 +736,7 @@ static void report_frame(const char *scene, const char *target, const uint8_t *p
 	}
 	if (fp_ref) {
 		char head[128];
-		snprintf(head, sizeof(head), "F %s %s %d %d\n", scene, target, W, H);
+		snprintf(head, sizeof(head), "F %s %s %d %d\n", scene, fp_section ? fp_section : target, W, H);
 		char *q = strstr(fp_ref, head);
 		if (!q) {
 			printf("AGXFPDIFF scene=%s target=%s result=no-reference\n", scene, target);
@@ -940,6 +965,567 @@ static void fresh_gl(const char *kind, GLenum internal, GLenum type, int w, int 
 	glDeleteTextures(1, &tex);
 }
 
+// ---- KMS present path ----
+static int console_fd = -1;
+
+// stdout and, unbuffered, /dev/console: if the kernel dies in the next call, the last step shows
+static void step(const char *fmt, ...)
+{
+	char line[600];
+	va_list ap;
+	int n = snprintf(line, sizeof(line), T "step: ");
+	va_start(ap, fmt);
+	n += vsnprintf(line + n, sizeof(line) - (size_t)n - 2, fmt, ap);
+	va_end(ap);
+	if (n > (int)sizeof(line) - 2)
+		n = sizeof(line) - 2;
+	line[n++] = '\n';
+	fwrite(line, 1, (size_t)n, stdout);
+	fflush(stdout);
+	if (console_fd >= 0)
+		(void)!write(console_fd, line, (size_t)n);
+}
+
+static int kfail(const char *what)
+{
+	int e = errno;
+	printf("AGXKMS_FAIL call=\"%s\" errno=%d (%s)\n", what, e, strerror(e));
+	return 1;
+}
+
+static int open_by_driver(const char *prefix, const char *driver, char *path, size_t path_len)
+{
+	DIR *d = opendir("/dev/dri");
+	struct dirent *e;
+	int found = -1;
+	if (!d)
+		return -1;
+	while (found < 0 && (e = readdir(d)) != NULL) {
+		if (strncmp(e->d_name, prefix, strlen(prefix)))
+			continue;
+		snprintf(path, path_len, "/dev/dri/%s", e->d_name);
+		int fd = open(path, O_RDWR | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		drmVersion *v = drmGetVersion(fd);
+		printf(T "%s: driver %s\n", path, v ? v->name : "(no version)");
+		if (v && !strcmp(v->name, driver))
+			found = fd;
+		else
+			close(fd);
+		drmFreeVersion(v);
+	}
+	closedir(d);
+	return found;
+}
+
+static void print_words(const char *label, const char *list)
+{
+	// extension strings are long; 180 columns per line survives the console
+	char line[200];
+	size_t n = 0;
+	for (const char *p = list ? list : ""; ; ) {
+		size_t w = strcspn(p, " ");
+		if (n && (n + w + 1 > 170 || !*p)) {
+			printf(T "%s: %.*s\n", label, (int)n, line);
+			n = 0;
+		}
+		if (!*p)
+			break;
+		if (w < 160) {
+			memcpy(line + n, p, w);
+			n += w;
+			line[n++] = ' ';
+		}
+		p += w;
+		while (*p == ' ')
+			p++;
+	}
+}
+
+struct kbuf {
+	uint32_t rhandle, chandle, fb, pitch;
+	size_t size;
+	uint8_t *map;	// CPU mapping through the render node
+	int prime_fd;
+	EGLImageKHR img;
+	GLuint tex, fbo;
+};
+
+struct kms {
+	int fd, rfd, noflip, modeset_done;
+	uint32_t crtc_id, plane_id, conn_id, p_conn_crtc, p_mode, p_active, pp[10], mode_blob;
+	drmModeModeInfo mode;
+	unsigned ebusy;
+	uint32_t gl_fourcc;
+};
+
+static int kbuf_create(struct kms *k, struct kbuf *b, int index, EGLDisplay dpy)
+{
+	struct { uint64_t size; uint32_t flags, vm_id, handle, pad; } create = { 0 };
+	struct { uint32_t handle, flags; uint64_t offset; } mo = { 0 };
+	PFNEGLCREATEIMAGEKHRPROC create_image = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+	void (*image_target)(GLenum, void *) = (void (*)(GLenum, void *))eglGetProcAddress("glEGLImageTargetTexture2DOES");
+
+	if (!create_image || !image_target) {
+		printf("AGXKMS_FAIL call=\"eglGetProcAddress(eglCreateImageKHR/glEGLImageTargetTexture2DOES)\" errno=0 (missing)\n");
+		return 1;
+	}
+	b->pitch = (uint32_t)W * 4;
+	b->size = ((size_t)b->pitch * H + 0x3fff) & ~(size_t)0x3fff;
+	b->prime_fd = -1;
+	create.size = b->size;
+	step("buffer %d: asahi GEM_CREATE %zu bytes on the render node", index, b->size);
+	if (drmIoctl(k->rfd, DRM_IOWR(DRM_COMMAND_BASE + 5, create), &create))
+		return kfail("DRM_IOCTL_ASAHI_GEM_CREATE (render node)");
+	b->rhandle = mo.handle = create.handle;
+	if (drmIoctl(k->rfd, DRM_IOWR(DRM_COMMAND_BASE + 6, mo), &mo))
+		return kfail("DRM_IOCTL_ASAHI_GEM_MMAP_OFFSET (render node)");
+	step("buffer %d: mmap through the render node", index);
+	b->map = mmap(NULL, b->size, PROT_READ | PROT_WRITE, MAP_SHARED, k->rfd, (off_t)mo.offset);
+	if (b->map == MAP_FAILED)
+		return kfail("mmap of the GPU buffer (render node)");
+	step("buffer %d: PRIME export from the render node (handle %u)", index, b->rhandle);
+	if (drmPrimeHandleToFD(k->rfd, b->rhandle, DRM_CLOEXEC | DRM_RDWR, &b->prime_fd))
+		return kfail("drmPrimeHandleToFD (render node)");
+
+	// GL side: ARGB8888 first (a renderable format with alpha), XRGB8888 if that is refused.
+	// Both describe the same bytes; the display reads them as XRGB8888.
+	static const uint32_t fourccs[2] = { DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888 };
+	for (int f = 0; f < 2 && !b->img; f++) {
+		uint32_t fourcc = k->gl_fourcc ? k->gl_fourcc : fourccs[f];
+		const EGLint at[] = {
+			EGL_WIDTH, W, EGL_HEIGHT, H, EGL_LINUX_DRM_FOURCC_EXT, (EGLint)fourcc,
+			EGL_DMA_BUF_PLANE0_FD_EXT, b->prime_fd, EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+			EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)b->pitch,
+			EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, (EGLint)(DRM_FORMAT_MOD_LINEAR & 0xffffffff),
+			EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (EGLint)(DRM_FORMAT_MOD_LINEAR >> 32), EGL_NONE,
+		};
+		step("buffer %d: eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT, %.4s, linear, pitch %u, fd %d)", index,
+		    (const char *)&fourcc, b->pitch, b->prime_fd);
+		b->img = create_image(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, at);
+		if (b->img == EGL_NO_IMAGE_KHR) {
+			printf(T "eglCreateImageKHR %.4s failed: EGL error 0x%x\n", (const char *)&fourcc, eglGetError());
+			b->img = 0;
+			if (k->gl_fourcc)
+				break;
+		} else {
+			k->gl_fourcc = fourcc;
+		}
+	}
+	if (!b->img) {
+		printf("AGXKMS_FAIL call=\"eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT)\" errno=0 (see EGL error above)\n");
+		return 1;
+	}
+	step("buffer %d: glEGLImageTargetTexture2DOES and framebuffer", index);
+	glGenTextures(1, &b->tex);
+	glBindTexture(GL_TEXTURE_2D, b->tex);
+	image_target(GL_TEXTURE_2D, b->img);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	GLenum err = glGetError();
+	glGenFramebuffers(1, &b->fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, b->fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, b->tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth_rb);
+	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	if (err != GL_NO_ERROR || status != GL_FRAMEBUFFER_COMPLETE) {
+		printf("AGXKMS_FAIL call=\"imported texture as framebuffer\" errno=0 (GL error 0x%x, framebuffer status 0x%x)\n", err, status);
+		return 1;
+	}
+	if (!k->noflip) {
+		uint32_t handles[4] = { 0 }, pitches[4] = { 0 }, offsets[4] = { 0 };
+		step("buffer %d: PRIME import into the card node (fd %d)", index, b->prime_fd);
+		if (drmPrimeFDToHandle(k->fd, b->prime_fd, &b->chandle))
+			return kfail("drmPrimeFDToHandle (card node)");
+		handles[0] = b->chandle;
+		pitches[0] = b->pitch;
+		step("buffer %d: ADDFB2 XRGB8888", index);
+		if (drmModeAddFB2(k->fd, (uint32_t)W, (uint32_t)H, DRM_FORMAT_XRGB8888, handles, pitches, offsets, &b->fb, 0))
+			return kfail("drmModeAddFB2 (XRGB8888, card node)");
+	}
+	printf(T "buffer %d: render handle %u, card handle %u, fb %u, GL format %.4s, texture %u, fbo %u\n", index,
+	    b->rhandle, b->chandle, b->fb, (const char *)&k->gl_fourcc, b->tex, b->fbo);
+	return 0;
+}
+
+static uint32_t kprop(int fd, uint32_t obj, uint32_t type, const char *name, uint64_t *value)
+{
+	drmModeObjectProperties *props = drmModeObjectGetProperties(fd, obj, type);
+	uint32_t id = 0;
+	if (!props)
+		return 0;
+	for (uint32_t i = 0; i < props->count_props && !id; i++) {
+		drmModePropertyRes *pr = drmModeGetProperty(fd, props->props[i]);
+		if (pr && !strcmp(pr->name, name)) {
+			id = pr->prop_id;
+			if (value)
+				*value = props->prop_values[i];
+		}
+		drmModeFreeProperty(pr);
+	}
+	drmModeFreeObjectProperties(props);
+	if (!id)
+		printf(T "object %u has no property %s\n", obj, name);
+	return id;
+}
+
+// connector, mode, CRTC, primary plane and property ids: the sequence of m1-dcp's dcp-flip-test
+static int kms_setup(struct kms *k)
+{
+	if (drmSetClientCap(k->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1))
+		return kfail("DRM_CLIENT_CAP_UNIVERSAL_PLANES");
+	if (drmSetClientCap(k->fd, DRM_CLIENT_CAP_ATOMIC, 1))
+		return kfail("DRM_CLIENT_CAP_ATOMIC");
+	step("drmModeGetResources");
+	drmModeRes *res = drmModeGetResources(k->fd);
+	if (!res)
+		return kfail("drmModeGetResources");
+	drmModeConnector *conn = NULL;
+	for (int i = 0; i < res->count_connectors && !conn; i++) {
+		drmModeConnector *c = drmModeGetConnector(k->fd, res->connectors[i]);
+		if (c && c->connection == DRM_MODE_CONNECTED && c->count_modes > 0)
+			conn = c;
+		else
+			drmModeFreeConnector(c);
+	}
+	if (!conn) {
+		printf("AGXKMS_FAIL call=\"find a connected connector\" errno=0 (none)\n");
+		return 1;
+	}
+	k->conn_id = conn->connector_id;
+	k->mode = conn->modes[0];
+	for (int i = 0; i < conn->count_modes; i++)
+		if (conn->modes[i].type & DRM_MODE_TYPE_PREFERRED)
+			k->mode = conn->modes[i];
+	int crtc_index = -1;
+	for (int e = 0; e < conn->count_encoders && !k->crtc_id; e++) {
+		drmModeEncoder *enc = drmModeGetEncoder(k->fd, conn->encoders[e]);
+		for (int c = 0; enc && c < res->count_crtcs && !k->crtc_id; c++)
+			if (enc->possible_crtcs & (1u << c)) {
+				k->crtc_id = res->crtcs[c];
+				crtc_index = c;
+			}
+		drmModeFreeEncoder(enc);
+	}
+	if (!k->crtc_id) {
+		printf("AGXKMS_FAIL call=\"find a CRTC\" errno=0 (none)\n");
+		return 1;
+	}
+	step("drmModeGetPlaneResources");
+	drmModePlaneRes *planes = drmModeGetPlaneResources(k->fd);
+	if (!planes)
+		return kfail("drmModeGetPlaneResources");
+	for (uint32_t i = 0; i < planes->count_planes && !k->plane_id; i++) {
+		drmModePlane *pl = drmModeGetPlane(k->fd, planes->planes[i]);
+		uint64_t type = 99;
+		if (!pl)
+			continue;
+		kprop(k->fd, pl->plane_id, DRM_MODE_OBJECT_PLANE, "type", &type);
+		if (type == DRM_PLANE_TYPE_PRIMARY && (pl->possible_crtcs & (1u << crtc_index)))
+			k->plane_id = pl->plane_id;
+		drmModeFreePlane(pl);
+	}
+	if (!k->plane_id) {
+		printf("AGXKMS_FAIL call=\"find a primary plane\" errno=0 (none)\n");
+		return 1;
+	}
+	static const char *const pn[10] = { "FB_ID", "CRTC_ID", "SRC_X", "SRC_Y", "SRC_W", "SRC_H", "CRTC_X", "CRTC_Y", "CRTC_W", "CRTC_H" };
+	k->p_conn_crtc = kprop(k->fd, k->conn_id, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", NULL);
+	k->p_mode = kprop(k->fd, k->crtc_id, DRM_MODE_OBJECT_CRTC, "MODE_ID", NULL);
+	k->p_active = kprop(k->fd, k->crtc_id, DRM_MODE_OBJECT_CRTC, "ACTIVE", NULL);
+	int missing = !k->p_conn_crtc || !k->p_mode || !k->p_active;
+	for (int i = 0; i < 10; i++)
+		missing |= !(k->pp[i] = kprop(k->fd, k->plane_id, DRM_MODE_OBJECT_PLANE, pn[i], NULL));
+	if (missing) {
+		printf("AGXKMS_FAIL call=\"look up KMS properties\" errno=0 (one is missing)\n");
+		return 1;
+	}
+	if (drmModeCreatePropertyBlob(k->fd, &k->mode, sizeof(k->mode), &k->mode_blob))
+		return kfail("drmModeCreatePropertyBlob (mode)");
+	printf(T "display: connector %u, crtc %u, plane %u, mode %ux%u@%u\n", k->conn_id, k->crtc_id, k->plane_id,
+	    k->mode.hdisplay, k->mode.vdisplay, k->mode.vrefresh);
+	return 0;
+}
+
+// Blocks in read() until a flip-complete event arrives; its sequence number in *seq.
+static int kms_wait_flip(struct kms *k, uint32_t *seq)
+{
+	char ev[256];
+	for (;;) {
+		ssize_t n = read(k->fd, ev, sizeof(ev));
+		if (n < 0 && errno == EINTR) {
+			if (stop_requested)
+				return 1;
+			continue;
+		}
+		if (n < (ssize_t)sizeof(struct drm_event))
+			return kfail("read of the DRM event (card node)");
+		for (ssize_t off = 0; off + (ssize_t)sizeof(struct drm_event) <= n;) {
+			struct drm_event *e = (struct drm_event *)(ev + off);
+			if (e->type == DRM_EVENT_FLIP_COMPLETE) {
+				if (seq && e->length >= sizeof(struct drm_event_vblank))
+					*seq = ((struct drm_event_vblank *)e)->sequence;
+				return 0;
+			}
+			if (e->length < sizeof(*e))
+				break;
+			off += e->length;
+		}
+	}
+}
+
+// The first commit sets the mode and blocks; later ones are non-blocking flips of FB_ID only.
+static int kms_commit(struct kms *k, const struct kbuf *b)
+{
+	int ret, tries = 0;
+	if (!k->modeset_done) {
+		drmModeAtomicReq *req = drmModeAtomicAlloc();
+		uint64_t pv[10] = { b->fb, k->crtc_id, 0, 0, (uint64_t)k->mode.hdisplay << 16, (uint64_t)k->mode.vdisplay << 16,
+			0, 0, k->mode.hdisplay, k->mode.vdisplay };
+		drmModeAtomicAddProperty(req, k->conn_id, k->p_conn_crtc, k->crtc_id);
+		drmModeAtomicAddProperty(req, k->crtc_id, k->p_mode, k->mode_blob);
+		drmModeAtomicAddProperty(req, k->crtc_id, k->p_active, 1);
+		for (int i = 0; i < 10; i++)
+			drmModeAtomicAddProperty(req, k->plane_id, k->pp[i], pv[i]);
+		step("atomic commit with ALLOW_MODESET, fb %u", b->fb);
+		ret = drmModeAtomicCommit(k->fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_PAGE_FLIP_EVENT, NULL);
+		drmModeAtomicFree(req);
+		if (ret)
+			return kfail("drmModeAtomicCommit (ALLOW_MODESET | PAGE_FLIP_EVENT)");
+		k->modeset_done = 1;
+		return 0;
+	}
+	for (;;) {
+		drmModeAtomicReq *req = drmModeAtomicAlloc();
+		drmModeAtomicAddProperty(req, k->plane_id, k->pp[0], b->fb);
+		ret = drmModeAtomicCommit(k->fd, req, DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_NONBLOCK, NULL);
+		drmModeAtomicFree(req);
+		if (!ret || errno != EBUSY || ++tries > 100)
+			break;
+		k->ebusy++;
+		usleep(1000);
+	}
+	return ret ? kfail("drmModeAtomicCommit (PAGE_FLIP_EVENT | NONBLOCK)") : 0;
+}
+
+static void force_alpha(uint8_t *px)
+{
+	for (size_t i = 0; i < (size_t)W * H; i++)
+		px[4 * i + 3] = 255;
+}
+
+static const char *eq(size_t blocks) { return blocks ? "different" : "equal"; }
+
+// The fixed frame, drawn y-flipped (buffer row 0 is the top scanline) into the scanout buffer:
+// what GL reads back from it, what the CPU sees in the same memory, and the same frame from an
+// ordinary GL-allocated RGBA8 target must be the same picture.  Alpha is ignored (X on screen).
+static int kms_check(int scene, struct kbuf *b, uint8_t *gl, uint8_t *cpu, uint8_t *ref)
+{
+	int bbox[4], first[2] = { 0, 0 };
+	char hex[65];
+	step("%s: fixed frame %d into the scanout buffer, glFinish", scene_names[scene], HASH_FRAME);
+	glBindFramebuffer(GL_FRAMEBUFFER, b->fbo);
+	draw_scene_ex(scene, HASH_FRAME, 1, 0);
+	glFinish();
+	step("%s: glReadPixels of the scanout buffer", scene_names[scene]);
+	glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, gl);
+	force_alpha(gl);
+	for (int y = 0; y < H; y++) {
+		const uint8_t *src = b->map + (size_t)y * b->pitch;
+		uint8_t *dst = cpu + (size_t)y * W * 4;
+		for (int x = 0; x < W; x++) {	// memory is B,G,R,X
+			dst[4 * x] = src[4 * x + 2]; dst[4 * x + 1] = src[4 * x + 1]; dst[4 * x + 2] = src[4 * x]; dst[4 * x + 3] = 255;
+		}
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo8);
+	draw_scene_ex(scene, HASH_FRAME, 1, 0);
+	glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, ref);
+	force_alpha(ref);
+	size_t d_cpu = diff_blocks(gl, cpu, bbox, first), flat = 1;
+	int cb[4] = { bbox[0], bbox[1], bbox[2], bbox[3] }, cf[2] = { first[0], first[1] };
+	size_t d_ref = diff_blocks(gl, ref, bbox, first);
+	for (size_t i = 1; i < (size_t)W * H && flat; i++)
+		flat = memcmp(gl, gl + 4 * i, 4) == 0;
+	sha256_hex(gl, (size_t)W * H * 4, hex);
+	printf("AGXKMSCHECK scene=%s frame=%d gl_vs_cpu_map=%s blocks_differ=%zu kms_vs_render_path=%s blocks_differ=%zu of=%d flat=%d sha256=%s result=%s\n",
+	    scene_names[scene], HASH_FRAME, eq(d_cpu), d_cpu, eq(d_ref), d_ref, ((W + BLK - 1) / BLK) * ((H + BLK - 1) / BLK),
+	    (int)flat, hex, d_cpu || d_ref || flat ? "FAIL" : "ok");
+	if (d_cpu) {
+		printf("AGXKMSDIFF scene=%s what=gl_vs_cpu_map bbox=%d,%d-%d,%d first_block=%d,%d\n", scene_names[scene], cb[0], cb[1], cb[2], cb[3], cf[0], cf[1]);
+		dump_block(scene_names[scene], "kms-gl", gl, cf[0], cf[1]);
+		dump_block(scene_names[scene], "kms-cpu", cpu, cf[0], cf[1]);
+	}
+	if (d_ref) {
+		printf("AGXKMSDIFF scene=%s what=kms_vs_render_path bbox=%d,%d-%d,%d first_block=%d,%d\n", scene_names[scene], bbox[0], bbox[1], bbox[2], bbox[3], first[0], first[1]);
+		dump_block(scene_names[scene], "kms-gl", gl, first[0], first[1]);
+		dump_block(scene_names[scene], "render", ref, first[0], first[1]);
+	}
+	// against another system: section "rgba8flip" of the reference is its render-path frame
+	report_frame(scene_names[scene], "rgba8flip", ref);
+	fp_section = "rgba8flip";
+	report_frame(scene_names[scene], "kms", gl);
+	fp_section = NULL;
+	return d_cpu || d_ref || flat;
+}
+
+static double ms_at(uint64_t *v, int n, double q)
+{
+	if (n <= 0)
+		return 0;
+	qsort(v, n, sizeof(*v), cmp_u64);
+	int i = (int)(q * (n - 1) + 0.5);
+	return (double)v[i] / 1000.0;
+}
+
+static int kms_run(EGLDisplay dpy, const char *scenes, double seconds, int noflip, int first_only,
+    uint8_t *buf_a, uint8_t *buf_b, uint8_t *buf_c)
+{
+	enum { NB = 3, MAXF = 8192 };
+	static uint64_t render_us[MAXF], wait_us[MAXF], iv_us[MAXF];
+	struct kms k = { .fd = -1, .rfd = -1, .noflip = noflip };
+	struct kbuf bufs[NB];
+	char path[300];
+	int failed = 0, front = -1, pending = -1, nbufs = first_only ? 1 : NB;
+
+	memset(bufs, 0, sizeof(bufs));
+	console_fd = open("/dev/console", O_WRONLY | O_NOCTTY);
+	print_words("EGL client extensions", eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS));
+	print_words("EGL display extensions", eglQueryString(dpy, EGL_EXTENSIONS));
+	const char *ext = eglQueryString(dpy, EGL_EXTENSIONS), *glext = (const char *)glGetString(GL_EXTENSIONS);
+	int has_import = ext && strstr(ext, "EGL_EXT_image_dma_buf_import") != NULL;
+	int has_mod = ext && strstr(ext, "EGL_EXT_image_dma_buf_import_modifiers") != NULL;
+	int has_oes = glext && strstr(glext, "GL_OES_EGL_image") != NULL;
+	printf(T "EGL_EXT_image_dma_buf_import=%d _modifiers=%d EGL_MESA_image_dma_buf_export=%d GL_OES_EGL_image=%d\n", has_import, has_mod,
+	    ext && strstr(ext, "EGL_MESA_image_dma_buf_export") != NULL, has_oes);
+	if (has_mod) {
+		PFNEGLQUERYDMABUFMODIFIERSEXTPROC qmod = (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+		static const uint32_t ask[3] = { DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, DRM_FORMAT_ABGR8888 };
+		for (int f = 0; f < 3 && qmod; f++) {
+			EGLuint64KHR mods[16];
+			EGLBoolean ext_only[16];
+			EGLint n = 0;
+			if (!qmod(dpy, (EGLint)ask[f], 16, mods, ext_only, &n)) {
+				printf(T "dma-buf format %.4s: not importable (EGL error 0x%x)\n", (const char *)&ask[f], eglGetError());
+				continue;
+			}
+			printf(T "dma-buf format %.4s: %d modifiers:", (const char *)&ask[f], n);
+			for (int i = 0; i < n && i < 16; i++)
+				printf(" 0x%llx%s", (unsigned long long)mods[i], ext_only[i] ? "(external-only)" : "");
+			printf("\n");
+		}
+	}
+	if (!has_import || !has_oes) {
+		printf("AGXKMS_FAIL call=\"EGL_EXT_image_dma_buf_import / GL_OES_EGL_image\" errno=0 (extension not advertised)\n");
+		return 1;
+	}
+
+	k.rfd = open_by_driver("renderD", "asahi", path, sizeof(path));
+	if (k.rfd < 0) {
+		printf("AGXKMS_FAIL call=\"open the asahi render node\" errno=0 (no /dev/dri/renderD* with driver asahi)\n");
+		return 1;
+	}
+	if (!noflip) {
+		k.fd = open_by_driver("card", "apple", path, sizeof(path));
+		if (k.fd < 0) {
+			printf("AGXKMS_FAIL call=\"open the display card node\" errno=0 (no /dev/dri/card* with driver apple)\n");
+			return 1;
+		}
+		if (kms_setup(&k))
+			return 1;
+		if ((int)k.mode.hdisplay != W || (int)k.mode.vdisplay != H) {
+			printf("AGXKMS_FAIL call=\"mode size\" errno=0 (mode %ux%u, render size %dx%d; pass --size)\n",
+			    k.mode.hdisplay, k.mode.vdisplay, W, H);
+			return 1;
+		}
+	}
+	for (int i = 0; i < nbufs; i++)
+		if (kbuf_create(&k, &bufs[i], i, dpy))
+			return 1;
+
+	for (int scene = 0; scene < NSCENES && !stop_requested; scene++) {
+		if (!strstr(scenes, scene_names[scene]))
+			continue;
+		// the fixed frame goes into a buffer that is neither on screen nor about to be
+		int f = 0;
+		while (f == front || f == pending)
+			f++;
+		failed |= kms_check(scene, &bufs[f], buf_a, buf_b, buf_c);
+		if (noflip && first_only)
+			break;
+		uint64_t begin = now_us(), end = begin + (uint64_t)(seconds * 1e6), last_flip = 0;
+		uint32_t seq_first = 0, seq_last = 0, seq = 0;
+		int n = 0, nwait = 0, niv = 0, missed = 0, flips = 0;
+		unsigned ebusy0 = k.ebusy;
+		// the checked frame is shown first; then frames 0.. of the animation
+		for (int frame = -1; !stop_requested; frame++) {
+			uint64_t t0 = now_us(), t1, t2;
+			if (frame >= 0) {
+				f = 0;
+				while (f == front || f == pending)
+					f++;
+				glBindFramebuffer(GL_FRAMEBUFFER, bufs[f].fbo);
+				draw_scene_ex(scene, frame, 1, 0);
+				glFinish();
+			}
+			t1 = now_us();
+			if (frame >= 0 && n < MAXF)
+				render_us[n++] = t1 - t0;
+			if (noflip) {
+				front = f;
+			} else {
+				if (pending >= 0) {
+					if (kms_wait_flip(&k, &seq))
+						return 1;
+					t2 = now_us();
+					if (nwait < MAXF)
+						wait_us[nwait++] = t2 - t1;
+					if (last_flip && niv < MAXF) {
+						iv_us[niv++] = t2 - last_flip;
+						missed += t2 - last_flip > 25000;
+					}
+					if (!flips++)
+						seq_first = seq;
+					seq_last = seq;
+					last_flip = t2;
+					front = pending;
+					pending = -1;
+				}
+				if (first_only)
+					step("%s: first commit", scene_names[scene]);
+				if (kms_commit(&k, &bufs[f]))
+					return 1;
+				pending = f;
+				if (first_only) {
+					step("waiting for the flip-complete event");
+					if (kms_wait_flip(&k, &seq))
+						return 1;
+					printf("AGXKMS_FIRST scene=%s result=flipped sequence=%u check=%s\n", scene_names[scene], seq, failed ? "FAIL" : "ok");
+					return failed;
+				}
+			}
+			if (now_us() >= end && frame >= 0)
+				break;
+		}
+		double elapsed = (double)(now_us() - begin) / 1e6;
+		uint64_t iv_min = 0, iv_max = 0;
+		for (int i = 0; i < niv; i++) {
+			if (!i || iv_us[i] < iv_min) iv_min = iv_us[i];
+			if (iv_us[i] > iv_max) iv_max = iv_us[i];
+		}
+		double r_med = ms_at(render_us, n, 0.5), r_p99 = ms_at(render_us, n, 0.99);
+		printf("AGXKMS scene=%s frames=%d seconds=%.2f fps=%.1f render_ms_median=%.2f render_ms_p99=%.2f flip_wait_ms_median=%.2f missed_vblanks=%d ebusy_retries=%u flips=%d interval_ms_min=%.2f interval_ms_max=%.2f event_sequence_span=%u present=%s\n",
+		    scene_names[scene], n, elapsed, elapsed > 0 ? (noflip ? n : flips) / elapsed : 0.0, r_med, r_p99,
+		    ms_at(wait_us, nwait, 0.5), missed, k.ebusy - ebusy0, flips, iv_min / 1000.0, iv_max / 1000.0,
+		    flips ? seq_last - seq_first : 0, noflip ? "none" : "kms");
+	}
+	if (pending >= 0 && !noflip)
+		kms_wait_flip(&k, NULL);
+	GLenum err = glGetError();
+	printf("AGXKMS_DONE status=%s gl_error=0x%x\n", stop_requested ? "interrupted" : failed ? "check-failed" : err ? "gl-error" : "ok", err);
+	return failed || err != GL_NO_ERROR || stop_requested;
+}
+
 static GLuint make_fbo(GLenum internal, GLuint depth)
 {
 	GLuint fbo, tex;
@@ -963,6 +1549,8 @@ int main(int argc, char **argv)
 {
 	const char *require = NULL, *scenes = "plasma,quads,mesh", *dump = NULL;
 	int frames = 30, budget_s = 50, no_present = 0, hold_ms = 0, size_given = 0;
+	int opt_kms = 0, kms_noflip = 0, kms_first = 0;
+	double kms_seconds = 5.0;
 	struct sink sink = { 0 };
 
 	for (int i = 1; i < argc; i++) {
@@ -974,6 +1562,10 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--require-renderer") && i + 1 < argc) require = argv[++i];
 		else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
 		else if (!strcmp(argv[i], "--no-present")) no_present = 1;
+		else if (!strcmp(argv[i], "--kms")) opt_kms = no_present = 1;
+		else if (!strcmp(argv[i], "--kms-noflip")) opt_kms = kms_noflip = no_present = 1;
+		else if (!strcmp(argv[i], "--kms-first")) opt_kms = kms_first = no_present = 1;
+		else if (!strcmp(argv[i], "--kms-seconds") && i + 1 < argc) kms_seconds = atof(argv[++i]);
 		else if (!strcmp(argv[i], "--tiles")) opt_tiles = 1;
 		else if (!strcmp(argv[i], "--variants")) opt_variants = 1;
 		else if (!strcmp(argv[i], "--fresh")) opt_fresh = 1;
@@ -999,7 +1591,8 @@ int main(int argc, char **argv)
 			printf("usage: %s [--size WxH] [--frames N] [--budget s] [--scenes plasma,quads,mesh] "
 			    "[--no-present] [--hold-ms N] [--require-renderer substr] [--dump prefix]\n"
 			    "  diagnostics: [--tiles] [--repeat-hash N] [--variants] [--fresh] [--diag] [--no-bench]\n"
-			    "               [--fp-out file] [--fp-ref file] [--pixels scene:target:x:y]\n", argv[0]);
+			    "               [--fp-out file] [--fp-ref file] [--pixels scene:target:x:y]\n"
+			    "  KMS present: --kms [--kms-seconds N] [--kms-first] [--kms-noflip]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -1135,6 +1728,13 @@ int main(int argc, char **argv)
 	setup_mesh();
 	printf(T "size=%dx%d frames=%d budget_s=%d sink=%s stride=%u setup_ms=%llu\n", W, H, frames, budget_s,
 	    no_present ? "none" : sink.kind, sink.stride, (unsigned long long)(now_us() - start) / 1000);
+	if (opt_kms) {
+		int rc = kms_run(dpy, scenes, kms_seconds, kms_noflip, kms_first, pixels, scratch, pixels8);
+		if (fp_out)
+			fclose(fp_out);
+		printf("AGXBENCH_DONE status=%s skipped=0 seconds=%.1f\n", rc ? "kms-failed" : "ok", (double)(now_us() - start) / 1e6);
+		return rc ? 1 : 0;
+	}
 
 	static const struct { int mode, path; } plan[] = {
 		{ MODE_RENDER, PATH_RGBA8 }, { MODE_READBACK, PATH_RGBA8 }, { MODE_PRESENT, PATH_RGBA8 },
