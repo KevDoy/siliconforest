@@ -1,21 +1,22 @@
 --- integrations/puredarwin/m1-apcie-port-packet/host/overlay/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-08 23:32:08.142192283 -0800
-+++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 19:53:53.663712904 -0800
-@@ -651,7 +651,8 @@
++++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 22:49:47.075613192 -0800
+@@ -651,7 +651,9 @@
                    for k in record), 'Conflicting APCIE experiment fields')
      image.require(native_trackpad_child_enabled(inputs), 'APCIE observer requires sealed native child')
      expected_members = set(APCIE_NATIVE_MEMBERS) | {APCIE_OBSERVER_MEMBER}
 -    image.require(type(members) is dict and len(members) == 51 and set(members) == expected_members,
-+    optional = {'com.apple.iokit.IO80211Family', 'org.puredarwin.driver.PDBwfm'}  # PCIe/Wi-Fi track
-+    image.require(type(members) is dict and expected_members <= set(members) <= expected_members | optional,
++    optional = {'com.apple.iokit.IO80211Family', 'org.puredarwin.driver.PDBwfm', 'org.puredarwin.driver.PDRustHello'}  # PCIe/Wi-Fi track
++    extra_ok = lambda names: all(n in optional or n.startswith('org.puredarwin.') for n in set(names) - expected_members)
++    image.require(type(members) is dict and expected_members <= set(members) and extra_ok(members),
                    'APCIE observer requires exact native50 plus observer members')
      raw = inputs.contents['kernel']
      kind, _, commands = image.commands(raw)
-@@ -668,14 +669,14 @@
+@@ -668,14 +670,14 @@
              actual.append(raw[off + nameoff:off + size].split(b'\0', 1)[0].decode('ascii'))
          except UnicodeDecodeError as error:
              raise ValueError('APCIE non-ASCII fileset name') from error
 -    image.require(len(actual) == 51 and len(set(actual)) == 51 and set(actual) == expected_members,
-+    image.require(len(set(actual)) == len(actual) and expected_members <= set(actual) <= expected_members | optional,
++    image.require(len(set(actual)) == len(actual) and expected_members <= set(actual) and extra_ok(actual),
                    'APCIE raw fileset must contain exactly native50 plus one observer')
      return True
  
@@ -27,7 +28,7 @@
                        type(timeout) is int and timeout == 240,
                        'APCIE observer requires runtime120 and worker240')
  
-@@ -1088,6 +1089,12 @@
+@@ -1088,6 +1090,12 @@
                                 inventory_sha256=inputs.inventory_sha256, reservation=reservation))
          hv = backend.new_hv()
          hv.init()
