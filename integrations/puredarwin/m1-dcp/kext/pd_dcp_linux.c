@@ -14,6 +14,7 @@
  */
 #include <linux/backlight.h>
 #include <linux/device.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -28,6 +29,11 @@ void kprintf(const char *, ...);
 extern int (*pd_platform_pre_probe)(struct platform_device *pdev);
 extern int (*pd_driver_vsnprintf)(char *, size_t, const char *, va_list);
 int pd_drm_vsnprintf(char *, size_t, const char *, va_list);
+struct linux_file;
+extern int (*pd_drm_mmap_pages)(struct linux_file *filp, off_t offset, size_t size, int prot,
+    uint32_t *pages, unsigned int *wimg, void (**release)(void *), void **release_arg);
+int pd_dcp_gem_dma_mmap_pages(struct linux_file *filp, off_t offset, size_t size, int prot,
+    uint32_t *pages, unsigned int *wimg, void (**release)(void *), void **release_arg);
 void *pd_dcp_host_of_nub(void *nub);		/* PDDcpHost.cpp */
 extern struct device_node *of_root;
 
@@ -152,6 +158,7 @@ pd_dcp_linux_init(void)
 
 	if (clk_ret != 0)
 		kprintf("PDDcp: fixed-clock provider not registered: %d\n", clk_ret);
+	pd_drm_mmap_pages = pd_dcp_gem_dma_mmap_pages;	/* kext/pd_dcp_mmap.c */
 	pd_dcp_mode = pd_rtkit_platform_bootarg("pddcp", 0);
 	pd_dcp_debug = pd_rtkit_platform_bootarg("pddcp_debug", 0);
 	pd_driver_vsnprintf = pd_drm_vsnprintf;
@@ -446,6 +453,68 @@ of_changeset_update_prop_string(struct of_changeset *ocs, struct device_node *np
     const char *prop_name, const char *str)
 {
 	return (-ENOSYS);
+}
+
+/*
+ * Managed coherent allocations through the DART backend (see include/pd_dcp_compat.h). The
+ * forced include of pd_dcp_iommu.h makes dma_alloc_coherent()/dma_free_coherent() below the
+ * backend's.
+ */
+struct pd_dcp_dmam {
+	struct device *dev;
+	size_t size;
+	void *vaddr;
+	dma_addr_t dma;
+};
+
+static void
+pd_dcp_dmam_release(void *data)
+{
+	struct pd_dcp_dmam *m = data;
+
+	if (m->vaddr != NULL)
+		dma_free_coherent(m->dev, m->size, m->vaddr, m->dma);
+	kfree(m);
+}
+
+void *
+pd_dcp_dmam_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp)
+{
+	struct pd_dcp_dmam *m = kzalloc(sizeof(*m), GFP_KERNEL);
+
+	if (m == NULL)
+		return (NULL);
+	m->dev = dev;
+	m->size = size;
+	m->vaddr = dma_alloc_coherent(dev, size, &m->dma, gfp);
+	if (m->vaddr == NULL) {
+		kprintf("PDDcp: %s: managed coherent allocation of %zu bytes failed\n", dev_name(dev), size);
+		kfree(m);
+		return (NULL);
+	}
+	{
+		void *vaddr = m->vaddr;
+		dma_addr_t dma = m->dma;
+		int ret;
+
+		/* on failure the action has already run: buffer and record are gone */
+		ret = devm_add_action_or_reset(dev, pd_dcp_dmam_release, m);
+		if (ret != 0)
+			return (NULL);
+		*dma_handle = dma;
+		return (vaddr);
+	}
+}
+
+/*
+ * An early free is not honoured: the buffer stays until the device's devres list is released
+ * (freeing here would leave the devres action to free it a second time).
+ */
+void
+pd_dcp_dmam_free_coherent(struct device *dev, size_t size, void *vaddr, dma_addr_t dma_handle)
+{
+	kprintf("PDDcp: %s: managed coherent buffer %p (%zu bytes) kept until the device is released\n",
+	    dev_name(dev), vaddr, size);
 }
 
 /* ---- 3. PD_STUB: entry points of files that are not built ------------------------------ */

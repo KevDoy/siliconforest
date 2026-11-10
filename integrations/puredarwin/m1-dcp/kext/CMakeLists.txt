@@ -69,8 +69,11 @@ set(dcpopt ${lkpiopt}
 # keep to the file under other names
 set_source_files_properties("${HERE}/pin/drm_gem_framebuffer_helper.c" PROPERTIES COMPILE_DEFINITIONS
     "drm_gem_fb_get_obj=pd_pin_drm_gem_fb_get_obj;drm_gem_fb_destroy=pd_pin_drm_gem_fb_destroy;drm_gem_fb_create_handle=pd_pin_drm_gem_fb_create_handle")
+# the 6.14 core calls mode_config_funcs.fb_create with three arguments (kext/pd_dcp_mmap.c)
+set_source_files_properties("${HERE}/driver/apple_drv.c" PROPERTIES COMPILE_DEFINITIONS
+    "drm_gem_fb_create=pd_dcp_gem_fb_create")
 _fbsdkpi_objects(PDDcp_drv SOURCES ${drv} ${pin}
-        "${HERE}/pd_dcp_linux.c"
+        "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c"
         "${DART}/src/pd_dcp_iommu.c" "${DART}/src/pd_dart_table.c"
         "${RTKIT}/mailbox.c" "${RTKIT}/rtkit.c" "${RTKIT}/rtkit-crashlog.c" "${RTKIT}/pd_rtkit_compat.c"
     INCLUDES "${HERE}/pininc" "${HERE}/driver" "${HERE}/include" "${DART}/include"

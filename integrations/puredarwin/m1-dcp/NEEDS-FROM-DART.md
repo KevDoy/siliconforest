@@ -38,3 +38,12 @@ Written by the PDDcp owner for relay. Each item says what is stubbed locally mea
 6. **`status` properties.** `of_get_next_available_child` is `of_get_next_child` here (the
    layer does not read `status`). If the synthesized display nodes carry `status =
    "disabled"` children, say so.
+
+## Added after boot dp05
+
+7. **`dmam_alloc_coherent` / `dmam_free_coherent` are not redirected by `pd_dcp_iommu.h`.**
+   `afk.c:262` allocates each AFK ring buffer with the managed variant, which went to
+   LinuxKPI's generic allocator (32-bit mask, contiguous below 4 GiB: impossible here) and
+   failed with "Failed to allocate 32768 bytes buffer". PDDcp now redirects both names itself
+   (`include/pd_dcp_compat.h`, `kext/pd_dcp_linux.c`: `pd_dma_alloc_coherent` plus a devres
+   action). If the header takes them over, drop PDDcp's copy.

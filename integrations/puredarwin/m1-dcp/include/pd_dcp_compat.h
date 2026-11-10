@@ -349,6 +349,21 @@ int pd_dcp_atomic_helper_commit(struct drm_device *dev, struct drm_atomic_commit
 	kprintf("PDDcp: %s: %s:%d: error %d: " fmt, dev_name(dev), __func__, __LINE__, pd_err_, ##__VA_ARGS__); \
 	pd_err_; })
 
+/*
+ * dmam_alloc_coherent()/dmam_free_coherent(): m1-dcp-dart's header redirects the unmanaged
+ * names to the DART but not these, so the AFK ring buffers (afk.c:262) went to LinuxKPI's
+ * generic allocator with a 32-bit mask and failed (boot dp05: "Failed to allocate 32768
+ * bytes buffer"; no RAM below 4 GiB on this machine). kext/pd_dcp_linux.c: the DART
+ * backend's allocation, freed by a devres action.
+ */
+#include <linux/dma-mapping.h>
+void *pd_dcp_dmam_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp);
+void pd_dcp_dmam_free_coherent(struct device *dev, size_t size, void *vaddr, dma_addr_t dma_handle);
+#undef dmam_alloc_coherent
+#define dmam_alloc_coherent(dev, size, handle, gfp)	pd_dcp_dmam_alloc_coherent((dev), (size), (handle), (gfp))
+#undef dmam_free_coherent
+#define dmam_free_coherent(dev, size, vaddr, handle)	pd_dcp_dmam_free_coherent((dev), (size), (vaddr), (handle))
+
 /* patches/0002: the IOMFB callback dispatcher reports each callback (kext/pd_dcp_linux.c) */
 void pd_dcp_note_callback(struct device *dev, int tag, const char *fourcc, u32 in_len, u32 out_len,
 			  unsigned int context, bool handled);
