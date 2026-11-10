@@ -18,6 +18,11 @@
  *                    coprocessor's ASC (/arm-io/dcp) as iBoot/m1n1 left it and wakes its
  *                    RTKit the way Linux's dcp_comp_bind() does, to log the endpoint map.
  *                    Lines start with "PDRtkitProbe: dcp". See runDcp() and ../README.md.
+ *   pdrtkitprobe=4   DCP with its DART (SF-H item H2): as 3, and the firmware's buffer
+ *                    requests are served through /arm-io/dart-dcp (pd_dcp_dart.cpp), so the
+ *                    wake can complete. pdrtkitprobe_dart=1 stops the DART part after its
+ *                    read-only stage (then behaves as 3); pdrtkitprobe_exit=1 quiesces the
+ *                    coprocessor after a completed wake instead of leaving it awake.
  *   any other value  nothing
  *
  * Every line this kext logs starts with "PDRtkitProbe: ".
@@ -38,6 +43,7 @@
 
 #include "pd_rtkit_platform.h"
 #include "pd_rtkitprobe.h"
+#include "pd_dcp_dart.h"
 
 #define GFX_ASC "/arm-io/gfx-asc"
 #define SGX     "/arm-io/sgx"
@@ -73,7 +79,7 @@ public:
 
 private:
     void run(int mode);
-    void runDcp();
+    void runDcp(bool withDart);
     bool dcpPowerState(UInt32 *fe, UInt32 *cpu0);
     void logRegisters(const char *when);
     bool firmwareMemoryOutsideKernel();
@@ -120,12 +126,12 @@ bool PDRtkitProbe::start(IOService *provider)
         return true;
     }
     pd_rtkit_platform_set_log_prefix("PDRtkitProbe: ");
-    if (mode == 3)
-        runDcp();
+    if (mode == 3 || mode == 4)
+        runDcp(mode == 4);
     else if (mode <= 2)
         run(mode);
     else
-        plog("pdrtkitprobe=%d is not a mode (0 off, 1 GPU read-only, 2 GPU RTKit boot, 3 DCP wake): nothing done", mode);
+        plog("pdrtkitprobe=%d is not a mode (0 off, 1 GPU read-only, 2 GPU RTKit boot, 3 DCP wake, 4 DCP wake with DART): nothing done", mode);
     registerService();
     return true;
 }
@@ -367,7 +373,7 @@ bool PDRtkitProbe::dcpPowerState(UInt32 *fe, UInt32 *cpu0)
  * of the display pipe, of either DART or of PMGR is written; no endpoint from 0x20 up is
  * started; the coprocessor is not shut down, quiesced or put to sleep afterwards.
  */
-void PDRtkitProbe::runDcp()
+void PDRtkitProbe::runDcp(bool withDart)
 {
     plog("dcp start: attach to " DCP " as found, wake its RTKit as Linux dcp_comp_bind does, log the endpoint map, stop");
 
@@ -411,12 +417,44 @@ void PDRtkitProbe::runDcp()
     }
     plog("dcp cpu: RUN is set; Linux's CPU_CONTROL |= RUN (dcp.c:3979) would write the value back unchanged, not written");
 
+    /*
+     * Mode 4 (H2). Read-only first: the DART's registers, its live root, and the walk of the
+     * two addresses the firmware is known to place (crashlog, boot dc04; oslog, as m1n1 saw
+     * it). Nothing is sent to the coprocessor unless all of that worked.
+     */
+    int serve = 0, quiesce = 0;
+    if (withDart) {
+        int dartStage = 2, exitMode = 0;
+        PE_parse_boot_argn("pdrtkitprobe_dart", &dartStage, sizeof(dartStage));
+        PE_parse_boot_argn("pdrtkitprobe_exit", &exitMode, sizeof(exitMode));
+        plog("dcp dart: mode 4: serve buffer requests through /arm-io/dart-dcp (pdrtkitprobe_dart=%d: %s; pdrtkitprobe_exit=%d: %s); /arm-io/dart-disp0 is not touched",
+             dartStage, dartStage >= 3 ? "read-only stage, then map and reply even if the self-check fails" :
+                                         dartStage == 2 ? "read-only stage, then map and reply" : "read-only stage only, requests are not served",
+             exitMode, exitMode == 1 ? "quiesce after a completed wake" : "leave awake");
+        ret = pd_dcp_dart_open();
+        if (ret != 0) {
+            plog("dcp stop: the dcp DART is not usable (%d); nothing was sent to the coprocessor", ret);
+            return;
+        }
+        int segmentsOk = pd_dcp_dart_selfcheck();
+        pd_dcp_dart_walk("crashlog buffer (boot dc04)", 0xf00267000ULL);
+        pd_dcp_dart_walk("oslog buffer (m1n1)", 0xf0025f000ULL);
+        pd_dcp_dart_check("before wake");
+        /* pdrtkitprobe_dart=3 goes on regardless, for a boot after this check itself is in doubt */
+        if (segmentsOk == 0 && dartStage == 2) {
+            plog("dcp stop: no firmware segment translates to the physical address the device tree gives, so this table walk cannot be trusted with a write; nothing was sent to the coprocessor");
+            return;
+        }
+        serve = dartStage >= 2;
+        quiesce = exitMode == 1;
+    }
+
     pdos_xnu_init();
     if (pd_rtkitprobe_layer_up() != 0) {
         plog("dcp stop: LinuxKPI layer did not come up; nothing was sent");
         return;
     }
-    ret = pd_rtkitprobe_dcp_wake();
+    ret = withDart ? pd_rtkitprobe_dcp_wake_serving(serve, quiesce) : pd_rtkitprobe_dcp_wake();
 
     logRegisters("dcp regs after");
     uint64_t taken = 0, handled = 0;
@@ -427,7 +465,14 @@ void PDRtkitProbe::runDcp()
     plog("dcp irq: recv-not-empty (AIC %u) %llu taken, %llu handler runs; send-empty (AIC %u) %llu taken, %llu handler runs",
          (unsigned)res.aic_recv_not_empty, (unsigned long long)taken, (unsigned long long)handled, (unsigned)res.aic_send_empty,
          (unsigned long long)staken, (unsigned long long)shandled);
-    plog("dcp done: result %d (%s); no endpoint from 0x20 up started, no shutdown, no sleep; RTKit stays attached and keeps acknowledging",
-         ret, ret == 0 ? "RTKit awake, IOP and AP power states 0x20" : "wake did not complete");
-    setProperty("PDRtkitProbeResult", ret == 0 ? "dcp-awake" : "dcp-wake-incomplete");
+    if (!withDart) {
+        plog("dcp done: result %d (%s); no endpoint from 0x20 up started, no shutdown, no sleep; RTKit stays attached and keeps acknowledging",
+             ret, ret == 0 ? "RTKit awake, IOP and AP power states 0x20" : "wake did not complete");
+        setProperty("PDRtkitProbeResult", ret == 0 ? "dcp-awake" : "dcp-wake-incomplete");
+        return;
+    }
+    plog("dcp done: result %d (%s); no endpoint from 0x20 up started; dart-disp0 never accessed", ret,
+         ret != 0 ? "not completed, see the lines above" : quiesce ? "woken with every buffer request served, then quiesced" :
+                                                                      "RTKit awake with every buffer request served");
+    setProperty("PDRtkitProbeResult", ret == 0 ? (quiesce ? "dcp-served-quiesced" : "dcp-served-awake") : "dcp-h2-incomplete");
 }

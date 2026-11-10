@@ -29,6 +29,16 @@ int pd_rtkitprobe_rtkit_boot(void);
  */
 int pd_rtkitprobe_dcp_wake(void);
 
+/*
+ * probe.c, DCP mode 4 (pdrtkitprobe=4, SF-H item H2): the same, but buffer requests are
+ * served through the dcp DART (pd_dcp_dart.h, which the caller has opened): a buffer the
+ * firmware placed is translated and mapped for reading, one it asks the AP for is
+ * allocated, mapped and answered. serve = 0 behaves exactly as pd_rtkitprobe_dcp_wake().
+ * quiesce != 0: after a completed wake, apple_rtkit_quiesce() (AP then IOP power state
+ * 0x10, the state m1n1 hands over); otherwise the coprocessor is left awake.
+ */
+int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce);
+
 #ifdef __cplusplus
 }
 #endif

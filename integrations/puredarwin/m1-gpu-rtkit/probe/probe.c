@@ -169,6 +169,8 @@ int pd_rtkitprobe_rtkit_boot(void)
 #include <linux/spinlock.h>
 #include <linux/soc/apple/mailbox.h>
 
+#include "pd_dcp_dart.h"
+
 #define dlog(fmt, ...)	pd_rtkit_printk(NULL, "dcp " fmt, ##__VA_ARGS__)
 
 /* received messages printed in full; after that only counted */
@@ -183,6 +185,10 @@ struct dcp_probe_state {
 	unsigned int shmem_calls;
 	unsigned int app_messages;
 	unsigned int crashes;
+	/* mode 4: serve buffer requests through the dcp DART */
+	int serve;
+	unsigned int served_fw_placed;
+	unsigned int served_allocated;
 };
 
 static struct dcp_probe_state dcp_state;
@@ -218,12 +224,14 @@ static void dcp_note_buffer_request(unsigned int ep, u64 size, u64 iova)
 {
 	if (iova) {
 		dcp_state.buf_fw_placed++;
-		dlog("buffer-request: ep 0x%02x (%s) size 0x%llx iova 0x%llx: placed by the firmware; Linux maps it through the dcp DART and sends no reply; not mapped here",
-		     ep, dcp_ep_name(ep), (unsigned long long)size, (unsigned long long)iova);
+		dlog("buffer-request: ep 0x%02x (%s) size 0x%llx iova 0x%llx: placed by the firmware; Linux maps it through the dcp DART and sends no reply; %s",
+		     ep, dcp_ep_name(ep), (unsigned long long)size, (unsigned long long)iova,
+		     dcp_state.serve ? "translating" : "not mapped here");
 	} else {
 		dcp_state.buf_need_alloc++;
-		dlog("buffer-request: ep 0x%02x (%s) size 0x%llx iova 0: the AP must allocate, map through the dcp DART and reply; NOT answered (needs H2)",
-		     ep, dcp_ep_name(ep), (unsigned long long)size);
+		dlog("buffer-request: ep 0x%02x (%s) size 0x%llx iova 0: the AP must allocate, map through the dcp DART and reply; %s",
+		     ep, dcp_ep_name(ep), (unsigned long long)size,
+		     dcp_state.serve ? "allocating" : "NOT answered (needs H2)");
 	}
 }
 
@@ -300,11 +308,47 @@ static int dcp_shmem_setup(void *cookie, struct apple_rtkit_shmem *bfr)
 	struct dcp_probe_state *st = cookie;
 
 	st->shmem_calls++;
-	return -ENOMEM;
+	if (!st->serve)
+		return -ENOMEM;
+
+	/*
+	 * Linux dcp_rtk_shmem_setup(), dcp.c:817-866 at the pin. An error return leaves the
+	 * request unanswered, exactly as mode 3 does.
+	 */
+	if (bfr->iova) {
+		void *kva = pd_dcp_dart_map_fw(bfr->iova, bfr->size);
+
+		if (!kva)
+			return -ENOMEM;
+		bfr->buffer = kva;
+		bfr->is_mapped = true;
+		st->served_fw_placed++;
+		dlog("buffer-served: firmware-placed 0x%zx bytes at 0x%llx readable at kernel %p; RTKit sends no reply",
+		     bfr->size, (unsigned long long)bfr->iova, kva);
+	} else {
+		u64 fw_addr = 0;
+		void *kva = pd_dcp_dart_alloc(bfr->size, &fw_addr);
+
+		if (!kva)
+			return -ENOMEM;
+		bfr->buffer = kva;
+		bfr->iova = fw_addr;
+		st->served_allocated++;
+		dlog("buffer-served: allocated 0x%zx bytes, mapped and verified; RTKit now replies with address 0x%llx",
+		     bfr->size, (unsigned long long)fw_addr);
+	}
+	return 0;
 }
 
+/* Reached only through apple_rtkit_quiesce() -> apple_rtkit_reinit() (exit mode 1). */
 static void dcp_shmem_destroy(void *cookie, struct apple_rtkit_shmem *bfr)
 {
+	if (!dcp_state.serve || !bfr->buffer)
+		return;
+	if (bfr->is_mapped)
+		pd_dcp_dart_unmap_fw(bfr->buffer);
+	else
+		pd_dcp_dart_release(bfr->iova, bfr->size);
 }
 
 static const struct apple_rtkit_ops dcp_probe_ops = {
@@ -317,6 +361,11 @@ static const struct apple_rtkit_ops dcp_probe_ops = {
 
 int pd_rtkitprobe_dcp_wake(void)
 {
+	return pd_rtkitprobe_dcp_wake_serving(0, 0);
+}
+
+int pd_rtkitprobe_dcp_wake_serving(int serve, int quiesce)
+{
 	struct apple_rtkit *rtk;
 	struct apple_mbox *mbox;
 	struct device *dev;
@@ -327,6 +376,7 @@ int pd_rtkitprobe_dcp_wake(void)
 
 	pd_rtkit_enter();
 	pd_rtkit_debug = 1;
+	dcp_state.serve = serve;
 
 	/* stands in for Linux's dcp@231c00000 platform device; its mboxes = <&dcp_mbox> */
 	dev = pd_rtkit_device_create("dcp", NULL);
@@ -372,5 +422,29 @@ int pd_rtkitprobe_dcp_wake(void)
 	     dcp_state.rx_total, dcp_state.endpoints_announced, dcp_state.buf_fw_placed,
 	     dcp_state.buf_need_alloc, dcp_state.shmem_calls, dcp_state.app_messages,
 	     dcp_state.crashes);
+	if (!serve)
+		return ret;
+
+	dlog("served: %u firmware-placed buffers mapped for reading, %u buffers allocated and mapped in the dcp DART",
+	     dcp_state.served_fw_placed, dcp_state.served_allocated);
+	pd_dcp_dart_check("after wake");
+	if (ret) {
+		dlog("exit: wake did not complete (%d); nothing more is sent, the coprocessor is left as it is", ret);
+		return ret;
+	}
+	if (!quiesce) {
+		dlog("exit: left awake (IOP and AP power 0x20), as Linux leaves it between bind and dcp_start; RTKit stays attached and keeps serving syslog, oslog, ioreport and crashlog");
+		return 0;
+	}
+
+	/*
+	 * m1n1's hand-over state (src/dcp.c:309, src/rtkit.c:786-851): AP power 0x10, IOP power
+	 * 0x10. apple_rtkit_quiesce() then reinitialises the instance, which releases the
+	 * buffers through dcp_shmem_destroy(), as m1n1 unmaps its own after the quiesce.
+	 */
+	dlog("exit: apple_rtkit_quiesce(): AP power 0x10, IOP power 0x10, then buffers released");
+	ret = apple_rtkit_quiesce(rtk);
+	dlog("exit: apple_rtkit_quiesce returned %d; %u messages received in all", ret, dcp_state.rx_total);
+	pd_dcp_dart_check("after quiesce");
 	return ret;
 }

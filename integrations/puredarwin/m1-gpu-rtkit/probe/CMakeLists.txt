@@ -32,6 +32,7 @@ add_fbsdkpi_driver(PDRtkitProbe
     # the port's own linux/soc/apple/*.h first
     INCLUDES "${RTKIT}/include" "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}" ${drminc} ${coreinc}
     XNU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/PDRtkitProbe.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/pd_dcp_dart.cpp"
         "${RTKIT}/PDRtkitPlatform.cpp"
 )
 target_include_directories(PDRtkitProbe.kext PRIVATE "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}")

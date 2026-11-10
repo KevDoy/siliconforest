@@ -229,6 +229,9 @@ changes, the store paths change with it.
 | none, or `pdrtkitprobe=1` | read-only probe |
 | `pdrtkitprobe=2` | read-only probe, then the RTKit boot attempt |
 | `pdrtkitprobe=3` | DCP mode (SF-H item H1), none of the GPU steps; see "DCP mode" below |
+| `pdrtkitprobe=4` | DCP mode with the dcp DART (SF-H item H2); see "DCP mode 4" below |
+| `pdrtkitprobe_dart=1\|2\|3` | mode 4 only: 1 = DART read-only stage, requests not served; 2 (default) = serve; 3 = serve even if the self-check fails |
+| `pdrtkitprobe_exit=0\|1` | mode 4 only: 0 (default) = leave the DCP awake; 1 = quiesce it after a completed wake |
 | `pdrtkit_irq=0\|1\|2` | interrupt mode, see above (mode 2 only) |
 
 To boot it: use the `kernel` from `build-probe-kc.nix` in place of the phase A collection in
@@ -435,6 +438,92 @@ Messages the probe causes to be sent, all by the unmodified `rtkit.c`: IOP power
 HELLO reply, endpoint-map replies, one start message per system endpoint in the map
 (below 0x20), AP power state 0x20 if the IOP ack arrives, and acknowledgments of syslog and
 ioreport notifications.
+
+## DCP mode 4 (`pdrtkitprobe=4`, SF-H item H2)
+
+Mode 3 booted (dc04): 21 endpoints, a firmware-placed crashlog buffer (0x10000 bytes at
+0xf00267000) and an ioreport request for 0x4000 bytes without an address; with neither
+served the wake timed out. Mode 4 serves them through `/arm-io/dart-dcp`
+(`probe/pd_dcp_dart.cpp`) so that `apple_rtkit_wake` can complete. Mode 3 is unchanged.
+Compile evidence only.
+
+### How the references treat this DART
+
+`dart-dcp` is a T8020 DART with the lock bit set (CONFIG 0x8001e100 in boot dc07; TCR of
+stream 0 0x80; TTBR 0 0x80bfff0c, i.e. the root at phys 0xbfff0c000; TTBR 1..3 empty).
+Locked means TCR/TTBR cannot change; the tables are RAM.
+
+| | Linux at the pin (`drivers/iommu/apple-dart.c`) | m1n1 (`src/dart.c`) |
+| --- | --- | --- |
+| lock detection | CONFIG bit 15, `:2913`, `:3378` | `:341-342` |
+| registers written | none of TCR/TTBR; a locked DART is not reset (`:3197-3208`); only the TLB invalidate (`:1104`, `:1300`) | same: no TTBR, TCR or enable when locked (`:343`, `:370-372`, `:384`); invalidate `:136-146` |
+| table memory | maps the root the TTBR names (`:879-938`), then **replaces every entry of it** with its own (`:1053-1070`, "Legacy display DARTs hand their locked root to Linux"); T8103 has neither `fw_handoff` nor `fw_mirror` (`:613`, `:3202-3206`). Linux's own tables already hold the firmware's mappings, rebuilt from the reserved regions m1n1 put in the FDT | keeps the root and every table (`:357-364`); for T8103 `dart-dcp` only, adds entries: follows a valid first-level entry, allocates a second-level table for an empty one (`:726-760`), refuses a leaf slot that is in use (`:762-783`) |
+| iova window | the stream's range from `iommus = <&dcp_dart 0 0x0 0x0 0x0 0xfc000000>` (`t8103.dtsi:663`), allocator of the DMA layer | `vm-base + 0x10000000 .. + 0x20000000` (`src/dcp.c:210`), handed to the firmware as `iova \| asc-dram-mask` (`src/rtkit.c:174`, `:343`) |
+| firmware-placed address | masked to the table's input size and looked up (`:1728-1746`), then `memremap` (`dcp.c:817-866`) | `addr & ~asc-dram-mask`, table walk (`src/rtkit.c:322-325`) |
+| leaf entry | address, subpage 0..0xfff, valid (`io-pgtable-dart.c:122-135`), plus `SP_DIS` | the same bits (`:179-180`) |
+
+The probe follows m1n1, which is what has run on this machine before every kernel boot, and
+is the less invasive: no existing entry is changed. One difference: m1n1 reuses the
+second-level table it finds in the first slot of its window (after m1n1's own session that
+table is in m1n1's heap); the probe takes the first **empty** first-level slot of the same
+window and a table of this kernel's own memory.
+
+### What it writes
+
+| Write | Where | When |
+| --- | --- | --- |
+| one 8-byte first-level entry, in a slot that read 0 | the live root (iBoot's page) | once, at the first allocation |
+| leaf entries | the probe's own second-level table | per allocated buffer |
+| `STREAM_SELECT` (0x34) = stream bit, `STREAM_COMMAND` (0x20) = invalidate | `dart-dcp` registers | after each mapping change |
+| leaf entries cleared, then invalidate | own table, `dart-dcp` | only with `pdrtkitprobe_exit=1` |
+
+Never written: TCR, TTBR, CONFIG, the error register (read, not cleared), any entry that was
+valid. `/arm-io/dart-disp0`, through which the panel's framebuffer is mapped, is not opened,
+read or written; no code path names it.
+
+### Stages (all lines start `PDRtkitProbe: dcp `)
+
+Read-only, before anything is sent to the coprocessor:
+
+| Line | Content | If it is the last line |
+| --- | --- | --- |
+| `dart: mode 4: ...` | the two boot-args as read | |
+| `dart-regs:` | PARAMS1, CONFIG (locked or not), TCR, TTBR 0..3, enabled streams, error, `asc-dram-mask` | |
+| `dart-stop: ...` | a check failed: node missing or not `dart,t8020`, page shift not 14, stream not enabled or not translating, TTBR 0 not valid, root not mappable, no empty slot | followed by `dcp stop: the dcp DART is not usable`; nothing was sent |
+| `dart-l1:` | root address, whether it lies in kernel memory, valid entries | |
+| `dart-window:` | state of first-level slots 8..15, the slot chosen | |
+| `dart-selfcheck:` | per firmware segment (`iop-dcp-nub` `segment-ranges`): the walk result against the physical address the device tree gives | if none matches: `dcp stop: no firmware segment translates ...`; nothing was sent (`pdrtkitprobe_dart=3` overrides) |
+| `dart-walk:` | both table entries and the result for 0xf00267000 (crashlog, dc04) and 0xf0025f000 (oslog, as m1n1 saw it) | informative only |
+
+Then the mode 3 sequence, with for each buffer request:
+
+| Line | Content |
+| --- | --- |
+| `buffer-request: ... translating` / `... allocating` | the request, from the receive trace |
+| `dart-fwbuf:` | firmware-placed: iova, phys, pages, mapped for reading; or why not |
+| `dart-l2: WRITE ...` | first allocation only: the first-level entry before and after, read back |
+| `dart-map: WRITE ...` | leaf entries, read back |
+| `dart-tlb: WRITE ...` | invalidate done, or BUSY stuck |
+| `dart-verify:` | walk of the new address through the live root, error register. `DOES NOT MATCH` clears the entries again and gives the firmware no address |
+| `buffer-served:` | what RTKit will now do: no reply (firmware-placed) or reply with the address |
+| `dcp: RTKit: failed buffer request ...` | from `rtkit.c`, when the step above failed: that request stays unanswered, as in mode 3 |
+
+After the wake: `served:`, `dart-error:` if the DART flags a fault, `exit:`, `regs after`,
+`irq`, `done`.
+
+### Exit
+
+The pin never changes the RTKit power state of a classic DCP after the wake: no
+`apple_rtkit_quiesce`, `_idle` or `_shutdown` call exists in `drivers/gpu/drm/apple`
+(`dcp_release_rtkit`, `dcp.c:134-143`, only frees the instance; power-off goes through
+IOMFB, `:2586`). m1n1 quiesces before handing over (`src/dcp.c:309`). Default here is to
+**leave it awake**: it is what Linux does at this point, it is the state the next step
+(starting an endpoint) begins from, and it adds no message or table change after the last
+verified one. `pdrtkitprobe_exit=1` instead calls `apple_rtkit_quiesce` (AP then IOP power
+0x10, `rtkit.c:1456`), which returns the coprocessor to the state m1n1 hands over, the only
+state in which the panel has been seen lit under this kernel; the instance then releases
+its buffers, so the leaf entries are cleared and invalidated. The buffer memory and the
+second-level table are kept until reboot in both cases.
 
 ## Unverified
 

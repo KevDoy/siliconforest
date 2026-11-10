@@ -20,6 +20,8 @@ let
     cp ${./probe/probe.c} "$out/probe.c"
     cp ${./probe/pd_rtkitprobe.h} "$out/pd_rtkitprobe.h"
     cp ${./probe/PDRtkitProbe.cpp} "$out/PDRtkitProbe.cpp"
+    cp ${./probe/pd_dcp_dart.cpp} "$out/pd_dcp_dart.cpp"
+    cp ${./probe/pd_dcp_dart.h} "$out/pd_dcp_dart.h"
     cp -R ${./src} "$out/rtkit"
   '';
   bindgenDefines = pkgs.writeText "bindgen-defines"
@@ -59,7 +61,7 @@ in lkpi.drmKext.overrideAttrs (old: {
     cp -R "$bundle" "$out/System/Library/Extensions/"
     cp build-commands.txt "$out/nix-support/build-commands"
     for o in $(find build-nix/src/Kernel/Extensions/PDRtkitProbe -name '*.o' \
-               | grep -e '/rtkit/' -e '/glue\.c' -e '/probe\.c' -e 'PDRtkitProbe\.cpp'); do
+               | grep -e '/rtkit/' -e '/glue\.c' -e '/probe\.c' -e 'PDRtkitProbe\.cpp' -e 'pd_dcp_dart\.cpp'); do
       cp "$o" "$out/nix-support/objects/$(basename "$o")"
     done
     ls "$out/nix-support/objects"
