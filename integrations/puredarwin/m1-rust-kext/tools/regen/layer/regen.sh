@@ -18,8 +18,12 @@ setup)
 		--eval --read-write-mode -E "toString (import $top/lkpi).pristineTree" 2>/dev/null | tr -d '"')
 	test -d "$src/src/Kernel/fbsdkpi"
 	rm -rf "$work/a" "$work/b"; mkdir -p "$work/a/src/Kernel" "$work/b/src/Kernel"
-	cp -R "$src/src/Kernel/fbsdkpi" "$work/a/src/Kernel/"; chmod -R u+w "$work/a"
+	mkdir -p "$work/a/src/Kernel/Extensions" "$work/b/src/Kernel/Extensions"
+	cp -R "$src/src/Kernel/fbsdkpi" "$work/a/src/Kernel/"
+	# PDDRMDri (the /dev/dri devices) is patched too (0020)
+	cp -R "$src/src/Kernel/Extensions/PDDRMDri" "$work/a/src/Kernel/Extensions/"; chmod -R u+w "$work/a"
 	cp -R "$work/a/src/Kernel/fbsdkpi" "$work/b/src/Kernel/"
+	cp -R "$work/a/src/Kernel/Extensions/PDDRMDri" "$work/b/src/Kernel/Extensions/"
 	for p in "$P"/*.patch; do
 		case $p in *0007-*) continue;; esac
 		patch -d "$work/b" -p1 --no-backup-if-mismatch < "$p" > /dev/null

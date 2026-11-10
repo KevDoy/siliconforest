@@ -108,3 +108,13 @@ streams 0 and 4 with the boot framebuffer searched for in stream 0; the DCP wake
 with the pin's `dcp_rtk_shmem_setup` code on this API; then one pass over
 `dma_alloc_coherent` (5 pages), `dma_get_sgtable`, `iommu_iova_to_phys`, `dma_free_coherent`,
 `dma_map_resource`/`dma_unmap_resource` on the dcp stream. `dart-disp0` is not written.
+
+## Added by the PDDcp owner: mapping another driver's pages
+
+`pd_dma_map_phys_pages(dev, phys[], n, &dma)` / `pd_dma_unmap_phys_pages(dev, dma, n)`
+(`src/pd_dcp_iommu.c`, `include/pd_dcp_iommu.h`): `n` physical pages, in order, at one
+contiguous address of the device's DART stream, with one invalidate; nothing is allocated or
+copied and the pages stay owned (and pinned) by whoever passed them. PDDcp uses it to scan out
+a buffer exported by the GPU driver (`../m1-dcp/kext/pd_dcp_prime.c`). On the M1 (boots pr02,
+km01) every page of each imported buffer translated back correctly through the tables. The
+host tests in `test/` do not cover this pair.

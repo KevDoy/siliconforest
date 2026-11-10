@@ -10,6 +10,12 @@ ln -sfn "$KC" runs/m1-desktop-010/apcie-host-kc-build-001/result
 # with its libdrm and the guest script that runs it (DL43 lines), and boot with pddcp=2.
 # DCP_TEST=prime: the same test binary with the cross-driver script (DL44 lines): needs a
 # collection with PDAgx and PDDcp; adds pdagx=1.
+# DCP_TEST=wait: the flip loop once per way of waiting on the DRM fd (read, poll, select,
+# kqueue), DL45 lines. Works on a PDDcp-only or a combined collection.
+if [ "${DCP_TEST:-0}" = wait ]; then
+  DCP_TEMPLATE=${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-wait-test.in}
+  DCP_TEST=1
+fi
 if [ "${DCP_TEST:-0}" = prime ]; then
   DCP_TEMPLATE=${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-prime-test.in}
   EXTRA="pdagx=1 $EXTRA"; DCP_TEST=1

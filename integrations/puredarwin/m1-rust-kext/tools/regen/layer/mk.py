@@ -167,6 +167,24 @@ a kind word, set for dma-buf files; both copies are built from the same sources,
 structures match.
 UPSTREAM: yes.
 """, []),
+ "0020-dri-fds-wake-select-poll-kqueue": ("""pd_dri: select(), poll() and kqueue on a DRM fd wake when an event is queued
+
+dri_select() only reported readiness and never recorded the waiter: select() slept until
+its timeout, and poll()/kqueue refused the device (xnu implements poll with kqueue, and a
+character device must opt in with cdevsw_setkqueueok()).
+- PDDRMDri: a selinfo per open file; dri_select() records the waiter and re-checks;
+  pd_dri_wakeup(cookie) wakes it; the major opts in to kqueue.
+- fbsdkpi/drm/src/pd_drm_cdev.c: each open DRM file keeps an entry on its drm_file's event
+  wait queue that forwards the DRM core's wake_up to pd_dri_wakeup().
+UPSTREAM: yes (PDDRMDri and fbsdkpi together).
+""", []),
+ "0021-dma-buf-sync-file-ioctls": ("""fbsdkpi: drm: DMA_BUF_IOCTL_EXPORT_SYNC_FILE and IMPORT_SYNC_FILE
+
+Both returned ENOTTY. Mesa calls them for every shared buffer on every submission and
+falls back to waiting on the CPU when they fail. Implemented as Linux's dma-buf.c does, on
+the layer's dma_resv, dma_fence_unwrap and sync_file.
+UPSTREAM: yes.
+""", []),
  "0004-allocator-exact-sizes-alignment-realloc": ("""fbsdkpi: allocator: exact ksize, malloc_aligned, realloc zeroing, contigmalloc fixes
 
 - heap blocks record the size that was asked for; malloc_usable_size()/ksize() return it
@@ -187,8 +205,11 @@ def topic(path, hunk, lineno):
     if path.endswith(("linux/device.h", "linux/of.h", "platform_device.h", "fbsdkpi.cmake", "property.h", "of_reserved_mem.h", "pd_drvcore.h", "pd_linux_drvcore.c")): return "0005-driver-core-surface-of-linux-7.2"
     if path.endswith("pd_lkpi_kern.c"): return "0009-physmem-is-the-machines"
     if path.endswith(("bus_dma.cpp", "dma-mapping.h")): return "0010-dma-map-sg-for-platform-devices"
+    if path.endswith(("PDDRMDri.cpp", "pd_dri_cdev.h")): return "0020-dri-fds-wake-select-poll-kqueue"
+    if path.endswith("pd_drm_cdev.c") and re.search(r"pd_dri_event_wake|event_wait|wait_queue_t wake|drm_file.h", hunk): return "0020-dri-fds-wake-select-poll-kqueue"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
+    if path.endswith("pd_dma_buf.c") and re.search(r"sync_file|SYNC_FILE|dma-resv.h|dma-fence", hunk): return "0021-dma-buf-sync-file-ioctls"
     if path.endswith(("linux/fs.h", "pd_dma_buf.c")): return "0019-dma-buf-of-another-kext-is-a-dma-buf"
     if path.endswith("linux/cleanup.h"): return "0016-scoped-guard-labels-are-unique"
     if path.endswith("pd_linux_platform.c"): return "0008-platform-pre-probe-hook"

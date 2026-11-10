@@ -10,7 +10,7 @@
  * Exit status 0 only if every step worked; a failure names the call and errno.
  *
  *   dcp-flip-test [--device /dev/dri/cardN] [--seconds N] [--nonce HEX] [--no-flip]
- *                 [--prime-from auto|/dev/dri/renderDN]
+ *                 [--prime-from auto|/dev/dri/renderDN] [--wait read|poll|select|kqueue]
  *
  * Without --device the display is the card node whose DRM driver is "apple"; --prime-from
  * auto is the render node whose driver is "asahi".
@@ -30,7 +30,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
+#include <sys/event.h>
 #include <sys/mman.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -104,13 +108,65 @@ static uint32_t prop_id(int fd, uint32_t obj, uint32_t type, const char *name, u
 	return id;
 }
 
-/* Blocks in read() until a flip-complete event arrives. 0, or 1 after printing the failure. */
+/*
+ * How the test learns that the fd is readable before it reads the event:
+ *   read    a blocking read() and nothing else
+ *   poll    poll(POLLIN), select: select(), kqueue: kevent(EVFILT_READ), each with a 1 s
+ *           timeout. A timeout is counted and reported, and the read() still follows, so a
+ *           wait that never wakes shows as timeouts and about one flip per second.
+ */
+enum { WAIT_READ, WAIT_POLL, WAIT_SELECT, WAIT_KQUEUE };
+static int wait_mode = WAIT_READ, wait_kq = -1;
+static unsigned wait_timeouts, wait_errors;
+
+static void wait_readable(int fd)
+{
+	int r = 1;
+
+	if (wait_mode == WAIT_POLL) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+
+		r = poll(&pfd, 1, 1000);
+		if (r > 0 && !(pfd.revents & POLLIN)) {
+			if (!wait_errors)
+				out(P "poll: revents 0x%x without POLLIN\n", pfd.revents);
+			wait_errors++;
+			return;
+		}
+	} else if (wait_mode == WAIT_SELECT) {
+		fd_set rfds;
+		struct timeval tv = { 1, 0 };
+
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+		r = select(fd + 1, &rfds, NULL, NULL, &tv);
+	} else if (wait_mode == WAIT_KQUEUE) {
+		struct kevent ev;
+		struct timespec ts = { 1, 0 };
+
+		r = kevent(wait_kq, NULL, 0, &ev, 1, &ts);
+	} else {
+		return;
+	}
+	if (r == 0)
+		wait_timeouts++;
+	else if (r < 0) {
+		if (!wait_errors)
+			out(P "wait for the fd failed: errno %d (%s)\n", errno, strerror(errno));
+		wait_errors++;
+	}
+}
+
+/* Waits (see above), then read()s until a flip-complete event arrives. 0, or 1 after printing the failure. */
 static int wait_flip(int fd, const char *what)
 {
 	char evbuf[256];
 
 	for (;;) {
-		ssize_t n = read(fd, evbuf, sizeof(evbuf));
+		ssize_t n;
+
+		wait_readable(fd);
+		n = read(fd, evbuf, sizeof(evbuf));
 
 		if (n < 0 && errno == EINTR)
 			continue;
@@ -269,7 +325,12 @@ int main(int argc, char **argv)
 			nonce = (uint32_t)strtoul(argv[++i], NULL, 16);
 		else if (!strcmp(argv[i], "--prime-from") && i + 1 < argc)
 			prime_from = argv[++i];
-		else if (!strcmp(argv[i], "--no-flip"))
+		else if (!strcmp(argv[i], "--wait") && i + 1 < argc) {
+			const char *m = argv[++i];
+
+			wait_mode = !strcmp(m, "poll") ? WAIT_POLL : !strcmp(m, "select") ? WAIT_SELECT :
+				    !strcmp(m, "kqueue") ? WAIT_KQUEUE : WAIT_READ;
+		} else if (!strcmp(argv[i], "--no-flip"))
 			do_flip = 0;
 	}
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -290,6 +351,14 @@ int main(int argc, char **argv)
 		device = found_path;
 	}
 	out(P "display node %s\n", device);
+	if (wait_mode == WAIT_KQUEUE) {
+		struct kevent ev;
+
+		wait_kq = kqueue();
+		EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+		if (wait_kq < 0 || kevent(wait_kq, &ev, 1, NULL, 0, NULL) < 0)
+			return fail("kqueue registration of the DRM fd (EVFILT_READ)");
+	}
 	drmVersion *v = drmGetVersion(fd);
 	if (v) {
 		out(P "driver %s %d.%d.%d (%s)\n", v->name, v->version_major, v->version_minor,
@@ -513,6 +582,14 @@ int main(int argc, char **argv)
 	out(P "%u flips in %.3f s: %.2f per second, interval min %.3f ms max %.3f ms, %u EBUSY retries\n", flips,
 	       elapsed, elapsed > 0 ? flips / elapsed : 0.0, flips > 1 ? min_iv / 1e6 : 0.0,
 	       flips > 1 ? max_iv / 1e6 : 0.0, busy_retries);
+	{
+		static const char *const wn[] = { "read", "poll", "select", "kqueue" };
+
+		out(P "wait mode %s: %u timeouts, %u errors%s\n", wn[wait_mode], wait_timeouts, wait_errors,
+		    wait_timeouts || wait_errors ? " FAILED" : "");
+		if (wait_timeouts || wait_errors)
+			return 1;
+	}
 	if (flips < 2) {
 		out(P "FAIL fewer than two flips completed\n");
 		return 1;

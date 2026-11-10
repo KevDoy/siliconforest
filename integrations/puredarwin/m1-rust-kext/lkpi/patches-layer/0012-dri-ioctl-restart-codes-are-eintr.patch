@@ -6,7 +6,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/drm/src/pd_drm_cdev.c
 +++ b/src/Kernel/fbsdkpi/drm/src/pd_drm_cdev.c
-@@ -141,6 +141,11 @@
+@@ -141,6 +175,11 @@
  		printf("pd_dri: ioctl 0x%08x returned %ld, failing it\n", cmd, ret);
  		return EINVAL;
  	}

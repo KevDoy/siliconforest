@@ -81,6 +81,18 @@ Counts are added/removed lines.
 | 0011 page pool for single pages, vmap through owning descriptors | +204 -16 |
 | 0012 DRI ioctl restart codes are EINTR | +5 -0 |
 | 0013 thread and area tables off the image | +14 -2 |
+| 0014 a thread slot is dropped when its thread_t is reused | see file |
+| 0015 xnu memory pressure runs the shrinkers and trims the page pool | see file |
+| 0016 scoped_guard labels are unique | see file |
+| 0017 backlight and platform_driver fields of Linux 7 | see file |
+| 0018 of_find_compatible_node continues after `from` | see file |
+| 0019 a dma-buf made by another DRM kext is recognised | see file |
+| 0020 select/poll/kqueue on DRM fds wake on events (also patches PDDRMDri) | see file |
+| 0021 dma-buf sync-file ioctls | see file |
+
+Counts for 0002, 0005, 0008 and 0011 above are from an earlier state; each patch's first
+lines say what it holds now (0002 also carries the seam halves of 0009, 0011, 0014, 0015; 0008
+also enters a device in the bus table before its probe).
 
 `lkpi/patches/` (against Linux `rust/`): 0001 +24 -12, 0002 +1, 0003 +16, 0004 +3 -3,
 0005 +10 -3, 0006 +7 -3. m1-lkpi-extras adds 1001 (+73) and 1002 (+16).
@@ -93,8 +105,13 @@ Counts are added/removed lines.
 | 0002 PureDarwin's Linux layer | +42 -25 | no `address_space`; firmware page tables reached through a mapping; one `c_char` cast |
 | 0003 temporary diagnostics | +64 -9 | `PDAgx: diag:` lines; remove when no longer needed |
 
-The layer and driver patches are generated from scratch directories that are not in the
-repository; the patch files are the source of truth.
+The patch series are regenerated with `tools/regen/` (`layer/regen.sh setup|split`,
+`agx/regen.sh setup|split`, `rust/mkpatches.sh`); `lkpi/patches-layer/0007` is hand-written
+and kept by the layer script. The patch files are the source of truth.
+
+Both collection recipes end with `tools/kc_overlap.py`, the lab launcher's image-gate rule: a
+collection whose segments would overlap (kc-builder puts `__PRELINK_INFO` after the last kext
+and accepts it running into the kernel) fails the build.
 
 ### Stubs
 

@@ -1,7 +1,7 @@
 # m1-dcp: Omacom's display-controller (DCP) driver as a kext (SF-H)
 
-Status: **builds and links; never loaded or booted.** `PDDcp.kext` and a kernel collection
-with it exist as build outputs only.
+Status: see `reports/sprint-010/` for what has run on the M1 (the coordinator records boots;
+this directory holds recipes, sources and tests).
 
 Source of truth: `sources/gpu-plan/linux-aurora` (`integration/aurora` at 6a08a08e),
 `drivers/gpu/drm/apple`. Two patches against the pin (`patches/`, 9 changed lines): one
@@ -105,10 +105,8 @@ user mappings go through PDDRMDri), system sleep callbacks (compiled, not wired)
 Boot-args: `pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=1`, optionally `pddcp_debug=1`
 (the driver's `dev_dbg` lines and every repeat of a callback) and `pdrtkit_debug=1`.
 
-`pddcp` values today: 0 (default) not attached; 1 and 2 both attach, bind both platform
-drivers through the component framework and run `dcp_start`. Nothing in the kext commits a
-mode in either; the difference the task asks for (2 = KMS for clients) is not implemented:
-with 1 a client that opens the card node could still commit.
+`pddcp` values: 0 (default) not attached; 1 attaches, binds and starts the coprocessor, and
+refuses every atomic commit with -EPERM; 2 also lets clients set modes and flip.
 
 Lines to expect, all prefixed `PDDcp:` (driver messages are `PDDcp: <device>: ...`):
 `LinuxKPI runtime up, pddcp=1`; `dcp <node>: mailbox 0 is /arm-io/dcp (0), probing`;
@@ -120,3 +118,15 @@ and in what order, is not predicted here: this driver has not run on this layer.
 
 Open before a boot is meaningful: the questions in `NEEDS-FROM-DART.md` (piodma device,
 node matching, `of_find_compatible_node` over published nodes).
+
+## Tests and other pieces added after the first bind
+
+| Path | What |
+| --- | --- |
+| `test/dcp-flip-test.c`, `dcp-flip-test.nix` | KMS through the card node whose driver is `apple`: modeset, page flips with flip-complete events, `--wait read|poll|select|kqueue`, `--prime-from auto` (buffers of the GPU driver imported for scanout) |
+| `supervisor/darwin-dcp-{flip,prime,wait}-test.in` | guest scripts (DL43, DL44, DL45 lines); `tools/dcp_boot.sh` stages them with `DCP_TEST=1|prime|wait` |
+| `kext/pd_dcp_mmap.c` | user mmap of dumb buffers (PDDRMDri resolver) and the 3-argument `fb_create` adapter |
+| `kext/pd_dcp_prime.c` | import of a dma-buf exported by another DRM kext, for scanout without a copy |
+| `tools/symbolize.sh` | names kext addresses from a panic, from the link map kept with each build |
+| `kernel-patches/` | changes that need a kernel rebuild and are applied nowhere here |
+| `build-kc.nix --arg agx true` | PDAgx and PDDcp in one collection |
