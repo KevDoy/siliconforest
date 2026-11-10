@@ -42,5 +42,5 @@ rm -f "$runtime/desktop.rc"
     echo "$?" > "$runtime/desktop.rc"
 } | grep -v 'chonkstep-gl: step:'
 printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
-[ -r "$records/session-result.txt" ] && sed 's/^/GPUDESK_RESULT /' "$records/session-result.txt" | head -12
+[ -r "$records/session-result.txt" ] && grep -v ' gate=\| kernel_messages=\| cs_at_spawn=\| exit_reason=' "$records/session-result.txt" | cut -c1-260 | sed 's/^/GPUDESK_RESULT /' | head -60
 printf 'GPUDESK_END_%s\n' "$nonce"

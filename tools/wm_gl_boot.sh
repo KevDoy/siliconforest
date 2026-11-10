@@ -29,12 +29,14 @@
 #   WM_GL_ASSEMBLE_ONLY=1       stop after the offline assemble (RAM root staged and checked,
 #                               nothing delivered or booted); prints the free space
 #   WM_GL_DRY_RUN=1             print the staging list only
-#   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 260)
+#   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 290)
 #   WM_GL_TEMPLATE=<path>       another guest script
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
-KC=${2:-/nix/store/1dka66ysaspm6lgwhxyzncb5ih912cn6-puredarwin-kc-arm64-0.1}
+# The collection with the multitouch trackpad (two-finger click = right button, two-finger
+# drag = wheel). pdm1tpmt=0 as an extra boot-arg falls back to the basic pointer mode.
+KC=${2:-/nix/store/73vka56ka5761ml6njqlmfshxmxcl81a-puredarwin-kc-arm64-0.1}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}
@@ -47,7 +49,7 @@ case "${WM_GL_STEP:-probe}" in
   bench) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
   dmabuf) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-dmabuf.in; STAGE_BARE=1; STAGE_DMABUF_CLIENT=1; export DCP_RUNTIME=${DCP_RUNTIME:-150} ;;
   wlgpu) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-wlgpu.in; STAGE_BARE=1; STAGE_WL=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
-  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-260} ;;
+  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-290} ;;
   *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
 esac
 TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}

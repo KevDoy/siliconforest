@@ -4,14 +4,16 @@
 #
 # Part A, the real desktop: chonkstep-darwin-desktop (shared shell, both-seat PDHID input,
 # two explicitly requested managed terminals, as darwin-shared-desktop-live-test) with
-# --renderer gl for 90 s. Needs /dev/usb_hid_kbd and /dev/usb_hid_mouse; the script runs the
+# --renderer gl for 110 s. Needs /dev/usb_hid_kbd and /dev/usb_hid_mouse; the script runs the
 # same enumeration helper and endpoint wait as the existing test, without failing on them.
 # Nobody has to be there: CHONKSTEP_DARWIN_AUTOPILOT=1 makes the compositor feed itself raw
 # PDHID keyboard and pointer records (decoded by the device path's own decoder) once a
-# terminal is focused, in phases, about 42 s in all: settle, pointer sweep, title bar drag,
+# terminal is focused, in phases, about 54 s in all: settle, pointer sweep, title bar drag,
 # typing "echo wmgl" + Enter, corner resize, a second drag (the size must not change),
 # miniaturize by the title bar button and restore by the miniwindow, the desktop menu by a
-# right-button click and by Control-click, Command-Q and Command-Return. These records are
+# right-button click and by Control-click, Command-Q and Command-Return, a terminal opened by
+# clicking the menu's Terminal row, and (with the limit set to three for this test) one more
+# such click that must be refused in a notice, not in the menu. These records are
 # compositor-generated and labelled input=synthetic-autopilot: not evidence of a physical
 # keyboard or trackpad, and a right-button record says nothing about what a two-finger click
 # on the real trackpad reports. Keep hands off the machine while it runs: real input is
@@ -25,7 +27,7 @@
 # phase=..." (the GL frame read back against the CPU render of the same scene: differing
 # pixels, max channel difference, hashes; the focused window's title bar: titlebar_hash=,
 # titlebar_colours=, buttons=miniaturize+close decorations=present); one WMAUTO line per phase
-# (drag, type, resize, redrag, minimize, menu, chords) and "WMAUTO done result=ok|FAILED";
+# (drag, type, resize, redrag, minimize, menu, chords, menuterm, limit) and "WMAUTO done result=ok|FAILED";
 # WMSTAT every 120
 # frames and a final one, the first with first_frame_* costs; "chonkstep-gl: step:" before each
 # first-time display call; DL10_CLIENT_* from the test client; WMGL3_* from this script.
@@ -64,11 +66,11 @@ printf 'WMGL3_ENDPOINT_WAIT missing_checks=%s max_sleeps=100\n' "$count"
 if [ -c /dev/usb_hid_kbd ] && [ -c /dev/usb_hid_mouse ] && [ -x /usr/bin/chonk-terminal-darwin ]; then
     records=$runtime/session-$session
     mkdir -m 0700 "$records"
-    printf 'WMGL3_DESKTOP_START renderer=gl seconds=90 terminals=2 input=pdhid+synthetic-autopilot start=%s\n' "$(date +%s)"
-    CHONKSTEP_DARWIN_AUTOPILOT=1 /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 90 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
+    printf 'WMGL3_DESKTOP_START renderer=gl seconds=110 terminals=2 input=pdhid+synthetic-autopilot start=%s\n' "$(date +%s)"
+    CHONKSTEP_DARWIN_AUTOPILOT=1 CHONKSTEP_DARWIN_MAX_TERMINALS=3 /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 110 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
     a_rc=$?
     printf 'WMGL3_DESKTOP_RC=%s end=%s\n' "$a_rc" "$(date +%s)"
-    [ -r "$records/session-result.txt" ] && sed 's/^/WMGL3_RESULT /' "$records/session-result.txt" | head -20
+    [ -r "$records/session-result.txt" ] && grep -v ' gate=\| kernel_messages=\| cs_at_spawn=\| exit_reason=' "$records/session-result.txt" | cut -c1-260 | sed 's/^/WMGL3_RESULT /' | head -40
 else
     printf 'WMGL3_DESKTOP_SKIPPED kbd=%s mouse=%s terminal=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes || echo no)" "$([ -c /dev/usb_hid_mouse ] && echo yes || echo no)" "$([ -x /usr/bin/chonk-terminal-darwin ] && echo yes || echo no)"
 fi
