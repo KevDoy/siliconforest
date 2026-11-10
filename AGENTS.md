@@ -1421,9 +1421,13 @@ Milestones:
   everything is exported as PureDarwin tree patches in
   `integrations/puredarwin/puredarwin-patches/` (`tools/pcie_export_patch.sh`,
   boot with `PCIE_FROM_PATCH=1`). Edit the lab sources, then regenerate.
-- M6, remaining: SMC radio power from Darwin (RTKit/SMC client), soak test and
-  lifecycle (rejoin, DHCP renewal, teardown, autostart), power management,
-  WPA3, Bluetooth, running outside the hypervisor.
+- Also done since: SMC radio power from the kext (the launcher does nothing for
+  PCIe by default), per-buffer DART mapping, `pd-netd` (auto-join, DHCP renewal,
+  resolver), lifecycle paths (stop/halt/reload; harder off modes and sleep hooks
+  unrun), and Rust in a kext (`integrations/puredarwin/m1-rust-kext/`).
+- What comes next is tracked as GitHub issues in `chriskearney/siliconforest`
+  (label `roadmap`; start at the issue titled "Roadmap index"). Research inputs
+  for those tickets are in `docs/roadmap/research/`.
 
 Licensing (Chris, November 9): port Omacom `linux-aurora` code directly. The
 PCIe host bridge and DART kexts are ported from `pcie-apple.c`, `apple-dart.c`
