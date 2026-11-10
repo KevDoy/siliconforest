@@ -1,0 +1,26 @@
+PDM1SPIHID.kext, multitouch build
+
+This build of the kext contains code ported from the Linux kernel as
+maintained in Omacom linux-aurora (branch integration/aurora, commit
+6a08a08e) and is, as a whole, distributed under the GNU General Public
+License version 2.
+
+SPDX-License-Identifier: GPL-2.0-or-later
+  m1tp_mt.c, m1tp_mt.h, m1tp_mt_selftest.c, PDM1SPIHIDMultitouch.inc
+  from drivers/hid/hid-magicmouse.c (report layout, validity rules, mode
+  request)
+    Apple "Magic" Wireless Mouse driver
+    Copyright (c) 2010 Michael Poole <mdpoole@troilus.org>
+    Copyright (c) 2010 Chase Douglas <chase.douglas@canonical.com>
+
+SPDX-License-Identifier: GPL-2.0
+  the mode request's transport framing in PDM1SPIHIDMultitouch.inc
+  from drivers/hid/spi-hid/spi-hid-apple-core.c
+    Apple SPI HID transport driver
+    Copyright (C) The Asahi Linux Contributors
+    Based on: drivers/input/applespi.c
+    Copyright (c) 2015-2018 Federico Lorenzi
+    Copyright (c) 2017-2018 Ronald Tschalär
+
+The remaining sources are the lab's own keyboard, transport, enumeration and
+child-device code (see ../IMPLEMENTATION.md and ../../m1-keyboard/ADAPTER.md).
