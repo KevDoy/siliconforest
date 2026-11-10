@@ -91,7 +91,39 @@ Surface semantics, the same as for `wl_shm` buffers on this compositor today:
 
 ## 3. Requests to the kernel / Mesa side
 
-None open. (When something is needed it goes here with the exact call and errno.)
+### 3.1 Two-finger click and two-finger scroll from the built-in trackpad (open)
+
+A person using the desktop could not open the desktop menu with a two-finger click. The
+compositor cannot fix this alone:
+
+- What it reads: `/dev/usb_hid_mouse`, 12-byte PDHID pointer records
+  (`PDHIDPushMouseEvent` / `PDHIDPushAbsoluteMouseEvent`): `u32 sequence, u8 device,
+  u8 buttons (bits 0-2), i8 dx | u16 x, i8 dy, i8 wheel, u8 absolute, u16 y`. There is no
+  finger count in a record.
+- Where they come from: `IOHIDEventService.cpp` turns the trackpad's generic HID pointer
+  reports into those records (`buttons & 7`). The SPI trackpad child
+  (`m1-trackpad-child/DESIGN.md`) leaves the device in its basic pointer mode ("Mode gate
+  remains closed ... neither enables multitouch nor decodes vendor touch data"), in which a
+  physical click is button 1 whatever the number of fingers on the pad, and there is no scroll.
+
+Request, to whoever owns the trackpad driver: with the pad in multitouch mode (Linux
+`applespi` is the reference for the mode switch and the finger frames), translate in the
+kernel, so the record format and every reader stay as they are:
+
+1. physical click with exactly two fingers down -> report **button bit 1 (right)** instead of
+   bit 0 for that press and its release;
+2. two fingers moving without a click -> **`wheel`** steps (the record's signed byte; the
+   compositor maps one step to one wheel detent, 120 in `v120`), and no pointer motion.
+
+Nothing changes on the compositor side when this arrives: a right-button record already opens
+the desktop menu (the unattended session proves that path with synthetic records:
+`WMAUTO menu ... right_button_record_opens_menu=true`), and `wheel` is already delivered to
+clients as vertical scroll. If the driver would rather hand the finger count to userspace, the
+smallest change is the count in the record's `device` byte's upper bits or a new 13th byte;
+say which here and the compositor will do the translation instead.
+
+Until then the desktop has a workaround that needs no kernel change: **Control + click is a
+secondary click** (the whole press is the right button).
 
 ## 4. Facts about the compositor side that may help
 

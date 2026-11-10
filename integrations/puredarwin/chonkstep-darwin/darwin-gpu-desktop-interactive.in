@@ -35,7 +35,12 @@ printf 'GPUDESK_INPUT kbd=%s mouse=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes 
 records=$runtime/session-$session
 mkdir -m 0700 "$records"
 printf 'GPUDESK_DESKTOP_START renderer=auto seconds=@SECONDS@ start=%s\n' "$(date +%s)"
-/usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds @SECONDS@ --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1 | grep -v 'chonkstep-gl: step:'
-printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$?" "$(date +%s)"
+# The desktop's own exit status, not that of the filter it is piped through.
+rm -f "$runtime/desktop.rc"
+{
+    /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds @SECONDS@ --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
+    echo "$?" > "$runtime/desktop.rc"
+} | grep -v 'chonkstep-gl: step:'
+printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
 [ -r "$records/session-result.txt" ] && sed 's/^/GPUDESK_RESULT /' "$records/session-result.txt" | head -12
 printf 'GPUDESK_END_%s\n' "$nonce"

@@ -52,3 +52,24 @@ ownership, two-window interaction and actual target execution.
 Host tests do not establish Darwin execution or physical input. Native keyboard
 and pointer observations belong to the preserved earlier receipts; raw HID wire
 correlation remains separate. Root owns SDK build, artifact binding and hardware.
+
+## Long sessions (10 November)
+
+`src/` here is now the source the deployed binary is built from: the fd-boundary revision that
+`runs/m1-desktop-010/terminal-application-build-002` was built from (its `FD_BOUNDARY_CONTRACT.md`,
+`fd-boundary.patch` and `test_fd_mutations.py` are copied alongside), plus the change in
+`long-session.diff`, made for interactive desktop sessions of up to four hours:
+
+- `--seconds` accepts 1..14400 (was 1..120);
+- `MAX_RX` (PTY output, which is also written to the records directory in the RAM root) is
+  8 MiB per terminal (was 1 MiB); `MAX_TX` (typed input) is 1 MiB (was 16 KiB).
+
+A terminal still ends itself when it passes either quota. The binary built from this source is
+`runs/m1-desktop-010/terminal-application-build-003/target/aarch64-apple-darwin/release/chonk-terminal-darwin`
+(same imports and size as build-002; 43 host tests pass):
+
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/../darwin-linker.py \
+      cargo build --offline --locked --release --target aarch64-apple-darwin --target-dir <run>/target
+
+`source-validation.json`, `host-tests.log` and `revisions/` describe earlier revisions and were
+not regenerated for this one.

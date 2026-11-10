@@ -4,14 +4,18 @@
 #
 # Part A, the real desktop: chonkstep-darwin-desktop (shared shell, both-seat PDHID input,
 # two explicitly requested managed terminals, as darwin-shared-desktop-live-test) with
-# --renderer gl for 40 s. Needs /dev/usb_hid_kbd and /dev/usb_hid_mouse; the script runs the
+# --renderer gl for 90 s. Needs /dev/usb_hid_kbd and /dev/usb_hid_mouse; the script runs the
 # same enumeration helper and endpoint wait as the existing test, without failing on them.
-# Nobody has to be there: CHONKSTEP_DARWIN_AUTOPILOT=1 makes the compositor feed itself
-# synthetic pointer and key events through its normal seat path once a terminal is focused
-# (2 s settle, 8 s pointer sweep, 4 s title bar drag, 5 s typing "echo wmgl" + Enter into the
-# focused terminal). These are compositor-generated events, labelled input=synthetic-autopilot;
-# they are not evidence of a physical keyboard or trackpad. Whoever is at the machine may
-# still type and move the pointer.
+# Nobody has to be there: CHONKSTEP_DARWIN_AUTOPILOT=1 makes the compositor feed itself raw
+# PDHID keyboard and pointer records (decoded by the device path's own decoder) once a
+# terminal is focused, in phases, about 42 s in all: settle, pointer sweep, title bar drag,
+# typing "echo wmgl" + Enter, corner resize, a second drag (the size must not change),
+# miniaturize by the title bar button and restore by the miniwindow, the desktop menu by a
+# right-button click and by Control-click, Command-Q and Command-Return. These records are
+# compositor-generated and labelled input=synthetic-autopilot: not evidence of a physical
+# keyboard or trackpad, and a right-button record says nothing about what a two-finger click
+# on the real trackpad reports. Keep hands off the machine while it runs: real input is
+# delivered too and would disturb the script.
 # Part B, when the input nodes or the terminal are missing or part A did not come up: the bare
 # compositor (input off) with the GL renderer and the finite SHM test client for 20 s, which
 # still proves client buffer -> texture -> page flip -> frame callback.
@@ -19,8 +23,10 @@
 # Lines: "WMSTAT selected renderer=gl output=kms ..." once; per phase "WMSTAT phase=..."
 # (frames, fps, missed_refreshes, steady avg/max composite and present) and "WMAUTO check
 # phase=..." (the GL frame read back against the CPU render of the same scene: differing
-# pixels, max channel difference, hashes); "WMAUTO drag window_moved=..", "WMAUTO type ..
-# client_buffer_pixels_changed=.." and "WMAUTO done result=ok|FAILED"; WMSTAT every 120
+# pixels, max channel difference, hashes; the focused window's title bar: titlebar_hash=,
+# titlebar_colours=, buttons=miniaturize+close decorations=present); one WMAUTO line per phase
+# (drag, type, resize, redrag, minimize, menu, chords) and "WMAUTO done result=ok|FAILED";
+# WMSTAT every 120
 # frames and a final one, the first with first_frame_* costs; "chonkstep-gl: step:" before each
 # first-time display call; DL10_CLIENT_* from the test client; WMGL3_* from this script.
 # Both new binaries are staged over the RAM root's own /usr/bin/chonkstep-darwin-desktop and
@@ -58,8 +64,8 @@ printf 'WMGL3_ENDPOINT_WAIT missing_checks=%s max_sleeps=100\n' "$count"
 if [ -c /dev/usb_hid_kbd ] && [ -c /dev/usb_hid_mouse ] && [ -x /usr/bin/chonk-terminal-darwin ]; then
     records=$runtime/session-$session
     mkdir -m 0700 "$records"
-    printf 'WMGL3_DESKTOP_START renderer=gl seconds=40 terminals=2 input=pdhid+synthetic-autopilot start=%s\n' "$(date +%s)"
-    CHONKSTEP_DARWIN_AUTOPILOT=1 /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 40 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
+    printf 'WMGL3_DESKTOP_START renderer=gl seconds=90 terminals=2 input=pdhid+synthetic-autopilot start=%s\n' "$(date +%s)"
+    CHONKSTEP_DARWIN_AUTOPILOT=1 /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds 90 --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 --renderer gl 2>&1
     a_rc=$?
     printf 'WMGL3_DESKTOP_RC=%s end=%s\n' "$a_rc" "$(date +%s)"
     [ -r "$records/session-result.txt" ] && sed 's/^/WMGL3_RESULT /' "$records/session-result.txt" | head -20

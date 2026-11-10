@@ -597,6 +597,15 @@ fn flush(conn: &Connection) -> Result<bool> {
     }
 }
 
+fn child_exec_facts(pty: &pty::Pty) -> serde_json::Value {
+    serde_json::json!({
+        "pre_exec_fd_check_observed":pty.pre_exec_fd_scan_bound().is_some(),
+        "pre_exec_fd_scan_bound_exclusive":pty.pre_exec_fd_scan_bound(),
+        "exec_status_pipe_eof_observed":pty.exec_status_pipe_eof_observed(),
+        "shell_exec_checked":pty.exec_checked(),
+        "inventory_scope":"pre_exec_only_not_after_exec_inventory"
+    })
+}
 fn session(
     stream: UnixStream,
     instance: &str,
@@ -630,7 +639,7 @@ fn session(
                 let mut child = log(dir, "child-ready.json")?;
                 serde_json::to_writer_pretty(
                     &mut child,
-                    &serde_json::json!({"parent_pid":std::process::id(),"child_pid":pty.pid(),"sid":pty.pid(),"pgid":pty.pid(),"session_and_ctty_checked_in_child":true,"exec_status_pipe_closed":true,"shell":"/bin/sh"}),
+                    &serde_json::json!({"parent_pid":std::process::id(),"child_pid":pty.pid(),"sid":pty.pid(),"pgid":pty.pid(),"session_and_ctty_checked_in_child":true,"exec_status_pipe_closed":true,"exec_boundary":child_exec_facts(pty),"shell":"/bin/sh"}),
                 )?;
                 child.write_all(b"\n")?;
                 child.sync_all()?;
@@ -781,7 +790,7 @@ fn session(
     } else {
         "deadline"
     };
-    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported,"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
+    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported,"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
     // Preserve a protocol failure even if writing the final grid also fails.
     let grid_result = (|| -> Result<()> {
         let mut final_grid = log(dir, "grid-final.txt")?;
@@ -808,7 +817,8 @@ fn arguments(args: &[String]) -> Result<(PathBuf, String, PathBuf, u64)> {
         || socket.as_os_str().as_bytes().len() > 103
         || dir.as_os_str().as_bytes().len() > 1024
         || !status::valid_instance(&args[3])
-        || !(1..=120).contains(&seconds)
+        // Four hours: the desktop session's own upper bound.
+        || !(1..=14_400).contains(&seconds)
     {
         return Err(
             "invalid socket, records path, lowercase instance identity, or lifetime".into(),
@@ -885,7 +895,7 @@ fn run() -> Result<()> {
             cleanup.complete = false;
         }
     }
-    let record = serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"shell":"/bin/sh","term":"dumb","child_pid":child_pid,"session":audit,"cleanup":{"complete":cleanup.complete,"status":cleanup.status,"term_sent":cleanup.term_sent,"kill_sent":cleanup.kill_sent,"error":cleanup.error},"errors":errors});
+    let record = serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"shell":"/bin/sh","term":"dumb","child_pid":child_pid,"child_exec_boundary":pty.as_ref().map(child_exec_facts),"session":audit,"cleanup":{"complete":cleanup.complete,"status":cleanup.status,"term_sent":cleanup.term_sent,"kill_sent":cleanup.kill_sent,"error":cleanup.error},"errors":errors});
     if let Err(error) = json_record(&dir, "result.json", &record) {
         errors.push(format!("final record: {error}"));
         cleanup.complete = false;
@@ -933,7 +943,7 @@ mod lifecycle_tests {
             (3, &"A".repeat(48)),
             (5, "relative"),
             (7, "0"),
-            (7, "121"),
+            (7, "14401"),
         ] {
             let mut invalid = args.clone();
             invalid[index] = value.into();

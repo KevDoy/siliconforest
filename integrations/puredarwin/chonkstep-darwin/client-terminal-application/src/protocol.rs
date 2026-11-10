@@ -1,6 +1,8 @@
 //! Bounded application transcript and SHM frame ownership; no response recognizer.
-pub const MAX_RX: usize = 1024 * 1024;
-pub const MAX_TX: usize = 16384;
+// Sized for an hours-long interactive session: PTY output is also written to
+// the records directory, so this bounds what one terminal can put in the RAM root.
+pub const MAX_RX: usize = 8 * 1024 * 1024;
+pub const MAX_TX: usize = 1024 * 1024;
 #[derive(Default)]
 pub struct FrameState {
     pub released: bool,
