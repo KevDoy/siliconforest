@@ -38,11 +38,20 @@ class PDApcieT8103Host : public IOPCIBridge
 
     volatile UInt8 *configAddress(IOPCIAddressSpace space, UInt8 offset) const;
     UInt32 portRead(UInt32 offset) const;
+    /* MSI: message data n on this port arrives as AIC interrupt msiBase + n */
+    UInt32 msiBase;
+    UInt32 msiCount;
+    UInt32 msiDoorbell;
+    UInt32 msiUsed;
+    IOReturn setupMSI(IOService *client, IOPCIDevice *device, UInt32 *vectorOut);
 
 public:
     bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
     bool configure(IOService *provider) APPLE_KEXT_OVERRIDE;
     void free(void) APPLE_KEXT_OVERRIDE;
+    /* "PDApcieSetupMSI" (client service, IOPCIDevice, UInt32 *aicVector): one MSI for a device below this bridge */
+    IOReturn callPlatformFunction(const OSSymbol *functionName, bool waitForFunction,
+                                  void *param1, void *param2, void *param3, void *param4) APPLE_KEXT_OVERRIDE;
     IODeviceMemory *ioDeviceMemory(void) APPLE_KEXT_OVERRIDE;
 
     UInt8 firstBusNum(void) APPLE_KEXT_OVERRIDE;

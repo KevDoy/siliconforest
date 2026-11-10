@@ -541,65 +541,33 @@ void PDBwfm::intrAction(OSObject *owner, IOInterruptEventSource *sender, int cou
 }
 
 /*
- * One MSI vector. The port's MSI block was enabled when the link came up (doorbell
- * 0xfffff000, base 0), so message data n arrives as AIC interrupt msi-vector-offset + n.
- * The interrupt is attached to this service, not the PCI nub, whose interrupt state
+ * One MSI vector, allocated and programmed by the host bridge (PDApcieSetupMSI), which
+ * also describes the interrupt on this service. The handler then hangs off an ordinary
+ * IOInterruptEventSource on this service, not the PCI nub, whose interrupt state
  * IOPCIFamily already resolved without a controller.
  */
 bool PDBwfm::setupMSI()
 {
-	IORegistryEntry *apcie = IORegistryEntry::fromPath("/arm-io/apcie", gIODTPlane);
-	OSData *off = apcie ? OSDynamicCast(OSData, apcie->getProperty("msi-vector-offset")) : NULL;
-	OSData *addr = apcie ? OSDynamicCast(OSData, apcie->getProperty("msi-address")) : NULL;
-	IOInterruptVectorNumber vector = 704;
-	UInt32 doorbell = 0xfffff000;
-	UInt8 cap = 0;
-	bool ok = false;
+	const OSSymbol *fn = OSSymbol::withCString("PDApcieSetupMSI");
+	UInt32 vector = 0;
+	IOReturn ret = fn ? fPCI->callPlatformFunction(fn, true, this, fPCI, &vector, NULL) : kIOReturnNoMemory;
 
-	if (off && off->getLength() >= 4)
-		vector = *(const UInt32 *)off->getBytesNoCopy();
-	if (addr && addr->getLength() >= 4)
-		doorbell = *(const UInt32 *)addr->getBytesNoCopy();
-	OSSafeReleaseNULL(apcie);
-	if (fPCI->findPCICapability(kIOPCIMSICapability, &cap) == 0 || cap == 0) {
-		LOG("msi: the device has no MSI capability");
+	OSSafeReleaseNULL(fn);
+	if (ret != kIOReturnSuccess) {
+		LOG("msi: the host bridge gave no vector (0x%x)", ret);
 		return false;
 	}
-
-	const OSSymbol *controller = gIODTDefaultInterruptController;
-	OSData *spec = OSData::withBytes(&vector, sizeof(vector));
-	OSArray *controllers = OSArray::withObjects((const OSObject **)&controller, 1);
-	OSArray *specs = spec ? OSArray::withObjects((const OSObject **)&spec, 1) : NULL;
-	if (controllers && specs) {
-		setProperty(gIOInterruptControllersKey, controllers);
-		setProperty(gIOInterruptSpecifiersKey, specs);
-		fIntSrc = IOInterruptEventSource::interruptEventSource(this, &PDBwfm::intrAction, this, 0);
-	}
-	OSSafeReleaseNULL(spec);
-	OSSafeReleaseNULL(controllers);
-	OSSafeReleaseNULL(specs);
+	fIntSrc = IOInterruptEventSource::interruptEventSource(this, &PDBwfm::intrAction, this, 0);
 	if (fIntSrc == NULL || fPollLoop->addEventSource(fIntSrc) != kIOReturnSuccess) {
-		LOG("msi: no interrupt event source for AIC vector %d", (int)vector);
+		LOG("msi: no interrupt event source for AIC vector %u", vector);
 		OSSafeReleaseNULL(fIntSrc);
 		return false;
 	}
 	fIntSrc->enable();
-
-	UInt16 ctl = fPCI->configRead16(cap + 2);
-	fPCI->configWrite32(cap + 4, doorbell);
-	if (ctl & 0x80) {			/* 64-bit capable */
-		fPCI->configWrite32(cap + 8, 0);
-		fPCI->configWrite16(cap + 12, 0);
-	} else {
-		fPCI->configWrite16(cap + 8, 0);
-	}
-	fPCI->configWrite16(cap + 2, (ctl & ~0x70) | 0x1);	/* one message, enable */
-	fPCI->configWrite16(kIOPCIConfigCommand, fPCI->configRead16(kIOPCIConfigCommand) | 0x400); /* INTx off */
-	ok = (fPCI->configRead16(cap + 2) & 1) != 0;
-	LOG("msi: capability at 0x%x control 0x%04x -> 0x%04x, doorbell 0x%08x, AIC vector %d, %s",
-	    cap, ctl, fPCI->configRead16(cap + 2), doorbell, (int)vector, ok ? "enabled" : "NOT enabled");
-	return ok;
+	LOG("msi: AIC vector %u from the host bridge", vector);
+	return true;
 }
+
 
 void pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {

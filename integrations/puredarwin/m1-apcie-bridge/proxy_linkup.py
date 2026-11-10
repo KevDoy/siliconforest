@@ -422,6 +422,28 @@ def bring_up(p, u, out, no_smc=False):
     return result
 
 
+def launcher_step(p, u, out):
+    """Called by the boot launcher after hv.init(). The mode file next to this module says who
+    brings the link up: "kext" (only power the radio through SMC; the kext does the rest) or
+    "launcher" (the full sequence from here, the original arrangement)."""
+    mode_file = Path(__file__).with_name("pcie_linkup_mode.txt")
+    mode = mode_file.read_text().strip() if mode_file.exists() else "launcher"
+    if mode != "kext":
+        result = bring_up(p, u, out)
+        result["mode"] = "launcher"
+        return result
+    result = {"mode": "kext", "pcie_init": None, "m0_port_ready": None, "link_up": None, "ok": None}
+    try:
+        smc_radio_enable(u)
+        result["radio_power"] = True
+        log("radio power enabled through SMC gP0d; PCIe bring-up is left to the kext")
+    except Exception:
+        result["radio_power"] = False
+        log("SMC radio enable failed:\n" + traceback.format_exc())
+    (Path(out) / "pcie-result.json").write_text(json.dumps(dict(result, log=list(LOG)), indent=1))
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", required=True)

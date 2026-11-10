@@ -1414,9 +1414,16 @@ Milestones:
 - M6, done so far (`reports/sprint-010/wifi-darwin-msi-dns-001.md`): MSI on AIC
   vector 704 with a 250 ms fallback poll; name resolution via `pd-net-up`
   (DHCP, then `mdnsd -debug`); bring-up logging removed.
-- M6, remaining: link-up inside the kext at 5 GT/s, DHCP renewal, starting
-  `pd-net-up` automatically, teardown, power management, WPA3, Bluetooth
-  coexistence, running outside the hypervisor.
+- Also done (`reports/sprint-010/pcie-kext-linkup-and-tree-patches-001.md`): the
+  bridge kext brings PCIe up from cold at 5 GT/s (`PCIE_LINK=kext`; the launcher
+  then only does the SMC radio-power write); MSI vectors come from the bridge
+  (`PDApcieSetupMSI`); board type and antenna SKU come from the device tree;
+  everything is exported as PureDarwin tree patches in
+  `integrations/puredarwin/puredarwin-patches/` (`tools/pcie_export_patch.sh`,
+  boot with `PCIE_FROM_PATCH=1`). Edit the lab sources, then regenerate.
+- M6, remaining: SMC radio power from Darwin (RTKit/SMC client), soak test and
+  lifecycle (rejoin, DHCP renewal, teardown, autostart), power management,
+  WPA3, Bluetooth, running outside the hypervisor.
 
 Licensing (Chris, November 9): port Omacom `linux-aurora` code directly. The
 PCIe host bridge and DART kexts are ported from `pcie-apple.c`, `apple-dart.c`

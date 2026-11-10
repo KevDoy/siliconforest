@@ -8,6 +8,14 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 SRC=integrations/puredarwin/m1-apcie-host; RUN=runs/m1-desktop-010
 NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007; M5=chriskearney@10.1.1.93
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
+if [ "${PCIE_FROM_PATCH:-0}" = 1 ]; then
+  # Build everything from the PureDarwin tree patches instead of the lab directories.
+  tools/pcie_export_patch.sh
+  P=integrations/puredarwin/puredarwin-patches
+  mkdir -p $RUN/bwfm-kc-build-001 $RUN/pd-dhcp-build-001
+  (cd $P && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
+  (cd $P && $NIX build-userspace-from-patch.nix -o "$ROOT/$RUN/pd-dhcp-build-001/result" > "$ROOT/$RUN/pd-dhcp-build-001/build.log" 2>&1) || { tail -20 $RUN/pd-dhcp-build-001/build.log; exit 1; }
+else
 mkdir -p $RUN/apcie-host-build-001 $RUN/apcie-host-kc-build-001
 (cd $SRC && $NIX build-kext.nix -o "$ROOT/$RUN/apcie-host-build-001/result" > "$ROOT/$RUN/apcie-host-build-001/build.log" 2>&1) || { grep -n 'error' -A6 $RUN/apcie-host-build-001/build.log | head -40; exit 1; }
 K=$(readlink -f $RUN/apcie-host-build-001/result)
@@ -19,9 +27,11 @@ if [ "${PCIE_WIFI:-0}" = 1 ]; then
   mkdir -p $RUN/bwfm-kc-build-001
   (cd integrations/puredarwin/m1-bwfm && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
 fi
+fi
 python3 -B tools/pcie_assemble.py $NAME | tail -2
 LAB=$RUN/pcie-m2-host-001/lab
 cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/puredarwin/m1-bringup/pcie_linkup.py
+echo "${PCIE_LINK:-launcher}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
 LSHA=$(sha256sum $LAB/integrations/puredarwin/m1-bringup/host_progress.py | cut -d' ' -f1)
 tar -C $RUN/pcie-m2-host-001 -cf - lab | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'rm -rf $W/lab-pcie-m2-001 && mkdir -m 700 $W/lab-pcie-m2-001 && tar -xf - -C $W/lab-pcie-m2-001 --strip-components 1 && chown -R root:staff $W/lab-pcie-m2-001'"
 tar -C artifacts/m1-desktop-010 -cf - $NAME/manifest.json $NAME/build-record.json $NAME/source.patch $NAME/kernel.macho $NAME/ramdisk.img $NAME/ramdisk.record.json | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'mkdir -p -m 700 $W/pcie-m2 && rm -rf $W/pcie-m2/$NAME && tar -xf - -C $W/pcie-m2 && chown -R root:staff $W/pcie-m2'"

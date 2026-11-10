@@ -12,14 +12,17 @@
  *   Author: Marc Zyngier <maz@kernel.org>
  * The BAR0 window constants follow Linux brcmfmac/pcie.c (ISC, Broadcom).
  *
- * This revision inherits a link that the launcher brought up from the m1n1
- * proxy (pcie_init, SMC radio power, port link sequence). It enumerates and
- * assigns resources; it does not yet own link bring-up, MSI or DART.
+ * Link bring-up is in PDApcieT8103Link.cpp: when port 0 is not already up, the
+ * bridge powers and initialises the controller, PHY and port itself (ported from
+ * m1n1) and runs the Linux port link sequence. A link the launcher brought up is
+ * used as it is. The SMC radio power write stays with the launcher.
  */
 #include "PDApcieT8103.h"
+#include "PDApcieT8103Link.h"
 
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLib.h>
+#include <IOKit/IOInterruptController.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <libkern/OSAtomic.h>
 #include <libkern/OSByteOrder.h>
@@ -158,6 +161,27 @@ bool PDApcieT8103Host::start(IOService *provider)
         (unsigned long long)ecam->getPhysicalSegment(0, NULL, kIOMemoryMapperNone), (unsigned long long)ecam->getLength(),
         (unsigned long long)port->getPhysicalSegment(0, NULL, kIOMemoryMapperNone), (unsigned long long)port->getLength());
 
+    /* MSI facts from the apcie node; port 0's share starts at message 0 */
+    msiBase = 704;
+    msiCount = 8;
+    msiDoorbell = 0xfffff000;
+    msiUsed = 0;
+    {
+        OSData *d;
+        IORegistryEntry *bridge0 = IORegistryEntry::fromPath("/arm-io/apcie/pci-bridge0", gIODTPlane);
+        if ((d = OSDynamicCast(OSData, provider->getProperty("msi-vector-offset"))) && d->getLength() >= 4)
+            msiBase = *(const UInt32 *)d->getBytesNoCopy();
+        if ((d = OSDynamicCast(OSData, provider->getProperty("msi-address"))) && d->getLength() >= 4)
+            msiDoorbell = *(const UInt32 *)d->getBytesNoCopy();
+        if (bridge0 && (d = OSDynamicCast(OSData, bridge0->getProperty("#msi-vectors"))) && d->getLength() >= 4)
+            msiCount = *(const UInt32 *)d->getBytesNoCopy();
+        if (bridge0 && (d = OSDynamicCast(OSData, bridge0->getProperty("msi-vector-base"))) && d->getLength() >= 4)
+            msiBase += *(const UInt32 *)d->getBytesNoCopy();
+        OSSafeReleaseNULL(bridge0);
+        if (msiCount > 32)
+            msiCount = 32;
+    }
+
     busFirst = 0;
     busLast = 8;
     if (busRange && busRange->getLength() >= sizeof(range)) {
@@ -180,12 +204,28 @@ bool PDApcieT8103Host::start(IOService *provider)
     }
     portBase = (volatile UInt8 *)portMap->getVirtualAddress();
 
+    /*
+     * Bring the link up unless it already is. This comes before any port register read
+     * here: with the apcie power domains off the port block cannot be read.
+     * pdapcielink=0 restores the old behaviour (the launcher must have done it all).
+     */
+    int linkMode = 1;
+    PE_parse_boot_argn("pdapcielink", &linkMode, sizeof(linkMode));
+    if (linkMode != 0) {
+        UInt32 broughtUp = 0;
+        IOReturn linkResult = PDApcieT8103LinkBringUp(provider, regs, &broughtUp);
+        if (linkResult != kIOReturnSuccess) {
+            LOG("port0 link bring-up failed (0x%08x, linksts 0x%08x). Not enumerating.", linkResult, broughtUp);
+            return false;
+        }
+    }
+
     UInt32 status = portRead(PORT_STATUS), link = portRead(PORT_LINKSTS);
     LOG("port0 appclk=0x%08x status=0x%08x refclk=0x%08x perst=0x%08x linksts=0x%08x intstat=0x%08x",
         portRead(PORT_APPCLK), status, portRead(PORT_REFCLK), portRead(PORT_PERST), link,
         portRead(PORT_INTSTAT));
     if (!(status & PORT_STATUS_READY) || !(link & PORT_LINKSTS_UP)) {
-        LOG("port0 link is not up; the launcher must bring it up first. Not enumerating.");
+        LOG("port0 link is not up. Not enumerating.");
         return false;
     }
 
@@ -234,6 +274,70 @@ bool PDApcieT8103Host::start(IOService *provider)
             configRead32(root, 0x18), configRead32(root, 0x20));
     }
     return ok;
+}
+
+/*
+ * One MSI vector for a function below this bridge, as apple_msi_domain_alloc() /
+ * apple_msi_compose_msg() do in Linux pcie-apple.c: the device is told to write
+ * message data n to the port's doorbell, and the port raises AIC interrupt
+ * msi-vector-offset + n. The interrupt is described on the client service (controller
+ * and specifier properties), so the client attaches an ordinary IOInterruptEventSource
+ * to itself, index 0.
+ */
+IOReturn PDApcieT8103Host::setupMSI(IOService *client, IOPCIDevice *device, UInt32 *vectorOut)
+{
+    UInt8 cap = 0;
+    UInt32 n;
+
+    if (!client || !device)
+        return kIOReturnBadArgument;
+    if (device->findPCICapability(kIOPCIMSICapability, &cap) == 0 || cap == 0)
+        return kIOReturnUnsupported;
+    for (n = 0; n < msiCount && (msiUsed & (1u << n)); n++) {}
+    if (n >= msiCount)
+        return kIOReturnNoResources;
+
+    IOInterruptVectorNumber vector = msiBase + n;
+    const OSSymbol *controller = gIODTDefaultInterruptController;
+    OSData *spec = OSData::withBytes(&vector, sizeof(vector));
+    OSArray *controllers = OSArray::withObjects((const OSObject **)&controller, 1);
+    OSArray *specs = spec ? OSArray::withObjects((const OSObject **)&spec, 1) : NULL;
+    bool described = controllers && specs &&
+        client->setProperty(gIOInterruptControllersKey, controllers) &&
+        client->setProperty(gIOInterruptSpecifiersKey, specs);
+    OSSafeReleaseNULL(spec);
+    OSSafeReleaseNULL(controllers);
+    OSSafeReleaseNULL(specs);
+    if (!described)
+        return kIOReturnNoMemory;
+
+    UInt16 ctl = device->configRead16(cap + 2);
+    device->configWrite32(cap + 4, msiDoorbell);
+    if (ctl & 0x80) {                       /* 64-bit capable */
+        device->configWrite32(cap + 8, 0);
+        device->configWrite16(cap + 12, (UInt16)n);
+    } else {
+        device->configWrite16(cap + 8, (UInt16)n);
+    }
+    device->configWrite16(cap + 2, (ctl & ~0x70) | 0x1);    /* one message, enable */
+    device->configWrite16(kIOPCIConfigCommand, device->configRead16(kIOPCIConfigCommand) | 0x400); /* INTx off */
+    if (!(device->configRead16(cap + 2) & 1))
+        return kIOReturnIOError;
+    msiUsed |= 1u << n;
+    if (vectorOut)
+        *vectorOut = (UInt32)vector;
+    LOG("msi: %u:%u.%u message %u -> AIC interrupt %u (doorbell 0x%08x) for %s",
+        device->getBusNumber(), device->getDeviceNumber(), device->getFunctionNumber(), n,
+        (UInt32)vector, msiDoorbell, client->getName());
+    return kIOReturnSuccess;
+}
+
+IOReturn PDApcieT8103Host::callPlatformFunction(const OSSymbol *functionName, bool waitForFunction,
+                                                void *param1, void *param2, void *param3, void *param4)
+{
+    if (functionName && functionName->isEqualTo("PDApcieSetupMSI"))
+        return setupMSI((IOService *)param1, OSDynamicCast(IOPCIDevice, (OSObject *)param2), (UInt32 *)param3);
+    return super::callPlatformFunction(functionName, waitForFunction, param1, param2, param3, param4);
 }
 
 bool PDApcieT8103Host::configure(IOService *provider)

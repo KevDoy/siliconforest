@@ -1,5 +1,5 @@
 --- integrations/puredarwin/m1-apcie-port-packet/host/overlay/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-08 23:32:08.142192283 -0800
-+++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 16:59:36.589348634 -0800
++++ runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-09 19:53:53.663712904 -0800
 @@ -651,7 +651,8 @@
                    for k in record), 'Conflicting APCIE experiment fields')
      image.require(native_trackpad_child_enabled(inputs), 'APCIE observer requires sealed native child')
@@ -35,8 +35,8 @@
 +        # pcie_init, SMC radio power, port-0 link sequence. XNU inherits the link.
 +        if apcie_port_observer_enabled(inputs):
 +            import pcie_linkup
-+            pcie = pcie_linkup.bring_up(backend.p, backend.u, directory)
-+            print('PCIE_LINKUP ' + json.dumps({k: pcie.get(k) for k in ('pcie_init', 'm0_port_ready', 'link_up', 'ok')}), flush=True)
++            pcie = pcie_linkup.launcher_step(backend.p, backend.u, directory)
++            print('PCIE_LINKUP ' + json.dumps({k: pcie.get(k) for k in ('mode', 'radio_power', 'pcie_init', 'm0_port_ready', 'link_up', 'ok')}), flush=True)
          cpus = list(hv.adt['cpus'])
          image.require(len(cpus) == 1 and cpus[0].state == 'running', 'Expected one running guest CPU')
          hv.set_bootargs(bootargs)

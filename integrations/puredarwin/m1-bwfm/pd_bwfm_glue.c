@@ -205,14 +205,14 @@ pd_bwfm_mclgetl(int how, u_int len)
 // the board
 
 /*
- * HARD-CODED BOARD IDENTITY, the one place to change for another machine.
+ * Board identity, used to pick the firmware and NVRAM files.
  *
- * On linux the board type comes from the device tree source ("brcm,board-type") and the
- * antenna SKU from m1n1, which copies bytes 8..15 of the Apple device tree property
- * /arm-io/wlan wifi-antenna-sku-info into "apple,antenna-sku". Version 1 of this driver
- * serves one machine, the M1 MacBook Pro 13" (J293): board apple,honshu, antenna X0.
- * The boot-args bwfm_board= and bwfm_antenna= override the two strings. What the Apple
- * device tree says is logged next to them and not used.
+ * On Linux the board type is in the device tree source ("brcm,board-type", e.g.
+ * apple,honshu for the J293) and the antenna SKU comes from m1n1, which copies bytes
+ * 8..15 of /arm-io/wlan wifi-antenna-sku-info into "apple,antenna-sku". Here both come
+ * from the Apple device tree: the board type is "apple," plus the lower-cased
+ * /arm-io/wlan module-instance, which is the same name on the J293. The boot-args
+ * bwfm_board= and bwfm_antenna= override them.
  */
 static void
 pd_bwfm_board_identity(char *board, size_t boardlen, char *antenna, size_t antennalen)
@@ -220,30 +220,38 @@ pd_bwfm_board_identity(char *board, size_t boardlen, char *antenna, size_t anten
 	static int logged;
 	uint8_t info[16];
 	char adt[64];
+	const char *boardsrc = "missing", *antsrc = "missing";
 	int n;
 
-	strlcpy(board, "apple,honshu", boardlen);
-	strlcpy(antenna, "X0", antennalen);
-	pd_bwfm_bootarg("bwfm_board", board, (int)boardlen);
-	pd_bwfm_bootarg("bwfm_antenna", antenna, (int)antennalen);
-	if (logged)
-		return;
-	logged = 1;
-	printf(PD_BWFM_NAME ": board type %s, antenna SKU %s (hard-coded or boot-arg)\n", board, antenna);
+	board[0] = antenna[0] = '\0';
+	/* m1n1: brcm,board-type is "apple," + lower-cased /arm-io/wlan module-instance */
 	n = pd_bwfm_adt_prop("/arm-io/wlan", "module-instance", adt, sizeof(adt) - 1);
 	if (n > 0) {
 		adt[MIN(n, (int)sizeof(adt) - 1)] = '\0';
-		printf(PD_BWFM_NAME ": device tree module-instance %s\n", adt);
-	} else
-		printf(PD_BWFM_NAME ": device tree /arm-io/wlan module-instance missing\n");
+		for (char *c = adt; *c != '\0'; c++) {
+			if (*c >= 'A' && *c <= 'Z')
+				*c += 'a' - 'A';
+		}
+		snprintf(board, boardlen, "apple,%s", adt);
+		boardsrc = "device tree";
+	}
+	/* m1n1: apple,antenna-sku is bytes 8..15 of /arm-io/wlan wifi-antenna-sku-info */
 	n = pd_bwfm_adt_prop("/arm-io/wlan", "wifi-antenna-sku-info", info, sizeof(info));
 	if (n >= (int)sizeof(info)) {
 		memcpy(adt, &info[8], 8);
 		adt[8] = '\0';
-		printf(PD_BWFM_NAME ": device tree antenna SKU %s%s\n", adt,
-		    strcmp(adt, antenna) == 0 ? "" : ", DIFFERS from the one in use");
-	} else
-		printf(PD_BWFM_NAME ": device tree /arm-io/wlan wifi-antenna-sku-info missing\n");
+		strlcpy(antenna, adt, antennalen);
+		antsrc = "device tree";
+	}
+	if (pd_bwfm_bootarg("bwfm_board", board, (int)boardlen))
+		boardsrc = "boot-arg";
+	if (pd_bwfm_bootarg("bwfm_antenna", antenna, (int)antennalen))
+		antsrc = "boot-arg";
+	if (logged)
+		return;
+	logged = 1;
+	printf(PD_BWFM_NAME ": board type %s (%s), antenna SKU %s (%s)\n",
+	    board[0] ? board : "(none)", boardsrc, antenna[0] ? antenna : "(none)", antsrc);
 }
 
 // the fdt properties bwfm reads. The calibration blob and the mac address are where m1n1

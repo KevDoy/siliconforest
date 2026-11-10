@@ -8,6 +8,8 @@ let
     cp ${./Info.plist} "$out/Info.plist"
     cp ${./PDApcieT8103.cpp} "$out/PDApcieT8103.cpp"
     cp ${./PDApcieT8103.h} "$out/PDApcieT8103.h"
+    cp ${./PDApcieT8103Link.cpp} "$out/PDApcieT8103Link.cpp"
+    cp ${./PDApcieT8103Link.h} "$out/PDApcieT8103Link.h"
     cp ${./NOTICE} "$out/NOTICE"
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
