@@ -3,9 +3,46 @@ drm/asahi: TEMPORARY diagnostics on the kernel-mapping path ("PDAgx: diag:")
 Boot ag02 failed with ENOMEM at the first HeapAllocator::add_block mapping. One line per
 step that can fail between the GEM object and the page-table commit, the DMA segments of the
 first four mappings, and an error instead of a silent short mapping when the sg table covers
-less than the mapping. Remove when the probe completes.
+less than the mapping; the first firmware messages, RTKit boot, and the first channel
+command the firmware consumes (or a line for each one it does not). Remove when the Mesa
+test passes.
 UPSTREAM: no.
 
+--- a/channel.rs
++++ b/channel.rs
+@@ -190,7 +190,10 @@
+         let timeout_ms = timeout_ms.max(1);
+         let timeout_fast = Delta::from_millis(timeout_ms.min(MAX_FAST_POLL));
+         let timeout_slow = Delta::from_millis(timeout_ms);
+-        self.ring.state.with(|raw, _inner| {
++        // PDAgx diag (temporary): the first time the firmware consumes a command, and every
++        // time it does not
++        static FIRST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
++        let result = self.ring.state.with(|raw, _inner| {
+             while start.elapsed() < timeout_fast {
+                 if T::rptr(raw) == wptr {
+                     return Ok(());
+@@ -204,8 +207,19 @@
+                 fsleep(Delta::from_millis(5));
+                 mem::sync();
+             }
++            pr_err!(
++                "PDAgx: diag: firmware did not consume a channel command: read pointer {} wanted {} after {} ms\n",
++                T::rptr(raw), wptr, timeout_ms
++            );
+             Err(ETIMEDOUT)
+-        })
++        });
++        if result.is_ok() && FIRST.swap(false, core::sync::atomic::Ordering::Relaxed) {
++            pr_info!(
++                "PDAgx: diag: firmware consumed its first channel command after {} us\n",
++                start.elapsed().as_micros_ceil()
++            );
++        }
++        result
+     }
+ }
+ 
 --- a/gem.rs
 +++ b/gem.rs
 @@ -124,7 +124,7 @@
@@ -17,6 +54,31 @@ UPSTREAM: no.
      set_mapping_held(gem, true);
      Ok(sgt)
  }
+--- a/gpu.rs
++++ b/gpu.rs
+@@ -472,6 +472,14 @@
+     fn recv_message(data: <Self::Data as ForeignOwnable>::Borrowed<'_>, ep: u8, msg: u64) {
+         let dev = &data.dev;
+         //dev_info!(dev.as_ref(), "RtKit message: {:#x}:{:#x}\n", ep, msg);
++        // PDAgx diag (temporary): the first messages the firmware sends after boot
++        {
++            static SEEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
++            let n = SEEN.fetch_add(1, Ordering::Relaxed);
++            if n < 4 {
++                pr_info!("PDAgx: diag: firmware message {} from endpoint {:#x}: {:#x}\n", n + 1, ep, msg);
++            }
++        }
+ 
+         if ep != EP_FIRMWARE || msg != MSG_RX_DOORBELL {
+             dev_err!(dev.as_ref(), "Unknown message: {:#x}:{:#x}\n", ep, msg);
+@@ -1394,6 +1402,7 @@
+         rtk.as_mut()
+             .send_message(EP_DOORBELL, MSG_TX_DOORBELL | DOORBELL_DEVCTRL)?;
+         core::mem::drop(guard);
++        pr_info!("PDAgx: diag: RTKit booted, endpoints started, init message sent (initdata at {:#x})\n", initdata);
+ 
+         self.kick_firmware()?;
+         Ok(())
 --- a/mmu.rs
 +++ b/mmu.rs
 @@ -927,10 +927,10 @@

@@ -33,6 +33,12 @@ void kprintf(const char *, ...);
 extern int (*pd_platform_pre_probe)(struct platform_device *pdev);
 extern int (*pd_driver_vsnprintf)(char *, size_t, const char *, va_list);
 int pd_drm_vsnprintf(char *, size_t, const char *, va_list);
+/* fbsdkpi/drm/src/pd_drm_cdev.c and drm_gem_shmem_helper.c (m1-drm72) */
+struct linux_file;
+extern int (*pd_drm_mmap_pages)(struct linux_file *filp, off_t offset, size_t size, int prot,
+    uint32_t *pages, unsigned int *wimg, void (**release)(void *), void **release_arg);
+int drm_gem_shmem_pd_mmap_pages(struct linux_file *filp, off_t offset, size_t size, int prot,
+    uint32_t *pages, unsigned int *wimg, void (**release)(void *), void **release_arg);
 /* PDAgxHost.cpp: the PDAgx IOService attached to the nub */
 void *pd_agx_host_of_nub(void *nub);
 /* lkpi/helpers/pd_device.c, in the Rust object */
@@ -247,6 +253,13 @@ pd_agx_linux_init(void)
 	/* LinuxKPI built with PD_LKPI_DRM prints through this (Linux %p extensions) */
 	pd_driver_vsnprintf = pd_drm_vsnprintf;
 	pd_platform_pre_probe = pd_agx_pre_probe;
+	/*
+	 * User mappings of GEM objects: PDDRMDri asks the DRM kext once, at mmap time, for the
+	 * pages behind an offset. The driver's objects are shmem objects; m1-drm72's resolver
+	 * for them pins the pages for the life of the mapping (boot ag04: without it every
+	 * mmap was refused with ENODEV).
+	 */
+	pd_drm_mmap_pages = drm_gem_shmem_pd_mmap_pages;
 }
 
 /*
