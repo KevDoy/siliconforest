@@ -34,3 +34,10 @@ patches (`m1-rust-kext/lkpi/patches-layer`, 12 patches) -> DRM core at Linux 7.2
 RTKit/mailbox port (`m1-gpu-rtkit`) -> Rust-for-Linux kernel crate -> Asahi driver, 3 patch files
 (`m1-rust-kext/agx`) -> PureDarwin's `PDDRMDri` render node -> libdrm -> Mesa asahi
 (`m1-mesa-asahi`, 5 patches, 78 lines).
+
+## Repeat test (boot `st01`)
+
+`AGX_TEMPLATE=.../m1-mesa-asahi/supervisor/darwin-agx-stress-test.in tools/agx_boot.sh st01`:
+40 sequential runs of the GPU test, each a new process with exact-hash check: 40 pass, 0 fail,
+22 seconds in total. Then four processes at once: all four exit 0. No firmware timeout, crash
+or panic in the kernel log. Process exit with live GPU state therefore works at this scale.
