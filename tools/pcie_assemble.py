@@ -23,7 +23,7 @@ if JOIN:
  env=dict(l.strip().split('=',1) for l in (ROOT/'private/wifi.env').read_text().splitlines() if '=' in l)
  assert "'" not in env['WIFI_SSID']+env['WIFI_PSK']
  filled=OUT/'darwin-wifi-join-test.private'
- filled.write_text((ROOT/'integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-join-test.in').read_text().replace('@SSID@',env['WIFI_SSID']).replace('@PSK@',env['WIFI_PSK']))
+ filled.write_text(Path(os.environ.get('PCIE_GUEST_TEMPLATE') or ROOT/'integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-join-test.in').read_text().replace('@SSID@',env['WIFI_SSID']).replace('@PSK@',env['WIFI_PSK']).replace('@TPUT_HOST@',os.environ.get('PCIE_TPUT_HOST','')))
  filled.chmod(0o700)
  SUPERVISOR=filled
 mapping=[]

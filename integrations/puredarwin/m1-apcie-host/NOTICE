@@ -17,7 +17,11 @@ Contributors).
 The controller, PHY and port bring-up in PDApcieT8103Link.cpp (PMGR power
 enable, device-tree tunables, PHY fuses, PHY clock/reset, port and root-port
 setup) and the ADT register indices are ported from m1n1 src/pcie.c, src/pmgr.c
-and src/tunables.c, which are under the MIT licence:
+and src/tunables.c. The SMC client in PDAppleSMC.cpp (ASC mailbox, RTKit
+management handshake, SMC endpoint and key commands) is ported from m1n1
+src/asc.c, src/rtkit.c, src/smc.c and proxyclient/m1n1/fw/smc.py,
+fw/asc/mgmt.py, fw/asc/kdebug.py and hw/asc.py. These m1n1 files are under the
+MIT licence:
 
   Copyright The Asahi Linux Contributors
 

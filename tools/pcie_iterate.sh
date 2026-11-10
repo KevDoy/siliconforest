@@ -8,7 +8,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 SRC=integrations/puredarwin/m1-apcie-host; RUN=runs/m1-desktop-010
 NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007; M5=chriskearney@10.1.1.93
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
-if [ "${PCIE_FROM_PATCH:-0}" = 1 ]; then
+if [ "${PCIE_SKIP_BUILD:-0}" = 1 ]; then
+  echo "reusing the existing kernel collection and tools"
+elif [ "${PCIE_FROM_PATCH:-0}" = 1 ]; then
   # Build everything from the PureDarwin tree patches instead of the lab directories.
   tools/pcie_export_patch.sh
   P=integrations/puredarwin/puredarwin-patches
@@ -31,7 +33,7 @@ fi
 python3 -B tools/pcie_assemble.py $NAME | tail -2
 LAB=$RUN/pcie-m2-host-001/lab
 cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/puredarwin/m1-bringup/pcie_linkup.py
-echo "${PCIE_LINK:-launcher}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
+echo "${PCIE_LINK:-none}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
 LSHA=$(sha256sum $LAB/integrations/puredarwin/m1-bringup/host_progress.py | cut -d' ' -f1)
 tar -C $RUN/pcie-m2-host-001 -cf - lab | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'rm -rf $W/lab-pcie-m2-001 && mkdir -m 700 $W/lab-pcie-m2-001 && tar -xf - -C $W/lab-pcie-m2-001 --strip-components 1 && chown -R root:staff $W/lab-pcie-m2-001'"
 tar -C artifacts/m1-desktop-010 -cf - $NAME/manifest.json $NAME/build-record.json $NAME/source.patch $NAME/kernel.macho $NAME/ramdisk.img $NAME/ramdisk.record.json | ssh -o BatchMode=yes $M5 "sudo -n sh -c 'mkdir -p -m 700 $W/pcie-m2 && rm -rf $W/pcie-m2/$NAME && tar -xf - -C $W/pcie-m2 && chown -R root:staff $W/pcie-m2'"
@@ -40,4 +42,4 @@ ssh -o BatchMode=yes -o ServerAliveInterval=15 $M5 "sudo -n sh -c 'cd $W/lab-pci
 R=$RUN/pcie-enum-attempt-$N; mkdir -p $R
 ssh -o BatchMode=yes $M5 "sudo -n sh -c 'cd $W/pcie-m2-cycles && d=\$(ls -td cycle-*/001 | head -1) && tar -cf - -C \$d guest/console.bin guest/worker.log result.json'" | tar -xf - -C $R
 grep -a 'PCIE_LINKUP' $R/guest/worker.log || true
-strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[234]|pd-dhcp|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
+strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-6]|pd-dhcp|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true

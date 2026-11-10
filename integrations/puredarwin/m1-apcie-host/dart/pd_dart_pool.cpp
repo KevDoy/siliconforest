@@ -15,6 +15,7 @@
  * Nothing is ever unmapped while the system runs.
  */
 #include "pd_dart_pool.h"
+#include "pd_dart_map.h"
 
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -102,7 +103,7 @@ static IOBufferMemoryDescriptor *tablePage(uint64_t *pa)
 uint32_t pd_dart_pool_check(const char *why)
 {
     if (!gRegs)
-        return 0;
+        return pd_dart_check(why);  /* the pool is not in use: the per-buffer mapper may be */
     uint32_t err = rd(DART_T8020_ERROR);
     if (err & DART_T8020_ERROR_FLAG) {
         DLOG("FAULT (%s): error=0x%08x stream=%u code=0x%03x addr=0x%08x%08x", why ? why : "",

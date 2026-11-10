@@ -15,7 +15,8 @@
  * Link bring-up is in PDApcieT8103Link.cpp: when port 0 is not already up, the
  * bridge powers and initialises the controller, PHY and port itself (ported from
  * m1n1) and runs the Linux port link sequence. A link the launcher brought up is
- * used as it is. The SMC radio power write stays with the launcher.
+ * used as it is. The link sequence also powers the radio through the SMC (key
+ * gP0d, PDAppleSMC.cpp); with boot argument pdapciesmc=0 that stays with the launcher.
  */
 #include "PDApcieT8103.h"
 #include "PDApcieT8103Link.h"

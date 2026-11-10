@@ -3,7 +3,7 @@
 # which matches the same PCI function (0x442514e4) as PDBwfm and has to go before a boot.
 let
   base = import ../m1-apcie-host/build-kc.nix;
-  wifi = import ./build-kexts.nix;
+  wifi = import ./build-kexts.nix { };
   needle = "  -o kernel";
 in base.overrideAttrs (old:
   # refuse a base recipe whose link line moved, rather than silently building it unchanged

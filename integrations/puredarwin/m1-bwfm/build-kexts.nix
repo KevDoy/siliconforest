@@ -1,6 +1,12 @@
 # Builds IO80211Family.kext (already in the pinned PureDarwin tree, but not in the M1 kernel
 # collection) and PDBwfm.kext (injected from this directory) for arm64.
+#
+# DMA switches (see CMakeLists.txt), default is per-buffer DART mapping:
+#   nix-build build-kexts.nix --arg dmaBounce true                       # PD_BWFM_DMA_BOUNCE
+#   nix-build build-kexts.nix --arg defines '[ "PD_BWFM_DMA_RX_SLOTS" ]' # or "PD_DART_STRICT"
+{ dmaBounce ? false, defines ? [] }:
 let
+  allDefines = (if dmaBounce then [ "PD_BWFM_DMA_BOUNCE" ] else []) ++ defines;
   pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   copied = pkgs.runCommand "puredarwin-bwfm-source" {} ''
@@ -14,11 +20,19 @@ let
     cp ${./pd_bwfm_compat.h} "$out/pd_bwfm_compat.h"
     cp ${../m1-apcie-host/dart/pd_dart_pool.h} "$out/pd_dart_pool.h"
     cp ${../m1-apcie-host/dart/pd_dart_pool.cpp} "$out/pd_dart_pool.cpp"
+    cp ${../m1-apcie-host/dart/pd_dart_map.h} "$out/pd_dart_map.h"
+    cp ${../m1-apcie-host/dart/pd_dart_map.cpp} "$out/pd_dart_map.cpp"
     cp ${./bwfm.c} "$out/bwfm.c"
     cp ${./bwfmreg.h} "$out/bwfmreg.h"
     cp ${./bwfmvar.h} "$out/bwfmvar.h"
     cp ${./if_bwfm_pci.c} "$out/if_bwfm_pci.c"
     cp ${./if_bwfm_pci.h} "$out/if_bwfm_pci.h"
+    chmod u+w "$out/CMakeLists.txt"
+    for d in ${pkgs.lib.concatStringsSep " " allDefines}; do
+      printf 'set(%s ON CACHE BOOL "" FORCE)\n' "$d" > "$out/defs.cmake"
+      cat "$out/CMakeLists.txt" >> "$out/defs.cmake"
+      mv "$out/defs.cmake" "$out/CMakeLists.txt"
+    done
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
   pname = "puredarwin-bwfm";

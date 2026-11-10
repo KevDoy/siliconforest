@@ -47,9 +47,15 @@
  *    the deviations of m1-apcie-bridge/proxy_linkup.py: REFCLK/APPCLK clock gating stays
  *    disabled (CGDIS set) and CLKREQ# GPIO 150 is muxed to function 1.
  *
+ * 3. The radio power enable (Linux "pwren", SMC GPIO 13) is the SMC key write gP0d of
+ *    m1n1 proxyclient/experiments/pcie_enable_devices.py, done by PDAppleSMC.cpp at the
+ *    place Linux apple_pcie_setup_link() switches pwren on. Boot argument pdapciesmc=0
+ *    skips all SMC access (the launcher must then have powered the radio).
+ *
  * Every on-SoC register here is mapped non-posted (kIOMapInhibitCache).
  */
 #include "PDApcieT8103Link.h"
+#include "PDAppleSMC.h"
 
 #include <IOKit/IODeviceMemory.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -697,8 +703,9 @@ struct Link {
     Pmgr pmgr;
     UInt32 perstPin, clkreqPin;
     UInt32 linksts;
+    UInt32 smcOptions; /* pdapciesmc boot argument, kPDAppleSMC* bits; 0 = no SMC access */
 
-    Link() : apcie(NULL), bridge(NULL), perstPin(0), clkreqPin(0), linksts(0) {}
+    Link() : apcie(NULL), bridge(NULL), perstPin(0), clkreqPin(0), linksts(0), smcOptions(kPDAppleSMCEnable) {}
     ~Link() { OSSafeReleaseNULL(bridge); }
 
     IOReturn setup(IORegistryEntry *node, OSArray *regs);
@@ -996,8 +1003,9 @@ void Link::gpioPerst(bool asserted)
 
 /*
  * proxy_linkup.py Port0.setup_link(), setup_port_tail() and train(): Linux
- * apple_pcie_setup_link() without the pwren GPIO (the launcher powers the radio through
- * the SMC), the rest of apple_pcie_setup_port(), and the LTSSM start.
+ * apple_pcie_setup_link() with the pwren GPIO replaced by the SMC key write gP0d
+ * (PDAppleSMCRadioPowerOn; with pdapciesmc=0 the launcher must have powered the radio),
+ * the rest of apple_pcie_setup_port(), and the LTSSM start.
  */
 IOReturn Link::linkSequence()
 {
@@ -1008,6 +1016,26 @@ IOReturn Link::linkSequence()
 
     /* Assert PERST# before setting up the clock */
     gpioPerst(true);
+
+    /*
+     * Linux: gpiod_set_value_cansleep(pwren, 1). On J293 pwren is SMC GPIO 13, key gP0d.
+     * A failure is not fatal here: the launcher may have powered the radio already, and
+     * the link result below tells. The 100 ms Tpvperl wait is done by the SMC code after
+     * its write and again below after the reference clock setup.
+     */
+    if (smcOptions & kPDAppleSMCEnable) {
+        bool wrote = false;
+        LOG("link: PERST# asserted; powering the radio through the SMC (pdapciesmc=%u)", smcOptions);
+        IOReturn smcRet = PDAppleSMCRadioPowerOn(smcOptions, &wrote);
+        if (smcRet == kIOReturnSuccess)
+            LOG("link: radio power is on (%s)", wrote ? "gP0d written" : "was already on, nothing written");
+        else
+            LOG("link: SMC radio power FAILED (0x%08x); going on, the link only trains if the radio is "
+                "powered already",
+                smcRet);
+    } else {
+        LOG("link: pdapciesmc=0, no SMC access; the launcher must have powered the radio");
+    }
 
     /* apple_pcie_setup_refclk() */
     lane.set32(PHY_LANE_CTL, PHY_LANE_CTL_CFGACC);
@@ -1106,6 +1134,11 @@ IOReturn PDApcieT8103LinkBringUp(IORegistryEntry *apcie, OSArray *regs, UInt32 *
     if (linkstsOut)
         *linkstsOut = 0;
     PE_parse_boot_argn("pdapcielink", &mode, sizeof(mode));
+    {
+        UInt32 smc = kPDAppleSMCEnable;
+        PE_parse_boot_argn("pdapciesmc", &smc, sizeof(smc));
+        link->smcOptions = smc;
+    }
 
     ret = link->setup(apcie, regs);
     if (ret == kIOReturnSuccess) {

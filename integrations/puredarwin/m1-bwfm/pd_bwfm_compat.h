@@ -125,10 +125,16 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, bus_s
 // the IOMemoryMap behind a BAR stays with PDBwfm until it stops
 #define bus_space_unmap(t, h, s)	((void)0)
 
-// dma: every device visible address is an iova inside the DART bounce pool (pd_dart_pool.h).
-// A map owns a pool slot of its maximum size. Transmit data is copied into the slot when the
-// mbuf is loaded, a map created with BUS_DMA_READ is a receive buffer whose slot is copied
-// into the loaded mbuf at BUS_DMASYNC_POSTREAD.
+// dma, by default (pd_dart_map.h): every device visible address is an iova the DART mapper
+// handed out for exactly that buffer. bus_dmamem memory is wired kernel memory mapped for its
+// lifetime, an mbuf is mapped in place (its own data pages, no copy) from bus_dmamap_load_mbuf
+// to bus_dmamap_unload. A map only gets a slot, a mapped bounce buffer of its maximum size,
+// the first time an mbuf cannot be mapped in place; see pd_bwfm_glue.c.
+//
+// dma with PD_BWFM_DMA_BOUNCE defined (pd_dart_pool.h): every device visible address is an
+// iova inside the DART bounce pool. A map owns a pool slot of its maximum size. Transmit data
+// is copied into the slot when the mbuf is loaded, a map created with BUS_DMA_READ is a
+// receive buffer whose slot is copied into the loaded mbuf at BUS_DMASYNC_POSTREAD.
 
 typedef struct pd_bwfm_dma *bus_dma_tag_t;
 
@@ -146,6 +152,10 @@ struct bus_dmamap {
 	void		*_dm_slot;
 	uint64_t	_dm_slot_iova;
 	struct mbuf	*_dm_mbuf;
+#ifndef PD_BWFM_DMA_BOUNCE
+	int		_dm_kind;	/* what is loaded, PD_BWFM_DMA_* in pd_bwfm_glue.c */
+	uint64_t	_dm_dva;	/* an mbuf mapped in place: its device address */
+#endif
 	bus_dma_segment_t dm_segs[1];
 };
 typedef struct bus_dmamap *bus_dmamap_t;
@@ -175,7 +185,8 @@ int	bus_dmamem_map(bus_dma_tag_t, bus_dma_segment_t *, int, size_t, caddr_t *, i
 void	bus_dmamem_unmap(bus_dma_tag_t, caddr_t, size_t);
 
 // the packet id tables are sized to what the 16 MiB pool can back: every id owns a slot,
-// 2 KiB for transmit and 8 KiB for receive. OpenBSD uses 2048 and 1024.
+// 2 KiB for transmit and 8 KiB for receive. OpenBSD uses 2048 and 1024. The per-buffer
+// mapper has no such limit; the sizes stay the same so the two can be compared.
 #define BWFM_NUM_TX_PKTIDS	512
 #define BWFM_NUM_RX_PKTIDS			640
 

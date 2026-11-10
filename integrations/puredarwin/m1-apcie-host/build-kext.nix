@@ -10,6 +10,8 @@ let
     cp ${./PDApcieT8103.h} "$out/PDApcieT8103.h"
     cp ${./PDApcieT8103Link.cpp} "$out/PDApcieT8103Link.cpp"
     cp ${./PDApcieT8103Link.h} "$out/PDApcieT8103Link.h"
+    cp ${./PDAppleSMC.cpp} "$out/PDAppleSMC.cpp"
+    cp ${./PDAppleSMC.h} "$out/PDAppleSMC.h"
     cp ${./NOTICE} "$out/NOTICE"
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {

@@ -1,9 +1,16 @@
 #!/bin/sh
-# pd-net-up [interface] - bring an already-joined interface onto the network in the RAM root:
-# DHCP lease (address, default route, /etc/resolv.conf via netsetup), then the resolver daemon
-# that libc name lookups talk to. There is no configd or launchd job for either here.
+# pd-net-up [interface] - bring the interface onto the network once in a root without configd:
+# radio on, join a remembered network if it is not joined, DHCP lease (address, default route,
+# /etc/resolv.conf via netsetup), then the resolver daemon that libc name lookups talk to.
+# This is "pd-netd --once"; run pd-netd without --once to keep the network up.
 PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 ifname=${1:-en0}
+if [ -x /usr/sbin/pd-netd ]; then
+    pd-netd --once "$ifname" || { echo "pd-net-up: network did not come up"; exit 1; }
+    echo "pd-net-up: resolver ready"
+    exit 0
+fi
+# a root without pd-netd: the interface must be joined already
 pd-dhcp "$ifname" || exit 1
 if [ ! -S /var/run/mDNSResponder ]; then
     mkdir -p /var/run /var/log

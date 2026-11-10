@@ -24,6 +24,11 @@
  * controller/PHY/port bring-up runs first. Boot argument pdapcielink=2 forces the whole
  * bring-up whenever the link is down; pdapcielink=0 is handled by the caller (no bring-up).
  *
+ * The port link sequence powers the radio itself through the SMC (key gP0d, see
+ * PDAppleSMC.h) after asserting PERST#. Boot argument pdapciesmc: 0 = no SMC access at
+ * all (the launcher must have powered the radio); 1 = default; +2 = write gP0d even when
+ * it already reads as enabled; +4 = also send the kdebug endpoint start message.
+ *
  * Returns kIOReturnSuccess only with PORT_LINKSTS_UP set. Every failure is logged.
  */
 IOReturn PDApcieT8103LinkBringUp(IORegistryEntry *apcie, OSArray *regs, UInt32 *linksts);

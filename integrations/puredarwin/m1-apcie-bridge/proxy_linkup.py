@@ -424,15 +424,21 @@ def bring_up(p, u, out, no_smc=False):
 
 def launcher_step(p, u, out):
     """Called by the boot launcher after hv.init(). The mode file next to this module says who
-    brings the link up: "kext" (only power the radio through SMC; the kext does the rest) or
-    "launcher" (the full sequence from here, the original arrangement)."""
+    brings the link up: "none" (the default: nothing here; the kext powers the radio and brings
+    PCIe up), "kext" (only power the radio through SMC from here) or "launcher" (the full
+    sequence from here, the original arrangement, kept for debugging)."""
     mode_file = Path(__file__).with_name("pcie_linkup_mode.txt")
-    mode = mode_file.read_text().strip() if mode_file.exists() else "launcher"
-    if mode != "kext":
+    mode = mode_file.read_text().strip() if mode_file.exists() else "none"
+    if mode == "launcher":
         result = bring_up(p, u, out)
         result["mode"] = "launcher"
         return result
-    result = {"mode": "kext", "pcie_init": None, "m0_port_ready": None, "link_up": None, "ok": None}
+    result = {"mode": mode, "pcie_init": None, "m0_port_ready": None, "link_up": None, "ok": None}
+    if mode == "none":
+        result["radio_power"] = None
+        log("launcher leaves PCIe and radio power entirely to the kext")
+        (Path(out) / "pcie-result.json").write_text(json.dumps(dict(result, log=list(LOG)), indent=1))
+        return result
     try:
         smc_radio_enable(u)
         result["radio_power"] = True

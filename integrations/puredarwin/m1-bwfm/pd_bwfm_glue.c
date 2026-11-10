@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // what PDBwfm.cpp needs from bwfm(4) without seeing its softc, the device tree answers bwfm
-// asks for, and OpenBSD's bus_dma on the DART bounce pool. Derived from PDQwx's pd_qwx_glue.c.
+// asks for, and OpenBSD's bus_dma on the DART: per-buffer mapping (pd_dart_map.h), or the
+// bounce pool (pd_dart_pool.h) with PD_BWFM_DMA_BOUNCE. Derived from PDQwx's pd_qwx_glue.c.
 
 #include "pd_bwfm_compat.h"
 #include <net80211/ieee80211_var.h>
@@ -8,6 +9,18 @@
 #include "bwfmvar.h"
 #include "pd_bwfm_glue.h"
 #include "pd_dart_pool.h"
+#include "pd_dart_map.h"
+
+// PD_BWFM_DMA_BOUNCE brings back the fixed bounce pool, the default maps every buffer
+#ifdef PD_BWFM_DMA_BOUNCE
+#define pd_bwfm_dma_init()	pd_dart_pool_init()
+#define pd_bwfm_dma_check(why)	pd_dart_pool_check(why)
+#define PD_BWFM_DMA_WHAT	"DMA pool"
+#else
+#define pd_bwfm_dma_init()	pd_dart_init()
+#define pd_bwfm_dma_check(why)	pd_dart_check(why)
+#define PD_BWFM_DMA_WHAT	"DART mapper"
+#endif
 
 extern const struct cfattach bwfm_pci_ca;
 
@@ -97,8 +110,8 @@ pd_bwfm_attach_hook(struct device *dev)
 
 	if (fn == NULL)
 		return ENXIO;
-	if (pd_dart_pool_init() != 0) {
-		printf("%s: the DMA pool did not come up\n", dev->dv_xname);
+	if (pd_bwfm_dma_init() != 0) {
+		printf("%s: the " PD_BWFM_DMA_WHAT " did not come up\n", dev->dv_xname);
 		return ENOMEM;
 	}
 	pd80211_lock();
@@ -106,7 +119,7 @@ pd_bwfm_attach_hook(struct device *dev)
 	if (!sc->sc_initialized) {
 		extern void bwfm_pci_dump(struct bwfm_softc *);
 		bwfm_pci_dump(sc);
-		pd_dart_pool_check("bring-up failed");
+		pd_bwfm_dma_check("bring-up failed");
 	}
 	pd80211_unlock();
 	pd_bwfm_dma_report(dev->dv_xname);
@@ -308,6 +321,8 @@ OF_getprop(int node, const char *name, void *buf, int len)
 	return pd_bwfm_prop(node, name, buf, len, 0);
 }
 
+#ifdef PD_BWFM_DMA_BOUNCE
+
 // bus_dma on the DART bounce pool. Everything runs under the stack lock.
 
 struct pd_bwfm_dmamem {
@@ -507,6 +522,299 @@ bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
 }
 
+#else /* !PD_BWFM_DMA_BOUNCE */
+
+// bus_dma on the DART mapper (pd_dart_map.h). Everything runs under the stack lock.
+//
+// bus_dmamem memory (rings, index and scratch buffers) is wired kernel memory that stays
+// mapped until bus_dmamem_free. An mbuf is mapped in place: the 16 KiB pages its data lies
+// in get consecutive iovas, adjacent in memory or not, from bus_dmamap_load_mbuf until
+// bus_dmamap_unload, and the device address is the iova plus the offset into the first page.
+// That holds for transmit, command and receive buffers alike, nothing is copied.
+//
+// The DART wants an invalidate before a new mapping is used. It is not done per mapping but
+// in bus_dmamap_sync(PRE*) of a bus_dmamem map: bwfm_pci_ring_write_commit syncs the ring
+// right before it moves the write pointer, and a ring entry is the only way the chip learns
+// a buffer address. That same invalidate retires everything unloaded since the last one.
+//
+// A bounce copy through the map's slot, a mapped buffer of the map's maximum size that is
+// allocated on first use and kept, happens only when an mbuf cannot be mapped in place: it
+// is a chain, the physical address of one of its pages cannot be resolved or is not one the
+// DART takes, or the mapper is out of iovas. With PD_BWFM_DMA_RX_SLOTS defined every receive
+// map (BUS_DMA_READ) is bounced on purpose: the slots then stay mapped for good and the
+// receive path costs a copy per packet instead of a map, an invalidate and an unmap.
+
+#define PD_BWFM_DMA_NONE	0
+#define PD_BWFM_DMA_MEM		1	/* bus_dmamem memory, mapped by its owner */
+#define PD_BWFM_DMA_MBUF	2	/* an mbuf mapped in place, _dm_dva and dm_mapsize */
+#define PD_BWFM_DMA_SLOT	3	/* an mbuf bounced through the slot */
+
+#define PD_BWFM_DMA_MAXPAGES	4	/* 64 KiB, the largest buffer here is 8 KiB */
+
+struct pd_bwfm_dmamem {
+	struct pd_bwfm_dmamem *next;
+	caddr_t		kva;
+	uint64_t	iova;
+	size_t		size;
+};
+static struct pd_bwfm_dmamem *pd_bwfm_dmamems;
+static size_t pd_bwfm_dma_bytes, pd_bwfm_dma_allocs, pd_bwfm_dma_failures, pd_bwfm_dma_slots;
+static uint64_t pd_bwfm_dma_inplace, pd_bwfm_dma_bounced;
+
+static void
+pd_bwfm_dma_report(const char *name)
+{
+	printf("%s: DMA map: %zu bytes in %zu allocations, %llu mbufs mapped in place, "
+	    "%llu bounced, %zu bounce slots, %zu failed requests\n", name,
+	    pd_bwfm_dma_bytes, pd_bwfm_dma_allocs, (unsigned long long)pd_bwfm_dma_inplace,
+	    (unsigned long long)pd_bwfm_dma_bounced, pd_bwfm_dma_slots, pd_bwfm_dma_failures);
+	pd_dart_report(name);
+}
+
+// the physical page behind a page of mbuf storage. The pmap answers for every wired kernel
+// address, cluster or not; the mbuf KPI is asked second because with a system mapper it
+// would answer with that mapper's address
+static uint64_t
+pd_bwfm_dma_page_pa(uintptr_t va)
+{
+	uint64_t pa = pd_dart_kvtophys((const void *)va);
+
+	if (pa == 0)
+		pa = (uint64_t)mbuf_data_to_physical((void *)va);
+	return pa;
+}
+
+static int
+pd_bwfm_dma_map_mbuf(bus_dmamap_t map, struct mbuf *m, size_t len)
+{
+	uintptr_t va = (uintptr_t)mbuf_data(m);
+	uintptr_t first = va & ~(uintptr_t)PD_DART_MAP_PAGE_MASK;
+	size_t n = (va - first + len + PD_DART_MAP_PAGE_MASK) >> PD_DART_MAP_PAGE_SHIFT;
+	uint64_t pa[PD_BWFM_DMA_MAXPAGES], iova = 0;
+
+	if (va == 0 || n > PD_BWFM_DMA_MAXPAGES)
+		return EFBIG;
+	for (size_t i = 0; i < n; i++) {
+		pa[i] = pd_bwfm_dma_page_pa(first + i * PD_DART_MAP_PAGE_SIZE);
+		if (pa[i] == 0 || (pa[i] & PD_DART_MAP_PAGE_MASK) != 0 || (pa[i] >> 36) != 0)
+			return EFAULT;
+	}
+	if (pd_dart_map_pages(pa, (unsigned)n, &iova) != 0)
+		return ENOMEM;
+	map->_dm_kind = PD_BWFM_DMA_MBUF;
+	map->_dm_dva = iova + (va - first);
+	map->_dm_mbuf = NULL;
+	map->dm_segs[0].ds_addr = map->_dm_dva;
+	map->dm_segs[0].ds_len = len;
+	map->dm_nsegs = 1;
+	map->dm_mapsize = len;
+	pd_bwfm_dma_inplace++;
+	return 0;
+}
+
+static int
+pd_bwfm_dma_bounce_mbuf(bus_dmamap_t map, struct mbuf *m, size_t len)
+{
+	if (map->_dm_slot == NULL) {
+		map->_dm_slot = pd_dart_alloc(map->_dm_size, &map->_dm_slot_iova);
+		if (map->_dm_slot == NULL) {
+			if (pd_bwfm_dma_failures++ % 256 == 0)
+				printf(PD_BWFM_NAME ": no bounce slot of %llu bytes\n",
+				    (unsigned long long)map->_dm_size);
+			return ENOMEM;
+		}
+		pd_bwfm_dma_slots++;
+	}
+	if (map->_dm_flags & BUS_DMA_READ) {
+		// a receive buffer: the chip writes the slot, the mbuf is filled at POSTREAD
+		map->_dm_mbuf = m;
+	} else {
+		m_copydata(m, 0, (int)len, map->_dm_slot);
+		map->_dm_mbuf = NULL;
+	}
+	map->_dm_kind = PD_BWFM_DMA_SLOT;
+	map->dm_segs[0].ds_addr = map->_dm_slot_iova;
+	map->dm_segs[0].ds_len = len;
+	map->dm_nsegs = 1;
+	map->dm_mapsize = len;
+	pd_bwfm_dma_bounced++;
+	return 0;
+}
+
+int
+bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegs, bus_size_t maxsegsz,
+    bus_size_t boundary, int flags, bus_dmamap_t *mapp)
+{
+	bus_dmamap_t map = malloc(sizeof(*map), M_DEVBUF, M_NOWAIT | M_ZERO);
+
+	*mapp = NULL;
+	if (map == NULL)
+		return ENOMEM;
+	map->_dm_size = size;
+	map->_dm_flags = flags;
+	*mapp = map;
+	return 0;
+}
+
+void
+bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
+{
+	if (map == NULL)
+		return;
+	// the iova is not handed out again before the next invalidate, see pd_dart_map.h
+	if (map->_dm_kind == PD_BWFM_DMA_MBUF)
+		pd_dart_unmap(map->_dm_dva, map->dm_mapsize);
+	map->_dm_kind = PD_BWFM_DMA_NONE;
+	map->_dm_dva = 0;
+	map->_dm_mbuf = NULL;
+	map->dm_nsegs = 0;
+	map->dm_mapsize = 0;
+}
+
+void
+bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
+{
+	if (map == NULL)
+		return;
+	// bwfm_pci_cleanup destroys the maps of packets that are still posted
+	bus_dmamap_unload(t, map);
+	if (map->_dm_slot != NULL) {
+		pd_dart_free(map->_dm_slot);
+		pd_bwfm_dma_slots--;
+	}
+	free(map, M_DEVBUF, sizeof(*map));
+}
+
+// only memory from bus_dmamem_alloc is loaded this way: rings, index and scratch buffers.
+// It is mapped already, the map points at it
+int
+bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf, bus_size_t len, void *p, int flags)
+{
+	struct pd_bwfm_dmamem *mem;
+
+	for (mem = pd_bwfm_dmamems; mem != NULL; mem = mem->next) {
+		if ((caddr_t)buf >= mem->kva && (caddr_t)buf + len <= mem->kva + mem->size)
+			break;
+	}
+	if (mem == NULL) {
+		printf(PD_BWFM_NAME ": bus_dmamap_load of memory that is not bus_dmamem refused\n");
+		return EINVAL;
+	}
+	bus_dmamap_unload(t, map);
+	map->_dm_kind = PD_BWFM_DMA_MEM;
+	map->dm_segs[0].ds_addr = mem->iova + (uint64_t)((caddr_t)buf - mem->kva);
+	map->dm_segs[0].ds_len = len;
+	map->dm_nsegs = 1;
+	map->dm_mapsize = len;
+	return 0;
+}
+
+int
+bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m, int flags)
+{
+	size_t len = (size_t)M_PKTLEN(m);
+	int inplace = 1;
+
+	if (map == NULL)
+		return EINVAL;
+	if (len == 0 || len > map->_dm_size)
+		return EFBIG;
+	bus_dmamap_unload(t, map);
+	// the driver takes one segment. Transmit chains are made one mbuf in bwfm_start and the
+	// buffers the driver allocates are one mbuf, so a chain here is the exception: it is
+	// bounced, which linearises it the way the pool always did
+	if (M_NEXT(m) != NULL || mbuf_len(m) < len)
+		inplace = 0;
+#ifdef PD_BWFM_DMA_RX_SLOTS
+	if (map->_dm_flags & BUS_DMA_READ)
+		inplace = 0;
+#endif
+	if (inplace && pd_bwfm_dma_map_mbuf(map, m, len) == 0)
+		return 0;
+	return pd_bwfm_dma_bounce_mbuf(map, m, len);
+}
+
+void
+bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t off, bus_size_t len, int ops)
+{
+	if (map == NULL)
+		return;
+	__sync_synchronize();
+	// a ring or index buffer is about to be shown to the chip: whatever was mapped for it
+	// since the last invalidate has to be live now. Nothing to do when nothing was mapped
+	if ((ops & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE)) && map->_dm_kind == PD_BWFM_DMA_MEM)
+		pd_dart_sync();
+	if ((ops & BUS_DMASYNC_POSTREAD) && map->_dm_kind == PD_BWFM_DMA_SLOT &&
+	    map->_dm_mbuf != NULL && map->_dm_slot != NULL) {
+		// once: the driver hands the mbuf up right after this
+		mbuf_copyback(map->_dm_mbuf, 0, map->dm_mapsize, map->_dm_slot, MBUF_DONTWAIT);
+		map->_dm_mbuf = NULL;
+	}
+}
+
+int
+bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t align, bus_size_t boundary,
+    bus_dma_segment_t *segs, int nsegs, int *rsegs, int flags)
+{
+	struct pd_bwfm_dmamem *mem;
+
+	// the memory is page aligned, in the kernel and for the chip
+	if (size == 0 || align > PD_DART_MAP_PAGE_SIZE)
+		return EINVAL;
+	mem = malloc(sizeof(*mem), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (mem == NULL)
+		return ENOMEM;
+	mem->kva = pd_dart_alloc(size, &mem->iova);
+	if (mem->kva == NULL) {
+		pd_bwfm_dma_failures++;
+		free(mem, M_DEVBUF, sizeof(*mem));
+		return ENOMEM;
+	}
+	mem->size = size;
+	mem->next = pd_bwfm_dmamems;
+	pd_bwfm_dmamems = mem;
+	pd_bwfm_dma_bytes += size;
+	pd_bwfm_dma_allocs++;
+	segs[0].ds_addr = mem->iova;
+	segs[0].ds_len = size;
+	segs[0]._ds_mem = mem->kva;
+	*rsegs = 1;
+	return 0;
+}
+
+void
+bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
+{
+	struct pd_bwfm_dmamem **prev, *mem;
+
+	for (prev = &pd_bwfm_dmamems; (mem = *prev) != NULL; prev = &mem->next) {
+		if (mem->kva == segs[0]._ds_mem) {
+			*prev = mem->next;
+			pd_dart_free(mem->kva);
+			pd_bwfm_dma_bytes -= mem->size;
+			pd_bwfm_dma_allocs--;
+			free(mem, M_DEVBUF, sizeof(*mem));
+			segs[0]._ds_mem = NULL;
+			return;
+		}
+	}
+}
+
+int
+bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size, caddr_t *kvap, int flags)
+{
+	if (segs[0]._ds_mem == NULL)
+		return EINVAL;
+	*kvap = segs[0]._ds_mem;
+	return 0;
+}
+
+void
+bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
+{
+}
+
+#endif /* PD_BWFM_DMA_BOUNCE */
 
 #undef printf
 extern void IOSleep(unsigned milliseconds);
