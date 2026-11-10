@@ -32,8 +32,10 @@ for e in load(BASE/'mapping.json')['files']:
  if e['destination']=='/usr/bin/darwin-desktop-test':e['source']=str(SUPERVISOR)
  mapping.append(e)
 if JOIN:
- mapping.append({'source':str((ROOT/'runs/m1-desktop-010/pd-dhcp-build-001/result/usr/bin/pd-dhcp').resolve()),'destination':'/usr/bin/pd-dhcp','executable':True})
- mapping.append({'source':str(ROOT/'integrations/puredarwin/m1-bwfm/dhcp/pd-net-up'),'destination':'/usr/bin/pd-net-up','executable':True})
+ # pd-dhcp, pd-net-up, pd-netd and its launchd job, all from the pd-netd build
+ N=(ROOT/'runs/m1-desktop-010/pd-netd-build-001/result').resolve()
+ for rel,exe in (('usr/bin/pd-dhcp',True),('usr/bin/pd-net-up',True),('usr/sbin/pd-netd',True),('System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist',False)):
+  mapping.append({'source':str(N/rel),'destination':'/'+rel,'executable':exe})
 if WIFI:
  # This M1's own firmware, private and never committed.
  for f in sorted((ROOT/'private/firmware/brcm').iterdir()):

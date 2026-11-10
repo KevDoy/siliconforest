@@ -24,8 +24,8 @@ K=$(readlink -f $RUN/apcie-host-build-001/result)
 sed -i "s|bridge = /nix/store/[^;]*;|bridge = $K/System/Library/Extensions/PDApcieT8103Bridge.kext;|" $SRC/build-kc.nix
 (cd $SRC && $NIX build-kc.nix -o "$ROOT/$RUN/apcie-host-kc-build-001/result" > "$ROOT/$RUN/apcie-host-kc-build-001/build.log" 2>&1) || { tail -30 $RUN/apcie-host-kc-build-001/build.log; exit 1; }
 if [ "${PCIE_WIFI:-0}" = 1 ]; then
-  mkdir -p $RUN/pd-dhcp-build-001
-  (cd integrations/puredarwin/m1-bwfm/dhcp && $NIX build-pd-dhcp.nix -o "$ROOT/$RUN/pd-dhcp-build-001/result" > "$ROOT/$RUN/pd-dhcp-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/pd-dhcp-build-001/build.log | head -20; exit 1; }
+  mkdir -p $RUN/pd-netd-build-001
+  (cd integrations/puredarwin/m1-bwfm/netd && $NIX build-pd-netd.nix -o "$ROOT/$RUN/pd-netd-build-001/result" > "$ROOT/$RUN/pd-netd-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/pd-netd-build-001/build.log | head -20; exit 1; }
   mkdir -p $RUN/bwfm-kc-build-001
   (cd integrations/puredarwin/m1-bwfm && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
 fi
@@ -42,4 +42,4 @@ ssh -o BatchMode=yes -o ServerAliveInterval=15 $M5 "sudo -n sh -c 'cd $W/lab-pci
 R=$RUN/pcie-enum-attempt-$N; mkdir -p $R
 ssh -o BatchMode=yes $M5 "sudo -n sh -c 'cd $W/pcie-m2-cycles && d=\$(ls -td cycle-*/001 | head -1) && tar -cf - -C \$d guest/console.bin guest/worker.log result.json'" | tar -xf - -C $R
 grep -a 'PCIE_LINKUP' $R/guest/worker.log || true
-strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-6]|pd-dhcp|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
+strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-6]|pd-dhcp|pd-netd|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
