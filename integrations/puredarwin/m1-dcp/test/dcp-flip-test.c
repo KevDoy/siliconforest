@@ -749,6 +749,7 @@ static int flip_loop(int fd, uint32_t plane_id, uint32_t p_fb, uint32_t crtc_id,
 		int tries = 0, ret;
 		int32_t out_fence = -1;
 		uint64_t t_commit;
+		uint64_t t_commit_done = 0;
 		int gpu_fence = -1;
 
 		if (p_in_fence) {
@@ -776,7 +777,7 @@ static int flip_loop(int fd, uint32_t plane_id, uint32_t p_fb, uint32_t crtc_id,
 						  (void *)(uintptr_t)(st->flips + 1));
 			drmModeAtomicFree(req);
 			if (!ret) {
-				uint64_t took = now_ns() - t_commit;
+				uint64_t took = (t_commit_done = now_ns()) - t_commit;
 
 				if (took < st->min_commit)
 					st->min_commit = took;
@@ -817,6 +818,11 @@ static int flip_loop(int fd, uint32_t plane_id, uint32_t p_fb, uint32_t crtc_id,
 				st->max_kiv = kiv;
 			st->late += kiv > 25000;
 			st->early += kiv < 8333;
+			/* which flips: at the start of a run, periodic, or anywhere (first 16 shown) */
+			if ((kiv > 25000 || kiv < 8333) && st->late + st->early <= 16)
+				out(P "timing: flip %u at %.3f s: kernel interval %.3f ms (%s), seen here %.3f ms, "
+				    "commit call %.3f ms\n", st->flips + 1, (t - start) / 1e9, kiv / 1e3,
+				    kiv > 25000 ? "late" : "early", iv / 1e6, (t_commit_done - t_commit) / 1e6);
 		}
 		last_event_us = event_us;
 		last = t;

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Guest side of an interactive GPU desktop session (tools/gpu_desktop.sh). Joins Wi-Fi in the
+# background when the tools and firmware are staged, then runs the shared-shell desktop on the
+# GL renderer with page flips, real keyboard and trackpad input, and two terminals, for
+# @SECONDS@ seconds. No synthetic input. @SSID@/@PSK@ are filled from private/wifi.env at
+# packet assembly; the filled script is never committed.
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
+case "$nonce" in *[!0-9a-f]*|'') session=000000000000000000000000000000000000000000000001 ;; *) session=$nonce ;; esac
+[ "${#session}" -eq 48 ] || session=000000000000000000000000000000000000000000000001
+runtime=/private/var/run/gpu-desktop
+mkdir -p "$runtime" && chmod 0700 "$runtime"
+export XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-0
+export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
+export CHONKSTEP_DARWIN_FRAME_STATS=3600
+printf '\nGPUDESK_BEGIN_%s seconds=@SECONDS@\n' "$nonce"
+ls -l /dev/dri 2>&1 | head -6
+(
+    if command -v wifiutil >/dev/null 2>&1 && [ -d /Library/Firmware/brcm ]; then
+        sleep 4; pd-dhcp --up en0 >/dev/null 2>&1; sleep 2
+        wifiutil on >/dev/null 2>&1; sleep 8
+        wifiutil join '@SSID@' '@PSK@' >/dev/null 2>&1; printf 'GPUDESK_WIFI_JOIN_RC=%s\n' "$?"
+        sleep 4; pd-net-up en0 >/dev/null 2>&1; printf 'GPUDESK_NET_UP_RC=%s\n' "$?"
+        ping -c 2 1.1.1.1 >/dev/null 2>&1; printf 'GPUDESK_PING_RC=%s\n' "$?"
+    else
+        printf 'GPUDESK_WIFI_SKIPPED\n'
+    fi
+) &
+[ -x /usr/bin/darwin-trackpad-enum ] && { /usr/bin/darwin-trackpad-enum --nonce "$session"; printf 'GPUDESK_ENUM rc=%s\n' "$?"; }
+count=0
+while [ ! -c /dev/usb_hid_kbd ] || [ ! -c /dev/usb_hid_mouse ]; do
+    count=$((count + 1)); [ "$count" -le 100 ] || break; sleep 0.1
+done
+printf 'GPUDESK_INPUT kbd=%s mouse=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes || echo no)" "$([ -c /dev/usb_hid_mouse ] && echo yes || echo no)"
+records=$runtime/session-$session
+mkdir -m 0700 "$records"
+printf 'GPUDESK_DESKTOP_START renderer=auto seconds=@SECONDS@ start=%s\n' "$(date +%s)"
+/usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds @SECONDS@ --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1 | grep -v 'chonkstep-gl: step:'
+printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$?" "$(date +%s)"
+[ -r "$records/session-result.txt" ] && sed 's/^/GPUDESK_RESULT /' "$records/session-result.txt" | head -12
+printf 'GPUDESK_END_%s\n' "$nonce"
