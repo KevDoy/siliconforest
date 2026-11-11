@@ -2,7 +2,7 @@
 /*
  * Apple GPIO pins. Ported from Linux drivers/pinctrl/pinctrl-apple-gpio.c
  * (apple_gpio_get, apple_gpio_set, apple_gpio_direction_input/output,
- * apple_gpio_pinmux_set):
+ * apple_gpio_pinmux_set, apple_gpio_irq_startup/mask/unmask/ack, apple_gpio_irq_handler):
  *   Copyright (C) The Asahi Linux Contributors
  *   Copyright (C) 2020 Corellium LLC
  *   Based on: pinctrl-pistachio.c, Copyright (C) 2014 Imagination Technologies Ltd.,
@@ -19,6 +19,8 @@
 #define REG_GPIOx_IN_IRQ_OFF   7
 #define REG_GPIOx_PERIPH       (3u << 5)
 #define REG_GPIOx_INPUT_ENABLE (1u << 9)
+#define REG_GPIOx_GRP          (7u << 16)
+#define REG_IRQ(g, x)          (0x800 + 0x40 * (g) + 4 * ((x) >> 5))
 
 bool
 PDGpio::attach(const char *path)
@@ -76,4 +78,45 @@ PDGpio::function(unsigned pin, unsigned func)
 	if (pin >= npins || regs.va == NULL || func > 3)
 		return;
 	regs.mask32(REG_GPIO(pin), REG_GPIOx_PERIPH | REG_GPIOx_INPUT_ENABLE, (func << 5) | REG_GPIOx_INPUT_ENABLE);
+}
+
+void
+PDGpio::irqSetup(unsigned pin)
+{
+	if (pin >= npins || regs.va == NULL)
+		return;
+	regs.mask32(REG_GPIO(pin), REG_GPIOx_GRP, 0);
+	input(pin);
+}
+
+void
+PDGpio::irqUnmask(unsigned pin, unsigned type)
+{
+	if (pin >= npins || regs.va == NULL || type < kIrqLevelHigh || type > kIrqAny)
+		return;
+	regs.mask32(REG_GPIO(pin), REG_GPIOx_MODE, type << 1);
+}
+
+void
+PDGpio::irqMask(unsigned pin)
+{
+	if (pin >= npins || regs.va == NULL)
+		return;
+	regs.mask32(REG_GPIO(pin), REG_GPIOx_MODE, REG_GPIOx_IN_IRQ_OFF << 1);
+}
+
+void
+PDGpio::irqAck(unsigned pin)
+{
+	if (pin >= npins || regs.va == NULL)
+		return;
+	regs.w32(REG_IRQ(0, pin), 1u << (pin % 32));
+}
+
+bool
+PDGpio::irqPending(unsigned pin) const
+{
+	if (pin >= npins || regs.va == NULL)
+		return false;
+	return (regs.r32(REG_IRQ(0, pin)) & (1u << (pin % 32))) != 0;
 }

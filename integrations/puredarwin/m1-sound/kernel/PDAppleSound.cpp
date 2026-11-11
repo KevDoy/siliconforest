@@ -18,7 +18,8 @@
  * Apple device tree nodes used (J293):
  *   /arm-io/i2c2                     I2C controller, clock-gates I2C2
  *   /arm-io/i2c2/audio-codec-output  CS42L83, reg 0x48, reset nub-gpio pin 11,
- *                                    interrupt gpio pin 183 (not used: status is polled)
+ *                                    interrupt gpio pin 183 (level low; the GPIO block's
+ *                                    group 0 interrupt, its first AIC interrupt)
  *   /arm-io/gpio, /arm-io/nub-gpio   pins; 162/163 are the i2c2 pins (function 1)
  *   /arm-io/nco                      clock synthesiser, one channel per cluster
  *   /arm-io/mca-switch               reg 0: clusters (0x4000 each), reg 1: DMA switch;
@@ -48,13 +49,16 @@
  *   pdsound_fe=<0..3>     front-end cluster (default 0, as Linux); pdsound_port=<n>
  *                         the cluster whose I2S pins are driven (default 2, the jack)
  *
- * Locking: one mutex (gLock) covers all driver state and every register sequence.
- * No interrupt is used: one kernel thread polls the DMA rings every few milliseconds
- * while playing, so nothing depends on which processor takes an interrupt. The same
- * thread reads the status registers that the sysctls report, so a reader never holds
- * the mutex across an I2C transfer.
+ * Locking: one mutex (gLock) covers the playback state and every register sequence of
+ * the transport. One kernel thread polls the DMA rings every few milliseconds while
+ * playing and reads the status registers that the sysctls report, so a reader never
+ * holds the mutex across an I2C transfer. The jack has its own thread and the codec's
+ * own lock (plug detection sleeps for up to a second): the codec's interrupt handler
+ * only masks the pin and wakes that thread, which also looks at the pin ten times a
+ * second, so a lost interrupt delays a jack event but cannot lose it.
  */
 #include <IOKit/IODeviceTreeSupport.h>
+#include <IOKit/IOInterruptController.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOService.h>
@@ -151,7 +155,14 @@ static int32_t  gLockMs = -1;               /* unmute to converter lock; -1 whil
 static uint32_t gSessions;
 static uint64_t gTotalDone;
 static uint32_t gLastRateMilliHz;           /* measured over the last finished or running session */
-static int      gJack = -1;                 /* 1 plugged, 0 not, -1 unknown */
+static volatile int gJack = -1;             /* kPDJack...: 0 nothing, 1 headphones, 2 headset; -1 unknown */
+static volatile int gJackButtons;           /* kPDJackButton... held now */
+static IOService   *gService;
+static IOLock      *gJackWait;
+static volatile SInt32 gJackPending;        /* set by the interrupt handler */
+static volatile UInt32 gJackIrqs;           /* interrupts taken for the codec's pin */
+static uint32_t     gJackPolled;            /* services started because the pin was found low */
+static bool         gJackIrqOk;             /* the interrupt registered */
 static uint32_t gIdleTicks, gPlayTicks;
 /* what the sysctls report: read by the thread, so readers never wait for the I2C bus */
 static PDCs42l83Status gCodecSeen;
@@ -277,13 +288,7 @@ measured_milli_hz(void)
 static void
 refresh_status(void)
 {
-	int was = gJack;
-
 	gCodec.status(&gCodecSeen);
-	if (gCodecSeen.error == 0 && (gCodecSeen.plug == 3 || gCodecSeen.plug == 0))
-		gJack = gCodecSeen.plug == 3;
-	if (gJack != was)
-		LOG("jack: %s (plug status %u)", gJack ? "plugged" : "not plugged", gCodecSeen.plug);
 	if (gMca.attached)
 		gMca.status(&gMcaSeen);
 }
@@ -294,9 +299,9 @@ log_codec(const char *when)
 	refresh_status();
 	const PDCs42l83Status &s = gCodecSeen;
 
-	LOG("codec %s: pll_lock=0x%02x asp_rx=0x%02x src=0x%02x codec=0x%02x plug=%u det1=0x%02x osc=0x%02x "
+	LOG("codec %s: pll_lock=0x%02x asp_rx=0x%02x src=0x%02x det1=0x%02x osc=0x%02x "
 	    "pwr1=0x%02x hp_ctl=0x%02x vol=0x%02x/0x%02x asp_clk=0x%02x mclk_src=0x%02x pll_ctl1=0x%02x i2c_err=%d",
-	    when, s.pllLock, s.aspRx, s.src, s.codec, s.plug, s.det1, s.oscSwitch, s.pwr1, s.hpCtl, s.volA, s.volB,
+	    when, s.pllLock, s.aspRx, s.src, s.det1, s.oscSwitch, s.pwr1, s.hpCtl, s.volA, s.volB,
 	    s.aspClk, s.mclkSrc, s.pllCtl1, s.error);
 }
 
@@ -418,6 +423,114 @@ stop_playback(const char *why)
 	    gFramesHeld, mhz / 1000, mhz % 1000, gRate, gLockMs, gLate, gRingErrors, gDart.faults, gI2C.errors);
 }
 
+/* ---- jack ----------------------------------------------------------------------------- */
+
+static const char *const kJackNames[] = { "nothing plugged", "headphones", "headset" };
+
+/* From the codec's jack path (its lock held): what is plugged or which buttons are down changed. */
+static void
+jack_changed(PDCs42l83 *codec, uint8_t pressed)
+{
+	if (codec->jack != gJack)
+		LOG("jack: %s (type %u%s)", kJackNames[codec->jack], codec->hsType,
+		    codec->remoteActive ? ", Apple remote" : "");
+	if (codec->buttons != gJackButtons)
+		LOG("jack buttons: held 0x%x, newly pressed 0x%x (1 play/pause, 2 volume up, 4 volume down, 8 voice)",
+		    codec->buttons, pressed);
+	gJack = codec->jack;
+	gJackButtons = codec->buttons;
+}
+
+/*
+ * The GPIO block's group 0 interrupt, in interrupt context. The codec's line is level
+ * low and stays so until its status has been read over I2C: mask the pin, wake the
+ * jack thread, which unmasks it after the service.
+ */
+static void
+gpio_interrupt(__unused OSObject *target, __unused void *refCon, __unused IOService *nub, __unused int source)
+{
+	if (gGpio.irqPending(PIN_CODEC_IRQ)) {
+		gGpio.irqMask(PIN_CODEC_IRQ);
+		gGpio.irqAck(PIN_CODEC_IRQ);
+		OSIncrementAtomic(&gJackIrqs);
+		OSCompareAndSwap(0, 1, (volatile UInt32 *)&gJackPending);
+		thread_wakeup((event_t)&gJackPending);
+	}
+}
+
+static void
+pd_jack_thread(__unused void *arg, __unused wait_result_t wr)
+{
+	for (;;) {
+		bool irq = OSCompareAndSwap(1, 0, (volatile UInt32 *)&gJackPending);
+
+		/* the line itself: low means the codec wants service, with or without an interrupt */
+		if (irq || gGpio.get(PIN_CODEC_IRQ) == 0) {
+			if (!irq)
+				gJackPolled++;
+			gCodec.jackService();
+			gGpio.irqUnmask(PIN_CODEC_IRQ, PDGpio::kIrqLevelLow);
+			/* a line that stays low (a codec that does not answer) must not spin */
+			IOSleep(5);
+			continue;
+		}
+		IOLockLock(gJackWait);
+		if (!gJackPending) {
+			AbsoluteTime deadline;
+			clock_interval_to_deadline(100, kMillisecondScale, &deadline);
+			IOLockSleepDeadline(gJackWait, (void *)&gJackPending, deadline, THREAD_UNINT);
+		}
+		IOLockUnlock(gJackWait);
+	}
+}
+
+/* The codec's interrupt: AIC interrupt of GPIO group 0, described on this service as index 0. */
+static void
+jack_bring_up(void)
+{
+	uint32_t vector = 0;
+	thread_t thread;
+	UInt32 before;
+
+	gJackWait = IOLockAlloc();
+	gCodec.changed = jack_changed;
+	gGpio.irqSetup(PIN_CODEC_IRQ);
+	if (gJackWait != NULL && pd_adt_u32("/arm-io/gpio", "interrupts", 0, &vector) && vector != 0) {
+		IOInterruptVectorNumber number = vector;
+		const OSSymbol *controller = gIODTDefaultInterruptController;
+		OSData *spec = OSData::withBytes(&number, sizeof(number));
+		OSArray *controllers = OSArray::withObjects((const OSObject **)&controller, 1);
+		OSArray *specs = spec ? OSArray::withObjects((const OSObject **)&spec, 1) : NULL;
+
+		gJackIrqOk = controllers && specs && gService->setProperty(gIOInterruptControllersKey, controllers) &&
+		    gService->setProperty(gIOInterruptSpecifiersKey, specs) &&
+		    gService->registerInterrupt(0, gService, gpio_interrupt, NULL) == kIOReturnSuccess &&
+		    gService->enableInterrupt(0) == kIOReturnSuccess;
+		OSSafeReleaseNULL(spec);
+		OSSafeReleaseNULL(controllers);
+		OSSafeReleaseNULL(specs);
+	}
+	if (gJackWait == NULL || kernel_thread_start(pd_jack_thread, NULL, &thread) != KERN_SUCCESS) {
+		LOG("jack: no thread; plug events are not followed");
+		return;
+	}
+	thread_deallocate(thread);
+	before = gJackIrqs;
+	gGpio.irqUnmask(PIN_CODEC_IRQ, PDGpio::kIrqLevelLow);
+	/* the self-test leaves one interrupt source of the codec asserted: the line must fire now */
+	if (gCodec.jackStart(true) != 0) {
+		LOG("jack: the codec's interrupt masks could not be written");
+		return;
+	}
+	for (int i = 0; i < 50 && gCodec.irqServices == 0; i++)
+		IOSleep(10);
+	LOG("jack: codec interrupt on gpio pin %u, AIC interrupt %u: %s (%u interrupts, %u services, %u found by "
+	    "looking at the pin); %s", PIN_CODEC_IRQ, vector,
+	    !gJackIrqOk ? "NOT registered, the pin is polled" : gJackIrqs != before ? "delivered" : "registered but NOT delivered",
+	    gJackIrqs - before, gCodec.irqServices, gJackPolled, kJackNames[gCodec.jack]);
+	gJack = gCodec.jack;
+}
+
 /* ---- bring-up ------------------------------------------------------------------------- */
 
 static void
@@ -459,6 +572,7 @@ bring_up(void)
 	LOG("CS42L83 at i2c2 0x%02x: device ID 0x%05x revision 0x%02x, reset pin now 0x%08x", addr, gCodec.devid,
 	    gCodec.revid, gNub.raw(PIN_CODEC_RESET));
 	log_codec("after init");
+	jack_bring_up();
 	gState = kStateCodecOnly;
 	if (gLevel < 2)
 		return;
@@ -599,7 +713,6 @@ pd_sound_thread(__unused void *arg, __unused wait_result_t wr)
 			if (gToneLeft > 0 || gFifoCount > 0) {
 				start_playback();
 			} else if (++gIdleTicks % 20 == 0) {
-				/* the jack, every two seconds */
 				refresh_status();
 			}
 		} else if (gState == kStateCodecOnly && ++gIdleTicks % 20 == 0) {
@@ -620,7 +733,8 @@ pd_sound_thread(__unused void *arg, __unused wait_result_t wr)
 enum {
 	kCtlTone, kCtlToneHz, kCtlToneDb, kCtlVolume, kCtlRate, kCtlJack, kCtlPeriods, kCtlFrames, kCtlLate,
 	kCtlRingErrors, kCtlDartFaults, kCtlI2CErrors, kCtlRateMilliHz, kCtlSessions, kCtlPlaying, kCtlLockMs,
-	kCtlPreroll,
+	kCtlPreroll, kCtlJackIrqs, kCtlJackServices, kCtlJackPolled, kCtlJackButtons, kCtlJackButtonEvents,
+	kCtlJackPlugs, kCtlJackUnplugs, kCtlJackDetects, kCtlJackSelfTest,
 };
 
 static int
@@ -647,6 +761,15 @@ pd_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sys
 	case kCtlPlaying:     value = gState == kStatePlaying; break;
 	case kCtlLockMs:      value = gLockMs; break;
 	case kCtlPreroll:     value = (int)gPrerollMs; break;
+	case kCtlJackIrqs:    value = (int)gJackIrqs; break;
+	case kCtlJackServices: value = (int)gCodec.irqServices; break;
+	case kCtlJackPolled:  value = (int)gJackPolled; break;
+	case kCtlJackButtons: value = gJackButtons; break;
+	case kCtlJackButtonEvents: value = (int)gCodec.buttonEvents; break;
+	case kCtlJackPlugs:   value = (int)gCodec.plugEvents; break;
+	case kCtlJackUnplugs: value = (int)gCodec.unplugEvents; break;
+	case kCtlJackDetects: value = (int)gCodec.detectsDone; break;
+	case kCtlJackSelfTest: value = (int)gCodec.hsType; break;
 	}
 	IOLockUnlock(gLock);
 
@@ -654,6 +777,12 @@ pd_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sys
 	if (error != 0 || req->newptr == USER_ADDR_NULL)
 		return error;
 
+	if (arg2 == kCtlJackSelfTest) {
+		/* outside gLock: the detection takes more than a second and has the codec's own lock */
+		if (gState < kStateCodecOnly)
+			return ENXIO;
+		return gCodec.jackSelfTest() ? 0 : EBUSY;
+	}
 	IOLockLock(gLock);
 	switch (arg2) {
 	case kCtlTone:
@@ -722,9 +851,9 @@ pd_sysctl_string(__unused struct sysctl_oid *oidp, __unused void *arg1, int arg2
 	case 1:
 		if (gState >= kStateCodecOnly) {
 			const PDCs42l83Status &s = gCodecSeen;
-			snprintf(text, sizeof(text), "pll_lock=0x%02x asp_rx=0x%02x src=0x%02x codec=0x%02x plug=%u "
+			snprintf(text, sizeof(text), "pll_lock=0x%02x asp_rx=0x%02x src=0x%02x "
 			    "det1=0x%02x osc=0x%02x pwr1=0x%02x hp_ctl=0x%02x vol=0x%02x/0x%02x asp_clk=0x%02x "
-			    "mclk_src=0x%02x pll_ctl1=0x%02x i2c_err=%d", s.pllLock, s.aspRx, s.src, s.codec, s.plug,
+			    "mclk_src=0x%02x pll_ctl1=0x%02x i2c_err=%d", s.pllLock, s.aspRx, s.src,
 			    s.det1, s.oscSwitch, s.pwr1, s.hpCtl, s.volA, s.volB, s.aspClk, s.mclkSrc, s.pllCtl1, s.error);
 		}
 		break;
@@ -760,7 +889,16 @@ PD_INT(tone_hz, kCtlToneHz, CTLFLAG_RW, "test tone frequency");
 PD_INT(tone_db, kCtlToneDb, CTLFLAG_RW, "test tone level, dB below full scale");
 PD_INT(volume_db, kCtlVolume, CTLFLAG_RW, "codec attenuation in dB, 63 mutes");
 PD_INT(rate, kCtlRate, CTLFLAG_RW, "sample rate");
-PD_INT(jack, kCtlJack, CTLFLAG_RD, "1 plugged, 0 not, -1 unknown");
+PD_INT(jack, kCtlJack, CTLFLAG_RD, "0 nothing plugged, 1 headphones, 2 headset, -1 unknown");
+PD_INT(jack_irqs, kCtlJackIrqs, CTLFLAG_RD, "codec interrupts taken");
+PD_INT(jack_services, kCtlJackServices, CTLFLAG_RD, "times the codec's interrupt status was serviced");
+PD_INT(jack_polled, kCtlJackPolled, CTLFLAG_RD, "services started by finding the interrupt line low without an interrupt");
+PD_INT(jack_buttons, kCtlJackButtons, CTLFLAG_RD, "headset buttons held: 1 play/pause, 2 volume up, 4 volume down, 8 voice");
+PD_INT(jack_button_events, kCtlJackButtonEvents, CTLFLAG_RD, "headset button presses seen");
+PD_INT(jack_plugs, kCtlJackPlugs, CTLFLAG_RD, "plug events");
+PD_INT(jack_unplugs, kCtlJackUnplugs, CTLFLAG_RD, "unplug events");
+PD_INT(jack_detects, kCtlJackDetects, CTLFLAG_RD, "plug type detections completed");
+PD_INT(jack_selftest, kCtlJackSelfTest, CTLFLAG_RW, "write: run the plug type detection once on the empty jack; reads the last type (3: none)");
 PD_INT(periods, kCtlPeriods, CTLFLAG_RD, "DMA periods played since boot");
 PD_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot");
 PD_INT(late, kCtlLate, CTLFLAG_RD, "times the descriptor ring ran empty in the last session");
@@ -782,6 +920,10 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_sound_ring_errors, &sysctl__kern_pd_sound_dart_faults, &sysctl__kern_pd_sound_i2c_errors,
 	&sysctl__kern_pd_sound_rate_mhz, &sysctl__kern_pd_sound_sessions, &sysctl__kern_pd_sound_playing,
 	&sysctl__kern_pd_sound_lock_ms, &sysctl__kern_pd_sound_preroll_ms,
+	&sysctl__kern_pd_sound_jack_irqs, &sysctl__kern_pd_sound_jack_services, &sysctl__kern_pd_sound_jack_polled,
+	&sysctl__kern_pd_sound_jack_buttons, &sysctl__kern_pd_sound_jack_button_events,
+	&sysctl__kern_pd_sound_jack_plugs, &sysctl__kern_pd_sound_jack_unplugs, &sysctl__kern_pd_sound_jack_detects,
+	&sysctl__kern_pd_sound_jack_selftest,
 };
 
 /* ---- IOKit ---------------------------------------------------------------------------- */
@@ -832,6 +974,7 @@ PDAppleSound::start(IOService *provider)
 	gLock = IOLockAlloc();
 	if (gLock == NULL)
 		return false;
+	gService = this;
 	for (unsigned i = 0; i < sizeof(gOids) / sizeof(gOids[0]); i++)
 		sysctl_register_oid(gOids[i]);
 	if (kernel_thread_start(pd_sound_thread, NULL, &thread) != KERN_SUCCESS)

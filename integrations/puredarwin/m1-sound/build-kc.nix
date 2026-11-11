@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # The default desktop collection (../m1-cpufreq/build-kc.nix: eight cores, PDCpuPower) plus
 # PDAppleSound.kext (./build-kext.nix), with its debug map stripped like the other kexts
-# that recipe adds (the collection has little room below the kernel's __TEXT).
+# that recipe adds, and with the debug maps of the base members stripped as well (see below).
 # pdsound=0 in the boot-args leaves the audio hardware untouched.
 #   nix-build ... build-kc.nix --argstr kernelConfig development
 { kernelConfig ? "development" }:
@@ -18,10 +18,26 @@ let
     ${strip} -S $out/bundle.kext/Contents/MacOS/PDAppleSound
   '';
   needle = "-o kernel";
+  # The base members the recipe takes from one directory ($KEXTS) still carry their debug
+  # maps. The same `strip -S` on every one of them frees about 60 pages (1 MiB) of the
+  # 16 MiB between the collection header and the kernel; no member is removed or changed
+  # otherwise. Without it this kext no longer fits (__PRELINK_INFO ran into __TEXT).
+  kextsLine = builtins.head (builtins.match ".*\nKEXTS=(/nix/store/[^\n]+)\n.*" base.buildPhase);
+  kextsDir = builtins.unsafeDiscardStringContext kextsLine;
+  kextsStore = builtins.head (builtins.match "(/nix/store/[^/]+).*" kextsDir);
+  kextsInside = builtins.substring (builtins.stringLength kextsStore) (builtins.stringLength kextsDir) kextsDir;
+  stripped = pkgs.runCommand "kexts-no-debug-map" { } ''
+    mkdir -p $out
+    cp -RL ${builtins.storePath kextsStore}${kextsInside}/. $out/
+    chmod -R u+w $out
+    for b in $out/*.kext/Contents/MacOS/*; do
+      ${strip} -S "$b"
+    done
+  '';
 in base.overrideAttrs (old:
   assert builtins.stringLength old.buildPhase
     != builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] old.buildPhase);
   {
-    buildPhase = builtins.replaceStrings [ needle ] [ ''-kext "${kext}/bundle.kext" \
-      -o kernel'' ] old.buildPhase;
+    buildPhase = builtins.replaceStrings [ needle "KEXTS=${kextsDir}" ] [ ''-kext "${kext}/bundle.kext" \
+      -o kernel'' "KEXTS=${stripped}" ] old.buildPhase;
   })

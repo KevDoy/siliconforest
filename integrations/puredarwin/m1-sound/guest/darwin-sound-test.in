@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Headphone-jack playback check for PDAppleSound, one boot:
 #   bringup   wait for the driver; codec identification, jack state, transport registers
+#   jack      the codec's interrupt counters; one plug type detection on the jack as it is
 #   tone48    the kernel test tone at 48 kHz, monitored once a second
 #   tone44    the same at 44.1 kHz
 #   pdplay    /dev/pdaudio from userspace: tones left, right, both; a WAVE file; raw zeros
@@ -60,6 +61,19 @@ idle*) ;;
 esac
 sysctl -w kern.pd_sound.volume_db=@VOLUME@ kern.pd_sound.tone_db=@TONEDB@ 2>&1
 
+phase jack
+jackmon() {
+    printf 'SD_JACK %s jack=%s irqs=%s services=%s polled=%s plugs=%s unplugs=%s detects=%s type=%s buttons=%s button_events=%s\n' \
+        "$1" "$(get kern.pd_sound.jack)" "$(get kern.pd_sound.jack_irqs)" "$(get kern.pd_sound.jack_services)" \
+        "$(get kern.pd_sound.jack_polled)" "$(get kern.pd_sound.jack_plugs)" "$(get kern.pd_sound.jack_unplugs)" \
+        "$(get kern.pd_sound.jack_detects)" "$(get kern.pd_sound.jack_selftest)" "$(get kern.pd_sound.jack_buttons)" \
+        "$(get kern.pd_sound.jack_button_events)"
+}
+jackmon start
+# the plug type detection, run once on the jack as it is (refused when something is plugged)
+sysctl -w kern.pd_sound.jack_selftest=1 2>&1
+jackmon after-detection
+
 phase tone48
 sysctl -w kern.pd_sound.rate=48000 2>&1
 tone tone48 @SECONDS@
@@ -99,6 +113,7 @@ wait
 mon smp-readers-done
 
 phase end
+jackmon end
 regs end
 sysctl kern.pd_sound 2>&1
 printf 'SD_END_%s\n' "$nonce"

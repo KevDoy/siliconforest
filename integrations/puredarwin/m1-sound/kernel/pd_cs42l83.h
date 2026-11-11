@@ -3,7 +3,11 @@
  * Cirrus Logic CS42L83 headphone codec (the CS42L42 with other reset defaults) on an
  * Apple I2C bus: playback path only, as an I2S clock consumer.
  *
- * Callers serialise all calls (the page register is shared state).
+ * Two callers at most: the playback path (configure, powerUp, setVolume, mute,
+ * powerDown, status, inputLocked), serialised by its owner, and the jack path
+ * (jackStart, jackService, jackSelfTest), serialised by jackLock. Register access is
+ * atomic (regLock covers the page register) and the two paths write different
+ * registers, as the Linux driver's irq_lock and DAPM do.
  */
 #ifndef _PD_CS42L83_H
 #define _PD_CS42L83_H
@@ -11,13 +15,15 @@
 #include "pd_gpio.h"
 #include "pd_i2c.h"
 
+enum { kPDJackNone = 0, kPDJackHeadphone = 1, kPDJackHeadset = 2 };
+/* headset buttons, as Linux reports them: A play/pause, B volume up, C volume down, D voice */
+enum { kPDJackButtonA = 1, kPDJackButtonB = 2, kPDJackButtonC = 4, kPDJackButtonD = 8 };
+
 struct PDCs42l83Status {
 	uint8_t pllLock;        /* bit 0: locked */
 	uint8_t aspRx;          /* sticky: 0 no LRCK, 1 early, 2 late, 3 error, 4 overload */
 	uint8_t src;            /* sticky sample-rate converter lock/unlock events */
-	uint8_t codec;          /* sticky codec status */
-	uint8_t plug;           /* tip sense: 3 plugged, 0 unplugged, 1 or 2 moving */
-	uint8_t det1;           /* detect status 1 (bit 7: tip sense level) */
+	uint8_t det1;           /* detect status 1 */
 	uint8_t oscSwitch;      /* which clock the digital core runs from */
 	uint8_t pwr1, hpCtl, volA, volB, aspClk, mclkSrc, pllCtl1;
 	int     error;          /* errno of the first failed read, 0 when all were read */
@@ -32,8 +38,23 @@ struct PDCs42l83 {
 	bool     ready;         /* identified and initialised */
 	bool     onSclk;        /* running from the I2S bit clock */
 	unsigned pll;           /* entry of the PLL table in use */
+	IOLock  *regLock, *jackLock;
 
-	PDCs42l83() : bus(NULL), addr(0), page(-1), devid(0), revid(0), ready(false), onSclk(false), pll(0) {}
+	/* jack state, under jackLock */
+	uint8_t  plugState;     /* tip sense: 3 plugged, 0 unplugged, 1 moving */
+	uint8_t  hsType;        /* 0 CTIA headset, 1 OMTP headset, 2 headphone, 3 none or invalid */
+	uint8_t  jack;          /* kPDJack... as reported */
+	uint8_t  buttons;       /* kPDJackButton... held now */
+	bool     remoteActive;  /* Apple inline remote receiver in use */
+	uint8_t  remoteSaved[9];
+	uint32_t irqServices;   /* jackService() calls that found the chip readable */
+	uint32_t plugEvents, unplugEvents, buttonEvents, detectsDone;
+	/* called under jackLock when `jack` or `buttons` changed */
+	void   (*changed)(PDCs42l83 *codec, uint8_t pressed);
+
+	PDCs42l83() : bus(NULL), addr(0), page(-1), devid(0), revid(0), ready(false), onSclk(false), pll(0),
+	    regLock(NULL), jackLock(NULL), plugState(0), hsType(3), jack(0), buttons(0), remoteActive(false),
+	    irqServices(0), plugEvents(0), unplugEvents(0), buttonEvents(0), detectsDone(0), changed(NULL) {}
 
 	int read(uint16_t reg, uint8_t *value);
 	int write(uint16_t reg, uint8_t value);
@@ -61,6 +82,34 @@ struct PDCs42l83 {
 	 * (reads the sticky converter status, which clears it).
 	 */
 	bool inputLocked(void);
+
+	/*
+	 * Unmasks the jack interrupts (cs42l42_set_interrupt_masks) and, when a plug is
+	 * already in, starts its type detection. With `selfTest`, the power-down-done
+	 * interrupt is left unmasked until the first jackService(): the chip then raises
+	 * its interrupt line at once, which proves the line without a plug.
+	 */
+	int jackStart(bool selfTest);
+	/*
+	 * The interrupt thread of the Linux driver (cs42l42_irq_thread): reads and clears
+	 * the sticky status, follows plug, unplug, type detection and buttons. Sleeps up
+	 * to about a second (type detection, the Apple remote handshake).
+	 */
+	void jackService(void);
+	/* Runs the type detection once although no plug event came; false if a plug is in. */
+	bool jackSelfTest(void);
+
+private:
+	void manualTypeDetect(void);
+	void processTypeDetect(void);
+	void initTypeDetect(void);
+	void cancelTypeDetect(void);
+	uint8_t buttonPress(void);
+	int  remoteSetDetect(uint8_t value);
+	void remoteStart(void);
+	void remoteRestore(bool settle);
+	void remoteButtons(uint8_t int1, uint8_t int2);
+	void report(uint8_t newJack, uint8_t newButtons, uint8_t buttonMask);
 };
 
 #endif
