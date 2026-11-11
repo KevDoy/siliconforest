@@ -1,0 +1,65 @@
+## Goal
+A working Touch Bar on the 13-inch M1 MacBook Pro (J293, T8103): the strip shows Escape, F1 to F12 and a media layer (brightness, mute, volume); touching a key delivers a key press to the system through the path the built-in keyboard uses, so the compositor's F1/F2 backlight keys and F10/F11/F12 volume keys work from touches without a special case.
+
+## Decision
+**One native kext, `PDAppleTouchBar` (`integrations/puredarwin/m1-touchbar/`, GPL-2.0), with everything in the kernel: display, digitizer, the picture of the keys, the touch-to-key logic and the key device. No daemon.**
+- Linux splits this into three drivers (`adp` display, `apple_z2` digitizer, `spi-apple`) and a userland renderer, tiny-dfr, which reads touches from the input layer and injects keys through uinput. On Linux the keys die with that process.
+- Here Escape and the function keys are part of the keyboard: they must work at the console, before any session, and whatever is or is not running. The strip is thirteen fixed keys and a layer switch; drawing it takes a 5x7 font, five 16x16 icons and 300 lines of C (`kernel/pd_tb_keys.c`, MIT, shared with the host tests). A richer strip (application-defined keys) would be a client of this driver later, not a replacement for it.
+- Register sequences are ported from Omacom `integration/aurora` (`adp_drv.c`, `adp-mipi.c`, `panel-summit.c`, `apple_z2.c`, `spi-apple.c`); layout, colours, layers and idle timeouts follow tiny-dfr.
+
+## Hardware map
+| What | Linux device tree (Omacom) | Apple device tree, as read on the machine (boot `tb01`) |
+|---|---|---|
+| Display pipe | `display-pipe@228200000`: back end `0x228200000+0xc000`, front end `0x228400000+0x4000`, interrupts 502 (be), 506 (fe), power `dispdfr_fe`, `dispdfr_be` | `/arm-io/dispdfr` (`dispdfr,t8103`): the same two blocks plus `0x22820c000`, `0x2284c0000`, `0x228500000`; interrupts 502 506 507 503; PMGR `DISPDFR_FE` (219, `0x23b7003a8`), `DISPDFR_BE` (220, `0x23b7003b0`), parent `RMX` |
+| DSI host | `dsi@228600000`, power `mipi_dsi` | `/arm-io/mipi-dsim` (`mipi-dsim-1,synopsys`), interrupt 509, PMGR `MIPI_DSI` (235, `0x23b7003b8`); Synopsys DesignWare host version `0x3133312a`, in command mode |
+| DART | `iommu@228304000`, stream 0, interrupt 504 | `/arm-io/dart-dispdfr` (`dart,t8020`), `0x228304000` and `0x228300000`, no clock gate of its own |
+| Panel | `apple,j293-summit`: 60 x 2008 at 60 Hz, brightness 0..255 by DCS `0x51` | the pipe's front end reports 60 x 2008; frame buffer lines are 64 pixels (stride 256 bytes: the stride register keeps multiples of 64) |
+| SPI | `spi@235100000` (`apple,spi`), interrupt 614, 200 MHz clock, pins 67/68/69 function 1, chip select GPIO 109 active low | `/arm-io/spi0` (`spi-1,spimc`), PMGR `SPI0` (49, `0x23b700240`), parents `SIO`, `SPI_P` |
+| Digitizer | `touchbar@0` (`apple,j293-touchbar`): 11.5 MHz, reset GPIO 139 active low, interrupt GPIO 194 falling edge, 23045 x 640 units, y inverted, firmware `apple/dfrmtfw-j293.bin` | `/arm-io/spi0/multi-touch`; `multi-touch-calibration` is 1688 bytes (Linux gets the same blob from m1n1 as `apple,z2-cal-blob`) |
+
+- **Firmware:** `dfrmtfw-j293.bin` (66080 bytes, format `Z2FW` version 1: one 16-byte init payload, blobs of 49442 and 16422 bytes, the calibration slot at `0x10009000`, seven small blobs). It is Apple's, extracted from this machine's macOS by the Asahi installer; it lives in `private/firmware/apple/` (never committed) and goes into the RAM root as `/Library/Firmware/apple/dfrmtfw-j293.bin` through `PCIE_EXTRA_FILES`, the way the Wi-Fi firmware reaches `/Library/Firmware/brcm`. The kext reads it once the root file system is mounted. The calibration is read from the Apple device tree at run time.
+- **Interrupt:** the digitizer's pin is put into interrupt group 1 of `/arm-io/gpio` (AIC interrupt 191). Linux uses group 0 for every pin; here `PDAppleSound` owns group 0 (AIC 190) for the codec, and an AIC interrupt has one owner.
+
+## What the hypervisor and the boot loader leave (boots `tb01` to `tb04`)
+- The m1n1 hypervisor passes all of it through: the pipe, the DSI host, the DART, SPI0, the GPIO block and the PMGR registers are read and written directly; the DART fault and the GPIO interrupt arrive.
+- iBoot leaves `DISPDFR_FE`, `DISPDFR_BE`, `MIPI_DSI` and `SPI0` powered; the pipe's front end running (control `0x713` or `0x2b13`) with the layer disabled; the DSI link up in command mode; the panel on (its answer to DCS `0x0a` is `0x9c`: display on, sleep out); every DART stream translating through tables that are not valid; the SPI pins on function 1, chip select high, the digitizer held in reset.
+- Like Linux, the driver relies on that state: it cannot bring the panel up from a powered-off `DISPDFR_BE` (Linux marks the domain always-on for the same reason). It never turns a domain off.
+
+## Status (November 11)
+The kext runs on the M1 in the proposed desktop collection. **Nobody has looked at the strip or touched it.**
+
+| Layer | Proven without a person | By | Not proven |
+|---|---|---|---|
+| Display | The pipe takes the layer (base, stride 256, format `0x53e4001`, source and destination 60 x 2008 read back); a flush is taken and finishes in about 10 ms by the Linux driver's own test (control bits 11:8 leave 6 and return); 60 vertical blank flags a second; no DART fault with the layer on the driver's buffer, error `0x80000002` at `0x10000000` when it is pointed at unmapped memory, so the pipe fetches what the layer names; the buffer's CRC-32 equals the host renderer's for both layers and a held key (`40f4372e`, `c2148cbc`, `74aba311`); the panel answers over DSI; brightness commands leave the DSI host without error | `tb04` (and `tb02`, `tb03`) | What the panel shows: that the picture is upright and not mirrored (the orientation is tiny-dfr's transform, not checked against glass), colours, that brightness takes effect (the panel answers `0` to a brightness read before and after), that it dims and goes dark |
+| Touch | The digitizer raises its line within 20 ms of reset; takes 11 firmware blobs and the calibration in 1.24 s without an SPI error; answers a read request differently before (`1f01...`) and after (`e1...`) the firmware; its interrupt is delivered (11 by the end of a boot); idle, it reports nothing for 5 s and every read request gets a well-formed empty packet; no bad report | `tb04` | A finger: no real touch report has been seen, so finger numbering, the x range (0..23045 left to right is the device tree's) and the report layout are Linux's word |
+| Keys | Finger records injected at the parser the digitizer's packets go through come out of `/dev/usb_hid_kbd` as Escape, F1, F2, F10, F11, F12 on the function layer and on the media layer; a held key shows lighter (CRC) and releases; sliding off a key releases it and presses nothing else; two fingers; the layer key; a touch on the dark strip lights it and presses nothing | `tb04`, six `TBTEST ... result=PASS` | The same with a finger |
+| Desktop | see below | `tb05`, `tb06` | |
+
+- **How keys are delivered:** `PDTouchBarKeys`, an `IOHIDDevice` with a boot keyboard descriptor published by the kext; reports go through `IOHIDFamily` to `PDHIDPushKeyboardEvent` and the console, exactly as `PDM1SPIHID`'s do. Vendor and product numbers are not Apple's, so nothing treats it as an Apple keyboard with an Fn row. If the device does not start, or with `pdtouchbar_direct=1`, keys are pushed into the PDHID queue directly.
+- **Media layer:** the PDHID queue carries keyboard-page usages only, and the compositor already takes brightness from F1/F2 and mute and volume from F10/F11/F12. The media layer therefore sends those same usages under their symbols; both layers act alike today, and the layer key (`FN`, right end) switches the picture. The keyboard's Fn key is not seen by this driver (it is a usage of Apple's vendor page inside `PDM1SPIHID`).
+- **Burn-in:** the strip is an OLED. As tiny-dfr does, it dims 30 s after the last touch and goes dark after 60 s; a touch on the dark strip only lights it. Typing on the keyboard does not keep it lit (tiny-dfr counts any input; this driver sees only its own). `kern.pd_touchbar.dim_ms`, `.off_ms`, boot arguments `pdtouchbar_dim=`, `pdtouchbar_off=` (seconds, 0 never). At shutdown the strip is made dark and the digitizer put into reset.
+- **Found on the way:** frame buffer lines of 60 pixels do not work (stride 240 read back as 192; tiny-dfr allocates 64). With the front end as Linux's `adp_drm_bind()` leaves it (`0x601`) the pipe does not fetch the layer; it does with the vertical blank bits on (`0x613`), which every DRM commit sets on Linux. The driver sets them at each flush and clears them a second later. On this DART an unmapped page inside a mapped second-level table raises no fault; an address without a second-level table does. SPI0 moves about 0.45 Mbit/s where 11.5 was asked for (the firmware takes 1.2 s); the cause is not established. (The flush trace, nominally 100 ms of 50-microsecond steps with two register reads each, saw 12 vertical blanks, so it took about 200 ms: a register access seems to cost tens of microseconds in this guest, which would explain a polled SPI as well. Not measured directly.)
+- **Collection:** `integrations/puredarwin/m1-touchbar/build-kc.nix` = `m1-sound/build-kc-desktop.nix` plus this kext, debug map stripped. Room between `__PRELINK_INFO` and the kernel's `__TEXT`: `0x114000` before, `0xeb000` after (the kext takes `0x29000`). `pdtouchbar=0` leaves the hardware untouched; `pdtouchbar=1` only reads and logs; `pdtouchbar=2` display only.
+- **Interface:** `kern.pd_touchbar.*` (state, display, touch, panel, keys, layer, brightness, counters, `inject` for tests, `fetch_probe`, `flush_probe`).
+
+## Whole desktop (boots `tb05`, `tb06`)
+Eight processors, the proposed collection, quiet boot, `tools/tb_desktop_boot.sh` (the sound desktop boot plus this driver; the compositor is a private build of the working tree, `runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-001`).
+- **Touch Bar:** `ready` before the desktop starts, picture CRC `40f4372e`. The compositor's autopilot phase `touchbar` writes finger records for F11, F11, F12, F12, F10, F10 and Escape to `kern.pd_touchbar.inject`; the keys arrive through `/dev/usb_hid_kbd`: `key_events_after_each=[2, 4, 6, 8, 10, 12, 14]`, last key Escape released, coreaudiod's level read back `44,38,44,50,50m,50` as expected, notices "Volume 44%" ... "Sound off", `result=PASS`. The frame after the phase equals the CPU render.
+- **Nothing else changed:** all 17 other autopilot phases pass or report what they reported in the sound boot `sd15` (brightness keys PASS, volume keys PASS, `WMAUTO done result=ok`); composite times as there (settle 7.7 ms, volume 3.7 ms); Wi-Fi joined and pinged (`JOIN_RC=0`, `PING_RC=0`); a 440 Hz tone on the speakers (20 dB held down, 0 trips) and 1 kHz on the headphone output, the headset microphone path read; `hw.activecpu: 8`; no panic.
+- **Repeated in `tb06`** with the same results, and the driver's counters at the end of the session: `injected=14 key_events=14 hid_reports=14 hid_errors=0 direct=0 dart_faults=0 dsi_errors=0 spi_errors=0`, picture CRC unchanged, state `ready`. (`tb05` ran to its time limit without its end lines: a bare `wait` in the guest script also waited for coreaudiod; fixed.)
+- The autopilot's keys are synthetic everywhere else; in this phase only the touch is synthetic. The strip's idle timeouts are switched off for the run (a touch on a dark strip only lights it).
+
+## Test with a person
+1. `TB_GUEST=guest/darwin-touchbar-listen.in TB_RUNTIME=420 integrations/puredarwin/m1-touchbar/tools/tb_boot.sh tb<NN>` (no desktop; the script's header lists what to touch and what must appear on the strip and in the log).
+2. In the desktop (`tools/tb_desktop_boot.sh` shape, or the interactive desktop with this collection): touch the strip once if it is dark; F11 and F12 must step the volume notice down and up, F10 must mute and unmute, F1 and F2 must step the panel brightness, Escape must act as Escape in a terminal (leave insert mode in `vi`); `FN` must switch to the symbols and back.
+
+## Open
+- Everything in the "Not proven" column.
+- The compositor's `touchbar` autopilot phase is a working-tree change in `sources/chonkstep-darwin` (`m1-touchbar/wm-darwin-touchbar-phase.patch`, on top of the uncommitted volume keys); it needs a commit there.
+- Fn on the keyboard as a momentary layer switch (needs `PDM1SPIHID` to tell this driver); keeping the strip lit while typing; sleep and wake (the digitizer loses its firmware across `SPI0` power-down; Linux reloads it on resume).
+- A distinct media usage set once the PDHID queue carries the consumer page.
+- SPI0's speed.
+- No failsafe for a lost lift report: a key whose finger-up packet never arrives stays held.
+
+## Research and references
+Omacom `linux-aurora` `integration/aurora` 6a08a08e; m1n1 `proxyclient/experiments/touchbar_rainbow.py`, `src/kboot.c` (`dt_set_multitouch`); tiny-dfr.
