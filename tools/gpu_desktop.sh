@@ -8,6 +8,9 @@
 # until the compositor's first frame. The serial log is the same as before.
 #   GPU_DESKTOP_VERBOSE=1       the text boot: kernel log on the panel as well as on serial
 #   GPU_DESKTOP_SPLASH=<png>    another boot picture (default: the desk picture)
+# Sound and the Touch Bar are on: coreaudiod runs, F10-F12 on the strip are mute and volume.
+#   GPU_DESKTOP_SPEAKER_HOLD=1  keep the speakers 20 dB under the protection model's limit
+#   GPU_DESKTOP_VOLUME=<n>      headphone attenuation at start (default 30)
 # The session also ends by itself after the given time, and the M1 is returned to Linux.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"; export PATH=$HOME/.nix-profile/bin:$PATH
@@ -15,13 +18,15 @@ N=${1:?name}; MIN=${2:-30}
 [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
 BOOT=140                                   # seconds from hypervisor start to the guest script
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
-# The desktop collection on the kernel with the two quiet-boot patches (m1-quiet-boot/kernel.nix:
-# no user-space progress bar under -noprogress; the early log reaches the UART in a graphics boot).
-KC=${GPU_DESKTOP_KC:-/nix/store/wjhbgfdan0iizb10jxlk1jayjll7ilr4-puredarwin-kc-arm64-0.1}
-[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-quiet-boot && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --argstr kernelConfig development --no-out-link | tail -1)
+# The default collection: the desktop collection with sound and the Touch Bar
+# (m1-touchbar/build-kc.nix: the quiet-boot kernel, PDAppleSound, PDAppleTouchBar; boots tb05, tb06).
+KC=${GPU_DESKTOP_KC:-/nix/store/mp7x0sgmn22zvaxlbx81dm5hvnrw887v-puredarwin-kc-arm64-0.1}
+[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-touchbar && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-D=runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop
+# The compositor with the volume keys and the Touch Bar phase (wm-darwin 3944e53).
+D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+[ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
 # output and 1 MiB of input per terminal). The desktop passes each terminal the session's
@@ -38,6 +43,21 @@ TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
 BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png}
 [ -f "$BG" ] && X="$X;$ROOT/$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+# Sound: the audio server, its frameworks and the tools (as m1-sound/tools/sd_desktop_boot.sh).
+SOUND=integrations/puredarwin/m1-sound
+A=$(cd $SOUND/sysaudio && $NB build-sysaudio.nix -A all 2>/dev/null | tail -1)
+[ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
+PLAY=$(cd $SOUND && $NB build-pdplay.nix 2>/dev/null | tail -1)
+FW=System/Library/Frameworks
+X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume;$PLAY/usr/bin/pdplay=/usr/bin/pdplay"
+for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"; done
+# The Touch Bar digitizer's firmware (this machine's own, never committed); without it the
+# strip shows its keys but takes no touches.
+TBFW=private/firmware/apple/dfrmtfw-j293.bin
+[ -f "$TBFW" ] && X="$X;$ROOT/$TBFW=/Library/Firmware/apple/dfrmtfw-j293.bin" || echo "no Touch Bar firmware at $TBFW: the strip will not take touches" >&2
+# Speakers are unrestricted: the kernel protection model alone sets the limit (owner decision,
+# 2026-11-11; no person has listened yet). GPU_DESKTOP_SPEAKER_HOLD=1 keeps them 20 dB under it.
+HOLD=${GPU_DESKTOP_SPEAKER_HOLD:-0}; VOL=${GPU_DESKTOP_VOLUME:-30}
 QUIET=()
 if [ "${GPU_DESKTOP_VERBOSE:-0}" != 1 ]; then
   # The launcher patch (graphics boot, no mirror, paints boot-logo.gz) and the picture in the
@@ -48,9 +68,9 @@ if [ "${GPU_DESKTOP_VERBOSE:-0}" != 1 ]; then
   B=integrations/puredarwin/m1-bringup
   QUIET=(PCIE_LAB_PATCH="$ROOT/$Q/quiet-boot.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
 fi
-S=$(mktemp); sed "s/@SECONDS@/$DESK/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
+S=$(mktemp); sed -e "s/@SECONDS@/$DESK/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/$VOL/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
 echo "GPU desktop: $MIN minutes; the desktop appears about 2.5 minutes after the M1 reboots"
 env "${QUIET[@]}" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
 rm -rf "$S" ${QD:+"$QD"}
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic' | cut -c1-260 | tail -40
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic\|PDSpeakers:\|PDTouchBar:' | cut -c1-260 | tail -40
