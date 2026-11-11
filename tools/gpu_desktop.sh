@@ -20,8 +20,9 @@ X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
 # output and 1 MiB of input per terminal). The desktop passes each terminal the session's
 # remaining time, which the RAM root's older terminal refuses.
-# build-004 adds the xterm emulation (full-screen programs, scrollback, TERM=xterm-256color).
-TERM_BIN=runs/m1-desktop-010/terminal-application-build-004/target/aarch64-apple-darwin/release/chonk-terminal-darwin
+# build-004 added the xterm emulation (full-screen programs, scrollback, TERM=xterm-256color),
+# build-005 selection by dragging and copy/paste.
+TERM_BIN=runs/m1-desktop-010/terminal-application-build-005/target/aarch64-apple-darwin/release/chonk-terminal-darwin
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for that TERM; the RAM root has none.

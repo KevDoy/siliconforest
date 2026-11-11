@@ -13,6 +13,9 @@ pub struct Input {
     pub written: usize,
     /// The program's cursor-key mode (DECCKM), kept current by the session loop.
     pub application_cursor: bool,
+    /// Copy / paste key presses not yet acted on by the session loop.
+    pub copy_requested: bool,
+    pub paste_requested: bool,
 }
 impl Input {
     pub fn new() -> Self {
@@ -23,6 +26,8 @@ impl Input {
             accepted: 0,
             written: 0,
             application_cursor: false,
+            copy_requested: false,
+            paste_requested: false,
         }
     }
     pub fn enter(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
@@ -76,6 +81,14 @@ impl Input {
         match self.keys.press(key, down, self.application_cursor)? {
             KeyAction::None => Ok((None, false)),
             KeyAction::ScrollPages(pages) => Ok((Some(pages), false)),
+            KeyAction::Copy => {
+                self.copy_requested = true;
+                Ok((None, false))
+            }
+            KeyAction::Paste => {
+                self.paste_requested = true;
+                Ok((None, false))
+            }
             KeyAction::Bytes(bytes) => {
                 self.send(&bytes)?;
                 Ok((None, true))

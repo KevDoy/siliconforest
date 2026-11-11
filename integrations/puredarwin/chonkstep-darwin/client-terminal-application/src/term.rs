@@ -89,11 +89,14 @@ pub struct Term {
     pub rows: usize,
     /// The start of a sequence cut off at the end of the last chunk (see `feed`).
     carry: Vec<u8>,
+    /// The highlighted text: from (col, row) up to and including (col, row),
+    /// in view cells, in reading order.
+    selection: Option<((usize, usize), (usize, usize))>,
 }
 impl Term {
     pub fn new(cols: usize, rows: usize) -> Result<Self, &'static str> {
         let (c, r) = Self::bounded(cols, rows)?;
-        Ok(Self { parser: vt100::Parser::new_with_callbacks(r, c, SCROLLBACK_LINES, Reports::default()), cols, rows, carry: Vec::new() })
+        Ok(Self { parser: vt100::Parser::new_with_callbacks(r, c, SCROLLBACK_LINES, Reports::default()), cols, rows, carry: Vec::new(), selection: None })
     }
     fn bounded(cols: usize, rows: usize) -> Result<(NonZeroU16, NonZeroU16), &'static str> {
         if !(MIN_COLS..=MAX_COLS).contains(&cols) || !(MIN_ROWS..=MAX_ROWS).contains(&rows) {
@@ -108,6 +111,10 @@ impl Term {
     /// screen-size probe does). Those two exact three-byte sequences are
     /// rewritten to the ESC form here, across chunk boundaries too.
     pub fn feed(&mut self, bytes: &[u8]) {
+        // The highlight marks cells, not text: new output would leave it on other words.
+        if !bytes.is_empty() {
+            self.selection = None;
+        }
         let mut data = std::mem::take(&mut self.carry);
         data.extend_from_slice(bytes);
         let mut out = Vec::with_capacity(data.len());
@@ -150,6 +157,7 @@ impl Term {
     pub fn resize(&mut self, cols: usize, rows: usize) -> Result<(), &'static str> {
         let (c, r) = Self::bounded(cols, rows)?;
         if (cols, rows) != (self.cols, self.rows) {
+            self.selection = None;
             self.parser.screen_mut().set_size(r, c);
             (self.cols, self.rows) = (cols, rows);
         }
@@ -178,6 +186,7 @@ impl Term {
     /// Move the view by `lines` (positive: back into history). Returns
     /// whether the view moved. The alternate screen has no history.
     pub fn scroll_view(&mut self, lines: isize) -> bool {
+        self.selection = None;
         let now = self.scrollback();
         let wanted = (now as isize + lines).max(0) as usize;
         self.parser.screen_mut().set_scrollback(wanted);
@@ -187,6 +196,43 @@ impl Term {
         let moved = self.scrollback() != 0;
         self.parser.screen_mut().set_scrollback(0);
         moved
+    }
+    /// Highlight from one view cell to another (either order), as a stream
+    /// of text: whole lines in between. `None` removes the highlight.
+    /// Returns whether anything changed.
+    pub fn select(&mut self, range: Option<((usize, usize), (usize, usize))>) -> bool {
+        let clamp = |(col, row): (usize, usize)| (col.min(self.cols - 1), row.min(self.rows - 1));
+        let range = range.map(|(a, b)| {
+            let (a, b) = (clamp(a), clamp(b));
+            if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) }
+        });
+        let changed = range != self.selection;
+        self.selection = range;
+        changed
+    }
+    fn selected(&self, col: usize, row: usize) -> bool {
+        self.selection.is_some_and(|(from, to)| (from.1, from.0) <= (row, col) && (row, col) <= (to.1, to.0))
+    }
+    /// The highlighted text: trailing blanks of each line dropped, lines joined by newlines.
+    pub fn selected_text(&self) -> Option<String> {
+        let (from, to) = self.selection?;
+        let mut lines = Vec::new();
+        for row in from.1..=to.1 {
+            let first = if row == from.1 { from.0 } else { 0 };
+            let last = if row == to.1 { to.0 } else { self.cols - 1 };
+            let mut line = String::new();
+            for col in first..=last {
+                if let Some(cell) = self.screen().cell(row as u16, col as u16) {
+                    if cell.is_wide_continuation() {
+                        continue;
+                    }
+                    let text = cell.contents();
+                    line.push_str(if text.is_empty() { " " } else { text });
+                }
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        Some(lines.join("\n"))
     }
     /// Cursor (column, row) on the live screen, if it is to be drawn: not
     /// hidden by the program and the view is not scrolled back.
@@ -217,6 +263,10 @@ impl Term {
         }
         if cell.dim() {
             fg = fg.map(|v| (u16::from(v) * 2 / 3) as u8);
+        }
+        // Selected text is shown with its colours exchanged.
+        if self.selected(col, row) {
+            std::mem::swap(&mut fg, &mut bg);
         }
         Cell {
             c: if cell.is_wide_continuation() { ' ' } else { cell.contents().chars().next().unwrap_or(' ') },
@@ -366,5 +416,25 @@ mod tests {
         t.feed(b"\x1b[999;999H\x1b[6n");
         assert_eq!(t.take_replies(), b"\x1b[20;60R");
         assert!(t.resize(10, 20).is_err());
+    }
+
+    #[test]
+    fn selection_is_a_stream_of_text_shown_inverted_and_dropped_by_output() {
+        let mut t = term();
+        t.feed(b"alpha beta\r\ngamma\r\ndelta epsilon");
+        // Backwards drag: from the "ep" of the third line up to the "b" of the first.
+        assert!(t.select(Some(((7, 2), (6, 0)))));
+        assert_eq!(t.selected_text().unwrap(), "beta\ngamma\ndelta ep");
+        assert_eq!(t.cell(6, 0).bg, DEFAULT_FG);
+        assert_eq!(t.cell(5, 0).bg, DEFAULT_BG);
+        assert_eq!(t.cell(39, 1).bg, DEFAULT_FG);
+        assert_eq!(t.cell(8, 2).bg, DEFAULT_BG);
+        // One word on one line; cells outside the grid are clamped.
+        t.select(Some(((0, 1), (99, 1))));
+        assert_eq!(t.selected_text().unwrap(), "gamma");
+        assert!(!t.select(Some(((0, 1), (99, 1)))));
+        t.feed(b"!");
+        assert_eq!(t.selected_text(), None);
+        assert_eq!(t.cell(0, 1).bg, DEFAULT_BG);
     }
 }

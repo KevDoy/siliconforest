@@ -1,5 +1,6 @@
 //! Owned Darwin desktop terminal application; real /bin/sh PTY and Wayland window.
 mod term;
+mod clipboard;
 #[cfg(test)]
 mod host_wayland_tests;
 mod input;
@@ -28,8 +29,9 @@ use std::{
 use wayland_client::{
     delegate_noop,
     protocol::{
-        wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat,
-        wl_shm, wl_shm_pool, wl_surface,
+        wl_buffer, wl_callback, wl_compositor, wl_data_device, wl_data_device_manager,
+        wl_data_offer, wl_data_source, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
+        wl_shm_pool, wl_surface,
     },
     Connection, Dispatch, QueueHandle, WEnum,
 };
@@ -77,6 +79,24 @@ struct State {
     wheel: f64,
     /// Bytes were typed since the last look: the view returns to the live screen.
     typed: bool,
+    /// The clipboard: the manager, this seat's device, the offers announced
+    /// (with their types), which of them is the current selection, and our
+    /// own source with the text it offers.
+    data_manager: Option<wl_data_device_manager::WlDataDeviceManager>,
+    data_device: Option<wl_data_device::WlDataDevice>,
+    offers: Vec<(wl_data_offer::WlDataOffer, Vec<String>)>,
+    clipboard: Option<wl_data_offer::WlDataOffer>,
+    source: Option<wl_data_source::WlDataSource>,
+    clip_text: String,
+    outgoing: Vec<clipboard::Outgoing>,
+    /// Serial of the latest key or button press (what `set_selection` wants).
+    last_serial: u32,
+    /// Selecting with the pointer: where it is (view cell), where the drag
+    /// began, the highlight to apply, and whether a drag just ended.
+    pointer_cell: (usize, usize),
+    drag: Option<(usize, usize)>,
+    select: Option<Option<((usize, usize), (usize, usize))>>,
+    select_done: bool,
     own: Option<wl_surface::WlSurface>,
     registry_done: bool,
     closed: bool,
@@ -103,6 +123,18 @@ impl State {
             scroll_pages: 0,
             wheel: 0.0,
             typed: false,
+            data_manager: None,
+            data_device: None,
+            offers: Vec::new(),
+            clipboard: None,
+            source: None,
+            clip_text: String::new(),
+            outgoing: Vec::new(),
+            last_serial: 0,
+            pointer_cell: (0, 0),
+            drag: None,
+            select: None,
+            select_done: false,
             own: None,
             registry_done: false,
             closed: false,
@@ -149,6 +181,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "wl_shm" => s.shm = Some(r.bind(name, 1, q, ())),
                 "xdg_wm_base" => s.shell = Some(r.bind(name, version.min(6), q, ())),
                 "zxdg_decoration_manager_v1" => s.decoration = Some(r.bind(name, 1, q, ())),
+                // Optional: without it there is selection but no copy or paste.
+                "wl_data_device_manager" if s.data_manager.is_none() => {
+                    s.data_manager = Some(r.bind(name, version.min(3), q, ()));
+                }
                 "wl_seat" => {
                     if s.seat.is_some() || version < 5 {
                         s.reject("ambiguous/old seat")
@@ -178,7 +214,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
             } else if s.keyboard.is_some() {
                 s.reject("keyboard capability removed");
             }
-            // The pointer is used for the wheel only (scrollback).
+            // The pointer: the wheel (scrollback) and selecting text.
             if matches!(capabilities,WEnum::Value(c) if c.contains(wl_seat::Capability::Pointer)) {
                 if s.pointer.is_none() {
                     s.pointer = Some(p.get_pointer(q, ()));
@@ -198,9 +234,46 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_pointer::Event::Axis { axis: WEnum::Value(wl_pointer::Axis::VerticalScroll), value, .. } = e {
-            // Bounded: a flood of axis events cannot build an unbounded backlog.
-            s.wheel = (s.wheel + value).clamp(-100_000.0, 100_000.0);
+        let cell = |x: f64, y: f64| {
+            let at = |v: f64, size: usize| ((v.max(0.0) as usize).saturating_sub(render::PAD)) / size;
+            (at(x, render::CW), at(y, render::CH))
+        };
+        match e {
+            wl_pointer::Event::Axis { axis: WEnum::Value(wl_pointer::Axis::VerticalScroll), value, .. } => {
+                // Bounded: a flood of axis events cannot build an unbounded backlog.
+                s.wheel = (s.wheel + value).clamp(-100_000.0, 100_000.0);
+            }
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => s.pointer_cell = cell(surface_x, surface_y),
+            wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
+                s.pointer_cell = cell(surface_x, surface_y);
+                // Dragging with the button held: the highlight follows.
+                if let Some(anchor) = s.drag {
+                    s.select = Some(Some((anchor, s.pointer_cell)));
+                }
+            }
+            wl_pointer::Event::Button { serial, button: 0x110, state, .. } => match state {
+                WEnum::Value(wl_pointer::ButtonState::Pressed) => {
+                    s.last_serial = serial;
+                    // A press alone takes the highlight away; a drag makes a new one.
+                    s.drag = Some(s.pointer_cell);
+                    s.select = Some(None);
+                }
+                _ => {
+                    if let Some(anchor) = s.drag.take() {
+                        if anchor != s.pointer_cell {
+                            s.select = Some(Some((anchor, s.pointer_cell)));
+                            s.select_done = true;
+                        }
+                    }
+                }
+            },
+            wl_pointer::Event::Leave { .. } => {
+                // The release may never arrive here: keep what is highlighted.
+                if s.drag.take().is_some() {
+                    s.select_done = true;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -263,9 +336,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                     .keys
                     .modifiers(mods_depressed, mods_latched, mods_locked, group);
             }
-            wl_keyboard::Event::Key { key, state, .. } => {
+            wl_keyboard::Event::Key { key, state, serial, .. } => {
                 let down = match state {
-                    WEnum::Value(wl_keyboard::KeyState::Pressed) => true,
+                    WEnum::Value(wl_keyboard::KeyState::Pressed) => {
+                        s.last_serial = serial;
+                        true
+                    }
                     WEnum::Value(wl_keyboard::KeyState::Released) => false,
                     _ => {
                         s.reject("invalid key state");
@@ -281,6 +357,91 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                 }
             }
             _ => (),
+        }
+    }
+}
+delegate_noop!(State: ignore wl_data_device_manager::WlDataDeviceManager);
+impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
+    fn event(
+        s: &mut Self,
+        _: &wl_data_device::WlDataDevice,
+        e: wl_data_device::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match e {
+            wl_data_device::Event::DataOffer { id } => {
+                // Bounded: stale offers are destroyed when a selection arrives.
+                if s.offers.len() >= 16 {
+                    let (old, _) = s.offers.remove(0);
+                    if s.clipboard.as_ref() != Some(&old) {
+                        old.destroy();
+                    }
+                }
+                s.offers.push((id, Vec::new()));
+            }
+            wl_data_device::Event::Selection { id } => {
+                // Every other offer is finished with: this one (or none) is the clipboard.
+                for (offer, _) in &s.offers {
+                    if Some(offer) != id.as_ref() {
+                        offer.destroy();
+                    }
+                }
+                s.offers.retain(|(offer, _)| Some(offer) == id.as_ref());
+                s.clipboard = id;
+            }
+            _ => {}
+        }
+    }
+    wayland_client::event_created_child!(State, wl_data_device::WlDataDevice, [
+        wl_data_device::EVT_DATA_OFFER_OPCODE => (wl_data_offer::WlDataOffer, ()),
+    ]);
+}
+impl Dispatch<wl_data_offer::WlDataOffer, ()> for State {
+    fn event(
+        s: &mut Self,
+        offer: &wl_data_offer::WlDataOffer,
+        e: wl_data_offer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_data_offer::Event::Offer { mime_type } = e {
+            if let Some((_, types)) = s.offers.iter_mut().find(|(o, _)| o == offer) {
+                if types.len() < 64 && mime_type.len() <= 128 {
+                    types.push(mime_type);
+                }
+            }
+        }
+    }
+}
+impl Dispatch<wl_data_source::WlDataSource, ()> for State {
+    fn event(
+        s: &mut Self,
+        source: &wl_data_source::WlDataSource,
+        e: wl_data_source::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match e {
+            // Someone pastes what was copied here.
+            wl_data_source::Event::Send { mime_type, fd } => {
+                if s.source.as_ref() == Some(source) && clipboard::MIMES.contains(&mime_type.as_str()) && s.outgoing.len() < 8 {
+                    if let Ok(out) = clipboard::Outgoing::new(fd, s.clip_text.clone().into_bytes()) {
+                        s.outgoing.push(out);
+                    }
+                }
+            }
+            // Another client copied something: this source is over.
+            wl_data_source::Event::Cancelled => {
+                source.destroy();
+                if s.source.as_ref() == Some(source) {
+                    s.source = None;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -670,6 +831,10 @@ fn session(
     let mut pixels: Vec<u8> = Vec::new();
     // The live state file (for unattended checks): what was last written, and when.
     let mut live = (String::new(), Instant::now() - Duration::from_secs(1));
+    // Clipboard: the text last selected, a paste on its way in, and counts.
+    let mut selected: Option<String> = None;
+    let mut incoming: Option<clipboard::Incoming> = None;
+    let (mut copies, mut pastes, mut pasted_bytes) = (0u32, 0u32, 0usize);
     let started = Instant::now();
     let mut received = 0;
     let mut checked_child_recorded = false;
@@ -764,9 +929,74 @@ fn session(
                     s.dirty = true;
                 }
             }
+            // Selecting with the pointer. The text is taken when the drag
+            // ends, so it stays copyable after output moved the highlight away.
+            if let Some(range) = s.select.take() {
+                if grid.select(range) {
+                    s.dirty = true;
+                }
+            }
+            if std::mem::take(&mut s.select_done) {
+                if let Some(text) = grid.selected_text().filter(|t| !t.is_empty()) {
+                    selected = Some(text);
+                }
+            }
+            if s.data_device.is_none() {
+                if let (Some(manager), Some(seat)) = (&s.data_manager, &s.seat) {
+                    s.data_device = Some(manager.get_data_device(seat, &q, ()));
+                }
+            }
+            // Copy: offer the selected text as the seat's selection.
+            if std::mem::take(&mut s.input.copy_requested) {
+                if let (Some(text), Some(manager), Some(device)) = (&selected, &s.data_manager, &s.data_device) {
+                    let source = manager.create_data_source(&q, ());
+                    for mime in clipboard::MIMES {
+                        source.offer(mime.to_string());
+                    }
+                    device.set_selection(Some(&source), s.last_serial);
+                    if let Some(old) = s.source.replace(source) {
+                        old.destroy();
+                    }
+                    s.clip_text = text.clone();
+                    copies += 1;
+                }
+            }
+            // Paste: ask the selection's owner for text; it arrives through a pipe.
+            if std::mem::take(&mut s.input.paste_requested) && incoming.is_none() {
+                let offer = s.clipboard.as_ref().and_then(|c| s.offers.iter().find(|(o, _)| o == c));
+                if let Some((offer, types)) = offer {
+                    if let Some(mime) = clipboard::pick(types) {
+                        let pipe = clipboard::Incoming::new()?;
+                        if let Some(write) = pipe.write_end() {
+                            offer.receive(mime.to_string(), write.as_fd());
+                        }
+                        incoming = Some(pipe);
+                    }
+                }
+            }
+            if let Some(text) = incoming.as_mut().and_then(|pipe| pipe.pump()) {
+                incoming = None;
+                let bytes = clipboard::paste_bytes(&text, grid.bracketed_paste());
+                // A paste that does not fit the input quota is not typed in part.
+                if !text.is_empty() && s.input.accepted + bytes.len() <= protocol::MAX_TX {
+                    s.input.send(&bytes)?;
+                    pastes += 1;
+                    pasted_bytes += text.len().min(clipboard::MAX_PASTE);
+                    if grid.scroll_to_bottom() {
+                        s.dirty = true;
+                    }
+                }
+            }
+            s.outgoing.retain_mut(|out| !out.pump());
             // The state file: what the screen shows, for checks from outside.
             if live.1.elapsed() >= Duration::from_millis(200) {
-                let now = format!("{}\n{}\n", grid.state_line(), grid.text());
+                let now = format!(
+                    "{} selected_bytes={} copies={copies} pastes={pastes} pasted_bytes={pasted_bytes} clipboard={}\n{}\n",
+                    grid.state_line(),
+                    selected.as_ref().map_or(0, |t| t.len()),
+                    if s.data_device.is_some() { "available" } else { "absent" },
+                    grid.text()
+                );
                 if now != live.0 {
                     let tmp = dir.join("term-live.txt.tmp");
                     std::fs::write(&tmp, &now)?;
@@ -825,6 +1055,13 @@ fn session(
             }
             if let Some(guard) = queue.prepare_read() {
                 let writable = flush(&conn)?;
+                // The paste request (and the pipe end in it) has left: only
+                // the selection's owner holds the write end now.
+                if !writable {
+                    if let Some(pipe) = incoming.as_mut() {
+                        pipe.sent();
+                    }
+                }
                 let mut fds = [
                     libc::pollfd {
                         fd: conn.as_fd().as_raw_fd(),
@@ -874,7 +1111,7 @@ fn session(
     } else {
         "deadline"
     };
-    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"alternate_screen":grid.alternate_screen(),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
+    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"clipboard_copies":copies,"clipboard_pastes":pastes,"clipboard_pasted_bytes":pasted_bytes,"alternate_screen":grid.alternate_screen(),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
     // Preserve a protocol failure even if writing the final grid also fails.
     let grid_result = (|| -> Result<()> {
         let mut final_grid = log(dir, "grid-final.txt")?;

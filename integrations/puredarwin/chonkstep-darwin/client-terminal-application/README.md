@@ -105,11 +105,31 @@ the cargo registry cache like the other dependencies; no platform code in any of
   bracketed_paste= cursor= cursor_hidden= scrollback_offset= scrollback_lines= unsupported=`
   line, then the text on screen. The compositor's autopilot reads it.
 
-Open: copy/paste. The compositor does not advertise `wl_data_device_manager`, so there
-is no selection to paste from; the emulator tracks bracketed-paste mode (reported in
-TERMSTATE) but nothing pastes. There is no mouse selection and no mouse reporting to
-programs. Blink and italic are parsed but not drawn differently.
+Open: no mouse reporting to programs. Blink and italic are parsed but not drawn differently.
 
-Host tests (`cargo test --offline --locked`, 47): emulator unit tests, and
+Host tests (`cargo test --offline --locked`, 51): emulator unit tests, and
 `host_full_screen_programs_draw_and_exit_cleanly`, which runs the host's real `less`
 and `vim` on a PTY through the emulator.
+
+## Selection and clipboard (10 November, build-005)
+
+* Select: press the left button on a character and drag; the text from the press to the
+  pointer is highlighted (colours exchanged), whole lines in between. The text is taken
+  when the button is let go, so it stays copyable after new output has moved the
+  highlight away (output, scrolling and resizing remove the highlight). A click without
+  a drag removes the highlight.
+* Copy: Control+Shift+C, Command+C or Control+Insert offers the selected text as the
+  seat's selection (`wl_data_device.set_selection`; types `text/plain;charset=utf-8`,
+  `UTF8_STRING`, `text/plain`, `TEXT`, `STRING`). Control+C alone is still the interrupt.
+* Paste: Control+Shift+V, Command+V or Shift+Insert reads the current selection through a
+  pipe (non-blocking, at most 256 KiB, two seconds) and types it. Control characters other
+  than tab and line ends are dropped; line ends become carriage returns; when the program
+  has bracketed paste on (DECSET 2004) the text goes between `ESC [ 200 ~` and
+  `ESC [ 201 ~`. A paste that does not fit the remaining input quota is not typed.
+* These are the bindings of Linux terminals; Control+Insert / Shift+Insert are what
+  Chonkstep's "universal copy/paste" (Super+C / Super+V) sends on Linux.
+* `wl_data_device_manager` is optional: without it (an older compositor build) the
+  terminal still selects but neither copies nor pastes; `term-live.txt` says
+  `clipboard=absent`. Its state line also carries `selected_bytes= copies= pastes=
+  pasted_bytes=`.
+* `src/clipboard.rs` holds the type choice, the paste filter and the two pipe pumps.

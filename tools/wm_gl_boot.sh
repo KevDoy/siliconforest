@@ -29,7 +29,7 @@
 #   WM_GL_ASSEMBLE_ONLY=1       stop after the offline assemble (RAM root staged and checked,
 #                               nothing delivered or booted); prints the free space
 #   WM_GL_DRY_RUN=1             print the staging list only
-#   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 310)
+#   DCP_RUNTIME=<seconds>       guest run time before capture (default 150; bench 180; session 340)
 #   WM_GL_TEMPLATE=<path>       another guest script
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
@@ -49,7 +49,7 @@ case "${WM_GL_STEP:-probe}" in
   bench) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
   dmabuf) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-dmabuf.in; STAGE_BARE=1; STAGE_DMABUF_CLIENT=1; export DCP_RUNTIME=${DCP_RUNTIME:-150} ;;
   wlgpu) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-wlgpu.in; STAGE_BARE=1; STAGE_WL=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
-  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-310} ;;
+  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-340} ;;
   *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
 esac
 TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
@@ -61,8 +61,8 @@ export PATH=$HOME/.nix-profile/bin:$PATH
 T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
 X="$BIN=/usr/bin/chonkstep-darwin-desktop"
 # The terminal built for sessions longer than two minutes, over the root's own.
-# (build-004: xterm emulation, scrollback, TERM=xterm-256color.)
-TERM_BIN=${WM_GL_TERMINAL:-$ROOT/runs/m1-desktop-010/terminal-application-build-004/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
+# (build-005: xterm emulation, scrollback, TERM=xterm-256color, selection and clipboard.)
+TERM_BIN=${WM_GL_TERMINAL:-$ROOT/runs/m1-desktop-010/terminal-application-build-005/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
 [ -x "$TERM_BIN" ] && X="$X;$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for the TERM the terminal sets (the RAM root has none), under both
 # directory spellings ncurses uses (first letter, and its hex code as on Darwin).
@@ -100,4 +100,4 @@ if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
   exit 0
 fi
 DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|WMEXT\|WMDMABUF\|DMACLIENT\|AGXWL\|agx-wl-demo:\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|WMPOWER\|WMEXT\|WMDMABUF\|DMACLIENT\|AGXWL\|agx-wl-demo:\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

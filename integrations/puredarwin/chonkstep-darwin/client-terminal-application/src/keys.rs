@@ -56,6 +56,18 @@ impl Keys {
         let sym = state.key_get_one_sym(code).raw();
         let held = |name: &str| state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE);
         let (shift, alt, control) = (held(xkb::MOD_NAME_SHIFT), held(xkb::MOD_NAME_ALT), held(xkb::MOD_NAME_CTRL));
+        let logo = held(xkb::MOD_NAME_LOGO);
+        // Copy and paste belong to the terminal: Control+Shift+C / V, as
+        // Linux terminals have it; Command+C / V; and Control+Insert /
+        // Shift+Insert, which is what Chonkstep's "universal copy/paste"
+        // (Super+C / Super+V) sends on Linux.
+        match sym {
+            0x43 | 0x63 if (control && shift && !alt) || (logo && !control && !alt) => return Ok(KeyAction::Copy),
+            0x56 | 0x76 if (control && shift && !alt) || (logo && !control && !alt) => return Ok(KeyAction::Paste),
+            0xff63 if control && !shift && !alt => return Ok(KeyAction::Copy),
+            0xff63 if shift && !control && !alt => return Ok(KeyAction::Paste),
+            _ => {}
+        }
         // The scrollback keys belong to the terminal, not to the program.
         match sym {
             0xff55 if shift => return Ok(KeyAction::ScrollPages(1)),
@@ -119,6 +131,10 @@ pub enum KeyAction {
     Bytes(Vec<u8>),
     /// Move the scrollback view by this many pages (positive: back).
     ScrollPages(i32),
+    /// Put the selected text on the clipboard.
+    Copy,
+    /// Type the clipboard's text.
+    Paste,
 }
 #[cfg(test)]
 mod tests {
@@ -186,6 +202,18 @@ mod tests {
         k.modifiers(1, 0, 0, 0);
         assert_eq!(k.press(104, true, false).unwrap(), KeyAction::ScrollPages(1));
         assert_eq!(k.press(109, true, true).unwrap(), KeyAction::ScrollPages(-1));
+        // Copy and paste: Control+Shift+C / V, Command+C / V, Control+Insert / Shift+Insert.
+        // (evdev: c 46, v 47, Insert 110; masks: Shift 1, Control 4, Logo 64.)
+        k.modifiers(5, 0, 0, 0);
+        assert_eq!((k.press(46, true, false).unwrap(), k.press(47, true, false).unwrap()), (KeyAction::Copy, KeyAction::Paste));
+        k.modifiers(64, 0, 0, 0);
+        assert_eq!((k.press(46, true, false).unwrap(), k.press(47, true, false).unwrap()), (KeyAction::Copy, KeyAction::Paste));
+        k.modifiers(4, 0, 0, 0);
+        assert_eq!(k.press(110, true, false).unwrap(), KeyAction::Copy);
+        // Control+C alone is still the interrupt character, Control+V the literal-next one.
+        assert_eq!((seq(&k, 46, false), seq(&k, 47, false)), ("\x03".into(), "\x16".into()));
+        k.modifiers(1, 0, 0, 0);
+        assert_eq!(k.press(110, true, false).unwrap(), KeyAction::Paste);
         // Alt+x is ESC x; a bare modifier key is nothing.
         k.modifiers(8, 0, 0, 0);
         assert_eq!(seq(&k, 45, false), "\x1bx");
