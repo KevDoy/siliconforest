@@ -10,17 +10,29 @@
  * reference this file is checked against on the host (../model-test).
  *
  * This file is plain C without floating point and without any kernel interface, so the
- * same object runs in the kext and in the host tests. Where the arithmetic cannot be the
- * reference's (single and double precision floats) it errs to the hot side:
- *   - the ambient temperature is PD_SPK_MODEL_BIAS_MC higher,
- *   - products are rounded up,
+ * same object runs in the kext and in the host tests. The daemon works in periods of 4096
+ * frames and this code is called with any number of frames, so it keeps the daemon's
+ * period grid (a count of all frames ever played) and is built to be at least as hot and
+ * at least as limiting as the daemon at every one of its period ends, whatever the calls:
+ *   - the ambient temperature is PD_SPK_MODEL_BIAS_MC higher, products are rounded up;
+ *   - the daemon cools for a pause only when its period took more than four periods of
+ *     time, and then before the whole period's frames. So the heat of the frames since
+ *     the last period boundary is kept apart and not cooled, and a pause cools the rest
+ *     only once more than three periods of pause have gathered since that boundary;
+ *   - the daemon runs a whole period with the coefficients of the sample rate in force at
+ *     its end, so a change of rate inside a period runs that period's frames again;
+ *     and the pause that cools is counted in periods of the slower rate;
  *   - while the speakers do not play, the coil cools towards the magnet temperature of
- *     the start of each block instead of the falling one,
+ *     the start of each 1024-sample block instead of the falling one;
+ *   - the hysteresis may fall no lower than the highest temperature of the last 4096
+ *     frames plus t_hysteresis (the daemon looks once per period), and not at all
+ *     during a pause;
+ *   - the mean power is judged over every run of four 1024-frame blocks on that grid,
+ *     which contains each of the daemon's periods, and a pause does not restart it;
  *   - the gain limit is rounded to the next half dB down, and any reduction at all costs
- *     at least one step (the reference ignores reductions under 0.01 dB and rounds to
- *     the nearest step),
- *   - the hysteresis is evaluated at every call, the reference's once per 4096 frames.
- * The caller serialises all calls.
+ *     at least one step (the daemon ignores reductions under 0.01 dB and rounds to the
+ *     nearest step).
+ * ../model-test compares the two on the host. The caller serialises all calls.
  */
 #ifndef _PD_SPEAKER_MODEL_H
 #define _PD_SPEAKER_MODEL_H
@@ -40,22 +52,37 @@ enum {
 	kPDSpkModelNegativePower,       /* mean power of a window below -0.01 W: the sense data is wrong */
 };
 
+#define PD_SPK_MODEL_BLOCK      1024    /* frames; four blocks are one period of the daemon */
+
 struct pd_spk_model_speaker {
-	int64_t t_coil, t_magnet;       /* degrees in Q23.40 */
+	/*
+	 * Degrees in Q23.40. The temperature is base + heat: `base` is the state at the last
+	 * period boundary carried on without power, `heat` what the frames since then added.
+	 */
+	int64_t base_coil, base_magnet, heat_coil, heat_magnet;
+	int64_t start_coil, start_magnet;       /* the base without the frames since the boundary */
 	int64_t t_coil_hyst, t_magnet_hyst;
-	int64_t power_sum;              /* sum of voltage * current sample products of the open window */
-	int32_t power_mw;               /* mean power of the last complete window, milliwatts */
+	int64_t max_coil[4], max_magnet[4];     /* highest temperature in each of the last four blocks */
+	int64_t cur_max_coil, cur_max_magnet;   /* and in the open one */
+	int64_t sum[4], cur_sum;                /* sums of voltage * current sample products, likewise */
+	int32_t power_mw;                       /* mean power of the last four complete blocks, milliwatts */
 };
 
 struct pd_spk_model {
 	uint32_t rate;
 	int64_t  alpha_coil, alpha_magnet;      /* per-sample filter coefficients, Q0.40 */
 	int64_t  block_coil, block_magnet;      /* (1 - alpha)^1024, Q0.40, rounded up: idle cooling */
-	uint64_t idle_ns;                       /* idle time not yet applied */
-	uint32_t window_fill;                   /* frames in the open power window */
+	uint32_t frame_in_block;                /* frames in the open block */
+	uint32_t block_in_period;               /* complete blocks since the last period boundary, 0..3 */
+	uint32_t blocks;                        /* complete blocks so far, saturating at 4 */
+	uint64_t pause_ns;                      /* pause gathered since the last period boundary */
+	uint64_t idle_ns;                       /* of that, time that is to cool and has not yet */
+	int      cooling;                       /* the pause since the boundary is long enough to cool */
 	int      fault;                         /* kPDSpkModel..., sticky */
 	unsigned fault_speaker;
 	struct pd_spk_model_speaker spk[PD_SPK_MODEL_SPEAKERS];
+	/* the sample products of the frames since the last period boundary, for a change of rate */
+	int32_t  product[PD_SPK_MODEL_WINDOW][PD_SPK_MODEL_SPEAKERS];
 };
 
 #ifdef __cplusplus

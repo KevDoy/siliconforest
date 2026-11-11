@@ -80,58 +80,31 @@ block_factor(int64_t a)
 	return f;
 }
 
-int
-pd_spk_model_set_rate(struct pd_spk_model *m, uint32_t rate)
+static void
+set_coefficients(struct pd_spk_model *m, uint32_t rate)
 {
-	if (rate != 44100 && rate != 48000)
-		return -1;
 	m->rate = rate;
 	m->alpha_coil = alpha(TAU_COIL_MS, rate);
 	m->alpha_magnet = alpha(TAU_MAGNET_MS, rate);
 	m->block_coil = block_factor(m->alpha_coil);
 	m->block_magnet = block_factor(m->alpha_magnet);
-	return 0;
 }
 
-int
-pd_spk_model_init(struct pd_spk_model *m, uint32_t rate, uint32_t amp_gain_reg)
+static int64_t
+coil_of(const struct pd_spk_model_speaker *s)
 {
-	const int64_t amb = DEG(T_AMBIENT_MC + PD_SPK_MODEL_BIAS_MC);
-	/* "warm but not warm enough to limit" */
-	const int64_t coil = DEG(T_LIMIT_MC - T_WINDOW_MC - 1000 + PD_SPK_MODEL_BIAS_MC);
-
-	if (amp_gain_reg != AMP_GAIN_REG || pd_spk_model_set_rate(m, rate) != 0)
-		return -1;
-	m->idle_ns = 0;
-	m->window_fill = 0;
-	m->fault = kPDSpkModelOk;
-	m->fault_speaker = 0;
-	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
-		struct pd_spk_model_speaker *s = &m->spk[i];
-		s->t_coil = coil;
-		/* t_ambient + (t_coil - t_ambient) * tr_magnet / (tr_magnet + tr_coil), rounded up */
-		s->t_magnet = amb + ((coil - amb) * TR_MAGNET_MK_W + (TR_MAGNET_MK_W + TR_COIL_MK_W - 1)) /
-		    (TR_MAGNET_MK_W + TR_COIL_MK_W);
-		s->t_coil_hyst = 0;
-		s->t_magnet_hyst = 0;
-		s->power_sum = 0;
-		s->power_mw = 0;
-	}
-	return 0;
+	return s->base_coil + s->heat_coil;
 }
 
-/* hyst = min(max(hyst, t), t + t_hysteresis) */
+static int64_t
+magnet_of(const struct pd_spk_model_speaker *s)
+{
+	return s->base_magnet + s->heat_magnet;
+}
+
+/* One frame of one speaker with the product p of its two samples. */
 static void
-hysteresis(int64_t *hyst, int64_t t)
-{
-	if (*hyst < t)
-		*hyst = t;
-	if (*hyst > t + DEG(T_HYSTERESIS_MC))
-		*hyst = t + DEG(T_HYSTERESIS_MC);
-}
-
-int
-pd_spk_model_run(struct pd_spk_model *m, const int16_t *sense, unsigned frames)
+step(struct pd_spk_model *m, struct pd_spk_model_speaker *s, int64_t p)
 {
 	/*
 	 * A product of two samples is at most 2^30 and stands for vs_scale * is_scale
@@ -142,48 +115,198 @@ pd_spk_model_run(struct pd_spk_model *m, const int16_t *sense, unsigned frames)
 	const int64_t k_coil = (((int64_t)VS_SCALE_MV * IS_SCALE_MA * TR_COIL_MK_W) << (Q - 30)) / 1000000000;
 	const int64_t k_magnet = (((int64_t)VS_SCALE_MV * IS_SCALE_MA * TR_MAGNET_MK_W) << (Q - 30)) / 1000000000;
 	const int64_t amb = DEG(T_AMBIENT_MC + PD_SPK_MODEL_BIAS_MC);
+
+	/* the two parts of the one linear system: the base without power, the heat without ambient */
+	s->base_coil += mul_up(s->base_magnet - s->base_coil, m->alpha_coil);
+	s->base_magnet += mul_up(amb - s->base_magnet, m->alpha_magnet);
+	s->heat_coil += mul_up(s->heat_magnet + p * (k_coil + (p > 0)) - s->heat_coil, m->alpha_coil);
+	s->heat_magnet += mul_up(p * (k_magnet + (p > 0)) - s->heat_magnet, m->alpha_magnet);
+}
+
+/* Note the temperature after a frame; nonzero when it is beyond the limit. */
+static int
+note(struct pd_spk_model *m, unsigned i)
+{
 	const int64_t too_hot = DEG(T_LIMIT_MC + T_HEADROOM_MC);
+	struct pd_spk_model_speaker *s = &m->spk[i];
+	int64_t coil = coil_of(s), magnet = magnet_of(s);
 
-	if (m->fault != kPDSpkModelOk)
-		return m->fault;
-	m->idle_ns = 0;
-	for (unsigned f = 0; f < frames; f++) {
-		for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
-			struct pd_spk_model_speaker *s = &m->spk[i];
-			int64_t p = (int64_t)sense[PD_SPK_MODEL_CHANNELS * f + 2 * i + 1] * sense[PD_SPK_MODEL_CHANNELS * f + 2 * i];
-			int64_t coil_target = s->t_magnet + p * (k_coil + (p > 0));
-			int64_t magnet_target = amb + p * (k_magnet + (p > 0));
+	if (coil > s->cur_max_coil)
+		s->cur_max_coil = coil;
+	if (magnet > s->cur_max_magnet)
+		s->cur_max_magnet = magnet;
+	if (coil <= too_hot && magnet <= too_hot)
+		return 0;
+	if (m->fault == kPDSpkModelOk) {
+		m->fault = coil > too_hot ? kPDSpkModelCoilTooHot : kPDSpkModelMagnetTooHot;
+		m->fault_speaker = i;
+	}
+	return 1;
+}
 
-			s->t_coil += mul_up(coil_target - s->t_coil, m->alpha_coil);
-			s->t_magnet += mul_up(magnet_target - s->t_magnet, m->alpha_magnet);
-			s->power_sum += p;
-			if (s->t_coil > too_hot || s->t_magnet > too_hot) {
-				m->fault = s->t_coil > too_hot ? kPDSpkModelCoilTooHot : kPDSpkModelMagnetTooHot;
-				m->fault_speaker = i;
-				return m->fault;
-			}
-		}
-		if (++m->window_fill == PD_SPK_MODEL_WINDOW) {
-			m->window_fill = 0;
-			for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
-				struct pd_spk_model_speaker *s = &m->spk[i];
-				/* milliwatts = sum / window * full scale / 2^30; the sum is below 2^43, the product below 2^59 */
-				int64_t scaled = s->power_sum * FULL_SCALE_MW;
+int
+pd_spk_model_set_rate(struct pd_spk_model *m, uint32_t rate)
+{
+	unsigned frames = m->block_in_period * PD_SPK_MODEL_BLOCK + m->frame_in_block;
 
-				s->power_mw = (int32_t)(scaled / ((int64_t)PD_SPK_MODEL_WINDOW << 30));
-				s->power_sum = 0;
-				/* "this really shouldn't happen other than rounding error": below -0.01 W */
-				if (scaled < -((int64_t)PD_SPK_MODEL_WINDOW << 30) * 10) {
-					m->fault = kPDSpkModelNegativePower;
-					m->fault_speaker = i;
-					return m->fault;
-				}
-			}
+	if (rate != 44100 && rate != 48000)
+		return -1;
+	if (rate == m->rate)
+		return 0;
+	set_coefficients(m, rate);
+	/* the frames since the period boundary again, as the daemon will run them: at this rate */
+	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
+		struct pd_spk_model_speaker *s = &m->spk[i];
+
+		s->base_coil = s->start_coil;
+		s->base_magnet = s->start_magnet;
+		s->heat_coil = 0;
+		s->heat_magnet = 0;
+		for (unsigned f = 0; f < frames; f++) {
+			step(m, s, m->product[f][i]);
+			(void)note(m, i);
 		}
 	}
+	return 0;
+}
+
+int
+pd_spk_model_init(struct pd_spk_model *m, uint32_t rate, uint32_t amp_gain_reg)
+{
+	const int64_t amb = DEG(T_AMBIENT_MC + PD_SPK_MODEL_BIAS_MC);
+	/* "warm but not warm enough to limit" */
+	const int64_t coil = DEG(T_LIMIT_MC - T_WINDOW_MC - 1000 + PD_SPK_MODEL_BIAS_MC);
+
+	if (amp_gain_reg != AMP_GAIN_REG || (rate != 44100 && rate != 48000))
+		return -1;
+	set_coefficients(m, rate);
+	m->frame_in_block = 0;
+	m->block_in_period = 0;
+	m->blocks = 0;
+	m->pause_ns = 0;
+	m->idle_ns = 0;
+	m->cooling = 0;
+	m->fault = kPDSpkModelOk;
+	m->fault_speaker = 0;
 	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
-		hysteresis(&m->spk[i].t_coil_hyst, m->spk[i].t_coil);
-		hysteresis(&m->spk[i].t_magnet_hyst, m->spk[i].t_magnet);
+		struct pd_spk_model_speaker *s = &m->spk[i];
+
+		s->base_coil = coil;
+		/* t_ambient + (t_coil - t_ambient) * tr_magnet / (tr_magnet + tr_coil), rounded up */
+		s->base_magnet = amb + ((coil - amb) * TR_MAGNET_MK_W + (TR_MAGNET_MK_W + TR_COIL_MK_W - 1)) /
+		    (TR_MAGNET_MK_W + TR_COIL_MK_W);
+		s->start_coil = s->base_coil;
+		s->start_magnet = s->base_magnet;
+		s->heat_coil = 0;
+		s->heat_magnet = 0;
+		s->t_coil_hyst = 0;
+		s->t_magnet_hyst = 0;
+		for (unsigned b = 0; b < 4; b++) {
+			s->max_coil[b] = s->base_coil;
+			s->max_magnet[b] = s->base_magnet;
+			s->sum[b] = 0;
+		}
+		s->cur_max_coil = s->base_coil;
+		s->cur_max_magnet = s->base_magnet;
+		s->cur_sum = 0;
+		s->power_mw = 0;
+	}
+	return 0;
+}
+
+/* hyst = min(max(hyst, t), highest t of the last four blocks and the open one + t_hysteresis) */
+static void
+hysteresis(int64_t *hyst, int64_t t, const int64_t max[4], int64_t cur_max)
+{
+	int64_t top = cur_max;
+
+	for (unsigned b = 0; b < 4; b++)
+		if (max[b] > top)
+			top = max[b];
+	if (*hyst < t)
+		*hyst = t;
+	if (*hyst > top + DEG(T_HYSTERESIS_MC))
+		*hyst = top + DEG(T_HYSTERESIS_MC);
+}
+
+/* A block of the grid is complete: its sums and maxima, the power check, the period boundary. */
+static int
+end_block(struct pd_spk_model *m)
+{
+	unsigned at = m->block_in_period;
+
+	m->frame_in_block = 0;
+	m->block_in_period = (at + 1) % 4;
+	if (m->blocks < 4)
+		m->blocks++;
+	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
+		struct pd_spk_model_speaker *s = &m->spk[i];
+		int64_t scaled;
+
+		s->sum[at] = s->cur_sum;
+		s->max_coil[at] = s->cur_max_coil;
+		s->max_magnet[at] = s->cur_max_magnet;
+		s->cur_sum = 0;
+		s->cur_max_coil = coil_of(s);
+		s->cur_max_magnet = magnet_of(s);
+		if (m->blocks < 4)
+			continue;
+		/* milliwatts = sum / window * full scale / 2^30; the sum is below 2^43, the product below 2^59 */
+		scaled = (s->sum[0] + s->sum[1] + s->sum[2] + s->sum[3]) * FULL_SCALE_MW;
+		s->power_mw = (int32_t)(scaled / ((int64_t)PD_SPK_MODEL_WINDOW << 30));
+		/* "this really shouldn't happen other than rounding error": below -0.01 W */
+		if (scaled < -((int64_t)PD_SPK_MODEL_WINDOW << 30) * 10 && m->fault == kPDSpkModelOk) {
+			m->fault = kPDSpkModelNegativePower;
+			m->fault_speaker = i;
+		}
+	}
+	if (m->block_in_period == 0) {
+		/* a period of the daemon ends: the heat joins the base, the pause count starts again */
+		for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
+			struct pd_spk_model_speaker *s = &m->spk[i];
+
+			s->base_coil += s->heat_coil;
+			s->base_magnet += s->heat_magnet;
+			s->heat_coil = 0;
+			s->heat_magnet = 0;
+			s->start_coil = s->base_coil;
+			s->start_magnet = s->base_magnet;
+		}
+		m->pause_ns = 0;
+		m->idle_ns = 0;
+		m->cooling = 0;
+	}
+	return m->fault;
+}
+
+int
+pd_spk_model_run(struct pd_spk_model *m, const int16_t *sense, unsigned frames)
+{
+	if (m->fault != kPDSpkModelOk)
+		return m->fault;
+	for (unsigned f = 0; f < frames; f++) {
+		unsigned at = m->block_in_period * PD_SPK_MODEL_BLOCK + m->frame_in_block;
+		int hot = 0;
+
+		for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
+			struct pd_spk_model_speaker *s = &m->spk[i];
+			int32_t p = (int32_t)sense[PD_SPK_MODEL_CHANNELS * f + 2 * i + 1] * sense[PD_SPK_MODEL_CHANNELS * f + 2 * i];
+
+			m->product[at][i] = p;
+			step(m, s, p);
+			s->cur_sum += p;
+			hot |= note(m, i);
+		}
+		if (hot)
+			return m->fault;
+		if (++m->frame_in_block == PD_SPK_MODEL_BLOCK && end_block(m) != kPDSpkModelOk)
+			return m->fault;
+	}
+	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
+		struct pd_spk_model_speaker *s = &m->spk[i];
+
+		hysteresis(&s->t_coil_hyst, coil_of(s), s->max_coil, s->cur_max_coil);
+		hysteresis(&s->t_magnet_hyst, magnet_of(s), s->max_magnet, s->cur_max_magnet);
 	}
 	return kPDSpkModelOk;
 }
@@ -194,23 +317,31 @@ pd_spk_model_idle(struct pd_spk_model *m, uint64_t ns)
 	const int64_t amb = DEG(T_AMBIENT_MC + PD_SPK_MODEL_BIAS_MC);
 	/* one block is 1024 sample periods */
 	const uint64_t block_ns = 1024ULL * 1000000000ULL / m->rate + 1;
+	/*
+	 * The daemon cools when its period took more than four periods: more than three of
+	 * pause, by the rate at the period's end, which may yet become the slower one.
+	 */
+	const uint64_t hold_ns = 3ULL * PD_SPK_MODEL_WINDOW * 1000000000ULL / 44100 + 1;
 
-	m->idle_ns += ns;
-	/* a pause never leaves a half-filled power window behind */
-	m->window_fill = 0;
-	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++)
-		m->spk[i].power_sum = 0;
+	m->pause_ns += ns;
+	if (m->pause_ns <= hold_ns)
+		return;
+	if (!m->cooling) {
+		m->cooling = 1;
+		m->idle_ns = m->pause_ns;
+	} else {
+		m->idle_ns += ns;
+	}
 	while (m->idle_ns >= block_ns) {
 		m->idle_ns -= block_ns;
 		for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
 			struct pd_spk_model_speaker *s = &m->spk[i];
+
 			/* the coil first, towards the magnet as it is before this block's cooling */
-			if (s->t_coil > s->t_magnet)
-				s->t_coil = s->t_magnet + mul_up(s->t_coil - s->t_magnet, m->block_coil);
-			if (s->t_magnet > amb)
-				s->t_magnet = amb + mul_up(s->t_magnet - amb, m->block_magnet);
-			hysteresis(&s->t_coil_hyst, s->t_coil);
-			hysteresis(&s->t_magnet_hyst, s->t_magnet);
+			s->base_coil = s->base_magnet + mul_up(s->base_coil - s->base_magnet, m->block_coil);
+			s->base_magnet = amb + mul_up(s->base_magnet - amb, m->block_magnet);
+			s->start_coil = s->start_magnet + mul_up(s->start_coil - s->start_magnet, m->block_coil);
+			s->start_magnet = amb + mul_up(s->start_magnet - amb, m->block_magnet);
 		}
 	}
 }
@@ -222,15 +353,17 @@ pd_spk_model_limit_steps(const struct pd_spk_model *m)
 	int64_t hottest = 0, over;
 
 	for (unsigned i = 0; i < PD_SPK_MODEL_SPEAKERS; i++) {
-		if (m->spk[i].t_coil_hyst > hottest)
-			hottest = m->spk[i].t_coil_hyst;
-		if (m->spk[i].t_magnet_hyst > hottest)
-			hottest = m->spk[i].t_magnet_hyst;
+		const struct pd_spk_model_speaker *s = &m->spk[i];
+
+		if (s->t_coil_hyst > hottest)
+			hottest = s->t_coil_hyst;
+		if (s->t_magnet_hyst > hottest)
+			hottest = s->t_magnet_hyst;
 		/* the hysteresis values are 0 until the first evaluation */
-		if (m->spk[i].t_coil > hottest)
-			hottest = m->spk[i].t_coil;
-		if (m->spk[i].t_magnet > hottest)
-			hottest = m->spk[i].t_magnet;
+		if (coil_of(s) > hottest)
+			hottest = coil_of(s);
+		if (magnet_of(s) > hottest)
+			hottest = magnet_of(s);
 	}
 	over = hottest - start;
 	if (over <= 0)
@@ -245,11 +378,11 @@ pd_spk_model_limit_steps(const struct pd_spk_model *m)
 int32_t
 pd_spk_model_coil_mc(const struct pd_spk_model *m, unsigned speaker)
 {
-	return speaker < PD_SPK_MODEL_SPEAKERS ? (int32_t)((m->spk[speaker].t_coil * 1000) >> Q) : 0;
+	return speaker < PD_SPK_MODEL_SPEAKERS ? (int32_t)((coil_of(&m->spk[speaker]) * 1000) >> Q) : 0;
 }
 
 int32_t
 pd_spk_model_magnet_mc(const struct pd_spk_model *m, unsigned speaker)
 {
-	return speaker < PD_SPK_MODEL_SPEAKERS ? (int32_t)((m->spk[speaker].t_magnet * 1000) >> Q) : 0;
+	return speaker < PD_SPK_MODEL_SPEAKERS ? (int32_t)((magnet_of(&m->spk[speaker]) * 1000) >> Q) : 0;
 }
