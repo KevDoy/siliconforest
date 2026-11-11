@@ -85,7 +85,7 @@ set_source_files_properties("${HERE}/driver/apple_drv.c" PROPERTIES COMPILE_DEFI
 set_source_files_properties("${RTKIT}/rtkit.c" PROPERTIES
     COMPILE_DEFINITIONS "linux_create_workqueue_common=linux_create_workqueue_highpri")
 _fbsdkpi_objects(PDDcp_drv SOURCES ${drv} ${pin}
-        "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c" "${HERE}/pd_dcp_prime.c"
+        "${HERE}/pd_dcp_linux.c" "${HERE}/pd_dcp_mmap.c" "${HERE}/pd_dcp_prime.c" "${HERE}/pd_dcp_backlight.c"
         "${DART}/src/pd_dcp_iommu.c" "${DART}/src/pd_dart_table.c"
         "${RTKIT}/mailbox.c" "${RTKIT}/rtkit.c" "${RTKIT}/rtkit-crashlog.c" "${RTKIT}/pd_rtkit_compat.c"
     INCLUDES "${HERE}/pininc" "${HERE}/driver" "${HERE}/include" "${DART}/include"
@@ -113,7 +113,7 @@ add_fbsdkpi_driver(PDDcp
     XNU_SOURCES "${HERE}/../../fbsdkpi/xnu/PDDRMPlatformDevice.cpp"
         "${RTKIT}/PDRtkitPlatform.cpp"
         "${DART}/src/pd_dart.cpp"
-        "${HERE}/PDDcpHost.cpp"
+        "${HERE}/PDDcpHost.cpp" "${HERE}/PDDcpSysctl.cpp"
 )
 # Space: the layer's own objects are compiled without -O by the tree. In this kext they get
 # -Os too (PDAgx keeps the tree's setting), which is what lets PDAgx and PDDcp share one

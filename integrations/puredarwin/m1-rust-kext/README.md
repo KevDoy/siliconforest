@@ -94,6 +94,7 @@ Counts are added/removed lines.
 | 0024 a sync_file made by another DRM kext is recognised | see file |
 | 0025 WQ_HIGHPRI work queues run above ordinary kernel threads (boot-arg `pdlkpi_wq_highpri=0` for the old behaviour) | see file |
 | 0026 a linux file's descriptor ops run in the layer copy that made the file (EFAULT on every ioctl of the other kext's dma-buf, boot mm01) | see file |
+| 0027 backlight class helpers as Linux has them (ops_lock, get/set brightness) | see file |
 
 Counts for 0002, 0005, 0008 and 0011 above are from an earlier state; each patch's first
 lines say what it holds now (0002 also carries the seam halves of 0009, 0011, 0014, 0015; 0008

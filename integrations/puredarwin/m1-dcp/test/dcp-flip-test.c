@@ -12,7 +12,7 @@
  *   dcp-flip-test [--device /dev/dri/cardN] [--seconds N] [--nonce HEX] [--no-flip]
  *                 [--prime-from auto|/dev/dri/renderDN] [--wait read|poll|select|kqueue]
  *                 [--scm-rights] [--fence poll|select|kqueue] [--dmabuf-mmap]
- *                 [--in-fence] [--dmabuf-ioctls]
+ *                 [--in-fence] [--dmabuf-ioctls] [--dpms-cycles N] [--dpms-off-ms MS]
  *
  * Without --device the display is the card node whose DRM driver is "apple"; --prime-from
  * auto is the render node whose driver is "asahi".
@@ -38,6 +38,13 @@
  * --prime-from auto --scm-rights it is the GPU driver's, mapped in the process that
  * received it over the socket and read back by the process that made the buffer. Also
  * checked: a mapping longer than the buffer is refused.
+ *
+ * --dpms-cycles N: display sleep the way a compositor does it. After the normal flip run, N
+ * times: an atomic commit with the CRTC's ACTIVE = 0 and ALLOW_MODESET (the driver powers the
+ * panel down), a pause of --dpms-off-ms (default 2000), a commit with ACTIVE = 1 (and a flip
+ * event), then half a second of flips. Printed per cycle: how long each commit took, the time
+ * to the first flip event after waking, and the flip rate. Fails if a commit fails or the
+ * rate after a wake is under 50 per second.
  *
  * --dmabuf-ioctls (with --prime-from): DMA_BUF_IOCTL_SYNC (start and end), EXPORT_SYNC_FILE
  * and IMPORT_SYNC_FILE on each GPU buffer's dma-buf descriptor, in the process that created
@@ -842,6 +849,7 @@ int main(int argc, char **argv)
 	int do_flip = 1;
 	const char *prime_from = NULL;
 	int scm_rights = 0;
+	unsigned dpms_cycles = 0, dpms_off_ms = 2000;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--device") && i + 1 < argc)
@@ -869,6 +877,10 @@ int main(int argc, char **argv)
 			in_fence = 1;
 		else if (!strcmp(argv[i], "--dmabuf-ioctls"))
 			dmabuf_ioctls = 1;
+		else if (!strcmp(argv[i], "--dpms-cycles") && i + 1 < argc)
+			dpms_cycles = (unsigned)atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--dpms-off-ms") && i + 1 < argc)
+			dpms_off_ms = (unsigned)atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--no-flip"))
 			do_flip = 0;
 	}
@@ -1227,6 +1239,62 @@ int main(int argc, char **argv)
 	if (st.flips < 2) {
 		out(P "FAIL fewer than two flips completed\n");
 		return 1;
+	}
+	if (dpms_cycles) {
+		unsigned ok = 0;
+		double worst_rate = 1e9, worst_on_ms = 0, worst_off_ms = 0, worst_first_ms = 0;
+
+		out(P "step: %u display sleep cycles, %u ms off each\n", dpms_cycles, dpms_off_ms);
+		for (unsigned c = 1; c <= dpms_cycles; c++) {
+			struct flip_stats ds;
+			uint64_t t0, t1, t2, t3;
+
+			req = drmModeAtomicAlloc();
+			drmModeAtomicAddProperty(req, crtc_id, p_active, 0);
+			t0 = now_ns();
+			if (drmModeAtomicCommit(fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL)) {
+				out(P "sleep cycle %u: ", c);
+				return fail("drmModeAtomicCommit (ACTIVE = 0, ALLOW_MODESET)");
+			}
+			drmModeAtomicFree(req);
+			t1 = now_ns();
+			usleep(dpms_off_ms * 1000);
+			req = drmModeAtomicAlloc();
+			drmModeAtomicAddProperty(req, crtc_id, p_active, 1);
+			t2 = now_ns();
+			if (drmModeAtomicCommit(fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_PAGE_FLIP_EVENT, NULL)) {
+				out(P "sleep cycle %u: ", c);
+				return fail("drmModeAtomicCommit (ACTIVE = 1, ALLOW_MODESET | PAGE_FLIP_EVENT)");
+			}
+			drmModeAtomicFree(req);
+			t3 = now_ns();
+			if (wait_flip(fd, "wake"))
+				return 1;
+			double first_ms = (now_ns() - t3) / 1e6, off_ms = (t1 - t0) / 1e6, on_ms = (t3 - t2) / 1e6;
+
+			if (flip_loop(fd, plane_id, pp[0], crtc_id, 0, bufs, 0.5, 0, &ds))
+				return 1;
+			double rate = ds.elapsed > 0 ? ds.flips / ds.elapsed : 0.0;
+
+			if (c <= 3 || c == dpms_cycles || rate < 50.0)
+				out(P "sleep cycle %u: off commit %.1f ms, on commit %.1f ms, first flip event %.1f ms later, "
+				    "then %u flips at %.2f per second%s\n", c, off_ms, on_ms, first_ms, ds.flips, rate,
+				    rate < 50.0 ? " FAILED" : "");
+			if (rate < 50.0)
+				return 1;
+			ok++;
+			if (rate < worst_rate)
+				worst_rate = rate;
+			if (on_ms > worst_on_ms)
+				worst_on_ms = on_ms;
+			if (off_ms > worst_off_ms)
+				worst_off_ms = off_ms;
+			if (first_ms > worst_first_ms)
+				worst_first_ms = first_ms;
+		}
+		out(P "display sleep: %u of %u cycles woke and flipped; slowest off commit %.1f ms, on commit %.1f ms, "
+		    "first flip event %.1f ms, lowest rate %.2f per second\n", ok, dpms_cycles, worst_off_ms,
+		    worst_on_ms, worst_first_ms, worst_rate);
 	}
 	if (scm_rights) {
 		struct flip_stats st2;

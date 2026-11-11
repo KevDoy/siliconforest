@@ -227,23 +227,6 @@ devres_remove_group(struct device *dev, void *id)
 	return (0);
 }
 
-/* not device-managed: the backlight lives until the kext does */
-struct backlight_device *
-devm_backlight_device_register(struct device *dev, const char *name, struct device *parent,
-    void *devdata, const struct backlight_ops *ops, const struct backlight_properties *props)
-{
-	struct backlight_device *bd;
-
-	bd = backlight_device_register(name, parent, devdata, ops, (struct backlight_properties *)props);
-	return (bd != NULL ? bd : ERR_PTR(-ENOMEM));
-}
-
-void
-devm_backlight_device_unregister(struct device *dev, struct backlight_device *bd)
-{
-	backlight_device_unregister(bd);
-}
-
 /*
  * The RTKit port already answers this from Apple's tree ("apple,tXXXX" asked as
  * "arm-io,tXXXX") and renames the Linux name to its own in pd_rtkit_compat.h; the driver's

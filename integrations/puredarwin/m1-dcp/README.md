@@ -186,3 +186,35 @@ from the kexts' load commands inside the collection and from the link maps):
   roughly that once, less its export table. It is not needed for space any more; the reason
   left for it is correctness across the two copies (a fence array or sync_file of one kext is
   not recognised by the other, see patch 0022's "Not done").
+
+## Panel brightness and display sleep
+
+**Brightness.** The driver's `dcp_backlight.c` registers a backlight class device,
+`apple-panel-bl`, once the firmware has published the panel's level. Linux gives it files under
+`/sys/class/backlight/apple-panel-bl`; here the same attributes are sysctls of the kext
+(`kext/PDDcpSysctl.cpp`, semantics from the pin's `drivers/video/backlight/backlight.c` in
+`kext/pd_dcp_backlight.c`):
+
+| sysctl | |
+| --- | --- |
+| `kern.pd_backlight.name` | `apple-panel-bl` |
+| `kern.pd_backlight.max_brightness` | 509 on the J293 (nits; `apple,max-brightness` 525 capped by the driver's table) |
+| `kern.pd_backlight.brightness` | read: level last asked for; write (root): 0..max, `EINVAL` above |
+| `kern.pd_backlight.actual_brightness` | the level the display coprocessor reports |
+| `kern.pd_backlight.bl_power` | 0 on, 4 off; the level is kept |
+
+All are `ENODEV` until the backlight is registered. A level is applied by re-presenting the
+current frame, so it takes effect only while something is presenting (a compositor is).
+`tool/pd-backlight.c` (built by `dcp-flip-test.nix` as `usr/local/bin/pd-backlight`):
+`pd-backlight get | set <percent> | up | down | raw <level> | power on|off`.
+
+**Display sleep.** Nothing PureDarwin-specific: an atomic commit with the CRTC's `ACTIVE` = 0
+and `DRM_MODE_ATOMIC_ALLOW_MODESET` powers the panel down (`apple_crtc_atomic_disable` ->
+`dcp_poweroff`), `ACTIVE` = 1 powers it up; the plane keeps its framebuffer. The legacy
+connector `DPMS` property maps to the same in the DRM core.
+
+Nodes are chosen by DRM driver name `apple` (`/dev/dri/card*`), never by number.
+
+Tests: `tools/bl_boot.sh <name> <collection> supervisor/darwin-dcp-backlight-test.in` (DL52) and
+`... supervisor/darwin-dcp-sleep-test.in` (DL53; `dcp-flip-test --dpms-cycles N`). Boots bl02
+and bl03.

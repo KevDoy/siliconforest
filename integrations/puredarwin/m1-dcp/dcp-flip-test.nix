@@ -24,13 +24,22 @@ in pkgs.stdenv.mkDerivation {
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains \
       -ldrm -lSystem -o dcp-flip-test
+    # pd-backlight (tool/pd-backlight.c): the panel backlight through hw.pd_backlight.*
+    ${tc}/bin/${triple}-clang -std=gnu11 -O2 -Wall -Wextra \
+      -isysroot ${sdkRoot} -mmacosx-version-min=26.5 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+      -fno-stack-protector -I${libSystem}/usr/include \
+      ${./tool/pd-backlight.c} \
+      -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains \
+      -lSystem -o pd-backlight
   '';
   installPhase = ''
     INT=${tc}/bin/${triple}-install_name_tool
     OTOOL=${tc}/bin/${triple}-otool
     lib=$out${prefix}
     mkdir -p $out/usr/local/bin $lib
-    cp dcp-flip-test $out/usr/local/bin/
+    cp dcp-flip-test pd-backlight $out/usr/local/bin/
     cp ${libdrm}/lib/libdrm.2.dylib $lib/
     chmod u+w $lib/* $out/usr/local/bin/*
     "$INT" -id "${prefix}/libdrm.2.dylib" $lib/libdrm.2.dylib

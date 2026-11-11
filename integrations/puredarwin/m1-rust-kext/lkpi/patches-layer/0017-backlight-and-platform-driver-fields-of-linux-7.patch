@@ -8,22 +8,7 @@ UPSTREAM: yes.
 
 --- a/src/Kernel/fbsdkpi/freebsd/linuxkpi/common/include/linux/backlight.h
 +++ b/src/Kernel/fbsdkpi/freebsd/linuxkpi/common/include/linux/backlight.h
-@@ -35,6 +35,14 @@
- 
- enum backlight_type {
- 	BACKLIGHT_RAW = 0,
-+	BACKLIGHT_PLATFORM,
-+	BACKLIGHT_FIRMWARE,
-+};
-+
-+enum backlight_scale {
-+	BACKLIGHT_SCALE_UNKNOWN = 0,
-+	BACKLIGHT_SCALE_LINEAR,
-+	BACKLIGHT_SCALE_NON_LINEAR,
- };
- 
- struct backlight_properties {
-@@ -42,6 +50,11 @@
+@@ -42,6 +51,11 @@
  	int max_brightness;
  	int brightness;
  	int power;
@@ -35,7 +20,7 @@ UPSTREAM: yes.
  };
  
  enum backlight_notification {
-@@ -58,6 +71,8 @@
+@@ -58,6 +72,8 @@
  #define	BL_CORE_SUSPENDRESUME   1
  	int (*update_status)(struct backlight_device *);
  	int (*get_brightness)(struct backlight_device *);
@@ -44,3 +29,14 @@ UPSTREAM: yes.
  };
  
  struct backlight_device {
+@@ -128,7 +164,9 @@
+ backlight_is_blank(struct backlight_device *bd)
+ {
+ 
+-	return (bd->props.power != 0/* FB_BLANK_UNBLANK */);
++	/* as linux: powered down, suspended or under an fb blank */
++	return (bd->props.power != 0/* FB_BLANK_UNBLANK */ ||
++	    (bd->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK)) != 0);
+ }
+ 
+ #endif	/* _LINUXKPI_LINUX_BACKLIGHT_H_ */

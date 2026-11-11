@@ -19,6 +19,7 @@ HAIKU_CHECK_DISABLE_INTERRUPTS(device_t dev)
 
 void kprintf(const char *, ...);
 void pd_dcp_linux_init(void);
+void pd_dcp_sysctl_register(void);
 extern int pd_dcp_mode;
 
 void
@@ -30,6 +31,7 @@ __haiku_init_hardware()
 		return;
 	done = 1;
 	pd_dcp_linux_init();
+	pd_dcp_sysctl_register();	/* kern.pd_backlight.*, PDDcpSysctl.cpp */
 	kprintf("PDDcp: LinuxKPI runtime up, pddcp=%d\n", pd_dcp_mode);
 }
 

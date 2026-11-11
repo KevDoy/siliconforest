@@ -224,6 +224,24 @@ sync_file_get_fence() (it compares f_op, as is_dma_buf_file() did before 0019), 
 fence cannot be given to the display driver as IN_FENCE_FD or imported into its dma-buf.
 UPSTREAM: yes, with the kernel patch; same licence note as 0021.
 """, []),
+ "0027-backlight-class-helpers-as-linux-has-them": ("""fbsdkpi: backlight: ops_lock, and get/set brightness as linux has them
+
+The display driver's backlight (drivers/gpu/drm/apple/dcp_backlight.c) is a backlight
+class device; these are the class pieces it and its user-space interface rely on, checked
+against include/linux/backlight.h and drivers/video/backlight/backlight.c of the pin:
+
+- struct backlight_device has ops_lock (initialised at registration, which now also copies
+  props.scale);
+- backlight_get_brightness() is 0 for a blanked backlight (it returned the remembered
+  level, so the driver's set path sent that level while powered off);
+- backlight_device_set_brightness() takes ops_lock and returns a negative errno (it
+  returned positive EINVAL and took no lock);
+- BACKLIGHT_POWER_ON/OFF.
+backlight_is_blank() (patch 0017) also looks at BL_CORE_SUSPENDED and BL_CORE_FBBLANK now.
+There is still no class registry or sysfs here: the PDDcp kext exposes its one backlight
+as sysctls (integrations/puredarwin/m1-dcp/kext/pd_dcp_backlight.c).
+UPSTREAM: yes.
+""", []),
  "0026-linux-file-ops-run-in-the-copy-that-made-the-file": ("""fbsdkpi: drm: a linux file's descriptor ops run in the layer copy that made the file
 
 With two DRM kexts loaded, every ioctl on a dma-buf or sync_file descriptor of the kext
@@ -325,6 +343,7 @@ def topic(path, hunk, lineno):
     if path.endswith(("PDDRMDri.cpp", "pd_dri_cdev.h")): return "0020-dri-fds-wake-select-poll-kqueue"
     if path.endswith("pd_drm_cdev.c") and re.search(r"pd_dri_event_wake|event_wait|wait_queue_t wake|drm_file.h", hunk): return "0020-dri-fds-wake-select-poll-kqueue"
     if path.endswith("pd_drm_cdev.c"): return "0012-dri-ioctl-restart-codes-are-eintr"
+    if path.endswith(("linux/backlight.h", "linux_pci.c")) and re.search(r"ops_lock|BACKLIGHT_POWER_ON", hunk): return "0027-backlight-class-helpers-as-linux-has-them"
     if path.endswith("linux/backlight.h") or (path.endswith("platform_device.h") and "driver_managed_dma" in hunk): return "0017-backlight-and-platform-driver-fields-of-linux-7"
     if path.endswith(("linux/mm.h", "pd_dma_buf_mmap.c")) or (path.endswith("drm.cmake") and "pd_dma_buf_mmap" in hunk): return "0023-dma-buf-descriptor-mmap"
     if path.endswith(("linux_work.c", "linux/workqueue.h")) or (path.endswith("pd_haiku_kernel.cpp") and "PD_THREAD_PRI_HIGH" in hunk): return "0025-wq-highpri-queues-run-above-kernel-threads"
