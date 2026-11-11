@@ -30,6 +30,7 @@
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IORegistryEntry.h>
+#include <libkern/OSAtomic.h>
 #include <libkern/OSByteOrder.h>
 #include <libkern/c++/OSArray.h>
 #include <libkern/c++/OSData.h>
@@ -300,8 +301,12 @@ void pd_dart_set_log_prefix(const char *prefix)
 
 struct pd_dart_stream *pd_dart_open(const char *path, uint64_t regs_phys, uint32_t sid)
 {
-    if (!gLock)
-        gLock = IOLockAlloc();
+    if (!gLock) {
+        /* two streams may be opened at once from different CPUs: one lock wins */
+        IOLock *fresh = IOLockAlloc();
+        if (fresh && !OSCompareAndSwapPtr(NULL, fresh, (void *volatile *)&gLock))
+            IOLockFree(fresh);
+    }
     if (!gLock || sid >= 16)
         return NULL;
     IOLockLock(gLock);
