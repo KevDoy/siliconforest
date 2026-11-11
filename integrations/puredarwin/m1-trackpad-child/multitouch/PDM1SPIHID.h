@@ -85,10 +85,11 @@ private:
     void traceTrackpad(const struct dlsp_message *);
     /* Multitouch mode (pdm1tpmt, default on with the T2 child). All of this is
      * heap state of the service and runs on the transport workloop only. */
-    bool mtEnabled, lineIdle, mtSelftestDone, mtInjectDone;
+    bool mtEnabled, lineIdle, mtSelftestDone, mtInjectDone, mtTypingLogged;
     int mtSelftest;
     uint32_t mtDebug, mtDebugHex, mtModeAttempts, mtResets, mtResponses, mtWireDrops;
-    uint32_t mtLoggedEvents, mtInjectSubmitted;
+    uint32_t mtLoggedEvents, mtInjectSubmitted, mtInjectOffered;
+    uint8_t mtKeys[6];
     uint64_t mtModeDueUS, mtTouchReports, mtBasicReports, mtPointerReports;
     struct m1tp_mt_config mtConfig;
     struct m1tp_mt_state mtState, mtScratch;

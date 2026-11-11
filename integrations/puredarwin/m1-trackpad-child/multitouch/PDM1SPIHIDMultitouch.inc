@@ -21,42 +21,63 @@
  * written to for ever. */
 #define PD_M1_MT_MAX_MODE_REQUESTS 8u
 
-/* Boot-args (all optional; the trackpad child needs pdm1trackpadchild=1 as before):
- *   pdm1tpmt=0        basic pointer mode, the behaviour before this code
- *   pdm1tpscale=N     contact units per pointer count (default 4; larger is slower)
- *   pdm1tpscroll=N    contact units of two-finger travel per wheel step (default 300)
- *   pdm1tpnatural=1   wheel direction follows the fingers
- *   pdm1tpheader=1    take pointer motion from the touch report's own pointer header
- *   pdm1tpdebug=N     print the first N decoded reports (MT_DBG lines)
- *   pdm1tpselftest=1  decoder self-test at start (MT_SELFTEST line)
- *   pdm1tpselftest=2  also deliver the self-test's pointer reports through the
- *                     child HID device when /dev/usb_hid_kbd is first opened
- *                     (MT_SELFTEST_INJECT line); for mt-selftest-prelude.in only */
+/* Boot-args (all optional; the trackpad child needs pdm1trackpadchild=1 as before).
+ * The defaults reproduce this M1 under Omarchy Linux: libinput 1.32.0 with Hyprland's
+ * settings there; where each number comes from is in m1tp_mt.h and m1tp_mt.c.
+ *   pdm1tpmt=0            basic pointer mode, the behaviour before multitouch
+ *   pdm1tpgain=N          pointer counts per libinput unit, percent (default 200: Linux runs
+ *                         the panel at scale 2, a count here is one panel pixel)
+ *   pdm1tpaccel=N         speed in mm/s where acceleration starts (default 130)
+ *   pdm1tpscale=N         no acceleration curve: N contact units per count (98 units = 1 mm)
+ *   pdm1tpscrollfactor=N  scroll speed in 1/1000 (default 400, Hyprland scroll_factor 0.4)
+ *   pdm1tpscroll=N        instead: N contact units of two-finger travel per wheel step
+ *                         (the defaults give 346 = 3.57 mm)
+ *   pdm1tpnatural=0       wheel direction of a mouse wheel (default 1: content follows fingers)
+ *   pdm1tpdwt=0           no disable-while-typing
+ *   pdm1tpthumb=0         no thumb detection
+ *   pdm1tppalm=N          touch size above which a touch is a palm (default 1600)
+ *   pdm1tptouchlow=N, pdm1tptouchhigh=N   touch size hysteresis (default 130, 150)
+ *   pdm1tpresx=N, pdm1tpresy=N            contact units per mm (default 98, 97)
+ *   pdm1tpheader=1        take pointer motion from the touch report's own pointer header
+ *   pdm1tpdebug=N         print the first N decoded reports (MT_DBG lines)
+ *   pdm1tpselftest=1      self-test at start (MT_SELFTEST and MT_MEASURED lines)
+ *   pdm1tpselftest=2      also deliver the self-test's first scenario through the child HID
+ *                         device when /dev/usb_hid_kbd is first opened (MT_SELFTEST_INJECT
+ *                         line); for mt-selftest-prelude.in only
+ * Tapping is not implemented: it is off on the reference desktop (tap_to_click = false). */
 void PDM1SPIHID::mtConfigure()
 {
     int on=1, value=0;
-    /* pdm1tpmt=0: leave the controller in its basic pointer mode, exactly as
-     * before this code existed. Default: multitouch whenever the child is on. */
     if (PE_parse_boot_argn("pdm1tpmt",&on,sizeof(on)) && on!=1) on=0;
     mtEnabled=t2Enabled && on==1;
-    m1tp_mt_default_config(&mtConfig);
-    if (PE_parse_boot_argn("pdm1tpscale",&value,sizeof(value)) && value>0)
-        mtConfig.units_per_count=(uint32_t)value;
-    if (PE_parse_boot_argn("pdm1tpscroll",&value,sizeof(value)) && value>0)
-        mtConfig.scroll_units_per_step=(uint32_t)value;
-    if (PE_parse_boot_argn("pdm1tpnatural",&value,sizeof(value)) && value==1)
-        mtConfig.natural_scroll=1;
-    if (PE_parse_boot_argn("pdm1tpheader",&value,sizeof(value)) && value==1)
-        mtConfig.use_header_motion=1;
+    bzero(&mtConfig,sizeof(mtConfig));      /* zero: m1tp_mt_init() takes the default */
+    if (PE_parse_boot_argn("pdm1tpgain",&value,sizeof(value)) && value>0) mtConfig.gain_percent=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpaccel",&value,sizeof(value)) && value>0) mtConfig.accel_threshold=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpscale",&value,sizeof(value)) && value>0) mtConfig.flat_units_per_count=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpscrollfactor",&value,sizeof(value)) && value>0) mtConfig.scroll_factor_permille=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpscroll",&value,sizeof(value)) && value>0) mtConfig.scroll_units_per_step=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpnatural",&value,sizeof(value))) mtConfig.natural_scroll=value==1?1:M1TP_MT_OFF;
+    if (PE_parse_boot_argn("pdm1tpdwt",&value,sizeof(value))) mtConfig.dwt=value==1?1:M1TP_MT_OFF;
+    if (PE_parse_boot_argn("pdm1tpthumb",&value,sizeof(value))) mtConfig.thumb=value==1?1:M1TP_MT_OFF;
+    if (PE_parse_boot_argn("pdm1tppalm",&value,sizeof(value)) && value>0) mtConfig.palm_size=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tptouchlow",&value,sizeof(value)) && value>0) mtConfig.touch_low=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tptouchhigh",&value,sizeof(value)) && value>0) mtConfig.touch_high=(uint32_t)value;
+    if (PE_parse_boot_argn("pdm1tpresx",&value,sizeof(value)) && value>0) mtConfig.res_x=value;
+    if (PE_parse_boot_argn("pdm1tpresy",&value,sizeof(value)) && value>0) mtConfig.res_y=value;
+    if (PE_parse_boot_argn("pdm1tpheader",&value,sizeof(value)) && value==1) mtConfig.use_header_motion=1;
     if (PE_parse_boot_argn("pdm1tpdebug",&value,sizeof(value)) && value>0)
         mtDebug=(uint32_t)(value>1000?1000:value);
     mtDebugHex=mtDebug<4?mtDebug:4;
     if (PE_parse_boot_argn("pdm1tpselftest",&value,sizeof(value)) && (value==1 || value==2))
         mtSelftest=value;
     m1tp_mt_init(&mtState,&mtConfig);
-    IOLog("PDM1SPIHID: MT stage=config enabled=%u units_per_count=%u scroll_units_per_step=%u natural=%u header_motion=%u debug_reports=%u selftest=%d\n",
-          mtEnabled?1u:0u,(unsigned)mtState.cfg.units_per_count,(unsigned)mtState.cfg.scroll_units_per_step,
-          (unsigned)mtState.cfg.natural_scroll,(unsigned)mtState.cfg.use_header_motion,(unsigned)mtDebug,mtSelftest);
+    const struct m1tp_mt_config *c=&mtState.cfg;
+    IOLog("PDM1SPIHID: MT stage=config enabled=%u reference=libinput-1.32.0 res=%d/%d units_per_mm gain_percent=%u accel_from_mm_s=%u flat_units_per_count=%u scroll_factor_permille=%u scroll_units_per_step=%u natural=%u dwt=%u thumb=%u palm_size=%u touch_size=%u/%u header_motion=%u debug_reports=%u selftest=%d\n",
+          mtEnabled?1u:0u,(int)c->res_x,(int)c->res_y,(unsigned)c->gain_percent,(unsigned)c->accel_threshold,
+          (unsigned)c->flat_units_per_count,(unsigned)c->scroll_factor_permille,
+          (unsigned)((((uint64_t)c->scroll_step_px)<<16)/(uint64_t)(mtState.scroll_per_unit>0?mtState.scroll_per_unit:1)),
+          (unsigned)c->natural_scroll,(unsigned)c->dwt,(unsigned)c->thumb,(unsigned)c->palm_size,
+          (unsigned)c->touch_low,(unsigned)c->touch_high,(unsigned)c->use_header_motion,(unsigned)mtDebug,mtSelftest);
 }
 
 void PDM1SPIHID::mtSendEnable()
@@ -135,7 +156,7 @@ void PDM1SPIHID::mtRoute(const struct dlsp_message *message)
         IOLog("PDM1SPIHID: MT stage=basic-report-after-mode-write bytes=%u (passed through as before)\n",
               (unsigned)message->payload_length);
     }
-    int emit=m1tp_mt_step(&mtState,&mtFrame,&out);
+    int emit=m1tp_mt_step(&mtState,&mtFrame,PDM1KeyboardHW::clockUS(),&out);
     uint32_t fresh=mtState.events & ~mtLoggedEvents;
     if (fresh) {
         mtLoggedEvents|=fresh;
@@ -146,6 +167,14 @@ void PDM1SPIHID::mtRoute(const struct dlsp_message *message)
             IOLog("PDM1SPIHID: MT stage=first-two-finger-click reported as the right button\n");
         if (fresh & M1TP_MT_EV_SCROLL)
             IOLog("PDM1SPIHID: MT stage=first-two-finger-scroll wheel=%d\n",(int)out.wheel);
+        if (fresh & M1TP_MT_EV_THUMB)
+            IOLog("PDM1SPIHID: MT stage=first-thumb state=%u (a resting thumb neither moves the pointer nor counts for a click)\n",
+                  (unsigned)mtState.thumb_state);
+        if (fresh & M1TP_MT_EV_PALM)
+            IOLog("PDM1SPIHID: MT stage=first-palm typing=%u (touch ignored: palm-sized, or landed while typing)\n",
+                  (unsigned)mtState.keyboard_active);
+        if (fresh & M1TP_MT_EV_DEVICE_CLOCK)
+            IOLog("PDM1SPIHID: MT stage=device-clock report interval taken from the controller's millisecond counter\n");
     }
     if (mtDebug) mtDump(message,emit,&out);
     if (emit) (void)mtSubmit(&out);
@@ -160,10 +189,13 @@ void PDM1SPIHID::mtDump(const struct dlsp_message *message, int emit, const stru
     if (!emit && !f->contacts && !f->reported && !f->tp_buttons && !f->mouse_buttons &&
         !f->mouse_dx && !f->mouse_dy && mtTouchReports+mtBasicReports>2) return;
     mtDebug--;
-    IOLog("PDM1SPIHID: MT_DBG kind=%u bytes=%u header=%02x/%d/%d tp_buttons=%02x records=%u contacts=%u gesture=%u emit=%d out=%02x/%d/%d/%d\n",
-          (unsigned)f->kind,(unsigned)message->payload_length,(unsigned)f->mouse_buttons,(int)f->mouse_dx,
-          (int)f->mouse_dy,(unsigned)f->tp_buttons,(unsigned)f->reported,(unsigned)f->contacts,
-          (unsigned)mtState.gesture,emit,(unsigned)out->buttons,(int)out->dx,(int)out->dy,(int)out->wheel);
+    IOLog("PDM1SPIHID: MT_DBG kind=%u bytes=%u ts_ms=%u header=%02x/%d/%d tp_buttons=%02x records=%u contacts=%u down=%u gesture=%u thumb=%u typing=%u speed_um_s=%lld factor_e4=%d emit=%d out=%02x/%d/%d/%d\n",
+          (unsigned)f->kind,(unsigned)message->payload_length,(unsigned)f->timestamp_ms,(unsigned)f->mouse_buttons,
+          (int)f->mouse_dx,(int)f->mouse_dy,(unsigned)f->tp_buttons,(unsigned)f->reported,(unsigned)f->contacts,
+          (unsigned)mtState.fingers_down,(unsigned)mtState.gesture,(unsigned)mtState.thumb_state,
+          (unsigned)mtState.keyboard_active,(long long)mtState.last_velocity,
+          (int)((int64_t)mtState.last_factor*10000/65536),emit,
+          (unsigned)out->buttons,(int)out->dx,(int)out->dy,(int)out->wheel);
     for (unsigned i=0;i<f->contacts && i<4;i++)
         IOLog("PDM1SPIHID: MT_DBG contact=%u x=%d y=%d rel=%d/%d major=%d minor=%d pressure=%d\n",
               i,(int)f->c[i].x,(int)f->c[i].y,(int)f->c[i].rel_x,(int)f->c[i].rel_y,
@@ -186,23 +218,32 @@ void PDM1SPIHID::mtDump(const struct dlsp_message *message, int emit, const stru
 void PDM1SPIHID::mtInjectSink(void *context, const struct m1tp_mt_out *out)
 {
     PDM1SPIHID *self=static_cast<PDM1SPIHID *>(context);
+    self->mtInjectOffered++;
     if (self->mtSubmit(out)) self->mtInjectSubmitted++;
 }
 
 /* pdm1tpselftest: constructed multitouch reports through the decoder on a
- * scratch state, every emitted pointer report compared (m1tp_mt_selftest.c).
- * With inject, the same reports are then delivered through the child HID
- * device, so they reach /dev/usb_hid_mouse like a finger's would. */
+ * scratch state (m1tp_mt_selftest.c). With inject, the first scenario's
+ * reports are delivered through the child HID device, so they reach
+ * /dev/usb_hid_mouse like a finger's would. */
 void PDM1SPIHID::mtRunSelftest(bool inject)
 {
-    unsigned steps=0, reports=0;
-    mtInjectSubmitted=0;
-    unsigned failed=m1tp_mt_selftest(&mtScratch,mtBuffer,sizeof(mtBuffer),&steps,&reports,
+    unsigned checks=0, reports=0;
+    struct m1tp_mt_measured m;
+    bzero(&m,sizeof(m));
+    mtInjectSubmitted=0; mtInjectOffered=0;
+    unsigned failed=m1tp_mt_selftest(&mtScratch,mtBuffer,sizeof(mtBuffer),&checks,&reports,&m,
                                      inject?mtInjectSink:nullptr,this);
-    if (!inject)
-        IOLog("PDM1SPIHID: MT_SELFTEST %s steps=%u pointer_reports=%u failed_step=%u (synthetic reports, decoder only)\n",
-              failed?"FAIL":"PASS",steps,reports,failed);
-    else
-        IOLog("PDM1SPIHID: MT_SELFTEST_INJECT %s pointer_reports=%u submitted=%u (synthetic reports through the child HID device)\n",
-              !failed && reports && mtInjectSubmitted==reports?"PASS":"FAIL",reports,(unsigned)mtInjectSubmitted);
+    if (inject) {
+        IOLog("PDM1SPIHID: MT_SELFTEST_INJECT %s pointer_reports=%u submitted=%u (first scenario through the child HID device)\n",
+              !failed && mtInjectOffered && mtInjectSubmitted==mtInjectOffered?"PASS":"FAIL",
+              (unsigned)mtInjectOffered,(unsigned)mtInjectSubmitted);
+        return;
+    }
+    IOLog("PDM1SPIHID: MT_SELFTEST %s checks=%u pointer_reports=%u failed_check=%u failed_travel=%d (contact sequences in mm and ms through the decoder; totals equal the host-verified libinput 1.32.0 values)\n",
+          failed?"FAIL":"PASS",checks,reports,failed,(int)m.failed_dx);
+    /* Counts are panel pixels; libinput units are counts * 100 / gain. */
+    IOLog("PDM1SPIHID: MT_MEASURED pointer counts: 10mm/s x 20mm = %d, 100mm/s x 40mm = %d, 400mm/s x 80mm = %d; recorded stroke (boot mt01) = %d/%d; scroll: 50mm two-finger travel = %d wheel steps\n",
+          (int)m.slow_counts,(int)m.medium_counts,(int)m.fast_counts,(int)m.recorded_dx,(int)m.recorded_dy,
+          (int)m.scroll_steps);
 }

@@ -90,9 +90,9 @@ bool PDM1SPIHID::init(OSDictionary *properties)
     childState.byte_size=sizeof(childState);
     t2Dispatches=0; childObserved=0; childRejected=0; childSubmitted=0;
     m1tp_trace_init(&trackpadTrace);
-    mtEnabled=false; lineIdle=false; mtSelftestDone=false; mtInjectDone=false;
+    mtEnabled=false; lineIdle=false; mtSelftestDone=false; mtInjectDone=false; mtTypingLogged=false;
     mtSelftest=0; mtDebug=0; mtDebugHex=0; mtModeAttempts=0; mtResets=0; mtResponses=0;
-    mtWireDrops=0; mtLoggedEvents=0; mtInjectSubmitted=0;
+    mtWireDrops=0; mtLoggedEvents=0; mtInjectSubmitted=0; mtInjectOffered=0; bzero(mtKeys,sizeof(mtKeys));
     mtModeDueUS=0; mtTouchReports=0; mtBasicReports=0; mtPointerReports=0;
     bzero(&mtConfig,sizeof(mtConfig)); bzero(&mtFrame,sizeof(mtFrame)); bzero(mtBuffer,sizeof(mtBuffer));
     m1tp_mt_init(&mtState,nullptr); m1tp_mt_init(&mtScratch,nullptr);
@@ -388,6 +388,19 @@ void PDM1SPIHID::poll(OSObject *owner, IOTimerEventSource *)
             IOBufferMemoryDescriptor *report=IOBufferMemoryDescriptor::withBytes(
                 message.payload,message.payload_length,kIODirectionNone);
             if (!report) { self->fail(M1KBD_IO,"input-allocation"); return; }
+            /* Disable-while-typing only reads the keyboard report (ID 1, the
+             * modifier byte, a reserved byte and six usages, as its descriptor
+             * says); delivery is unchanged. */
+            if (self->mtEnabled && message.payload_length>=9 && message.payload[0]==0x01) {
+                bool typing=self->mtState.keyboard_active;
+                m1tp_mt_keyboard_report(&self->mtState,PDM1KeyboardHW::clockUS(),message.payload,
+                                        message.payload_length,self->mtKeys);
+                if (!typing && self->mtState.keyboard_active && !self->mtTypingLogged) {
+                    self->mtTypingLogged=true;
+                    IOLog("PDM1SPIHID: MT stage=first-typing report_bytes=%u (touches that land while typing are ignored; no key data logged)\n",
+                          (unsigned)message.payload_length);
+                }
+            }
             if (self->t2Enabled) { self->retain(); self->t2Dispatches++; }
             IOReturn kr=self->handleReport(report,kIOHIDReportTypeInput);
             if (self->t2Enabled) { self->t2Dispatches--; self->release(); }
