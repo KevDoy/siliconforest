@@ -13,6 +13,7 @@ mkdir -p "$runtime" && chmod 0700 "$runtime"
 export XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-0
 export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
 export CHONKSTEP_DARWIN_FRAME_STATS=3600
+[ -d /usr/share/backgrounds/siliconforest ] && export CHONKSTEP_BACKGROUND_DIR=/usr/share/backgrounds/siliconforest
 printf '\nGPUDESK_BEGIN_%s seconds=@SECONDS@\n' "$nonce"
 ls -l /dev/dri 2>&1 | head -6
 (
