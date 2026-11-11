@@ -22,8 +22,8 @@ printf '\nSA_BEGIN_%s\n' "$nonce"
 bringup
 ls -l /dev/pdspeaker 2>&1
 monspk bringup
-if [ "$(get kern.pd_speaker.owner)" != 0 ] || [ "$(get kern.pd_speaker.unlocked)" != 0 ]; then
-    printf 'SA_FAIL a safety daemon holds the speakers: not an unattended boot\n'
+if [ "$(get kern.pd_speaker.hold_probe)" != 1 ]; then
+    printf 'SA_FAIL the speakers are not held at the probe volume: not an unattended boot\n'
     printf 'SA_END_%s\n' "$nonce"; printf '\nPD_BENCH_DONE\n'; exit 0
 fi
 
@@ -58,7 +58,7 @@ monspk two; mon two
 phase volume
 for c in "set 30" up down mute unmute "set 50"; do
     bounded 10 pdvolume $c
-    printf 'SA_VOL after "%s": kern.pd_sound.volume_db=%s speakers unlocked=%s\n' "$c" "$(get kern.pd_sound.volume_db)" "$(get kern.pd_speaker.unlocked)"
+    printf 'SA_VOL after "%s": kern.pd_sound.volume_db=%s speakers volume_steps=%s\n' "$c" "$(get kern.pd_sound.volume_db)" "$(get kern.pd_speaker.volume_steps)"
 done
 idlespk 15 two
 showlog

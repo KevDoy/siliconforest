@@ -17,9 +17,9 @@ mon() {
 }
 # one line of the speakers' counters
 monspk() {
-    printf 'SA_SPK %s t=%s playing=%s sessions=%s frames=%s fifo_frames=%s unlocked=%s owner=%s trips=%s rate=%s state=%s\n' \
+    printf 'SA_SPK %s t=%s playing=%s sessions=%s frames=%s fifo_frames=%s volume_steps=%s hold_probe=%s trips=%s rate=%s state=%s\n' \
         "$1" "$(now)" "$(get kern.pd_speaker.playing)" "$(get kern.pd_speaker.sessions)" "$(get kern.pd_speaker.frames)" \
-        "$(get kern.pd_speaker.fifo_frames)" "$(get kern.pd_speaker.unlocked)" "$(get kern.pd_speaker.owner)" \
+        "$(get kern.pd_speaker.fifo_frames)" "$(get kern.pd_speaker.volume_steps)" "$(get kern.pd_speaker.hold_probe)" \
         "$(get kern.pd_speaker.trips)" "$(get kern.pd_speaker.rate)" "$(get kern.pd_speaker.state | cut -c1-40)"
 }
 # bounded SECONDS COMMAND...: runs the command, killing it when it outlasts the bound
@@ -93,4 +93,6 @@ bringup() {
         printf 'SA_END_%s\n' "$nonce"; printf '\nPD_BENCH_DONE\n'; exit 0;;
     esac
     sysctl -w kern.pd_sound.volume_db=@VOLUME@ 2>&1
+    # unattended: the speakers stay 20 dB under the model's limit (a listening script lifts this)
+    sysctl -w kern.pd_speaker.hold_probe=1 2>&1
 }

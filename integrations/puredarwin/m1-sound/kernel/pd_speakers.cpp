@@ -104,6 +104,7 @@
 #define SENSE_FRAME_BYTES   16      /* 8 x 16 bits */
 #define PERIOD_BYTES        (PERIOD_FRAMES * 16)
 #define RING_PERIODS        8
+#define SPK_SENSE_LAG       4       /* played periods the model may be behind before the stream stops */
 #define FIFO_FRAMES         16384   /* writer -> thread, stereo */
 #define TRAILING_SILENCE    6
 #define CHECK_TICKS         50      /* amplifier registers every 250 ms */
@@ -140,7 +141,7 @@ static char         gFailure[96];
 static uint32_t     gRate = 48000;
 
 /* the limit */
-static const bool kModelLiftsClamp = false;     /* false: the model only watches, the volumes stay at -100 dB */
+static const bool kModelLiftsClamp = true;      /* false: the model only watches, the volumes stay at -100 dB */
 static uint32_t gModelOn = 1;                   /* pdspeaker_model= */
 static struct pd_spk_model gModel;
 static bool     gModelValid;
@@ -638,7 +639,7 @@ service_playback(void)
 	if (gState != kPlaying)
 		return;
 	/* the sense stream runs with the playback: one that falls behind is one the model cannot use */
-	if (gDone > gSenseDone + 2 * RING_PERIODS) {
+	if (gDone > gSenseDone + SPK_SENSE_LAG) {
 		trip("the sense capture stopped");
 		return;
 	}

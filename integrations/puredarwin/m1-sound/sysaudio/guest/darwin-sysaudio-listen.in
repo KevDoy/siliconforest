@@ -3,12 +3,9 @@
 # Listening script for the system audio path: needs a PERSON AT THE M1 with headphones at
 # hand, NOT plugged in when the boot starts. Run:
 #   SD_RUNTIME=420 tools/sa_boot.sh sd<NN> guest/darwin-sysaudio-listen.in
-# for the headphones and the switching alone, or, to hear the speakers too,
-#   SD_WITH_SAFETYD=1 SD_RUNTIME=420 tools/sa_boot.sh sd<NN> guest/darwin-sysaudio-listen.in
-# THE SPEAKERS ARE ONLY AUDIBLE WITH THE SAFETY DAEMON: without it the kernel holds them at
-# -100 dB and every speaker step below is silent (that is correct, not a fault). With
-# SD_WITH_SAFETYD=1 the script runs speakersafetyd in a restart loop, as
-# ../guest/darwin-sound-listen-speakers.in does; that is for a person at the machine only.
+# The speakers play at what the kernel's protection model allows (this script lifts the
+# 20 dB hold that unattended boots keep): every session starts 20 dB down and comes up
+# within a second once the sense data follows the signal.
 # If anything from the speakers sounds wrong (buzz, rattle, loud): close the lid or hold the
 # power button; the kernel also shuts the amplifiers down on any amplifier fault.
 #
@@ -17,7 +14,7 @@
 # @TONEDB@ dB below on the headphones at pdvolume 50 (31 dB codec attenuation): clearly
 # audible, not loud. The console names each step (SA_LISTEN) as it starts.
 #
-# Part 1, speakers, jack empty (silent without the daemon):
+# Part 1, speakers, jack empty:
 #   S1. 440 Hz for 3 s from both speakers: starts at once, clean, no pop at start or end.
 #   S2. Left speaker 2 s, then right speaker 2 s.
 #   S3. A 12 s tone that gets quieter in four steps and louder again in four (pdvolume
@@ -48,20 +45,9 @@ printf '\nSA_BEGIN_%s\n' "$nonce"
 bringup
 monspk bringup
 
-# Only when tools/sa_boot.sh staged it (SD_WITH_SAFETYD=1): the daemon that may open the
-# speakers' volume. It ends on every error by design; restart it as systemd does on Linux.
-if [ -x /usr/bin/speakersafetyd ]; then
-    mkdir -p /tmp/ssd
-    ( while [ ! -f /tmp/ssd/stop ]; do
-          speakersafetyd -c /usr/share/speakersafetyd --machine j293 --runtime-dir /tmp/ssd -v >> /tmp/ssd/log 2>&1
-          sleep 1
-      done ) &
-    sleep 3
-    printf 'SA_LISTEN the safety daemon runs: the speakers can be heard\n'
-else
-    printf 'SA_LISTEN no safety daemon: the speakers stay at -100 dB, the speaker steps are silent\n'
-fi
-monspk daemon
+sysctl -w kern.pd_speaker.hold_probe=0 2>&1
+printf 'SA_LISTEN the speakers play at the model\'s limit: %s\n' "$(get kern.pd_speaker.model)"
+monspk model
 
 start_server
 sleep 1; showlog
@@ -153,7 +139,7 @@ idle 15 end
 idlespk 15 end
 showlog
 mon end; monspk end
-[ -d /tmp/ssd ] && { touch /tmp/ssd/stop; pkill speakersafetyd 2>/dev/null || kill $(ps ax | grep '[s]peakersafetyd' | awk '{print $1}') 2>/dev/null; sed 's/^/SA_DAEMON_LOG /' /tmp/ssd/log | tail -30; }
+sysctl -w kern.pd_speaker.hold_probe=1 2>&1
 sysctl -w kern.pd_sound.volume_db=@VOLUME@ 2>&1
 kill "$server" 2>/dev/null
 printf 'SA_END_%s\n' "$nonce"

@@ -7,10 +7,6 @@
 #   SD_KC        collection store path (default: the collection the path was proven with; build
 #                ../../build-kc.nix for the current kext)
 #   SD_FILES     further files for the RAM root: "source=/destination;..."
-#   SD_WITH_SAFETYD=1  only with guest/darwin-sysaudio-listen.in, A PERSON AT THE M1: stages
-#                ../safetyd's speakersafetyd, which that script then runs so the speakers can be
-#                heard. Never for an unattended boot: without the daemon the kernel keeps the
-#                speakers at -100 dB, which is what an unattended boot must have.
 #   SD_RUNTIME   upper bound of the guest's run in seconds, at most 600 (default 300)
 #   SD_BOOTARGS  further kernel boot arguments; SD_CPUS guest processors (default 8)
 #   SD_VOLUME    codec attenuation in dB at the start (default 30); SD_TONEDB tone level in dB
@@ -30,12 +26,6 @@ KC=${SD_KC:-/nix/store/a4q9xb09s3xblmj17jal2rmm59wvnadp-puredarwin-kc-arm64-0.1}
 SPKDB=${SD_SPKDB:-30}
 [ "$SPKDB" -ge 30 ] || { echo "SD_SPKDB: 30 dB below full scale or quieter" >&2; exit 2; }
 EXTRA=${SD_FILES:-}
-if [ "${SD_WITH_SAFETYD:-0}" = 1 ]; then
-    case "$GUEST" in */darwin-sysaudio-listen.in) ;; *) echo "SD_WITH_SAFETYD=1 is for the listening script only" >&2; exit 2;; esac
-    SSD=$HERE/../safetyd
-    [ -f "$SSD/build/speakersafetyd" ] || { echo "no $SSD/build/speakersafetyd (run its build.sh)" >&2; exit 2; }
-    EXTRA="$SSD/build/speakersafetyd=/usr/bin/speakersafetyd;$SSD/conf/apple/j293.conf=/usr/share/speakersafetyd/apple/j293.conf${EXTRA:+;$EXTRA}"
-fi
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 A=$(cd "$HERE" && $NIX build-sysaudio.nix -A all --no-out-link 2> "${TMPDIR:-/tmp}/sa-build.$$.log" | tail -1)
 [ -x "$A/usr/sbin/coreaudiod" ] || { tail -30 "${TMPDIR:-/tmp}/sa-build.$$.log" >&2; echo "build failed" >&2; exit 2; }
