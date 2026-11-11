@@ -137,6 +137,12 @@ if '--tune' in sys.argv[1:]:
             continue
         seconds = int(lines[-1]['t']) - int(lines[0]['t'])
         manual = any(m.get('mode') == '1' for m in lines)
+        pc = [pair(m.get('cap'))[1] for m in lines if pair(m.get('cap'))[1] is not None]
+        ps = [pair(m.get('pstate'))[1] for m in lines if pair(m.get('pstate'))[1] is not None]
+        mw = [int(m['mw']) for m in lines if re.fullmatch(r'\d+', m.get('mw', ''))]
+        print(f"{name}: mean P cap {sum(pc) / len(pc):.1f}, mean P state {sum(ps) / len(ps):.1f}, "
+              f"mean die {sum(d) / len(d) / 1000:.1f} C, mean system {sum(mw) / max(1, len(mw)) / 1000:.1f} W, "
+              f"{total(name)} MB by {len(groups.get(name, []))} workers")
         print(f"{name}: {seconds} s, die {d[0] / 1000:.1f} -> {d[-1] / 1000:.1f} C (max {max(d) / 1000:.1f}), "
               f"fan {min(r)} .. {max(r)} rpm ({'set by this driver' if manual else 'left to the SMC'}), "
               f"{rate(name):.1f} MB/s, caps at the end {lines[-1].get('cap')}, status {lines[-1].get('status')}")
@@ -149,6 +155,8 @@ if '--tune' in sys.argv[1:]:
                 abs(int(m['fan']) - int(m['asked'])) <= max(300, int(m['asked']) // 10) and int(m['asked']) >= 1199
                 for m in tail), ', '.join(f"asked {m['asked']} running {m['fan']}" for m in tail))
         print_monitor(lines[::3])
+    for m in re.finditer(r'^TH_SENSORS .*$', text, re.M):
+        print(m.group(0)[:900])
     back = first('TH_BACK')
     if back:
         check('fan given back to the SMC afterwards', back.get('mode') == '0' and back.get('asked') == '0'

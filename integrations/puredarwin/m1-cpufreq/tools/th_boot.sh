@@ -11,6 +11,9 @@
 #   TH_CPUS      guest processors (default 8)
 #   TH_HEAT, TH_FORCED, TH_BELOW, TH_STRESS, TH_SOAK, TH_AUTO, TH_CONTROL   fill the template's placeholders
 #   TH_CONFIGS   for guest/darwin-cpupower-tune.in: "run NAME MODE PERIOD UP HOLD; run ..."
+#   TH_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (e.g. 1,5: 54 s less boot)
+#   TH_BEFORE, TH_AFTER   shell commands run inside the bench lock before the boot and after
+#                the M1 is back in Linux (e.g. tools/linux_fan_state.sh)
 #   TH_SUMMARY   option for tools/th_summary.py (--fan, --soak)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
@@ -30,14 +33,18 @@ sed -e "s/@HEAT@/$HEAT/g" -e "s/@FORCED@/$FORCED/g" -e "s/@BELOW@/${TH_BELOW:-8}
     "${TH_GUEST:-$HERE/guest/darwin-cpupower-suite.in}" > "$S"
 LINK=runs/m1-desktop-010/bwfm-kc-build-001/result
 export KC S N RUNTIME LINK TH_CPUS=${TH_CPUS:-8} TH_BOOTARGS=${TH_BOOTARGS:-}
+export TH_BEFORE=${TH_BEFORE:-} TH_AFTER=${TH_AFTER:-}
 flock "$ROOT/runs/bench.lock" bash -c '
   set -uo pipefail
+  [ -n "$TH_BEFORE" ] && bash -c "$TH_BEFORE"
   old=$(readlink "$LINK" || true)
   ln -sfn "$KC" "$LINK"
-  PCIE_BOOTARGS="cpus=$TH_CPUS $TH_BOOTARGS" PCIE_GUEST_TEMPLATE="$S" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 \
+  PCIE_TIMEWAIT="${TH_TIMEWAIT:-}" PCIE_BOOTARGS="cpus=$TH_CPUS $TH_BOOTARGS" PCIE_GUEST_TEMPLATE="$S" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 \
     PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="" LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
     grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space" | cut -c1-240
   [ -n "$old" ] && ln -sfn "$old" "$LINK"
+  [ -n "$TH_AFTER" ] && bash -c "$TH_AFTER"
+  true
 '
 rm -f "$S"
 python3 -B "$HERE/tools/th_summary.py" ${TH_SUMMARY:-} "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin"

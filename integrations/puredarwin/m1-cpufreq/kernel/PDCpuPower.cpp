@@ -32,9 +32,16 @@
  *   pdthermal_log=S        one log line every S seconds (default 60; 0: only changes)
  *   pdthermal_delay=S      earliest uptime of the first SMC access (default 20)
  *   pdthermal_keys=K,K,..  die sensor keys instead of the enumerated Tp/Te/Tg ones
+ *   pdthermal_suffix=C     of the enumerated ones, only keys ending in this character
+ *                          (a, b, x or z on J293, see thermalEnumerate)
  *   pdthermal_dump=0|1     log every temperature key once after enumeration (default 1)
- *   pdfan=0|1              0 (default): the fan is the SMC's; 1: set the fan speed from the
- *                          die temperature (manual mode, as macsmc-hwmon's fan_control)
+ *   pdfan=0|1              1 (default): set the fan speed from the die temperature (manual
+ *                          mode, as macsmc-hwmon's fan_control); 0: the fan is the SMC's,
+ *                          which on J293 leaves it off (boots th03, th05: 0 rpm through
+ *                          four minutes at 88-92 C). Manual mode does not outlive the
+ *                          session: the reset that returns the machine to Linux clears it
+ *                          (boot thf01), and a shutdown or restart of this system gives
+ *                          the fan back first (systemWillShutdown).
  *   pdfan_start=C          die temperature at which the fan starts (default 70)
  *   pdfan_full=C           die temperature at which it runs at its maximum (default 95)
  *   pdsmc_verbose=1        keep the SMC client's message log on after the first open
@@ -150,6 +157,7 @@ static uint32_t gThermalDelayS = 20;
 static uint32_t gThermalDump = 1;
 static uint32_t gSmcKeepVerbose;
 static char gThermalKeyArg[160];
+static char gThermalSuffixArg[4];
 
 /* written by the thermal thread, read by the sysctls (word-sized, no lock) */
 static TempKey gTempKeys[MAX_TEMP_KEYS];
@@ -171,7 +179,8 @@ static uint64_t gThermalPolls, gThermalReadErrors, gSmcOpens, gSmcOpenFailures;
 static uint64_t gPollLastUs, gPollMaxUs;        /* how long a sensor poll took */
 static int32_t gFanRpm = -1, gFanTarget = -1, gFanMin = -1, gFanMax = -1, gFanMode = -1;
 /* fan control: off unless asked for, see thermalFan() */
-static uint32_t gFanControl;
+static uint32_t gFanControl = 1;
+static volatile uint32_t gShutdown;     /* 1: asked to give the fan back and stop; 2: done */
 static struct pd_fan_config gFanCfg = { 70000, 95000 };
 static int32_t gFanAsked;               /* rpm last written to F0Tg; 0: none, mode left to the SMC */
 static bool gFanManual;                 /* F0Md was written 1 by this driver */
@@ -533,7 +542,8 @@ thermalEnumerate(PDSmcSession *smc)
 		if (gThermalKeyArg[0])
 			wanted = strnstr(gThermalKeyArg, name, sizeof(gThermalKeyArg)) != NULL;
 		else
-			wanted = name[1] == 'p' || name[1] == 'e' || name[1] == 'g';
+			wanted = (name[1] == 'p' || name[1] == 'e' || name[1] == 'g') &&
+			    (gThermalSuffixArg[0] == 0 || name[3] == gThermalSuffixArg[0]);
 		if (wanted && die < MAX_DIE_KEYS && (gThermalKeyArg[0] || (ok && plausible_die(milli))))
 			gDieKeys[die++] = gTempKeys[i];
 		if (gThermalDump) {
@@ -727,19 +737,14 @@ pd_thermal_thread(void *, wait_result_t)
 
 	/*
 	 * The PCIe bridge powers the radio in its own SMC session while it starts, and
-	 * quiesces the SMC when it is done. Stay out of the mailbox until it has started
-	 * (or 30 s have shown that this collection has none), and until the earliest uptime.
+	 * quiesces the SMC when it is done: about half a second, before this kext is even
+	 * started (boots th02..th05, where that session ended 30 s before the first access
+	 * here). There is no lock shared with it, so stay out of the mailbox until the
+	 * earliest uptime, which leaves it that margin on a faster boot as well.
 	 */
-	OSDictionary *matching = IOService::serviceMatching("PDApcieT8103Bridge");
-	IOService *bridge = matching ? IOService::waitForMatchingService(matching, 30ULL * 1000 * 1000 * 1000) : NULL;
-
-	OSSafeReleaseNULL(matching);
-	LOG("thermal: PCIe bridge %s; first SMC access not before %u s of uptime",
-	    bridge ? "has started" : "not seen in 30 s", gThermalDelayS);
-	OSSafeReleaseNULL(bridge);
 	while (uptime_ms() < (uint64_t)gThermalDelayS * 1000)
 		IOSleep(200);
-	IOSleep(2000);
+	LOG("thermal: first SMC access at %llu s of uptime", uptime_ms() / 1000);
 
 	for (;;) {
 		bool valid = false;
@@ -824,6 +829,15 @@ pd_thermal_thread(void *, wait_result_t)
 		gArmed = true;
 		IOLockUnlock(gLock);
 
+		if (gShutdown == 1) {
+			/* the system is going down: the fan goes back to the SMC, nothing more is asked */
+			gFanControl = 0;
+			if (!smc->failed() && enumerated)
+				thermalFan(smc, valid, hottest, status);
+			gShutdown = 2;
+			for (;;)
+				IOSleep(1000);
+		}
 		if (!smc->failed() && enumerated) {
 			thermalFan(smc, valid, hottest, status);
 			if (gDumpRequest) {
@@ -1183,6 +1197,7 @@ class PDCpuPower : public IOService
 
 public:
 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+	void systemWillShutdown(IOOptionBits specifier) APPLE_KEXT_OVERRIDE;
 };
 
 OSDefineMetaClassAndStructors(PDCpuPower, IOService);
@@ -1214,6 +1229,23 @@ pd_cluster_setup(Cluster *c, const struct pd_cluster_opps *opps, uint64_t phys, 
 	    "fallback %u", opps->name, c->ncpu, phys, pd_cluster_current(c), reg_read64(c, APPLE_DVFS_CMD),
 	    opps->opp[pd_opp_top(opps)].pstate, opps->opp[pd_opp_fallback(opps)].pstate);
 	return true;
+}
+
+/*
+ * Shutdown and restart: give the fan back to the SMC before the system goes, so that
+ * whatever runs next does not inherit manual mode. The sensor thread owns the SMC session
+ * and does the write; wait for it, but not for long. (A panic and a guest stopped from
+ * outside do not come through here.)
+ */
+void
+PDCpuPower::systemWillShutdown(IOOptionBits specifier)
+{
+	if (gThermalEnabled && gFanManual && OSCompareAndSwap(0, 1, &gShutdown)) {
+		for (int i = 0; i < 40 && gShutdown != 2; i++)
+			IOSleep(100);
+		LOG("shutdown: fan %s", gShutdown == 2 && !gFanManual ? "given back to the SMC" : "NOT given back in 4 s");
+	}
+	IOService::systemWillShutdown(specifier);
 }
 
 bool
@@ -1262,6 +1294,7 @@ PDCpuPower::start(IOService *provider)
 	    (int32_t)value * 1000 > gFanCfg.start_mc)
 		gFanCfg.full_mc = (int32_t)value * 1000;
 	PE_parse_boot_arg_str("pdthermal_keys", gThermalKeyArg, sizeof(gThermalKeyArg));
+	PE_parse_boot_arg_str("pdthermal_suffix", gThermalSuffixArg, sizeof(gThermalSuffixArg));
 
 	gLock = IOLockAlloc();
 	if (gLock == NULL)

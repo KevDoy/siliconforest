@@ -99,3 +99,5 @@ printf 'TH_BACK die_mc=%s fan=%s target=%s asked=%s mode=%s\n' "$(get kern.pd_th
 phase end
 sysctl kern.pd_thermal kern.pd_cpufreq 2>&1
 printf 'TH_END_%s\n' "$nonce"
+# ends the capture at once (tools/pcie_iterate.sh PCIE_DONE)
+printf '\nPD_BENCH_DONE\n'
