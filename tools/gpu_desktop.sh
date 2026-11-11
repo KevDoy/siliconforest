@@ -10,8 +10,8 @@ N=${1:?name}; MIN=${2:-30}
 [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
 BOOT=140                                   # seconds from hypervisor start to the guest script
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
-KC=${GPU_DESKTOP_KC:-/nix/store/73vka56ka5761ml6njqlmfshxmxcl81a-puredarwin-kc-arm64-0.1}
-[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-dcp && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --arg agx true --arg wifi true --no-out-link | tail -1)
+KC=${GPU_DESKTOP_KC:-/nix/store/k7xlish9lxldkjvkfccjyj0sg9ddjgz1-puredarwin-kc-arm64-0.1}
+[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-smp && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc-desktop.nix --no-out-link | tail -1)
 ln -sfn "$KC" runs/m1-desktop-010/bwfm-kc-build-001/result
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
@@ -34,7 +34,7 @@ BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/background
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 S=$(mktemp); sed "s/@SECONDS@/$DESK/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
 echo "GPU desktop: $MIN minutes; the desktop appears about 2.5 minutes after the M1 reboots"
-PCIE_BOOTARGS="pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
+PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
 rm -f "$S"
 strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic' | cut -c1-260 | tail -40
