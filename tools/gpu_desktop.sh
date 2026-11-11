@@ -3,6 +3,11 @@
 # compositor on GL with page flips, real keyboard and trackpad, two terminals.
 # Usage: tools/gpu_desktop.sh <new-name> [minutes, default 30, max 235]
 # End early from this machine: tools/gpu_desktop_stop.sh   (the M1 returns to Linux in about a minute)
+# Quiet boot (default): the desk picture is put on the panel before the guest starts and the
+# kernel draws nothing on it (graphics boot, console on the UART only), so the picture stays
+# until the compositor's first frame. The serial log is the same as before.
+#   GPU_DESKTOP_VERBOSE=1       the text boot: kernel log on the panel as well as on serial
+#   GPU_DESKTOP_SPLASH=<png>    another boot picture (default: the desk picture)
 # The session also ends by itself after the given time, and the M1 is returned to Linux.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"; export PATH=$HOME/.nix-profile/bin:$PATH
@@ -10,9 +15,10 @@ N=${1:?name}; MIN=${2:-30}
 [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
 BOOT=140                                   # seconds from hypervisor start to the guest script
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
-KC=${GPU_DESKTOP_KC:-/nix/store/n32wy9al58yf3rc1pw6x0zaz3lwj4l5a-puredarwin-kc-arm64-0.1}
-[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-cpufreq && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --argstr kernelConfig development --no-out-link | tail -1)
-ln -sfn "$KC" runs/m1-desktop-010/bwfm-kc-build-001/result
+# The desktop collection on the kernel with the two quiet-boot patches (m1-quiet-boot/kernel.nix:
+# no user-space progress bar under -noprogress; the early log reaches the UART in a graphics boot).
+KC=${GPU_DESKTOP_KC:-/nix/store/wjhbgfdan0iizb10jxlk1jayjll7ilr4-puredarwin-kc-arm64-0.1}
+[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-quiet-boot && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --argstr kernelConfig development --no-out-link | tail -1)
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
 D=runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop
@@ -32,9 +38,19 @@ TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
 BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png}
 [ -f "$BG" ] && X="$X;$ROOT/$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+QUIET=()
+if [ "${GPU_DESKTOP_VERBOSE:-0}" != 1 ]; then
+  # The launcher patch (graphics boot, no mirror, paints boot-logo.gz) and the picture in the
+  # framebuffer's format, both for this boot's private copy of the launcher tree only.
+  Q=integrations/puredarwin/m1-quiet-boot; SPLASH=${GPU_DESKTOP_SPLASH:-$BG}
+  [ -f "$SPLASH" ] || { echo "no boot picture at $SPLASH" >&2; exit 2; }
+  QD=$(mktemp -d); python3 "$Q/boot_logo.py" pack "$SPLASH" "$QD" > /dev/null
+  B=integrations/puredarwin/m1-bringup
+  QUIET=(PCIE_LAB_PATCH="$ROOT/$Q/quiet-boot.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
+fi
 S=$(mktemp); sed "s/@SECONDS@/$DESK/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
 echo "GPU desktop: $MIN minutes; the desktop appears about 2.5 minutes after the M1 reboots"
-PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
+env "${QUIET[@]}" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
-rm -f "$S"
+rm -rf "$S" ${QD:+"$QD"}
 strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic' | cut -c1-260 | tail -40

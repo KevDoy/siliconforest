@@ -11,6 +11,9 @@ import os
 LAB=Path(os.environ['PCIE_LAB']).resolve() if os.environ.get('PCIE_LAB') else ROOT/'runs/m1-desktop-010/pcie-m2-host-001/lab'
 WIFI=os.environ.get('PCIE_WIFI')=='1'
 KERNEL=(ROOT/('runs/m1-desktop-010/bwfm-kc-build-001/result/kernel' if WIFI else 'runs/m1-desktop-010/apcie-host-kc-build-001/result/kernel')).resolve()
+# PCIE_KC=<collection directory>: that collection instead of the shared build link, which
+# another boot being prepared at the same time may repoint
+if os.environ.get('PCIE_KC'): KERNEL=(Path(os.environ['PCIE_KC'])/'kernel').resolve(strict=True)
 SUPERVISOR=ROOT/('integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-test' if WIFI else 'integrations/puredarwin/m1-apcie-host/supervisor/darwin-pcie-enum-test')
 STAGER=ROOT/'integrations/puredarwin/chonkstep-darwin/stage_ramdisk.py'
 ORIGINAL=ROOT/'artifacts/m1-bringup-009/ramdisk.img'

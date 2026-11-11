@@ -76,6 +76,13 @@ tar -C $RUN/pcie-m2-host-001 --exclude=__pycache__ -cf - lab | tar -C $R -xf -
 LAB=$R/lab
 # PCIE_LAB_PATCH=<patch file>: applied to this boot's private copy of the launcher tree only
 if [ -n "${PCIE_LAB_PATCH:-}" ]; then patch -s -d $LAB -p1 < "$PCIE_LAB_PATCH" || { echo "PCIE_LAB_PATCH does not apply" >&2; exit 2; }; fi
+# PCIE_LAB_FILES="<file>=<path below the tree>;...": files added to that private copy
+if [ -n "${PCIE_LAB_FILES:-}" ]; then
+  IFS=';' read -ra LAB_FILES <<< "$PCIE_LAB_FILES"
+  for item in "${LAB_FILES[@]}"; do
+    [ -f "${item%%=*}" ] && [ -d "$LAB/$(dirname "${item#*=}")" ] && cp "${item%%=*}" "$LAB/${item#*=}" || { echo "PCIE_LAB_FILES: cannot place $item" >&2; exit 2; }
+  done
+fi
 echo "${PCIE_BOOTARGS:-}" > $LAB/integrations/puredarwin/m1-bringup/extra_bootargs.txt
 PCIE_LAB=$LAB PCIE_ASSEMBLE_STAGE=build python3 -B tools/pcie_assemble.py $NAME | tail -2
 cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/puredarwin/m1-bringup/pcie_linkup.py
@@ -121,6 +128,12 @@ main "$@"; exit $?
 #   PCIE_LAB_PATCH=<file> a patch (-p1) for this boot's private copy of the launcher tree, e.g.
 #                         integrations/puredarwin/m1-smp-audit/host/vcpu-dump.patch (worker.log
 #                         then has one PD_VCPU line per guest processor when the capture stops)
+#   PCIE_KC=<directory>     with PCIE_SKIP_BUILD=1 and PCIE_WIFI=1: the collection to boot, instead of
+#                         the shared link runs/m1-desktop-010/bwfm-kc-build-001/result
+#   PCIE_LAB_FILES="<file>=<path>;..."  files copied into that private copy after the patch
+#                         (path relative to the tree's root). The quiet boot uses both:
+#                         integrations/puredarwin/m1-quiet-boot/quiet-boot.patch and the boot
+#                         picture (tools/gpu_desktop.sh shows how)
 #   M5_HOST=<address>     controller address (default: 10.1.1.127 dock Ethernet when it
 #                         answers, else 10.1.1.70 Wi-Fi)
 #
