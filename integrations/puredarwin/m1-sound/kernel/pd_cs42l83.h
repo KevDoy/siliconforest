@@ -82,6 +82,12 @@ struct PDCs42l83 {
 	 * (reads the sticky converter status, which clears it).
 	 */
 	bool inputLocked(void);
+	/*
+	 * The headset microphone path: the converter and the serial output, two 32-bit
+	 * slots carrying the one channel. Only while the chip runs from the bit clock
+	 * (after powerUp); powerDown turns it off as well.
+	 */
+	int capture(bool on);
 
 	/*
 	 * Unmasks the jack interrupts (cs42l42_set_interrupt_masks) and, when a plug is

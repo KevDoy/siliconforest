@@ -110,6 +110,13 @@
 #define CS42L42_MIXER_CH_VOL_MASK       0x3f
 #define CS42L42_SP_RX_CH_SEL            0x2501
 #define CS42L42_SP_RX_CHB_SEL_MASK      (3 << 2)
+#define CS42L42_ASP_TX_SZ_EN            0x2901
+#define CS42L42_ASP_TX_CH_EN            0x2902
+#define CS42L42_ASP_TX_CH_AP_RES        0x2903
+#define CS42L42_ASP_TX_CH1_BIT_MSB      0x2904
+#define CS42L42_ASP_TX_CH1_BIT_LSB      0x2905
+#define CS42L42_ASP_TX_CH2_BIT_MSB      0x290A
+#define CS42L42_ASP_TX_CH2_BIT_LSB      0x290B
 #define CS42L42_ASP_RX_DAI0_EN          0x2A01
 #define CS42L42_ASP_RX0_CH_EN_MASK      (0xf << 2)
 #define CS42L42_ASP_RX_DAI0_CH1_AP_RES  0x2A02
@@ -568,11 +575,52 @@ PDCs42l83::powerDown(void)
 		else if (err == 0)
 			err = e;
 	}
+	capture(false);
 	/* the DAPM widgets in power-down order */
 	update(CS42L42_PWR_CTL1, CS42L42_HP_PDN_MASK, CS42L42_HP_PDN_MASK);
 	update(CS42L42_PWR_CTL1, CS42L42_MIXER_PDN_MASK, CS42L42_MIXER_PDN_MASK);
 	update(CS42L42_PWR_CTL1, CS42L42_ASP_DAI_PDN_MASK, CS42L42_ASP_DAI_PDN_MASK);
 	update(CS42L42_ASP_CLK_CFG, CS42L42_ASP_SCLK_EN_MASK, 0);
+	return err;
+}
+
+int
+PDCs42l83::capture(bool on)
+{
+	int err;
+
+	if (!ready)
+		return ENXIO;
+	if (!on) {
+		/* the DAPM capture widgets in power-down order */
+		err = update(CS42L42_ASP_TX_CH_EN, 0x03, 0);
+		update(CS42L42_PWR_CTL1, CS42L42_ADC_PDN_MASK, CS42L42_ADC_PDN_MASK);
+		update(CS42L42_ASP_TX_SZ_EN, 0x01, 0);
+		update(CS42L42_PWR_CTL1, CS42L42_ASP_DAO_PDN_MASK, CS42L42_ASP_DAO_PDN_MASK);
+		return err;
+	}
+	if (!onSclk)
+		return EBUSY;
+	/* cs42l42_pcm_hw_params(), capture: 32-bit samples, channel 1 on low LRCLK, 2 on high */
+	err = update(CS42L42_ASP_TX_CH_AP_RES, 0xcf, (1 << 6) | (3 << 2) | 3);
+	if (err == 0)
+		err = write(CS42L42_ASP_TX_CH1_BIT_MSB, 0);
+	if (err == 0)
+		err = write(CS42L42_ASP_TX_CH1_BIT_LSB, 0);
+	if (err == 0)
+		err = write(CS42L42_ASP_TX_CH2_BIT_MSB, 0);
+	if (err == 0)
+		err = write(CS42L42_ASP_TX_CH2_BIT_LSB, 0);
+	/* the DAPM capture widgets in power-up order: supplies, converter, outputs */
+	if (err == 0)
+		err = update(CS42L42_PWR_CTL1, CS42L42_ASP_DAO_PDN_MASK, 0);
+	if (err == 0)
+		err = update(CS42L42_ASP_TX_SZ_EN, 0x01, 0x01);
+	if (err == 0)
+		err = update(CS42L42_PWR_CTL1, CS42L42_ADC_PDN_MASK, 0);
+	IOSleep(CS42L42_HP_ADC_EN_TIME_US / 1000 + 1);
+	if (err == 0)
+		err = update(CS42L42_ASP_TX_CH_EN, 0x03, 0x03);
 	return err;
 }
 

@@ -500,19 +500,23 @@ PDMca::status(PDMcaStatus *out) const
 /* ---- capture stream ---- */
 
 int
-PDMcaCapture::attach(unsigned captureCluster, unsigned portMask, unsigned syncFromPort, unsigned slotsPerFrame,
-    unsigned channelCount)
+PDMcaCapture::attach(unsigned captureCluster, unsigned portMask, bool clockConsumer, unsigned syncFromPort,
+    unsigned slotsPerFrame, unsigned slotWidth, unsigned channelCount, unsigned sram)
 {
 	if (attached)
 		return 0;
-	if (captureCluster > 5 || portMask == 0 || (portMask >> 6) != 0 || syncFromPort > 5 || slotsPerFrame != 16 ||
-	    channelCount != 8)
+	if (captureCluster > 5 || portMask == 0 || (portMask >> 6) != 0 || syncFromPort > 5 || slotsPerFrame < 2 ||
+	    slotsPerFrame > 16 || (slotWidth != 16 && slotWidth != 32) || channelCount < 2 || channelCount > slotsPerFrame ||
+	    sram > 7)
 		return EINVAL;
 	cluster = captureCluster;
 	ports = portMask;
+	consumer = clockConsumer;
 	syncPort = syncFromPort;
 	slots = slotsPerFrame;
+	slotBits = slotWidth;
 	channels = channelCount;
+	sramBlock = sram;
 	if (audio_power() != 0)
 		return ENXIO;
 	if (!mca.mapNode("/arm-io/mca-switch", 0) || !sw.mapNode("/arm-io/mca-switch", 1) ||
@@ -533,33 +537,36 @@ PDMcaCapture::prepare(void)
 
 	if (!attached)
 		return ENXIO;
-	/* the clock of this cluster's power domain is the one the port brings: clock gated counts */
-	ret = pd_pmgr_enable_node("/arm-io/mca-switch", (int)cluster, kPDPmgrExternallyClocked, false);
+	/* the clock of a consumer cluster's power domain is the one the port brings: clock gated counts */
+	ret = consumer ? pd_pmgr_enable_node("/arm-io/mca-switch", (int)cluster, kPDPmgrExternallyClocked, false) : 0;
 	if (ret != 0)
 		return ret;
 
 	/* mca_fe_set_fmt(): I2S, inverted bit clock and frame, as the transmitter */
 	mca.mask32(rxo + REG_RX_SERDES_CONF, SERDES_CONF_BCLK_POL, 0);
 	mca.w32(rxo + REG_RX_SERDES_BITSTART, 1);
-	/* mca_configure_serdes(): 16-bit slots, the first `channels` of them captured, from these ports */
+	/* mca_configure_serdes(): the first `channels` slots captured, from these ports */
 	mca.mask32(rxo + REG_RX_SERDES_CONF,
 	    SERDES_CONF_WIDTH_MASK | SERDES_CONF_NCHANS | SERDES_CONF_SYNC_SEL | SERDES_CONF_UNK1 | SERDES_CONF_UNK2 |
 	    SERDES_CONF_UNK3 | SERDES_CONF_NO_DATA_FEEDBACK,
-	    (slots - 1) | SERDES_CONF_WIDTH_16BIT | ((cluster + 1) << 16) | SERDES_CONF_UNK1 | SERDES_CONF_UNK2 |
-	    SERDES_CONF_NO_DATA_FEEDBACK);
+	    (slots - 1) | (slotBits == 16 ? SERDES_CONF_WIDTH_16BIT : SERDES_CONF_WIDTH_32BIT) | ((cluster + 1) << 16) |
+	    SERDES_CONF_UNK1 | SERDES_CONF_UNK2 | SERDES_CONF_NO_DATA_FEEDBACK);
 	mca.w32(rxo + REG_RX_SERDES_SLOTMASK, 0xffffffff);
 	mca.w32(rxo + REG_RX_SERDES_SLOTMASK + 0x4, ~((1u << channels) - 1));
 	mca.w32(rxo + REG_RX_SERDES_PORT, ports);
-	/* mca_fe_hw_params(): 16-bit samples in 32-bit DMA words, 16 bits of padding */
-	sw.w32(REG_DMA_ADAPTER_B(cluster), (4u << 20) | (2u << 13) | (16u << 8) | (2u << 5) | 16u);
-	mca.w32(cl + REG_SYNCGEN_HI_PERIOD, slots * 16 / 2 - 1);
-	mca.w32(cl + REG_SYNCGEN_LO_PERIOD, (slots * 16 + 1) / 2 - 1);
-	mca.w32(cl + REG_MCLK_CONF, 1u << 8);
-	/* mca_fe_prepare() of a clock consumer: the sync generator runs from the port's clock */
-	mca.w32(cl + REG_SYNCGEN_MCLK_SEL, syncPort + 6 + 1);
-	mca.mask32(cl + REG_SYNCGEN_STATUS, 0, SYNCGEN_STATUS_EN);
+	/* mca_fe_hw_params(): samples in 32-bit DMA words, padded to 32 bits */
+	sw.w32(REG_DMA_ADAPTER_B(cluster), ((channels > 4 ? 4u : channels) << 20) | (2u << 13) | ((32 - slotBits) << 8) |
+	    (2u << 5) | (32 - slotBits));
+	if (consumer) {
+		mca.w32(cl + REG_SYNCGEN_HI_PERIOD, slots * slotBits / 2 - 1);
+		mca.w32(cl + REG_SYNCGEN_LO_PERIOD, (slots * slotBits + 1) / 2 - 1);
+		mca.w32(cl + REG_MCLK_CONF, 1u << 8);
+		/* mca_fe_prepare() of a clock consumer: the sync generator runs from the port's clock */
+		mca.w32(cl + REG_SYNCGEN_MCLK_SEL, syncPort + 6 + 1);
+		mca.mask32(cl + REG_SYNCGEN_STATUS, 0, SYNCGEN_STATUS_EN);
+	}
 
-	rx.configure(2, 4, 0);
+	rx.configure(slotBits / 8, channels > 4 ? 4 : channels, sramBlock);
 	/* mca_fe_early_trigger() */
 	mca.mask32(rxo + REG_RX_SERDES_CONF, SERDES_CONF_SYNC_SEL, 0);
 	mca.mask32(rxo + REG_RX_SERDES_CONF, SERDES_CONF_SYNC_SEL, 7u << 16);
@@ -593,7 +600,8 @@ PDMcaCapture::stop(void)
 	rx.stop();
 	rx.resetRings();
 	/* mca_fe_hw_free() */
-	mca.mask32(cl + REG_SYNCGEN_STATUS, SYNCGEN_STATUS_EN, 0);
+	if (consumer)
+		mca.mask32(cl + REG_SYNCGEN_STATUS, SYNCGEN_STATUS_EN, 0);
 	running = false;
 }
 

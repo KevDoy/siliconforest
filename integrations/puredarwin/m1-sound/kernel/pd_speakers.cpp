@@ -1020,7 +1020,7 @@ pd_speakers_bring_up(PDGpio *gpio, PDDartFixed *dart, uint8_t *playRing, uint64_
 
 	err = gMca.attach(SPK_FE_CLUSTER, SPK_PORTS, SPK_SLOTS, PDSPK_SPEAKERS, 1);
 	if (err == 0)
-		err = gSense.attach(SPK_SENSE_CLUSTER, SPK_PORTS, 0, SPK_SENSE_SLOTS, PDSPK_SENSE_CHANNELS);
+		err = gSense.attach(SPK_SENSE_CLUSTER, SPK_PORTS, true, 0, SPK_SENSE_SLOTS, 16, PDSPK_SENSE_CHANNELS, 0);
 	if (err != 0)
 		return fail("speaker transport", err);
 	gFifo = (int32_t *)IOMalloc(FIFO_FRAMES * 2 * sizeof(int32_t));

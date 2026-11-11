@@ -29,13 +29,18 @@
  *
  * The speakers (TAS5770L amplifiers on i2c1/i2c3, the I2S ports of clusters 0 and 1,
  * shutdown gpio pin 181) are pd_speakers.cpp, which shares only the DART window and the
- * GPIO block with this file. Not touched: microphones.
+ * GPIO block with this file. The built-in microphones are not here: they hang off the
+ * AOP coprocessor.
  *
  * Interfaces:
  *   /dev/pdaudio          write-only, one writer: signed 16-bit little-endian stereo
  *                         frames at kern.pd_sound.rate. Playback starts with the first
  *                         frames and stops when the writer has closed and all of it
  *                         has been played.
+ *   /dev/pdmic            read-only, one reader: the headset microphone (the codec's one
+ *                         converter) as signed 16-bit little-endian stereo frames, both
+ *                         channels the same signal, at kern.pd_sound.rate. While it is
+ *                         open the headphone stream runs (silence when nothing plays).
  *   kern.pd_sound.*       state, codec and transport registers, counters, and
  *     tone=<seconds>      play the test tone (tone_hz, tone_db below full scale)
  *     volume_db=<0..63>   codec attenuation in dB (63 mutes); default 30
@@ -100,6 +105,8 @@
 #define PERIOD_BYTES        (PERIOD_FRAMES * FRAME_BYTES)
 #define RING_PERIODS        8       /* at most 4 queued and 1 in flight; the rest are free to fill */
 #define RING_BYTES          (RING_PERIODS * PERIOD_BYTES)
+#define MIC_RING_BYTES      RING_BYTES  /* 8 periods of 1024 frames, two 32-bit slots */
+#define MIC_FIFO_FRAMES     16384
 #define RING_IOVA           0x04000000ULL
 #define FIFO_FRAMES         16384   /* what a writer may queue ahead */
 #define TRAILING_SILENCE    6       /* silent periods queued behind the last data before stopping */
@@ -120,6 +127,7 @@ static PDI2C       gI2C;
 static PDCs42l83   gCodec;
 static PDDartFixed gDart;
 static PDMca       gMca;
+static PDMcaCapture gMic;               /* the front-end cluster's receiver, on the jack's port */
 
 static uint32_t gLevel = 3;                 /* pdsound= */
 static uint32_t gDelayMs = 2000;
@@ -142,6 +150,20 @@ static bool     gDevOpen;
 static int      gFifoEvent;                 /* sleep channel of a writer waiting for room */
 static int      gMajor = -1;
 static void    *gDevNode;
+
+/* headset microphone: thread -> reader, frames of two int16 */
+static uint8_t *gMicRing;
+static uint64_t gMicIova;
+static int16_t *gMicFifo;
+static uint32_t gMicHead, gMicCount, gMicNext, gMicDropped;
+static bool     gMicOpen;
+static int      gMicEvent;
+static uint64_t gMicPeriods, gMicFrames;
+static int32_t  gMicPeak[2], gMicMean[2], gMicRms[2];    /* of the last period, in 24-bit units (of 8388608) */
+static int32_t  gMicPeakSession[2];
+static uint64_t gMicNonZero;                            /* samples that were not 0, since boot */
+static int      gMicMajor = -1;
+static void    *gMicNode;
 
 /* one playback session */
 static uint32_t gNext;                      /* ring period to fill next */
@@ -324,6 +346,109 @@ log_transport(const char *when)
 
 static void stop_playback(const char *why);
 
+static uint32_t
+isqrt64(uint64_t v)
+{
+	uint64_t r = 0, bit = 1ULL << 62;
+
+	while (bit > v)
+		bit >>= 2;
+	for (; bit != 0; bit >>= 2) {
+		if (v >= r + bit) {
+			v -= r + bit;
+			r = (r >> 1) + bit;
+		} else {
+			r >>= 1;
+		}
+	}
+	return (uint32_t)r;
+}
+
+/* The codec's capture path and the receiver on, while a session runs. */
+static void
+mic_start(void)
+{
+	int err = gCodec.capture(true);
+
+	if (err == 0)
+		err = gMic.prepare();
+	if (err != 0) {
+		LOG("microphone: capture could not start (error %d)", err);
+		gCodec.capture(false);
+		return;
+	}
+	gMicNext = 0;
+	gMicPeriods = 0;
+	gMicPeakSession[0] = gMicPeakSession[1] = 0;
+	while (!gMic.descRingFull()) {
+		gMic.submit(gMicIova + (uint64_t)gMicNext * PERIOD_BYTES, PERIOD_BYTES);
+		gMicNext = (gMicNext + 1) % RING_PERIODS;
+	}
+	gMic.start();
+	LOG("microphone: capturing");
+}
+
+static void
+mic_stop(void)
+{
+	uint32_t st[3];
+
+	if (!gMic.running)
+		return;
+	gMic.status(st);
+	gMic.stop();
+	gCodec.capture(false);
+	LOG("microphone: stopped after %llu periods; last period peak %d/%d mean %d/%d rms %d/%d, session peak %d/%d (of "
+	    "8388608), %llu non-zero samples since boot, receiver 0x%x/0x%08x, %u frames not read in time", gMicPeriods,
+	    gMicPeak[0], gMicPeak[1], gMicMean[0], gMicMean[1], gMicRms[0], gMicRms[1], gMicPeakSession[0],
+	    gMicPeakSession[1], gMicNonZero, st[0], st[1], gMicDropped);
+}
+
+/* One captured period: statistics, and into the reader's FIFO (the oldest frames give way). */
+static void
+mic_take(uint32_t index)
+{
+	const int32_t *src = (const int32_t *)(const void *)(gMicRing + index * PERIOD_BYTES);
+	int64_t sum[2] = { 0, 0 };
+	uint64_t sq[2] = { 0, 0 };
+	int32_t peak[2] = { 0, 0 };
+
+	for (unsigned i = 0; i < PERIOD_FRAMES; i++) {
+		int16_t frame[2];
+
+		for (unsigned c = 0; c < 2; c++) {
+			/* the converter has 24 bits: statistics at that resolution, the device's frames at 16 */
+			int32_t v = src[2 * i + c] >> 8;
+			frame[c] = (int16_t)(src[2 * i + c] >> 16);
+			if (src[2 * i + c] != 0)
+				gMicNonZero++;
+			sum[c] += v;
+			sq[c] += (uint64_t)((int64_t)v * v);
+			if (v < 0)
+				v = -v;
+			if (v > peak[c])
+				peak[c] = v;
+		}
+		if (gMicCount == MIC_FIFO_FRAMES) {
+			gMicHead = (gMicHead + 1) % MIC_FIFO_FRAMES;
+			gMicCount--;
+			gMicDropped++;
+		}
+		memcpy(gMicFifo + 2 * ((gMicHead + gMicCount) % MIC_FIFO_FRAMES), frame, sizeof(frame));
+		gMicCount++;
+	}
+	for (unsigned c = 0; c < 2; c++) {
+		gMicPeak[c] = peak[c];
+		gMicMean[c] = (int32_t)(sum[c] / PERIOD_FRAMES);
+		gMicRms[c] = (int32_t)isqrt64(sq[c] / PERIOD_FRAMES);
+		if (peak[c] > gMicPeakSession[c])
+			gMicPeakSession[c] = peak[c];
+	}
+	gMicPeriods++;
+	gMicFrames += PERIOD_FRAMES;
+	IOLockWakeup(gLock, &gMicEvent, false);
+}
+
 static void
 start_playback(void)
 {
@@ -365,6 +490,8 @@ start_playback(void)
 	LOG("playing at %u Hz, codec attenuation %u dB, tone %llu frames at %u Hz -%u dB, writer %s", gRate,
 	    gAttenuation, gToneLeft + gFramesTone, gToneHz, gToneDb, gDevOpen ? "open" : "none");
 	log_transport("at start");
+	if (gMicOpen)
+		mic_start();
 }
 
 static void
@@ -388,6 +515,22 @@ service_playback(void)
 			log_transport("ring error");
 	}
 	gDart.check("playback");
+	/* the microphone follows its reader */
+	if (gMicOpen && !gMic.running && gMic.attached) {
+		mic_start();
+	} else if (!gMicOpen && gMic.running) {
+		mic_stop();
+	} else if (gMic.running) {
+		unsigned got = gMic.drainReports(NULL);
+		for (unsigned i = 0; i < got; i++)
+			mic_take((uint32_t)(gMicPeriods % RING_PERIODS));
+		while (!gMic.descRingFull()) {
+			gMic.submit(gMicIova + (uint64_t)gMicNext * PERIOD_BYTES, PERIOD_BYTES);
+			gMicNext = (gMicNext + 1) % RING_PERIODS;
+		}
+		if (gMic.clearError())
+			gRingErrors++;
+	}
 	/* an empty descriptor ring here means this thread fell several periods behind */
 	if (gDone > 0 && gMca.descRingEmpty())
 		gLate++;
@@ -403,7 +546,7 @@ service_playback(void)
 	/* once a second, after the ring is full again: the registers the sysctls show */
 	if (++gPlayTicks % 200 == 0)
 		refresh_status();
-	if (gToneLeft == 0 && !gDevOpen && gFifoCount == 0 && gSilentRun >= TRAILING_SILENCE)
+	if (gToneLeft == 0 && !gDevOpen && !gMicOpen && gFifoCount == 0 && gSilentRun >= TRAILING_SILENCE)
 		stop_playback("end of data");
 }
 
@@ -414,6 +557,7 @@ stop_playback(const char *why)
 
 	log_codec("before stop");
 	log_transport("before stop");
+	mic_stop();
 	/* the codec leaves the bit clock while it still runs */
 	gCodec.powerDown();
 	gMca.stopDma();
@@ -582,7 +726,8 @@ bring_up(void)
 		return;
 
 	pd_adt_u32("/arm-io/dart-sio/mapper-admac", "reg", 0, &sid);
-	err = gDart.attach("/arm-io/dart-sio", sid, RING_IOVA, RING_BYTES + PD_SPK_PLAY_RING_BYTES + PD_SPK_SENSE_RING_BYTES);
+	err = gDart.attach("/arm-io/dart-sio", sid, RING_IOVA,
+	    RING_BYTES + PD_SPK_PLAY_RING_BYTES + PD_SPK_SENSE_RING_BYTES + MIC_RING_BYTES);
 	if (err != 0) {
 		fail("dart-sio", err);
 		return;
@@ -592,8 +737,14 @@ bring_up(void)
 		fail("audio transport", err);
 		return;
 	}
+	gMicRing = gDart.buf + RING_BYTES + PD_SPK_PLAY_RING_BYTES + PD_SPK_SENSE_RING_BYTES;
+	gMicIova = gDart.iova + RING_BYTES + PD_SPK_PLAY_RING_BYTES + PD_SPK_SENSE_RING_BYTES;
+	/* receive SRAM block 1: block 0 is the speakers' sense */
+	if (gMic.attach(gFe, 1u << gPort, false, 0, 2, 32, 2, 1) != 0)
+		LOG("microphone: no receiver; /dev/pdmic will not work");
 	gFifo = (int32_t *)IOMalloc(FIFO_FRAMES * 2 * sizeof(int32_t));
-	if (gFifo == NULL) {
+	gMicFifo = (int16_t *)IOMalloc(MIC_FIFO_FRAMES * 2 * sizeof(int16_t));
+	if (gFifo == NULL || gMicFifo == NULL) {
 		fail("FIFO", ENOMEM);
 		return;
 	}
@@ -681,6 +832,78 @@ static struct cdevsw pd_audio_cdevsw = {
 	eno_strat, eno_getc, eno_putc, 0
 };
 
+/* ---- /dev/pdmic ----------------------------------------------------------------------- */
+
+static int
+pd_mic_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+{
+	int err = 0;
+
+	IOLockLock(gLock);
+	if (gState < kStateIdle || !gMic.attached)
+		err = ENXIO;
+	else if (gMicOpen)
+		err = EBUSY;
+	else {
+		gMicOpen = true;
+		gMicHead = gMicCount = 0;
+	}
+	IOLockUnlock(gLock);
+	return err;
+}
+
+static int
+pd_mic_close(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
+{
+	IOLockLock(gLock);
+	gMicOpen = false;
+	IOLockWakeup(gLock, &gMicEvent, false);
+	IOLockUnlock(gLock);
+	return 0;
+}
+
+/* Whole frames; blocks until there is at least one. */
+static int
+pd_mic_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	int16_t chunk[2 * 256];
+	int err = 0;
+	bool any = false;
+
+	while (err == 0 && uio_resid(uio) >= 4) {
+		unsigned want = (unsigned)(uio_resid(uio) / 4), got = 0;
+
+		if (want > 256)
+			want = 256;
+		IOLockLock(gLock);
+		while (gMicCount == 0 && !any && err == 0) {
+			if (gState < kStateIdle)
+				err = ENXIO;
+			else if (IOLockSleep(gLock, &gMicEvent, THREAD_ABORTSAFE) != THREAD_AWAKENED)
+				err = EINTR;
+		}
+		while (got < want && gMicCount > 0) {
+			chunk[2 * got] = gMicFifo[2 * gMicHead];
+			chunk[2 * got + 1] = gMicFifo[2 * gMicHead + 1];
+			gMicHead = (gMicHead + 1) % MIC_FIFO_FRAMES;
+			gMicCount--;
+			got++;
+		}
+		IOLockUnlock(gLock);
+		if (got == 0)
+			break;
+		err = uiomove((char *)chunk, (int)(got * 4), uio);
+		any = true;
+	}
+	return err;
+}
+
+static struct cdevsw pd_mic_cdevsw = {
+	pd_mic_open, pd_mic_close, pd_mic_read, eno_rdwrt,
+	eno_ioctl, eno_stop, eno_reset, 0, eno_select, eno_mmap,
+	eno_strat, eno_getc, eno_putc, 0
+};
+
 /* devfs is not there yet when the driver starts: keep trying from the thread. */
 static void
 publish_node(void)
@@ -691,8 +914,12 @@ publish_node(void)
 		gMajor = cdevsw_add(-1, &pd_audio_cdevsw);
 	if (gMajor >= 0)
 		gDevNode = devfs_make_node(makedev(gMajor, 0), DEVFS_CHAR, 0, 0, 0666, "pdaudio");
+	if (gMicMajor < 0)
+		gMicMajor = cdevsw_add(-1, &pd_mic_cdevsw);
+	if (gMicMajor >= 0 && gMicNode == NULL)
+		gMicNode = devfs_make_node(makedev(gMicMajor, 0), DEVFS_CHAR, 0, 0, 0666, "pdmic");
 	if (gDevNode != NULL)
-		LOG("/dev/pdaudio published (major %d)", gMajor);
+		LOG("/dev/pdaudio published (major %d)%s", gMajor, gMicNode ? ", /dev/pdmic" : "");
 }
 
 /* ---- the thread ----------------------------------------------------------------------- */
@@ -717,7 +944,7 @@ pd_sound_thread(__unused void *arg, __unused wait_result_t wr)
 		if (gState == kStatePlaying) {
 			service_playback();
 		} else if (gState == kStateIdle) {
-			if (gToneLeft > 0 || gFifoCount > 0) {
+			if (gToneLeft > 0 || gFifoCount > 0 || gMicOpen) {
 				start_playback();
 			} else if (++gIdleTicks % 20 == 0) {
 				refresh_status();
@@ -876,6 +1103,12 @@ pd_sysctl_string(__unused struct sysctl_oid *oidp, __unused void *arg1, int arg2
 			    s.residue, gSubmitted, gDone);
 		}
 		break;
+	case 3:
+		snprintf(text, sizeof(text), "%s periods=%llu frames=%llu peak=%d/%d mean=%d/%d rms=%d/%d session_peak=%d/%d "
+		    "nonzero=%llu dropped=%u", gMic.running ? "capturing" : "idle", gMicPeriods, gMicFrames, gMicPeak[0],
+		    gMicPeak[1], gMicMean[0], gMicMean[1], gMicRms[0], gMicRms[1], gMicPeakSession[0], gMicPeakSession[1],
+		    gMicNonZero, gMicDropped);
+		break;
 	}
 	IOLockUnlock(gLock);
 	return SYSCTL_OUT(req, text, strlen(text) + 1);
@@ -892,6 +1125,7 @@ SYSCTL_NODE(_kern, OID_AUTO, pd_sound, CTLFLAG_RD | CTLFLAG_LOCKED, 0, "headphon
 PD_STR(state, 0, "driver state, codec identification, jack");
 PD_STR(codec, 1, "CS42L83 status registers as last read (every second while playing, every two otherwise)");
 PD_STR(transport, 2, "NCO, MCA and ADMAC registers as last read");
+PD_STR(mic, 3, "headset microphone capture: periods, and peak, mean and RMS of the last period (of 8388608)");
 PD_INT(tone, kCtlTone, CTLFLAG_RW, "seconds of test tone left; write to play");
 PD_INT(tone_hz, kCtlToneHz, CTLFLAG_RW, "test tone frequency");
 PD_INT(tone_db, kCtlToneDb, CTLFLAG_RW, "test tone level, dB below full scale");
@@ -923,6 +1157,7 @@ PD_INT(lock_ms, kCtlLockMs, CTLFLAG_RD, "last session: ms from unmute to the cod
 static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_sound,
 	&sysctl__kern_pd_sound_state, &sysctl__kern_pd_sound_codec, &sysctl__kern_pd_sound_transport,
+	&sysctl__kern_pd_sound_mic,
 	&sysctl__kern_pd_sound_tone, &sysctl__kern_pd_sound_tone_hz, &sysctl__kern_pd_sound_tone_db,
 	&sysctl__kern_pd_sound_volume_db, &sysctl__kern_pd_sound_rate, &sysctl__kern_pd_sound_jack,
 	&sysctl__kern_pd_sound_periods, &sysctl__kern_pd_sound_frames, &sysctl__kern_pd_sound_late,

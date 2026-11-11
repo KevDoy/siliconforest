@@ -88,20 +88,27 @@ struct PDMca {
 };
 
 /*
- * Capture of 16-bit slots on a cluster that is a clock consumer: the frame comes from
- * the I2S port `syncPort` (driven by a PDMca), data from the ports in `ports`.
+ * Capture on a cluster's second receiver, data from the I2S ports in `ports`. Either the
+ * cluster is a clock consumer (`consumer`: its frame comes from the port `syncPort`,
+ * which a PDMca on another cluster drives; the speakers' sense), or it is the cluster of
+ * a running PDMca and shares its clocks and frame (the headset microphone).
  */
 struct PDMcaCapture {
 	PDMmio   mca, sw, admac;
 	PDAdmacChan rx;
-	unsigned cluster, ports, syncPort, slots, channels;
-	bool     attached, running;
+	unsigned cluster, ports, syncPort, slots, slotBits, channels, sramBlock;
+	bool     consumer, attached, running;
 
-	PDMcaCapture() : cluster(0), ports(0), syncPort(0), slots(16), channels(8), attached(false), running(false) {}
+	PDMcaCapture() : cluster(0), ports(0), syncPort(0), slots(16), slotBits(16), channels(8), sramBlock(0),
+	    consumer(true), attached(false), running(false) {}
 
-	int attach(unsigned captureCluster, unsigned portMask, unsigned syncFromPort, unsigned slotsPerFrame,
-	    unsigned channelCount);
-	/* Configures the receiver for frames of `slots` 16-bit slots (the playback stream's clocks must run). */
+	/*
+	 * `slotWidth` 16 or 32 bits, `channelCount` leading slots captured (samples of that
+	 * width in memory), `sram`: this stream's block of the receive SRAM.
+	 */
+	int attach(unsigned captureCluster, unsigned portMask, bool clockConsumer, unsigned syncFromPort,
+	    unsigned slotsPerFrame, unsigned slotWidth, unsigned channelCount, unsigned sram);
+	/* Configures the receiver (the playback stream's clocks must run). */
 	int prepare(void);
 	bool descRingFull(void) const { return rx.descRingFull(); }
 	void submit(uint64_t iova, uint32_t bytes) { rx.submit(iova, bytes); }
