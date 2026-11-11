@@ -7,11 +7,15 @@ coreaudiod-dev-backend.patch   the tree's coreaudiod with a second kind of engin
                                device that takes 16-bit frames (applies to the pinned tree, -p1)
 build-sysaudio.nix             coreaudiod (patched), CoreAudio/AudioToolbox/AudioUnit and pcmplay
                                (unchanged), pdtone and pdvolume, arm64
-user/pdtone.c                  a tone through an AudioQueue, reports the rate the queue ran at
+user/pdtone.c                  a tone through an AudioQueue (default output) or, with -u <UID>,
+                               through an IOProc on one device; -l lists the devices
 user/pdvolume.c                get | set <0..100> | up | down | mute | unmute | toggle-mute
 tools/sa_boot.sh               one boot with all of it staged; tools/sa_summary.sh reads a console
-guest/darwin-sysaudio-test.in  unattended proof; -jack.in the default output following the jack
-                               (stand-ins); -listen.in the script for a person
+guest/darwin-sysaudio-speakers.in  unattended proof on both real devices (no safety daemon)
+guest/darwin-sysaudio-test.in  unattended proof of the headphones alone (jack hook says plugged)
+guest/darwin-sysaudio-jack.in  the switch with /dev/null standing in for the speakers
+guest/darwin-sysaudio-listen.in  the script for a person
+wm-darwin-volume-keys.commit   the commit message for the compositor's volume keys (see the end)
 
 The path of a sample
 --------------------
@@ -41,36 +45,35 @@ resampler belongs in AudioConverter.c and mixClient, not here.
 
 Pacing and timestamps
 ---------------------
-The driver's FIFO takes 16384 frames (341 ms) before a write blocks. Filling it would make
+The drivers' FIFOs take 16384 frames (341 ms) before a write blocks. Filling them would make
 every sound a third of a second late, so the server keeps DEV_QUEUE_FRAMES (3072, 64 ms)
-queued instead and follows the driver's own clock: kern.pd_sound.frames counts the frames
-the DMA has played, and the driver takes one period (1024) from the FIFO for each period
-played, so
-    queued = frames written - (kern.pd_sound.frames now - at the start)
-The thread reads the counter (one sysctl by MIB) and writes a period of 512 whenever the
-queue has room for one, else sleeps 2 ms. The device's clock is therefore the only clock:
-no drift between host time and the codec, and AudioQueue callbacks run at the device's rate
-because the rings empty at it.
+queued instead: <prefix>.fifo_frames says how many written frames the driver has not taken
+yet; the thread reads it (one sysctl by MIB) and writes a period of 512 whenever the queue
+has room for one, else sleeps 2 ms. The device's clock is therefore the only clock: no
+drift between host time and the codec, and AudioQueue callbacks run at the device's rate
+because the rings empty at it (measured from a client: 48006 and 44112 frames/s).
 
-  start: a session of the driver begins with about 1.1 s of silence while the codec's
-    converter locks, during which the FIFO is not read. The server writes its 3072 frames
-    and waits until the driver says the session runs and has locked (playing, sessions,
-    lock_ms; preroll_ms + 1 s is the bound), then starts counting. Clients are held, their
-    first frames are not lost.
-  underrun: when the count shows the driver took more than was written (the server was
-    late), the missed frames are not made up: the queue starts from empty again, so the
-    latency does not creep. Counted and logged ("late by N frames").
-  stall: a counter that does not move for 2 s while the queue is full closes the node; it
-    is reopened a second later.
-  idle: with no client playing nothing is written (the driver plays silence while the node
+  start: the headphones' driver begins a session with about 1.1 s of silence while the
+    codec's converter locks and does not read its FIFO meanwhile: the queue stays full,
+    the server waits, the clients are held and their first frames are not lost. The
+    speakers start with the first frames. Nothing has to be inferred about either.
+  underrun: an empty queue found while clients play (after the first frames of a run) is
+    counted and logged ("ran out of frames"); nothing is made up for.
+  stall: a queue that stays full for 3 s closes the node; it is tried again 5 s later.
+  errors: a write the driver refuses (ENXIO once the kernel has shut the speakers'
+    amplifiers down for good) closes the node for 5 s; a driver whose state sysctl says
+    off, failed, disabled or codec-only is no device: the poll thread takes the device
+    out of the table within 200 ms (clients on the default move to what is left) and puts
+    it back when the state allows.
+  idle: with no client playing nothing is written (the drivers play silence while the node
     is open); DEV_LINGER_SECONDS (5) after the last client the node is closed, so a new
-    sound within that time starts at once and a later one pays the 1.1 s start.
+    sound within that time starts at once and a later one pays the driver's start.
   timestamps: readHostTime of a client's ring is now + (queued + 512 + DEV_OUTPUT_FRAMES)
-    frames, DEV_OUTPUT_FRAMES (5120) being the periods the driver fills ahead of the DMA.
+    frames, DEV_OUTPUT_FRAMES (5120) being the periods the drivers fill ahead of the DMA.
     The device's latency is reported as 8192 frames (171 ms).
 
-A device without the frames sysctl is paced by the host clock (one period per period time,
-write() blocking when the device's queue is full).
+A device without fifo_frames (the /dev/null stand-in, an older collection) is paced by the
+host clock: one period per period time, write() blocking when the device's queue is full.
 
 Volume
 ------
@@ -82,23 +85,20 @@ can be heard; later starts use /Library/Preferences/org.puredarwin.audio.plist.
 A device without hardware volume (speakers) is scaled in the mix, level squared, and starts
 at 0.5 (DEV_SOFT_VOLUME: -12 dB) until a level is set.
 
-Adding the speakers
--------------------
-The table already has the entry:
+The speakers
+------------
     { "Speakers", "PDAudio:speakers", "/dev/pdspeaker", ..., "kern.pd_speaker", false, kDevJackEmpty }
-so the device appears by itself once the node exists. For the same pacing as the headphones
-the driver should give kern.pd_speaker.frames, .playing, .sessions, .lock_ms (or always 0),
-.preroll_ms and .rate with the meaning they have under kern.pd_sound; without frames the
-host clock paces and the FIFO slowly fills or empties with the clock difference (a blocked
-write or a short silence every few minutes). The software level is not a protection: what
-keeps the speakers safe has to stay in the kernel.
+A second engine of the same kind, with the software level. The server never touches the
+amplifiers' volume and never opens /dev/pdspeaker-safety: whether the speakers can be heard
+at all is the kernel's and the safety daemon's business (without the daemon: -100 dB), and
+the server's level is not a protection.
 
-The default output follows the jack (implemented, devPollThread/devRouteLocked): every
-200 ms kern.pd_sound.jack is read; when it changes, or a device appears, the default output
-and the default system output become the kDevJackPlugged device while something is plugged
-(jack > 0) and the kDevJackEmpty device otherwise, each only when that device exists. On
-this machine today only Headphones exists, so it stays the default with an empty jack. A
-default set by hand (kPDAudioSetDefaultOutput) holds until the next jack event.
+The default output follows the jack (devPollThread/devRouteLocked): every 200 ms
+kern.pd_sound.jack is read; when it changes, or a device comes or goes, the default output
+and the default system output become the kDevJackPlugged device (Headphones) while
+something is plugged (1 headphones, 2 headset) and the kDevJackEmpty device (Speakers)
+otherwise, each only when that device exists. A default set by hand
+(kPDAudioSetDefaultOutput) holds until the next jack event.
 
 What happens to running clients at a switch: a client on the default device (every
 AudioQueue and default output unit: the alias device 0x40) keeps its ring and its rate; at
@@ -106,13 +106,13 @@ its next period the other device's thread mixes it. The device left is closed 5 
 the device taken is opened at once (for the headphones: 1.1 s of start during which the
 client is held, nothing is dropped; what was already written to the device left is played
 there, up to 64 ms plus the driver's periods). A client that connected to a device by its
-id stays on it. Listeners get kAudioHardwarePropertyDefaultOutputDevice and the alias
-device's volume and mute change notifications, as for any default change.
+id (an IOProc on that device: pdtone -u) stays on it. Listeners get
+kAudioHardwarePropertyDefaultOutputDevice and the alias device's volume and mute change
+notifications, as for any default change.
 
-The switch can be tried without the hardware: COREAUDIOD_SPEAKER_DEVICE=<node> names a
-stand-in for /dev/pdspeaker (/dev/null works: paced by the host clock) and
-COREAUDIOD_JACK_FILE=<file> a file holding the jack's number in place of the sysctl
-(guest/darwin-sysaudio-jack.in).
+Test hooks, environment of coreaudiod: COREAUDIOD_JACK_FILE=<file> reads the jack's number
+from a file instead of the sysctl (the jack is empty in every unattended boot);
+COREAUDIOD_SPEAKER_DEVICE=<node> names a stand-in for /dev/pdspeaker (/dev/null works).
 
 Adding capture
 --------------
@@ -146,9 +146,39 @@ Frameworks (the larger part; today there is no input anywhere):
 Known limits
 ------------
   - One writer: /dev/pdaudio opens once. While coreaudiod holds it pdplay gets EBUSY, and
-    while something else holds it coreaudiod retries once a second.
+    while something else holds it coreaudiod retries every 5 s.
+  - An AudioQueue always plays on the default output (the tree's AudioQueue accepts
+    kAudioQueueProperty_CurrentDevice and ignores it); a client that wants one device
+    uses an IOProc on it.
   - kern.pd_sound.tone and a second user of the driver's rate are outside the server's
     knowledge: the driver's test tone is not heard while the server writes (the driver
     plays its FIFO first), and a rate changed while the node is closed is set back at the
     next open.
   - The output is clipped, not limited, when clients sum above full scale.
+
+The desktop
+-----------
+What a desktop session must have for sound (all from `nix-build build-sysaudio.nix -A all`,
+staged as tools/sa_boot.sh does):
+    usr/sbin/coreaudiod                                         -> /usr/sbin/coreaudiod
+    System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio      -> same path
+    System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox -> same path
+    System/Library/Frameworks/AudioUnit.framework/Versions/A/AudioUnit      -> same path
+    usr/bin/pdvolume, usr/bin/pdtone                            -> /usr/bin (optional tools)
+and one process, started once before or after the compositor, as root, no arguments, no
+environment (never COREAUDIOD_JACK_FILE or COREAUDIOD_SPEAKER_DEVICE outside a test):
+    mkdir -p /var/log /Library/Preferences
+    /usr/sbin/coreaudiod > /var/log/coreaudiod.log 2>&1 &
+It needs the PDAppleSound collection (kern.pd_sound, /dev/pdaudio; with the speakers
+kern.pd_speaker, /dev/pdspeaker) and finds the nodes whenever they appear. For the speakers
+to be heard the safety daemon must run as well; that is not part of this.
+
+Volume keys (sources/chonkstep-darwin, crates/wm-darwin/src/volume.rs): F10 mute, F11
+quieter, F12 louder by a sixteenth, without modifiers, on the default output; the notice
+says "Volume 56%" or "Sound off". The compositor sends coreaudiod's own Mach messages
+(get state, set volume, set mute) itself. Starting /usr/bin/pdvolume instead was the
+alternative: the compositor starts programs only through its managed-spawn shim, which is
+an admission path for applications, and a process per key press costs a dyld start in the
+input path; a lookup and two messages cost well under a millisecond, need nothing staged
+and fail at once when coreaudiod is not there (the keys are then ordinary F-keys). The
+price is that volume.rs repeats the layout of PDAudioServer.h's state and set messages.

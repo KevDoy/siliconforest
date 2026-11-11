@@ -12,6 +12,8 @@
 #   SD_VOLUME    codec attenuation in dB for the test (default 30); SD_TONEDB tone level in
 #                dB below full scale (default 20); SD_SECONDS length of each tone (default 5);
 #                SD_CYCLES start/stop cycles of guest/darwin-sound-stress.in (default 20)
+#   SD_SPKDB     level of the speaker test's tone, dB below full scale (default 22, not louder;
+#                the test keeps the amplifiers another 20 dB down)
 #   SD_FILES     further files for the RAM root: "source=/destination;..."
 #   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
 set -euo pipefail
@@ -26,9 +28,12 @@ rm -f "${TMPDIR:-/tmp}/sd-kc-build.$$.log"
 PLAY=$(cd "$HERE" && $NIX build-pdplay.nix --no-out-link 2>/dev/null | tail -1)
 RUNTIME=${SD_RUNTIME:-300}
 [ "$RUNTIME" -le 600 ] || { echo "boots are capped at 600 s" >&2; exit 2; }
+# the speaker test's tone level; the script holds the volume another 20 dB down (hold_probe)
+SPKDB=${SD_SPKDB:-22}
+[ "$SPKDB" -ge 22 ] || { echo "SD_SPKDB: 22 dB below full scale or quieter" >&2; exit 2; }
 W=$(mktemp -d)
 sed -e "s/@VOLUME@/${SD_VOLUME:-30}/g" -e "s/@TONEDB@/${SD_TONEDB:-20}/g" -e "s/@SECONDS@/${SD_SECONDS:-5}/g" \
-    -e "s/@CYCLES@/${SD_CYCLES:-20}/g" \
+    -e "s/@CYCLES@/${SD_CYCLES:-20}/g" -e "s/@SPKDB@/$SPKDB/g" \
     "${SD_GUEST:-$HERE/guest/darwin-sound-test.in}" > "$W/guest"
 # a WAVE file for pdplay: 1 s of 1 kHz left, 1 s right, 16 bit, 44.1 kHz, 30 dB below full scale
 python3 -B - "$W/test.wav" <<'PY'
@@ -40,7 +45,7 @@ for n in range(2 * 44100):
     w.writeframes(struct.pack('<hh', s if n < 44100 else 0, 0 if n < 44100 else s))
 w.close()
 PY
-FILES="$PLAY/usr/bin/pdplay=/usr/bin/pdplay;$PLAY/usr/bin/pdspk-test=/usr/bin/pdspk-test;$W/test.wav=/usr/share/pdsound-test.wav${SD_FILES:+;$SD_FILES}"
+FILES="$PLAY/usr/bin/pdplay=/usr/bin/pdplay;$W/test.wav=/usr/share/pdsound-test.wav${SD_FILES:+;$SD_FILES}"
 PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |

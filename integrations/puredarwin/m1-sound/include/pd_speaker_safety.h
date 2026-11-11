@@ -1,5 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only OR MIT */
 /*
+ * NOT PROVIDED BY THE KERNEL ANY MORE. The speaker protection model now runs inside the
+ * kext (../kernel/pd_speaker_model.c) and nothing in userspace can raise a speaker
+ * volume. This header remains as the device contract of ../safetyd, the port of
+ * speakersafetyd that is kept as the reference the kernel model is tested against on
+ * the host (../model-test); boots sd06 to sd08 ran against a kext that had the device.
+ *
  * /dev/pdspeaker-safety: the kernel side of the speaker protection split of the J293
  * (four TAS5770L amplifiers), for the speaker safety daemon and nobody else.
  *

@@ -11,6 +11,9 @@
 #   pcmplay  the tree's own test player with a raw file
 #   linger   the device closes some seconds after the last client; a later client reopens it
 #   restart  coreaudiod killed and started again (does its service name come back?)
+# On a collection that also has the speakers the default output would be Speakers with the empty
+# jack: coreaudiod's test hook COREAUDIOD_JACK_FILE says "plugged" here, so this script stays the
+# headphones' proof (guest/darwin-sysaudio-speakers.in is the one for both devices).
 # Quiet throughout: codec attenuation @VOLUME@ dB or more, tones @TONEDB@ dB below full scale.
 # (@SSID@/@PSK@ are unused; the assembler fills templates.)
 @COMMON@
@@ -18,7 +21,10 @@ printf '\nSA_BEGIN_%s\n' "$nonce"
 bringup
 
 phase server
+mkdir -p /var/run; echo 1 > /var/run/pdjack
+COREAUDIOD_JACK_FILE=/var/run/pdjack; export COREAUDIOD_JACK_FILE
 start_server
+sleep 1; showlog
 bounded 10 pdvolume get
 mon server
 

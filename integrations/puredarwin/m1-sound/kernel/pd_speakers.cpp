@@ -12,36 +12,42 @@
  * current and voltage in 16-bit slots on its port's input line; cluster 2 captures
  * them as a clock consumer (Linux's "Speaker Sense" front end).
  *
- * The policy is that of sound/soc/apple/macaudio.c (macaudio_j293_cfg,
- * macaudio_set_speaker, macaudio_vlimit_*, macaudio_slk_*), Copyright (C) The Asahi
- * Linux Contributors, and it is enforced here, in the kernel, whatever userspace does:
+ * What keeps the speakers safe is all in this file and in pd_speaker_model.c, in the
+ * kernel; nothing in userspace can raise a limit:
  *
  *  1. The amplifier gain register is written by this file only, always SPK_AMP_GAIN
- *     (18.5 dBV, the cap of macaudio_j293_cfg). Nothing can change it.
- *  2. The digital volume of every amplifier is held at control value 1 (-100 dB)
- *     unless the volume lock is open. It opens only for the one process that holds
- *     /dev/pdspeaker-safety (the safety daemon, root) and has sent the magic value
- *     within the last 250 ms of playback. The lease runs down only while the speakers
- *     play. When it runs out, or the device is closed, the volumes go back to -100 dB
- *     at once and the next ping fails with ETIMEDOUT.
- *  3. No other interface reaches the volume: /dev/pdspeaker takes samples only, and
- *     the sysctls are read-only apart from the test tone.
- *  4. Beyond Linux: while the speakers play, the amplifiers' latched fault bits, their
- *     power state and the gain and volume registers are read back four times a second.
- *     A fault, a register that is not what was written, any failed I2C transfer, a DMA
- *     ring error or a ring that ran dry, or a DART fault shuts all four amplifiers
- *     down (software shutdown, then the hardware shutdown line) and stops the stream.
- *     After SPK_MAX_TRIPS such stops the speakers stay off until the next boot.
+ *     (18.5 dBV, the cap of Linux's macaudio_j293_cfg). Nothing can change it.
+ *  2. The digital volume of every amplifier is written by this file only. It is what
+ *     the voice-coil temperature model allows (pd_speaker_model.c: the model of the
+ *     Asahi speakersafetyd, fed with the amplifiers' current and voltage sense while
+ *     they play), and -100 dB whenever the model may not be used: when it is switched
+ *     off (kModelLiftsClamp, the boot argument pdspeaker_model=0), and after a fault.
+ *     Linux has the same model in a daemon and holds -100 dB without it (macaudio.c,
+ *     macaudio_vlimit_unlock); here there is no daemon and no interface to unlock.
+ *  3. The model is only as good as the sense data, so that is checked while playing:
+ *     every session starts SPK_PROBE_STEPS (20 dB) down and is released, half a dB per
+ *     period, only once the sensed voltage has followed the played signal and the
+ *     sensed current fits a speaker; afterwards a played signal that the voltage sense
+ *     does not show, a voltage without current, a sense stream that stops, a mean power
+ *     below zero (the reference's check) or a modelled temperature above the limit
+ *     plus headroom shuts the amplifiers down.
+ *  4. While the speakers play, the amplifiers' latched fault bits, their power state
+ *     and the gain and volume registers are read back four times a second. A fault, a
+ *     register that is not what was written, any failed I2C transfer, a DMA ring error
+ *     or a ring that ran dry, or a DART fault shuts all four amplifiers down (software
+ *     shutdown, then the hardware shutdown line) and stops the stream.
+ *     After SPK_MAX_TRIPS shutdowns the speakers stay off until the next boot.
  *  5. Between sessions the amplifiers are in hardware shutdown; every session starts
- *     from a software reset.
+ *     from a software reset. /dev/pdspeaker takes samples only; the sysctls are
+ *     read-only apart from the test tone and the forced shutdown.
  *
  * Interfaces:
  *   /dev/pdspeaker          write-only, one writer: signed 16-bit little-endian stereo
  *                           at kern.pd_speaker.rate; left goes to both left
  *                           amplifiers, right to both right ones
- *   /dev/pdspeaker-safety   the safety daemon's (../include/pd_speaker_safety.h)
- *   kern.pd_speaker.*       state, counters, sense statistics; tone=<seconds> plays
- *                           the test tone (at the volume in force: -100 dB when locked)
+ *   kern.pd_speaker.*       state, counters, sense statistics, the model's temperatures
+ *                           and limit; tone=<seconds> plays the test tone; hold_probe=1
+ *                           keeps the volume 20 dB down for quiet tests
  *
  * Locking: one mutex for everything here; one thread services the DMA rings every
  * 5 ms while playing. No interrupts.
@@ -53,22 +59,39 @@
 #include <miscfs/devfs/devfs.h>
 #include <sys/conf.h>
 #include <sys/errno.h>
-#include <sys/kauth.h>
+#include <pexpert/pexpert.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
 
 #include "pd_i2c.h"
 #include "pd_mca.h"
-#include "pd_speaker_safety.h"
+#include "pd_speaker_model.h"
 #include "pd_speakers.h"
 #include "pd_tas2770.h"
 
 #define LOG(fmt, ...) IOLog("PDSpeakers: " fmt "\n", ##__VA_ARGS__)
 
 #define PIN_SPEAKER_SDZ     181     /* /arm-io/gpio: high lets the amplifiers run */
-#define SPK_AMP_GAIN        PDSPK_AMP_GAIN_REG
-#define SPK_VOLUME_REG(ctl) ((uint8_t)(PDSPK_VOLUME_MAX - (ctl)))  /* the control is inverted: 0xc8 is -100 dB */
+#define PDSPK_SPEAKERS      PD_SPK_MODEL_SPEAKERS
+#define PDSPK_SENSE_CHANNELS PD_SPK_MODEL_CHANNELS
+#define SPK_AMP_GAIN        0x0f    /* 18.5 dBV; dBV = 11 + 0.5 * value */
+#define SPK_STEPS_LOCKED    200     /* register 0xc8: -100 dB */
+#define SPK_PROBE_STEPS     40      /* 20 dB down until the sense data is believed */
+#define SPK_VOLUME_REG(steps) ((uint8_t)(steps))       /* PLAY_CFG_REG2: half-dB steps below 0 dB */
+/* a full-scale sample at 0 dB is 10^(18.5/20) V RMS * sqrt(2) = 11.9 V peak; the voltage sense reads 14 V at 32768 */
+#define SPK_FULL_SCALE_COUNTS 27853
+/*
+ * The checks compare mean magnitudes over a period, not peaks: the capture starts with a
+ * few stray samples (a full-scale one was seen), which a mean of 1024 samples hardly notices.
+ * Idle sense noise has a mean magnitude of about 20.
+ */
+#define SPK_CONFIRM_COUNTS  100     /* expected mean voltage magnitude from which the sense is compared, of 32768 */
+#define SPK_DEAD_COUNTS     300     /* sustained expected magnitude at which a silent voltage sense is a fault */
+#define SPK_SETTLE_PERIODS  4       /* sense periods at the start of a session that are not judged */
+/* current counts per voltage count for a 128 ohm load (14 / 3.75 / 128), in 1/4096: less current is no speaker */
+#define SPK_MIN_CURRENT_Q12 119
+#define SPK_HISTORY         12      /* periods of history for those checks: a quarter of a second */
 #define SPK_FE_CLUSTER      1       /* Linux's Secondary front end */
 #define SPK_PORTS           0x3     /* the I2S ports of clusters 0 and 1 */
 #define SPK_SLOTS           8
@@ -82,7 +105,6 @@
 #define PERIOD_BYTES        (PERIOD_FRAMES * 16)
 #define RING_PERIODS        8
 #define FIFO_FRAMES         16384   /* writer -> thread, stereo */
-#define SENSE_FIFO_FRAMES   16384   /* thread -> safety daemon */
 #define TRAILING_SILENCE    6
 #define CHECK_TICKS         50      /* amplifier registers every 250 ms */
 #define ADMAC_COUNTER_HZ    24000000ULL
@@ -117,15 +139,22 @@ static int          gState = kOff;
 static char         gFailure[96];
 static uint32_t     gRate = 48000;
 
-/* the volume lock (macaudio's speaker_volume_unlocked, speaker_lock_remain, ...) */
-static bool     gOwner;                 /* /dev/pdspeaker-safety is open */
-static bool     gUnlocked;
-static bool     gWasLocked;             /* the lease ran out: the next ping says so */
-static uint64_t gLeaseNs;               /* remaining while not playing */
-static uint64_t gLeaseDeadline;         /* uptime at which it runs out, while playing */
-static uint32_t gVolume[PDSPK_SPEAKERS] = { PDSPK_VOLUME_LOCKED, PDSPK_VOLUME_LOCKED, PDSPK_VOLUME_LOCKED,
-	                                    PDSPK_VOLUME_LOCKED };
-static uint32_t gPings, gLeaseTimeouts, gVolumeRefused, gVolumeSets;
+/* the limit */
+static const bool kModelLiftsClamp = false;     /* false: the model only watches, the volumes stay at -100 dB */
+static uint32_t gModelOn = 1;                   /* pdspeaker_model= */
+static struct pd_spk_model gModel;
+static bool     gModelValid;
+static uint32_t gHoldProbe;                     /* kern.pd_speaker.hold_probe: never release above the probe volume */
+static uint64_t gIdleStamp;                     /* uptime of the last idle step of the model */
+/* per side (0 left, 1 right: amplifier index & 1), since a signal may be on one side only */
+static uint32_t gSteps[2] = { SPK_STEPS_LOCKED, SPK_STEPS_LOCKED };     /* half-dB steps below 0 dB in the amplifiers now */
+static bool     gSenseTrusted[2];               /* this session's sense data has followed the signal */
+static uint32_t gConfirmRun[2];
+static int32_t  gExpect[2][SPK_HISTORY];        /* per played period: mean |sample| as voltage sense counts at 0 dB */
+/* per sense period: mean voltage and current magnitude of the side's weaker speaker */
+static int32_t  gSeenV[2][SPK_HISTORY], gSeenI[2][SPK_HISTORY];
+static uint32_t gExpectAt, gSeenAt;
+static uint32_t gAttenQ16[64];                  /* 10^(-steps / 40) */
 
 /* writer and tone */
 static int32_t *gFifo;                  /* stereo frames of int32 */
@@ -135,11 +164,7 @@ static int      gFifoEvent;
 static uint64_t gToneLeft;
 static uint32_t gTonePhase, gToneHz = 1000, gToneDb = 30;
 
-/* sense: thread -> daemon */
-static int16_t *gSenseFifo;             /* frames of 8 int16 */
-static uint32_t gSenseHead, gSenseCount;
-static int      gSenseEvent;
-static uint32_t gSenseDropped;
+/* sense */
 static int32_t  gSensePeak[PDSPK_SENSE_CHANNELS];       /* largest |sample| of the last period */
 static int32_t  gSenseMean[PDSPK_SENSE_CHANNELS];       /* mean of the last period (offset) */
 static int32_t  gSensePeakSession[PDSPK_SENSE_CHANNELS];
@@ -157,8 +182,8 @@ static uint8_t  gAmpRev[PDSPK_SPEAKERS], gLat0[PDSPK_SPEAKERS], gLat1[PDSPK_SPEA
                 gGainSeen[PDSPK_SPEAKERS], gVolSeen[PDSPK_SPEAKERS];
 static int32_t  gDieMilli[PDSPK_SPEAKERS] = { INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN };
 
-static int   gMajor = -1, gSafetyMajor = -1;
-static void *gNode, *gSafetyNode;
+static int   gMajor = -1;
+static void *gNode;
 
 static uint64_t
 uptime_ns(void)
@@ -191,7 +216,7 @@ amps_on(void)
 	IOSleep(2);
 	for (unsigned i = 0; i < PDSPK_SPEAKERS && err == 0; i++) {
 		err = gAmp[i].init(kAmps[i].slot, kAmps[i].vmon, kAmps[i].imon, kAmps[i].pdm, kAmps[i].pulldown,
-		    SPK_AMP_GAIN, SPK_VOLUME_REG(gUnlocked ? gVolume[i] : PDSPK_VOLUME_LOCKED));
+		    SPK_AMP_GAIN, SPK_VOLUME_REG(gSteps[i & 1]));
 		gAmpRev[i] = gAmp[i].rev;
 		if (err != 0)
 			LOG("amplifier %s (0x%02x) did not take its configuration (error %d)", kAmps[i].name, kAmps[i].addr, err);
@@ -205,7 +230,7 @@ amps_check(char *why, size_t len)
 {
 	for (unsigned i = 0; i < PDSPK_SPEAKERS; i++) {
 		PDTas2770 &a = gAmp[i];
-		uint8_t want = SPK_VOLUME_REG(gUnlocked ? gVolume[i] : PDSPK_VOLUME_LOCKED);
+		uint8_t want = SPK_VOLUME_REG(gSteps[i & 1]);
 
 		if (a.faults(&gLat0[i], &gLat1[i]) != 0 || a.rd(0x02, &gPwr[i]) != 0 || a.rd(0x03, &gGainSeen[i]) != 0 ||
 		    a.rd(0x05, &gVolSeen[i]) != 0) {
@@ -230,48 +255,107 @@ amps_check(char *why, size_t len)
 	return 0;
 }
 
-/* ---- the volume lock ------------------------------------------------------------------ */
+/* ---- the limit ------------------------------------------------------------------------ */
 
-/* macaudio_vlimit_unlock(false): every volume to -100 dB, now. */
-static void
-lock_volumes(const char *why)
+static void trip(const char *why);
+
+/* What the volume of a side's amplifiers must be now, in half-dB steps below 0 dB. */
+static uint32_t
+wanted_steps(unsigned side)
 {
-	if (gUnlocked)
-		LOG("speaker volumes locked: %s", why);
-	gUnlocked = false;
-	for (unsigned i = 0; i < PDSPK_SPEAKERS; i++) {
-		gVolume[i] = PDSPK_VOLUME_LOCKED;
-		if (gState == kPlaying)
-			gAmp[i].setVolume(SPK_VOLUME_REG(PDSPK_VOLUME_LOCKED));
-	}
+	uint32_t steps;
+
+	if (!kModelLiftsClamp || !gModelOn || !gModelValid || gModel.fault != kPDSpkModelOk)
+		return SPK_STEPS_LOCKED;
+	steps = pd_spk_model_limit_steps(&gModel);
+	if ((!gSenseTrusted[side] || gHoldProbe) && steps < SPK_PROBE_STEPS)
+		steps = SPK_PROBE_STEPS;
+	return steps > SPK_STEPS_LOCKED ? SPK_STEPS_LOCKED : steps;
 }
 
-/* macaudio_vlimit_update(): open only with an owner whose lease has time left. */
-static void
-update_lock(void)
+/*
+ * Moves the volumes to the limit: down at once, up half a dB per call (a period).
+ * false when an amplifier did not take it.
+ */
+static bool
+apply_limit(void)
 {
-	uint64_t left = gState == kPlaying ? (gLeaseDeadline > uptime_ns() ? gLeaseDeadline - uptime_ns() : 0) : gLeaseNs;
+	for (unsigned side = 0; side < 2; side++) {
+		uint32_t want = wanted_steps(side), next = want >= gSteps[side] ? want : gSteps[side] - 1;
 
-	if (gOwner && left > 0) {
-		if (!gUnlocked)
-			LOG("speaker volumes unlocked");
-		gUnlocked = true;
-	} else {
-		lock_volumes(!gOwner ? "no safety daemon" : "the daemon's lease ran out");
+		if (next == gSteps[side])
+			continue;
+		gSteps[side] = next;
+		if (gAmp[side].setVolume(SPK_VOLUME_REG(next)) != 0 || gAmp[side + 2].setVolume(SPK_VOLUME_REG(next)) != 0)
+			return false;
 	}
+	return true;
 }
 
-/* macaudio_vlimit_timeout_work(), polled from the thread while playing. */
+/* The model while nothing plays: the speakers cool. */
 static void
-lease_tick(void)
+model_idle(void)
 {
-	if (gOwner && gUnlocked && uptime_ns() >= gLeaseDeadline) {
-		gLeaseNs = 0;
-		gLeaseDeadline = 0;
-		gWasLocked = true;
-		gLeaseTimeouts++;
-		lock_volumes("the daemon's lease ran out");
+	uint64_t now = uptime_ns();
+
+	if (gModelValid && gIdleStamp != 0 && now > gIdleStamp)
+		pd_spk_model_idle(&gModel, now - gIdleStamp);
+	gIdleStamp = now;
+}
+
+static int32_t
+history_min(const int32_t *h)
+{
+	int32_t m = h[0];
+	for (unsigned i = 1; i < SPK_HISTORY; i++)
+		if (h[i] < m)
+			m = h[i];
+	return m;
+}
+
+static int32_t
+history_max(const int32_t *h)
+{
+	int32_t m = h[0];
+	for (unsigned i = 1; i < SPK_HISTORY; i++)
+		if (h[i] > m)
+			m = h[i];
+	return m;
+}
+
+/*
+ * Rule 3, after every sense period, for each side. The sense trails the played signal
+ * by a few periods, so a quarter second of both is compared: the quietest played period
+ * against the loudest sensed one. Returns the reason to shut down, or NULL.
+ */
+static const char *
+sense_check(unsigned side)
+{
+	int32_t expect = history_min(gExpect[side]), seenV = history_max(gSeenV[side]), seenI = history_max(gSeenI[side]);
+	int32_t lastV = gSeenV[side][(gSeenAt + SPK_HISTORY - 1) % SPK_HISTORY];
+	int32_t lastI = gSeenI[side][(gSeenAt + SPK_HISTORY - 1) % SPK_HISTORY];
+
+	/* the played signal as it leaves the amplifiers at the volume in force */
+	expect = gSteps[side] > 63 ? 0 : (int32_t)(((int64_t)expect * gAttenQ16[gSteps[side]]) >> 16);
+	if (expect >= SPK_DEAD_COUNTS && seenV < expect / 8)
+		return side ? "right: the voltage sense does not show the played signal" :
+		       "left: the voltage sense does not show the played signal";
+	if (seenV >= SPK_DEAD_COUNTS && (int64_t)seenI * 4096 < (int64_t)seenV * SPK_MIN_CURRENT_Q12)
+		return side ? "right: voltage without current: the current sense or a speaker is not there" :
+		       "left: voltage without current: the current sense or a speaker is not there";
+	if (!gSenseTrusted[side]) {
+		/* three periods in a row with the signal in the voltage and a plausible current */
+		if (expect >= SPK_CONFIRM_COUNTS && lastV >= expect / 4 && (int64_t)lastI * 4096 >= (int64_t)lastV * SPK_MIN_CURRENT_Q12)
+			gConfirmRun[side]++;
+		else
+			gConfirmRun[side] = 0;
+		if (gConfirmRun[side] >= 3) {
+			gSenseTrusted[side] = true;
+			LOG("%s sense data follows the signal (expected %d, voltage %d, current %d of 32768): limit released to the model's",
+			    side ? "right" : "left", expect, lastV, lastI);
+		}
 	}
+	return NULL;
 }
 
 /* ---- playback and sense --------------------------------------------------------------- */
@@ -299,6 +383,7 @@ fill_period(uint32_t index)
 	int32_t *dst = (int32_t *)(void *)(gPlayRing + index * PERIOD_BYTES);
 	bool any = false;
 	uint32_t taken = 0;
+	int64_t mag[2] = { 0, 0 };
 
 	for (unsigned i = 0; i < PERIOD_FRAMES; i++) {
 		int32_t l = 0, r = 0;
@@ -321,49 +406,76 @@ fill_period(uint32_t index)
 		dst[4 * i + 1] = r;
 		dst[4 * i + 2] = l;
 		dst[4 * i + 3] = r;
+		mag[0] += l < 0 ? -(int64_t)l : l;
+		mag[1] += r < 0 ? -(int64_t)r : r;
 	}
+	gExpect[0][gExpectAt] = (int32_t)(((mag[0] / PERIOD_FRAMES) * SPK_FULL_SCALE_COUNTS) >> 31);
+	gExpect[1][gExpectAt] = (int32_t)(((mag[1] / PERIOD_FRAMES) * SPK_FULL_SCALE_COUNTS) >> 31);
+	gExpectAt = (gExpectAt + 1) % SPK_HISTORY;
 	gFramesData += taken;
 	gSilentRun = any ? 0 : gSilentRun + 1;
 	if (taken > 0)
 		IOLockWakeup(gLock, &gFifoEvent, false);
 }
 
-/* One captured period: statistics, and into the daemon's FIFO (the oldest frames give way). */
+/* One captured period: statistics, the model, the checks of rule 3, the limit. */
 static void
 take_sense(uint32_t index)
 {
 	const int16_t *src = (const int16_t *)(const void *)(gSenseRing + index * PERIOD_BYTES);
-	int32_t peak[PDSPK_SENSE_CHANNELS] = { 0 };
-	int64_t sum[PDSPK_SENSE_CHANNELS] = { 0 };
+	int32_t peak[PDSPK_SENSE_CHANNELS] = { 0 }, mag[PDSPK_SENSE_CHANNELS];
+	int64_t sum[PDSPK_SENSE_CHANNELS] = { 0 }, abssum[PDSPK_SENSE_CHANNELS] = { 0 };
+	const char *why;
+	int fault;
 
 	for (unsigned i = 0; i < PERIOD_FRAMES; i++) {
-		for (unsigned c = 0; c < PDSPK_SENSE_CHANNELS; c++) {
-			int32_t v = src[PDSPK_SENSE_CHANNELS * i + c];
-			sum[c] += v;
-			if (v < 0)
-				v = -v;
-			if (v > peak[c])
-				peak[c] = v;
-		}
-		if (gOwner) {
-			if (gSenseCount == SENSE_FIFO_FRAMES) {
-				gSenseHead = (gSenseHead + 1) % SENSE_FIFO_FRAMES;
-				gSenseCount--;
-				gSenseDropped++;
-			}
-			memcpy(gSenseFifo + PDSPK_SENSE_CHANNELS * ((gSenseHead + gSenseCount) % SENSE_FIFO_FRAMES),
-			    src + PDSPK_SENSE_CHANNELS * i, SENSE_FRAME_BYTES);
-			gSenseCount++;
+		for (unsigned ch = 0; ch < PDSPK_SENSE_CHANNELS; ch++) {
+			int32_t x = src[PDSPK_SENSE_CHANNELS * i + ch];
+			sum[ch] += x;
+			if (x < 0)
+				x = -x;
+			abssum[ch] += x;
+			if (x > peak[ch])
+				peak[ch] = x;
 		}
 	}
-	for (unsigned c = 0; c < PDSPK_SENSE_CHANNELS; c++) {
-		gSensePeak[c] = peak[c];
-		gSenseMean[c] = (int32_t)(sum[c] / PERIOD_FRAMES);
-		if (peak[c] > gSensePeakSession[c])
-			gSensePeakSession[c] = peak[c];
+	for (unsigned ch = 0; ch < PDSPK_SENSE_CHANNELS; ch++) {
+		gSensePeak[ch] = peak[ch];
+		gSenseMean[ch] = (int32_t)(sum[ch] / PERIOD_FRAMES);
+		mag[ch] = (int32_t)(abssum[ch] / PERIOD_FRAMES);
+		if (peak[ch] > gSensePeakSession[ch])
+			gSensePeakSession[ch] = peak[ch];
 	}
-	if (gOwner)
-		IOLockWakeup(gLock, &gSenseEvent, false);
+	/* channels: current, voltage of left front, right front, left rear, right rear; per side the weaker speaker counts */
+	for (unsigned side = 0; side < 2; side++) {
+		gSeenI[side][gSeenAt] = mag[2 * side] < mag[2 * side + 4] ? mag[2 * side] : mag[2 * side + 4];
+		gSeenV[side][gSeenAt] = mag[2 * side + 1] < mag[2 * side + 5] ? mag[2 * side + 1] : mag[2 * side + 5];
+		/* the first periods of a capture are not judged */
+		if (gSenseDone < SPK_SETTLE_PERIODS)
+			gSeenI[side][gSeenAt] = gSeenV[side][gSeenAt] = 0;
+	}
+	gSeenAt = (gSeenAt + 1) % SPK_HISTORY;
+
+	if (!gModelValid)
+		return;
+	fault = pd_spk_model_run(&gModel, src, PERIOD_FRAMES);
+	if (fault != kPDSpkModelOk) {
+		char text[96];
+		snprintf(text, sizeof(text), "model: %s on %s", fault == kPDSpkModelNegativePower ? "mean power below zero" :
+		    fault == kPDSpkModelCoilTooHot ? "coil above the limit" : "magnet above the limit",
+		    kAmps[gModel.fault_speaker].name);
+		trip(text);
+		return;
+	}
+	for (unsigned side = 0; side < 2 && kModelLiftsClamp && gModelOn && gSenseDone >= SPK_HISTORY; side++) {
+		why = sense_check(side);
+		if (why != NULL) {
+			trip(why);
+			return;
+		}
+	}
+	if (!apply_limit())
+		trip("I2C error while setting the volume");
 }
 
 static void
@@ -379,17 +491,18 @@ stop_streams(void)
 static void
 trip(const char *why)
 {
+	if (gState != kPlaying)
+		return;
 	amps_off();
 	stop_streams();
 	gTrips++;
 	snprintf(gTripReason, sizeof(gTripReason), "%s", why);
-	gLeaseNs = gLeaseDeadline > uptime_ns() ? gLeaseDeadline - uptime_ns() : 0;
 	gToneLeft = 0;
 	gFifoCount = 0;
 	gState = gTrips >= SPK_MAX_TRIPS ? kDisabled : kIdle;
-	lock_volumes("amplifiers shut down");
+	gSteps[0] = gSteps[1] = SPK_STEPS_LOCKED;
+	gIdleStamp = uptime_ns();
 	IOLockWakeup(gLock, &gFifoEvent, false);
-	IOLockWakeup(gLock, &gSenseEvent, false);
 	LOG("SHUT DOWN: %s (stop %u of %u before the speakers stay off)", why, gTrips, SPK_MAX_TRIPS);
 }
 
@@ -406,6 +519,19 @@ start_playback(void)
 	gTonePhase = 0;
 	bzero(gSensePeakSession, sizeof(gSensePeakSession));
 	bzero(gSenseRing, PD_SPK_SENSE_RING_BYTES);
+	bzero(gExpect, sizeof(gExpect));
+	bzero(gSeenV, sizeof(gSeenV));
+	bzero(gSeenI, sizeof(gSeenI));
+	gExpectAt = gSeenAt = 0;
+	gConfirmRun[0] = gConfirmRun[1] = 0;
+	gSenseTrusted[0] = gSenseTrusted[1] = false;
+	/* the model up to now, then the volume this session starts at */
+	model_idle();
+	if (gModelValid && pd_spk_model_set_rate(&gModel, gRate) != 0)
+		gModelValid = false;
+	gSteps[0] = wanted_steps(0);
+	gSteps[1] = wanted_steps(1);
+	gState = kPlaying;      /* from here a failure goes through trip() */
 
 	err = amps_on();
 	if (err == 0)
@@ -440,10 +566,6 @@ start_playback(void)
 		gAmp[i].faults(&gLat0[i], &gLat1[i]);
 	for (unsigned i = 0; i < PDSPK_SPEAKERS && err == 0; i++)
 		err = gAmp[i].power(kPDTasActive);
-	gState = kPlaying;
-	/* macaudio_vlimit_enable_timeout(): the lease runs from here with what was left of it */
-	gLeaseDeadline = uptime_ns() + gLeaseNs;
-	update_lock();
 	if (err != 0 || amps_check(why, sizeof(why)) != 0) {
 		if (err != 0)
 			snprintf(why, sizeof(why), "unmute failed (error %d)", err);
@@ -451,10 +573,11 @@ start_playback(void)
 		return;
 	}
 	gSessions++;
-	LOG("playing at %u Hz: volumes %s (0x%02x 0x%02x 0x%02x 0x%02x), gain 0x%02x, tone %llu frames at -%u dB, "
-	    "writer %s, daemon %s", gRate, gUnlocked ? "unlocked" : "locked at -100 dB", gVolSeen[0], gVolSeen[1],
-	    gVolSeen[2], gVolSeen[3], gGainSeen[0], gToneLeft + gFramesTone, gToneDb, gDevOpen ? "open" : "none",
-	    gOwner ? "present" : "absent");
+	LOG("playing at %u Hz: volume %u.%u dB below full (registers 0x%02x 0x%02x 0x%02x 0x%02x; model %s, limit %u steps, "
+	    "coil %d mC), gain 0x%02x, tone %llu frames at -%u dB, writer %s", gRate, gSteps[0] / 2, (gSteps[0] & 1) * 5, gVolSeen[0],
+	    gVolSeen[1], gVolSeen[2], gVolSeen[3], wanted_steps(0) == SPK_STEPS_LOCKED ? "not in use" : "in use",
+	    gModelValid ? pd_spk_model_limit_steps(&gModel) : 0, gModelValid ? pd_spk_model_coil_mc(&gModel, 0) : 0,
+	    gGainSeen[0], gToneLeft + gFramesTone, gToneDb, gDevOpen ? "open" : "none");
 }
 
 static void
@@ -468,9 +591,9 @@ stop_playback(const char *why)
 	gSense.status(st);
 	amps_off();
 	stop_streams();
-	/* macaudio_vlimit_disable_timeout(): what is left of the lease is kept */
-	gLeaseNs = gLeaseDeadline > uptime_ns() ? gLeaseDeadline - uptime_ns() : 0;
 	gState = kIdle;
+	gSteps[0] = gSteps[1] = SPK_STEPS_LOCKED;
+	gIdleStamp = uptime_ns();
 	gLastRateMilliHz = mhz;
 	LOG("stopped (%s): %llu periods played (%llu written frames, %llu tone), %llu sense periods, measured %u.%03u Hz, "
 	    "late %u, ring errors %u, sense receiver 0x%x/0x%08x sync 0x%x", why, gDone, gFramesData, gFramesTone,
@@ -479,6 +602,14 @@ stop_playback(const char *why)
 	    gSensePeakSession[0], gSensePeakSession[1], gSensePeakSession[2], gSensePeakSession[3], gSensePeakSession[4],
 	    gSensePeakSession[5], gSensePeakSession[6], gSensePeakSession[7], gDieMilli[0], gDieMilli[1], gDieMilli[2],
 	    gDieMilli[3]);
+	if (gModelValid)
+		LOG("model: coil %d %d %d %d mC, magnet %d %d %d %d mC, limit %u half-dB steps, sense %s", pd_spk_model_coil_mc(&gModel, 0),
+		    pd_spk_model_coil_mc(&gModel, 1), pd_spk_model_coil_mc(&gModel, 2), pd_spk_model_coil_mc(&gModel, 3),
+		    pd_spk_model_magnet_mc(&gModel, 0), pd_spk_model_magnet_mc(&gModel, 1), pd_spk_model_magnet_mc(&gModel, 2),
+		    pd_spk_model_magnet_mc(&gModel, 3), pd_spk_model_limit_steps(&gModel),
+		    gSenseTrusted[0] && gSenseTrusted[1] ? "followed the signal on both sides" : gSenseTrusted[0] ?
+		    "followed the signal on the left only" : gSenseTrusted[1] ? "followed the signal on the right only" :
+		    "not confirmed (too quiet to tell, or absent)");
 }
 
 static void
@@ -499,17 +630,23 @@ service_playback(void)
 	}
 	/* captured periods come back in the order they were queued */
 	n = gSense.drainReports(NULL);
-	for (unsigned i = 0; i < n; i++) {
+	for (unsigned i = 0; i < n && gState == kPlaying; i++) {
 		take_sense((uint32_t)(gSenseDone % RING_PERIODS));
 		gSenseDone++;
 		gTotalSense++;
+	}
+	if (gState != kPlaying)
+		return;
+	/* the sense stream runs with the playback: one that falls behind is one the model cannot use */
+	if (gDone > gSenseDone + 2 * RING_PERIODS) {
+		trip("the sense capture stopped");
+		return;
 	}
 	while (!gSense.descRingFull()) {
 		gSense.submit(gSenseIova + (uint64_t)gSenseNext * PERIOD_BYTES, PERIOD_BYTES);
 		gSenseNext = (gSenseNext + 1) % RING_PERIODS;
 	}
 
-	lease_tick();
 	if (gMca.clearError() || gSense.clearError()) {
 		gRingErrors++;
 		trip("DMA ring error");
@@ -551,17 +688,16 @@ pd_speaker_thread(__unused void *arg, __unused wait_result_t wr)
 			service_playback();
 		else if (gState == kIdle && (gToneLeft > 0 || gFifoCount > 0))
 			start_playback();
+		else
+			model_idle();
 		playing = gState == kPlaying;
 		IOLockUnlock(gLock);
 
 		/* devfs is not there when the driver starts */
-		if ((gNode == NULL || gSafetyNode == NULL) && tick % (playing ? 200 : 10) == 0) {
-			if (gNode == NULL && gMajor >= 0)
-				gNode = devfs_make_node(makedev(gMajor, 0), DEVFS_CHAR, 0, 0, 0666, "pdspeaker");
-			if (gSafetyNode == NULL && gSafetyMajor >= 0)
-				gSafetyNode = devfs_make_node(makedev(gSafetyMajor, 0), DEVFS_CHAR, 0, 0, 0600, "pdspeaker-safety");
-			if (gNode != NULL && gSafetyNode != NULL)
-				LOG("/dev/pdspeaker and /dev/pdspeaker-safety published");
+		if (gNode == NULL && gMajor >= 0 && tick % (playing ? 200 : 10) == 0) {
+			gNode = devfs_make_node(makedev(gMajor, 0), DEVFS_CHAR, 0, 0, 0666, "pdspeaker");
+			if (gNode != NULL)
+				LOG("/dev/pdspeaker published");
 		}
 		tick++;
 		IOSleep(playing ? 5 : 100);
@@ -640,162 +776,12 @@ static struct cdevsw spk_cdevsw = {
 	eno_strat, eno_getc, eno_putc, 0
 };
 
-/* ---- /dev/pdspeaker-safety ------------------------------------------------------------ */
-
-/* macaudio_slk_lock(): a new owner starts without a lease */
-static int
-safety_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
-{
-	int err = 0;
-
-	if (!kauth_cred_issuser(kauth_cred_get()))
-		return EPERM;
-	IOLockLock(gLock);
-	if (gState == kOff || gState == kFailed) {
-		err = ENXIO;
-	} else if (gOwner) {
-		err = EBUSY;
-	} else {
-		gOwner = true;
-		gLeaseNs = 0;
-		gLeaseDeadline = 0;
-		gWasLocked = false;
-		gSenseHead = gSenseCount = 0;
-		update_lock();
-	}
-	IOLockUnlock(gLock);
-	return err;
-}
-
-/* macaudio_slk_unlock(): the owner is gone, lock at once */
-static int
-safety_close(__unused dev_t dev, __unused int flags, __unused int devtype, __unused struct proc *p)
-{
-	IOLockLock(gLock);
-	gOwner = false;
-	gLeaseNs = 0;
-	gLeaseDeadline = 0;
-	update_lock();
-	IOLockWakeup(gLock, &gSenseEvent, false);
-	IOLockUnlock(gLock);
-	return 0;
-}
-
-static int
-safety_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int fflag, __unused struct proc *p)
-{
-	int err = 0;
-
-	IOLockLock(gLock);
-	switch (cmd) {
-	case PDSPK_IOC_INFO: {
-		struct pdspk_info *info = (struct pdspk_info *)(void *)data;
-
-		bzero(info, sizeof(*info));
-		info->version = 1;
-		info->sample_rate = gState == kPlaying ? gRate : 0;
-		info->unlocked = gUnlocked;
-		info->amp_gain = SPK_AMP_GAIN;
-		info->volume_max = gUnlocked ? PDSPK_VOLUME_MAX : PDSPK_VOLUME_LOCKED;
-		for (unsigned i = 0; i < PDSPK_SPEAKERS; i++) {
-			info->volume[i] = gUnlocked ? gVolume[i] : PDSPK_VOLUME_LOCKED;
-			info->die_millicelsius[i] = gDieMilli[i];
-		}
-		info->tripped = gTrips;
-		break;
-	}
-	case PDSPK_IOC_PING:
-		/* macaudio_slk_put() */
-		if (*(uint32_t *)(void *)data != PDSPK_MAGIC) {
-			err = EINVAL;
-		} else if (gWasLocked) {
-			gWasLocked = false;
-			err = ETIMEDOUT;
-		} else {
-			gPings++;
-			gLeaseNs = (uint64_t)PDSPK_LEASE_MS * 1000000;
-			if (gState == kPlaying)
-				gLeaseDeadline = uptime_ns() + gLeaseNs;
-			update_lock();
-		}
-		break;
-	case PDSPK_IOC_SET_VOLUME: {
-		const struct pdspk_volume *v = (const struct pdspk_volume *)(void *)data;
-		uint32_t max = gUnlocked ? PDSPK_VOLUME_MAX : PDSPK_VOLUME_LOCKED;
-
-		for (unsigned i = 0; i < PDSPK_SPEAKERS; i++)
-			if (v->volume[i] > max)
-				err = EINVAL;
-		if (err != 0) {
-			gVolumeRefused++;
-			break;
-		}
-		gVolumeSets++;
-		for (unsigned i = 0; i < PDSPK_SPEAKERS; i++) {
-			gVolume[i] = v->volume[i];
-			if (gState == kPlaying && gAmp[i].setVolume(SPK_VOLUME_REG(gVolume[i])) != 0) {
-				trip("I2C error while setting a volume");
-				err = EIO;
-				break;
-			}
-		}
-		break;
-	}
-	default:
-		err = ENOTTY;
-	}
-	IOLockUnlock(gLock);
-	return err;
-}
-
-/* The sense stream: whole frames, blocking while there are none. */
-static int
-safety_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
-{
-	int16_t chunk[PDSPK_SENSE_CHANNELS * 64];
-	int err = 0;
-	bool any = false;
-
-	while (err == 0 && uio_resid(uio) >= SENSE_FRAME_BYTES) {
-		unsigned want = (unsigned)(uio_resid(uio) / SENSE_FRAME_BYTES), got = 0;
-
-		if (want > 64)
-			want = 64;
-		IOLockLock(gLock);
-		while (gSenseCount == 0 && !any && err == 0) {
-			if (IOLockSleep(gLock, &gSenseEvent, THREAD_ABORTSAFE) != THREAD_AWAKENED)
-				err = EINTR;
-			else if (!gOwner)
-				err = ENXIO;
-		}
-		while (got < want && gSenseCount > 0) {
-			memcpy(chunk + PDSPK_SENSE_CHANNELS * got, gSenseFifo + PDSPK_SENSE_CHANNELS * gSenseHead,
-			    SENSE_FRAME_BYTES);
-			gSenseHead = (gSenseHead + 1) % SENSE_FIFO_FRAMES;
-			gSenseCount--;
-			got++;
-		}
-		IOLockUnlock(gLock);
-		if (got == 0)
-			break;          /* what there was has been returned */
-		err = uiomove((char *)chunk, (int)(got * SENSE_FRAME_BYTES), uio);
-		any = true;
-	}
-	return err;
-}
-
-static struct cdevsw safety_cdevsw = {
-	safety_open, safety_close, safety_read, eno_rdwrt,
-	safety_ioctl, eno_stop, eno_reset, 0, eno_select, eno_mmap,
-	eno_strat, eno_getc, eno_putc, 0
-};
-
 /* ---- sysctl --------------------------------------------------------------------------- */
 
 enum {
-	kCtlTone, kCtlToneDb, kCtlRate, kCtlPlaying, kCtlUnlocked, kCtlOwner, kCtlPings, kCtlLeaseTimeouts,
-	kCtlVolumeRefused, kCtlVolumeSets, kCtlPeriods, kCtlSensePeriods, kCtlTrips, kCtlSessions, kCtlRateMilliHz,
-	kCtlSenseDropped, kCtlTestShutdown, kCtlFrames, kCtlFifoFrames, kCtlLockMs, kCtlPrerollMs,
+	kCtlTone, kCtlToneDb, kCtlRate, kCtlPlaying, kCtlUnlocked, kCtlOwner, kCtlLimitSteps, kCtlVolumeSteps,
+	kCtlSenseTrusted, kCtlPeriods, kCtlSensePeriods, kCtlTrips, kCtlSessions, kCtlRateMilliHz,
+	kCtlTestShutdown, kCtlHoldProbe, kCtlFrames, kCtlFifoFrames, kCtlLockMs, kCtlPrerollMs,
 };
 
 static int
@@ -809,18 +795,17 @@ spk_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sy
 	case kCtlToneDb:        value = (int)gToneDb; break;
 	case kCtlRate:          value = (int)gRate; break;
 	case kCtlPlaying:       value = gState == kPlaying; break;
-	case kCtlUnlocked:      value = gUnlocked; break;
-	case kCtlOwner:         value = gOwner; break;
-	case kCtlPings:         value = (int)gPings; break;
-	case kCtlLeaseTimeouts: value = (int)gLeaseTimeouts; break;
-	case kCtlVolumeRefused: value = (int)gVolumeRefused; break;
-	case kCtlVolumeSets:    value = (int)gVolumeSets; break;
+	case kCtlUnlocked:      value = wanted_steps(0) != SPK_STEPS_LOCKED; break;
+	case kCtlOwner:         value = 0; break;
+	case kCtlLimitSteps:    value = gModelValid ? (int)pd_spk_model_limit_steps(&gModel) : -1; break;
+	case kCtlVolumeSteps:   value = (int)(gSteps[0] > gSteps[1] ? gSteps[1] : gSteps[0]); break;
+	case kCtlSenseTrusted:  value = gSenseTrusted[0] + 2 * gSenseTrusted[1]; break;
 	case kCtlPeriods:       value = (int)gTotalDone; break;
 	case kCtlSensePeriods:  value = (int)gTotalSense; break;
 	case kCtlTrips:         value = (int)gTrips; break;
 	case kCtlSessions:      value = (int)gSessions; break;
 	case kCtlRateMilliHz:   value = (int)gLastRateMilliHz; break;
-	case kCtlSenseDropped:  value = (int)gSenseDropped; break;
+	case kCtlHoldProbe:     value = (int)gHoldProbe; break;
 	case kCtlFrames:        value = (int)(gTotalDone * PERIOD_FRAMES); break;
 	case kCtlFifoFrames:    value = (int)gFifoCount; break;
 	/* the amplifiers need no lock time: both are 0, so a client of either output can read the same names */
@@ -847,6 +832,10 @@ spk_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sy
 			error = EINVAL;
 		else
 			gToneDb = (uint32_t)value;
+		break;
+	case kCtlHoldProbe:
+		/* can only make the speakers quieter */
+		gHoldProbe = value != 0;
 		break;
 	case kCtlTestShutdown:
 		/* takes the same path as a fault; it can only turn the speakers off */
@@ -891,12 +880,26 @@ spk_sysctl_string(__unused struct sysctl_oid *oidp, __unused void *arg1, int arg
 		    gSenseMean[6], gSenseMean[7]);
 		break;
 	case 2:
-		snprintf(text, sizeof(text), "%s control=%u,%u,%u,%u registers=0x%02x,0x%02x,0x%02x,0x%02x gain=0x%02x,0x%02x,"
+		snprintf(text, sizeof(text), "%s steps=%u,%u registers=0x%02x,0x%02x,0x%02x,0x%02x gain=0x%02x,0x%02x,"
 		    "0x%02x,0x%02x power=0x%02x,0x%02x,0x%02x,0x%02x latched=0x%02x/0x%02x,0x%02x/0x%02x,0x%02x/0x%02x,0x%02x/0x%02x",
-		    gUnlocked ? "unlocked" : "locked", gUnlocked ? gVolume[0] : 1, gUnlocked ? gVolume[1] : 1,
-		    gUnlocked ? gVolume[2] : 1, gUnlocked ? gVolume[3] : 1, gVolSeen[0], gVolSeen[1], gVolSeen[2], gVolSeen[3],
+		    wanted_steps(0) == SPK_STEPS_LOCKED ? "locked" : "model", gSteps[0], gSteps[1], gVolSeen[0], gVolSeen[1],
+		    gVolSeen[2], gVolSeen[3],
 		    gGainSeen[0], gGainSeen[1], gGainSeen[2], gGainSeen[3], gPwr[0], gPwr[1], gPwr[2], gPwr[3], gLat0[0],
 		    gLat1[0], gLat0[1], gLat1[1], gLat0[2], gLat1[2], gLat0[3], gLat1[3]);
+		break;
+	case 3:
+		if (gModelValid)
+			snprintf(text, sizeof(text), "%s%s coil_mc=%d,%d,%d,%d magnet_mc=%d,%d,%d,%d power_mw=%d,%d,%d,%d limit_steps=%u "
+			    "volume_steps=%u,%u sense=%s fault=%d", !kModelLiftsClamp || !gModelOn ? "watching only" : "in charge",
+			    gModel.fault ? " FAULT" : "", pd_spk_model_coil_mc(&gModel, 0), pd_spk_model_coil_mc(&gModel, 1),
+			    pd_spk_model_coil_mc(&gModel, 2), pd_spk_model_coil_mc(&gModel, 3), pd_spk_model_magnet_mc(&gModel, 0),
+			    pd_spk_model_magnet_mc(&gModel, 1), pd_spk_model_magnet_mc(&gModel, 2), pd_spk_model_magnet_mc(&gModel, 3),
+			    gModel.spk[0].power_mw, gModel.spk[1].power_mw, gModel.spk[2].power_mw, gModel.spk[3].power_mw,
+			    pd_spk_model_limit_steps(&gModel), gSteps[0], gSteps[1], gState != kPlaying ? "idle" :
+			    gSenseTrusted[0] && gSenseTrusted[1] ? "trusted" : gSenseTrusted[0] ? "left trusted" : gSenseTrusted[1] ?
+			    "right trusted" : "unconfirmed", gModel.fault);
+		else
+			snprintf(text, sizeof(text), "no model: volumes at -100 dB");
 		break;
 	}
 	IOLockUnlock(gLock);
@@ -913,38 +916,38 @@ SYSCTL_NODE(_kern, OID_AUTO, pd_speaker, CTLFLAG_RD | CTLFLAG_LOCKED, 0, "built-
 
 SPK_STR(state, 0, "state, amplifier revisions and die temperatures, shutdowns");
 SPK_STR(sense, 1, "current/voltage sense of the last period, of 32768: largest magnitude and mean");
-SPK_STR(volume, 2, "the volume lock and the amplifier registers as last read back");
+SPK_STR(volume, 2, "the volume in force and the amplifier registers as last read back");
+SPK_STR(model, 3, "the temperature model: coil and magnet per speaker, mean power, limit, sense health");
 SPK_INT(tone, kCtlTone, CTLFLAG_RW, "seconds of test tone left; write to play (at the volume in force)");
 SPK_INT(tone_db, kCtlToneDb, CTLFLAG_RW, "test tone level, dB below digital full scale (at least 20)");
 SPK_INT(rate, kCtlRate, CTLFLAG_RW, "sample rate");
 SPK_INT(playing, kCtlPlaying, CTLFLAG_RD, "1 while the speakers play");
-SPK_INT(unlocked, kCtlUnlocked, CTLFLAG_RD, "1 while the safety daemon holds the volume lock open");
-SPK_INT(owner, kCtlOwner, CTLFLAG_RD, "1 while a safety daemon has the safety device open");
-SPK_INT(pings, kCtlPings, CTLFLAG_RD, "accepted keep-alive pings");
-SPK_INT(lease_timeouts, kCtlLeaseTimeouts, CTLFLAG_RD, "times the daemon's lease ran out while playing");
-SPK_INT(volume_refused, kCtlVolumeRefused, CTLFLAG_RD, "volume requests above what the lock allows");
-SPK_INT(volume_sets, kCtlVolumeSets, CTLFLAG_RD, "accepted volume requests");
+SPK_INT(unlocked, kCtlUnlocked, CTLFLAG_RD, "1 while the model sets the volume, 0 while it is held at -100 dB");
+SPK_INT(owner, kCtlOwner, CTLFLAG_RD, "always 0: no process can hold the volume open");
+SPK_INT(limit_steps, kCtlLimitSteps, CTLFLAG_RD, "the model's limit in half-dB steps below 0 dB (-1: no model)");
+SPK_INT(volume_steps, kCtlVolumeSteps, CTLFLAG_RD, "the amplifiers' volume in half-dB steps below 0 dB (200: -100 dB)");
+SPK_INT(sense_trusted, kCtlSenseTrusted, CTLFLAG_RD, "this session's sense data has followed the signal: 1 left, 2 right, 3 both");
 SPK_INT(periods, kCtlPeriods, CTLFLAG_RD, "DMA periods played since boot");
 SPK_INT(sense_periods, kCtlSensePeriods, CTLFLAG_RD, "sense periods captured since boot");
 SPK_INT(trips, kCtlTrips, CTLFLAG_RD, "times the amplifiers were shut down for a fault");
 SPK_INT(sessions, kCtlSessions, CTLFLAG_RD, "playback sessions started");
 SPK_INT(rate_mhz, kCtlRateMilliHz, CTLFLAG_RD, "sample rate of the last session from the DMA timestamps, in mHz");
+SPK_INT(hold_probe, kCtlHoldProbe, CTLFLAG_RW, "1: keep the volume 20 dB down even once the sense data is confirmed (for quiet tests)");
 SPK_INT(test_shutdown, kCtlTestShutdown, CTLFLAG_RW, "write while playing: shut the amplifiers down as a fault would");
 SPK_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot (wraps)");
 SPK_INT(fifo_frames, kCtlFifoFrames, CTLFLAG_RD, "frames a writer has queued that are not yet in the DMA ring");
 SPK_INT(lock_ms, kCtlLockMs, CTLFLAG_RD, "always 0 (kern.pd_sound.lock_ms has the codec's lock time)");
 SPK_INT(preroll_ms, kCtlPrerollMs, CTLFLAG_RD, "always 0: playback starts with the first frames");
-SPK_INT(sense_dropped, kCtlSenseDropped, CTLFLAG_RD, "sense frames the daemon did not read in time");
 
 static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_speaker,
 	&sysctl__kern_pd_speaker_state, &sysctl__kern_pd_speaker_sense, &sysctl__kern_pd_speaker_volume,
 	&sysctl__kern_pd_speaker_tone, &sysctl__kern_pd_speaker_tone_db, &sysctl__kern_pd_speaker_rate,
 	&sysctl__kern_pd_speaker_playing, &sysctl__kern_pd_speaker_unlocked, &sysctl__kern_pd_speaker_owner,
-	&sysctl__kern_pd_speaker_pings, &sysctl__kern_pd_speaker_lease_timeouts, &sysctl__kern_pd_speaker_volume_refused,
-	&sysctl__kern_pd_speaker_volume_sets, &sysctl__kern_pd_speaker_periods, &sysctl__kern_pd_speaker_sense_periods,
+	&sysctl__kern_pd_speaker_limit_steps, &sysctl__kern_pd_speaker_volume_steps, &sysctl__kern_pd_speaker_sense_trusted,
+	&sysctl__kern_pd_speaker_model, &sysctl__kern_pd_speaker_periods, &sysctl__kern_pd_speaker_sense_periods,
 	&sysctl__kern_pd_speaker_trips, &sysctl__kern_pd_speaker_sessions, &sysctl__kern_pd_speaker_rate_mhz,
-	&sysctl__kern_pd_speaker_sense_dropped, &sysctl__kern_pd_speaker_test_shutdown,
+	&sysctl__kern_pd_speaker_test_shutdown, &sysctl__kern_pd_speaker_hold_probe,
 	&sysctl__kern_pd_speaker_frames, &sysctl__kern_pd_speaker_fifo_frames, &sysctl__kern_pd_speaker_lock_ms,
 	&sysctl__kern_pd_speaker_preroll_ms,
 };
@@ -1010,7 +1013,7 @@ pd_speakers_bring_up(PDGpio *gpio, PDDartFixed *dart, uint8_t *playRing, uint64_
 		LOG("amplifier %s at i2c%u 0x%02x: revision 0x%02x, power 0x%02x, gain 0x%02x, volume 0x%02x, latched 0x%02x/0x%02x",
 		    kAmps[i].name, kAmps[i].bus ? 3 : 1, kAmps[i].addr, gAmp[i].rev, pwr, gain, vol, gLat0[i], gLat1[i]);
 		if (err == 0 && ((pwr & 0x03) != kPDTasShutdown || (gain & 0x1f) != SPK_AMP_GAIN ||
-		    vol != SPK_VOLUME_REG(PDSPK_VOLUME_LOCKED)))
+		    vol != SPK_VOLUME_REG(SPK_STEPS_LOCKED)))
 			err = EIO;
 	}
 	amps_off();
@@ -1024,16 +1027,24 @@ pd_speakers_bring_up(PDGpio *gpio, PDDartFixed *dart, uint8_t *playRing, uint64_
 	if (err != 0)
 		return fail("speaker transport", err);
 	gFifo = (int32_t *)IOMalloc(FIFO_FRAMES * 2 * sizeof(int32_t));
-	gSenseFifo = (int16_t *)IOMalloc(SENSE_FIFO_FRAMES * SENSE_FRAME_BYTES);
-	if (gFifo == NULL || gSenseFifo == NULL)
+	if (gFifo == NULL)
 		return fail("FIFOs", ENOMEM);
 	gMajor = cdevsw_add(-1, &spk_cdevsw);
-	gSafetyMajor = cdevsw_add(-1, &safety_cdevsw);
+	/* 10^(-1/40) per half-dB step, for the signal the voltage sense should show */
+	gAttenQ16[0] = 65536;
+	for (unsigned i = 1; i < 64; i++)
+		gAttenQ16[i] = (uint32_t)(((uint64_t)gAttenQ16[i - 1] * 61870) >> 16);
+	PE_parse_boot_argn("pdspeaker_model", &gModelOn, sizeof(gModelOn));
+	gModelValid = pd_spk_model_init(&gModel, gRate, SPK_AMP_GAIN) == 0;
+	gIdleStamp = uptime_ns();
 	gState = kIdle;
 	if (kernel_thread_start(pd_speaker_thread, NULL, &thread) != KERN_SUCCESS)
 		return fail("thread", ENOMEM);
 	thread_deallocate(thread);
-	LOG("ready: amplifiers in hardware shutdown, gain fixed at 0x%02x, volumes locked at -100 dB", SPK_AMP_GAIN);
+	LOG("ready: amplifiers in hardware shutdown, gain fixed at 0x%02x; volume %s (coil %d mC, magnet %d mC at start)",
+	    SPK_AMP_GAIN, wanted_steps(0) == SPK_STEPS_LOCKED ? "held at -100 dB, the model only watches" :
+	    "set by the temperature model, 20 dB down until the sense data is confirmed",
+	    gModelValid ? pd_spk_model_coil_mc(&gModel, 0) : 0, gModelValid ? pd_spk_model_magnet_mc(&gModel, 0) : 0);
 	return 0;
 }
 
@@ -1050,6 +1061,5 @@ pd_speakers_quiesce(void)
 	if (gGpio != NULL && gAmp[0].bus != NULL)
 		amps_off();
 	IOLockWakeup(gLock, &gFifoEvent, false);
-	IOLockWakeup(gLock, &gSenseEvent, false);
 	IOLockUnlock(gLock);
 }

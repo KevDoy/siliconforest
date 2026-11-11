@@ -15,6 +15,13 @@ mon() {
         "$(get kern.pd_sound.rate_mhz)" "$(get kern.pd_sound.lock_ms)" "$(get kern.pd_sound.late)" \
         "$(get kern.pd_sound.ring_errors)" "$(get kern.pd_sound.jack)"
 }
+# one line of the speakers' counters
+monspk() {
+    printf 'SA_SPK %s t=%s playing=%s sessions=%s frames=%s fifo_frames=%s unlocked=%s owner=%s trips=%s rate=%s state=%s\n' \
+        "$1" "$(now)" "$(get kern.pd_speaker.playing)" "$(get kern.pd_speaker.sessions)" "$(get kern.pd_speaker.frames)" \
+        "$(get kern.pd_speaker.fifo_frames)" "$(get kern.pd_speaker.unlocked)" "$(get kern.pd_speaker.owner)" \
+        "$(get kern.pd_speaker.trips)" "$(get kern.pd_speaker.rate)" "$(get kern.pd_speaker.state | cut -c1-40)"
+}
 # bounded SECONDS COMMAND...: runs the command, killing it when it outlasts the bound
 bounded() {
     limit=$1; shift
@@ -46,6 +53,12 @@ idle() {
     n=0
     while [ "$(get kern.pd_sound.playing)" = 1 ] && [ "$n" -lt "$1" ]; do sleep 1; n=$((n+1)); done
     printf 'SA_IDLE %s waited=%s playing=%s\n' "$2" "$n" "$(get kern.pd_sound.playing)"
+}
+# the same for the speakers
+idlespk() {
+    n=0
+    while [ "$(get kern.pd_speaker.playing)" = 1 ] && [ "$n" -lt "$1" ]; do sleep 1; n=$((n+1)); done
+    printf 'SA_IDLE %s speakers waited=%s playing=%s\n' "$2" "$n" "$(get kern.pd_speaker.playing)"
 }
 # the lines coreaudiod logged since the last call
 logpos=0

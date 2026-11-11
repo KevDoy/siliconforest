@@ -6,10 +6,16 @@
 # Usage: sa_boot.sh <name, sd20..sd39> [guest template, default ../guest/darwin-sysaudio-test.in]
 #   SD_KC        collection store path (default: the collection the path was proven with; build
 #                ../../build-kc.nix for the current kext)
+#   SD_FILES     further files for the RAM root: "source=/destination;..."
+#   SD_WITH_SAFETYD=1  only with guest/darwin-sysaudio-listen.in, A PERSON AT THE M1: stages
+#                ../safetyd's speakersafetyd, which that script then runs so the speakers can be
+#                heard. Never for an unattended boot: without the daemon the kernel keeps the
+#                speakers at -100 dB, which is what an unattended boot must have.
 #   SD_RUNTIME   upper bound of the guest's run in seconds, at most 600 (default 300)
 #   SD_BOOTARGS  further kernel boot arguments; SD_CPUS guest processors (default 8)
 #   SD_VOLUME    codec attenuation in dB at the start (default 30); SD_TONEDB tone level in dB
-#                below full scale (default 20)
+#                below full scale on the headphones (default 20); SD_SPKDB the same for what may
+#                reach the speakers (default 30, not below)
 #   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
@@ -20,7 +26,16 @@ case "$N" in sd2[0-9]|sd3[0-9]) ;; *) echo "boot names for the system audio path
 [ ! -e "runs/m1-desktop-010/pcie-enum-attempt-$N" ] || { echo "boot $N exists" >&2; exit 2; }
 [ ! -e runs/bench.finisher.failed ] || { echo "runs/bench.finisher.failed exists: the bench needs a person" >&2; exit 2; }
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
-KC=${SD_KC:-/nix/store/bsnkaxg6x54psa1qzj7yhhgf40kzxrwm-puredarwin-kc-arm64-0.1}
+KC=${SD_KC:-/nix/store/a4q9xb09s3xblmj17jal2rmm59wvnadp-puredarwin-kc-arm64-0.1}
+SPKDB=${SD_SPKDB:-30}
+[ "$SPKDB" -ge 30 ] || { echo "SD_SPKDB: 30 dB below full scale or quieter" >&2; exit 2; }
+EXTRA=${SD_FILES:-}
+if [ "${SD_WITH_SAFETYD:-0}" = 1 ]; then
+    case "$GUEST" in */darwin-sysaudio-listen.in) ;; *) echo "SD_WITH_SAFETYD=1 is for the listening script only" >&2; exit 2;; esac
+    SSD=$HERE/../safetyd
+    [ -f "$SSD/build/speakersafetyd" ] || { echo "no $SSD/build/speakersafetyd (run its build.sh)" >&2; exit 2; }
+    EXTRA="$SSD/build/speakersafetyd=/usr/bin/speakersafetyd;$SSD/conf/apple/j293.conf=/usr/share/speakersafetyd/apple/j293.conf${EXTRA:+;$EXTRA}"
+fi
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 A=$(cd "$HERE" && $NIX build-sysaudio.nix -A all --no-out-link 2> "${TMPDIR:-/tmp}/sa-build.$$.log" | tail -1)
 [ -x "$A/usr/sbin/coreaudiod" ] || { tail -30 "${TMPDIR:-/tmp}/sa-build.$$.log" >&2; echo "build failed" >&2; exit 2; }
@@ -28,11 +43,11 @@ rm -f "${TMPDIR:-/tmp}/sa-build.$$.log"
 RUNTIME=${SD_RUNTIME:-300}
 [ "$RUNTIME" -le 600 ] || { echo "boots are capped at 600 s" >&2; exit 2; }
 W=$(mktemp -d)
-python3 -B - "$GUEST" "$HERE/guest/sysaudio-common.sh" "$W/guest" "${SD_VOLUME:-30}" "${SD_TONEDB:-20}" <<'PY'
+python3 -B - "$GUEST" "$HERE/guest/sysaudio-common.sh" "$W/guest" "${SD_VOLUME:-30}" "${SD_TONEDB:-20}" "$SPKDB" <<'PY'
 import sys
-guest, common, out, volume, tonedb = sys.argv[1:]
+guest, common, out, volume, tonedb, spkdb = sys.argv[1:]
 text = open(guest).read().replace('@COMMON@', open(common).read())
-open(out, 'w').write(text.replace('@VOLUME@', volume).replace('@TONEDB@', tonedb))
+open(out, 'w').write(text.replace('@VOLUME@', volume).replace('@TONEDB@', tonedb).replace('@SPKDB@', spkdb))
 PY
 # raw frames for pcmplay: 2 s of 1 kHz, 16 bit stereo, 48 kHz, 30 dB below full scale
 python3 -B - "$W/test.pcm" <<'PY'
@@ -49,7 +64,7 @@ FILES="$FILES;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdv
 for f in CoreAudio AudioToolbox AudioUnit; do
     FILES="$FILES;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"
 done
-FILES="$FILES;$W/test.pcm=/usr/share/sysaudio-test.pcm"
+FILES="$FILES;$W/test.pcm=/usr/share/sysaudio-test.pcm${EXTRA:+;$EXTRA}"
 PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |

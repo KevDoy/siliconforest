@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# pdplay and pdspk-test for the PureDarwin M1 guest (arm64 Mach-O, libSystem only): same toolchain and link
+# pdplay for the PureDarwin M1 guest (arm64 Mach-O, libSystem only): same toolchain and link
 # shape as ../m1-bwfm/netd/build-pd-netd.nix.
 let
   pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
@@ -14,7 +14,7 @@ in pkgs.stdenv.mkDerivation {
     build() {
       ${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang \
         -std=c11 -Wall -Wextra -O1 \
-        -isystem "$DARWIN_SDK_ROOT/usr/include" -I${./include} \
+        -isystem "$DARWIN_SDK_ROOT/usr/include" \
         "$1" \
         --ld-path=${p.native-ld}/bin/ld -nostdlib \
         -L${libSystem}/usr/lib -L${libSystem}/usr/lib/system \
@@ -23,11 +23,10 @@ in pkgs.stdenv.mkDerivation {
         -lSystem -o "$2"
     }
     build ${./user/pdplay.c} pdplay
-    build ${./user/pdspk-test.c} pdspk-test
   '';
   installPhase = ''
     mkdir -p "$out/usr/bin"
-    cp pdplay pdspk-test "$out/usr/bin/"
+    cp pdplay "$out/usr/bin/"
   '';
   dontFixup = true;
   dontStrip = true;

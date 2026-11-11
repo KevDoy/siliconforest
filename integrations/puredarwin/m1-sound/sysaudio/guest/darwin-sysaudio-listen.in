@@ -1,71 +1,159 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
-# Listening script for the system audio path: needs a person at the M1 with headphones in the
-# jack BEFORE the boot. Run:
-#   SD_RUNTIME=240 tools/sa_boot.sh sd<NN> guest/darwin-sysaudio-listen.in
-# Everything goes through AudioToolbox and coreaudiod to /dev/pdaudio. The level starts at
-# pdvolume 50 (31 dB codec attenuation), tones are @TONEDB@ dB below full scale: clearly
-# audible, not loud. About 30 s after the boot's picture the steps follow one another with a
-# two second pause between them; the console names each step (SA_LISTEN) as it starts.
-# What must be heard:
-#   1. A 440 Hz tone for 3 s in both ears. It starts about a second after the step begins
-#      (the codec's start) but must start cleanly and last the full 3 s: no click, no
-#      clipped start or end, a steady pitch without crackle or warble.
-#   2. The same tone for 2 s in the LEFT ear only, then 2 s in the RIGHT ear only.
-#   3. Two tones at once for 5 s: 440 Hz left and 660 Hz right (two clients, one at 44.1 kHz
-#      and one at 48 kHz, mixed). Both steady and clean; the left one must not sound rougher
-#      than in step 2 (it is rate converted).
-#   4. A 14 s tone that gets quieter in four steps, one a second, then louder again in four
-#      steps (pdvolume down/up), then is silent for 2 s (mute) and comes back (unmute) at the
-#      level it had. No click or dropout at a step.
-#   5. Two 1 s tones (660 Hz) a second apart: the second starts at once, without the
-#      one second wait of step 1 (the device stays open between clients).
-#   6. After 8 s of silence a 1 s tone at 880 Hz: after the driver has stopped and started
-#      again it must still be complete and about 1 s long.
-#   7. A 1 kHz tone for 2 s (the tree's pcmplay; 10 dB quieter than the others): clean, both
-#      ears. Its last tenth of a second or so may be missing (pcmplay stops at its last buffer).
-# Report for each step: heard as described or what was wrong (click, crackle, wrong ear,
-# wrong pitch, too short, too loud).
+# Listening script for the system audio path: needs a PERSON AT THE M1 with headphones at
+# hand, NOT plugged in when the boot starts. Run:
+#   SD_RUNTIME=420 tools/sa_boot.sh sd<NN> guest/darwin-sysaudio-listen.in
+# for the headphones and the switching alone, or, to hear the speakers too,
+#   SD_WITH_SAFETYD=1 SD_RUNTIME=420 tools/sa_boot.sh sd<NN> guest/darwin-sysaudio-listen.in
+# THE SPEAKERS ARE ONLY AUDIBLE WITH THE SAFETY DAEMON: without it the kernel holds them at
+# -100 dB and every speaker step below is silent (that is correct, not a fault). With
+# SD_WITH_SAFETYD=1 the script runs speakersafetyd in a restart loop, as
+# ../guest/darwin-sound-listen-speakers.in does; that is for a person at the machine only.
+# If anything from the speakers sounds wrong (buzz, rattle, loud): close the lid or hold the
+# power button; the kernel also shuts the amplifiers down on any amplifier fault.
+#
+# Everything goes through AudioToolbox and coreaudiod. Tones are @SPKDB@ dB below full scale
+# where they can reach the speakers (the server's speaker level is 50 on top: quiet) and
+# @TONEDB@ dB below on the headphones at pdvolume 50 (31 dB codec attenuation): clearly
+# audible, not loud. The console names each step (SA_LISTEN) as it starts.
+#
+# Part 1, speakers, jack empty (silent without the daemon):
+#   S1. 440 Hz for 3 s from both speakers: starts at once, clean, no pop at start or end.
+#   S2. Left speaker 2 s, then right speaker 2 s.
+#   S3. A 12 s tone that gets quieter in four steps and louder again in four (pdvolume
+#       down/up act on the server's mix here), is silent for 2 s (mute) and comes back.
+# Part 2, switching (the console says when to plug and unplug; each wait is 30 s at most):
+#   P1. A 440 Hz tone plays on the speakers. PLUG THE HEADPHONES IN: the speakers must go
+#       quiet within a moment and the tone continue in the headphones about a second
+#       later (the codec's start), without a click. The console shows "the default output
+#       is Headphones".
+#   P2. UNPLUG: the tone must return to the speakers within a moment and nothing more may
+#       come from the headphones' jack. PLUG IN AGAIN for part 3.
+# Part 3, headphones:
+#   H1. 440 Hz for 3 s in both ears: clean start and end, steady pitch, no crackle.
+#   H2. Left ear 2 s, then right ear 2 s.
+#   H3. Two tones at once for 5 s: 440 Hz left and 660 Hz right (two clients, 44.1 kHz and
+#       48 kHz, mixed). Both steady and clean; the left one not rougher than in H2.
+#   H4. A 14 s tone, four steps quieter, four louder, 2 s mute, back: no click at a step.
+#   H5. Two 1 s tones (660 Hz) a second apart: the second starts at once.
+#   H6. After 8 s of silence a 1 s tone at 880 Hz: complete and about 1 s long.
+#   H7. A 1 kHz tone for 2 s (the tree's pcmplay; 10 dB quieter than the others): clean,
+#       both ears. Its last tenth of a second or so may be missing (pcmplay stops at its
+#       last buffer).
+# Report for each step: heard as described or what was wrong (click, crackle, wrong side,
+# wrong pitch, too short, too loud, nothing).
 # (@SSID@/@PSK@ are unused; the assembler fills templates.)
 @COMMON@
 printf '\nSA_BEGIN_%s\n' "$nonce"
 bringup
+monspk bringup
+
+# Only when tools/sa_boot.sh staged it (SD_WITH_SAFETYD=1): the daemon that may open the
+# speakers' volume. It ends on every error by design; restart it as systemd does on Linux.
+if [ -x /usr/bin/speakersafetyd ]; then
+    mkdir -p /tmp/ssd
+    ( while [ ! -f /tmp/ssd/stop ]; do
+          speakersafetyd -c /usr/share/speakersafetyd --machine j293 --runtime-dir /tmp/ssd -v >> /tmp/ssd/log 2>&1
+          sleep 1
+      done ) &
+    sleep 3
+    printf 'SA_LISTEN the safety daemon runs: the speakers can be heard\n'
+else
+    printf 'SA_LISTEN no safety daemon: the speakers stay at -100 dB, the speaker steps are silent\n'
+fi
+monspk daemon
+
 start_server
-step() { sleep 2; printf 'SA_LISTEN step %s: %s (jack=%s)\n' "$1" "$2" "$(get kern.pd_sound.jack)"; }
+sleep 1; showlog
+step() { sleep 2; printf 'SA_LISTEN step %s: %s (jack=%s default: %s)\n' "$1" "$2" "$(get kern.pd_sound.jack)" "$(pdvolume get 2>&1)"; }
+# waits until the jack is as wanted (0: empty, 1: something in it), 30 s at most
+jackwait() {
+    n=0
+    while [ "$n" -lt 30 ]; do
+        j=$(get kern.pd_sound.jack)
+        if [ "$1" = 0 ] && [ "$j" = 0 ]; then break; fi
+        if [ "$1" = 1 ] && [ "${j:-0}" -gt 0 ]; then break; fi
+        sleep 1; n=$((n+1))
+    done
+    sleep 1
+    printf 'SA_LISTEN jack=%s after %s s; %s\n' "$(get kern.pd_sound.jack)" "$n" "$(pdvolume get 2>&1)"
+    showlog
+}
+
+if [ "$(get kern.pd_sound.jack)" != 0 ]; then
+    printf 'SA_LISTEN the headphones are plugged in already: UNPLUG them now for part 1\n'
+    jackwait 0
+fi
 bounded 10 pdvolume unmute
 bounded 10 pdvolume set 50
 
-step 1 "440 Hz, both ears, 3 s"
-bounded 20 pdtone -r 48000 -f 440 -s 3 -d @TONEDB@ -n both
-step 2 "440 Hz, left 2 s then right 2 s"
-bounded 20 pdtone -r 48000 -f 440 -s 2 -d @TONEDB@ -c l -n left
-bounded 20 pdtone -r 48000 -f 440 -s 2 -d @TONEDB@ -c r -n right
-step 3 "440 Hz left (44.1 kHz client) and 660 Hz right (48 kHz client) together, 5 s"
-pdtone -r 44100 -f 440 -s 5 -d @TONEDB@ -c l -n mix44 2>&1 &
+step S1 "speakers: 440 Hz, both, 3 s"
+bounded 20 pdtone -r 48000 -f 440 -s 3 -d @SPKDB@ -n spk-both
+monspk S1
+step S2 "speakers: left 2 s, then right 2 s"
+bounded 20 pdtone -r 48000 -f 440 -s 2 -d @SPKDB@ -c l -n spk-left
+bounded 20 pdtone -r 48000 -f 440 -s 2 -d @SPKDB@ -c r -n spk-right
+step S3 "speakers: 12 s, four steps down, four up, 2 s mute, back"
+pdtone -r 48000 -f 440 -s 12 -d @SPKDB@ -n spk-volume 2>&1 &
 a=$!
-pdtone -r 48000 -f 660 -s 5 -d @TONEDB@ -c r -n mix48 2>&1 &
-b=$!
-wait_pids 25 "$a" "$b"
-step 4 "440 Hz for 14 s: four steps down, four up, 2 s mute, back"
-pdtone -r 48000 -f 440 -s 14 -d @TONEDB@ -n volume 2>&1 &
-a=$!
-sleep 2
+sleep 1
 for c in down down down down up up up up; do pdvolume $c 2>&1; sleep 1; done
 pdvolume mute 2>&1; sleep 2; pdvolume unmute 2>&1
 wait_pids 25 "$a"
-step 5 "660 Hz, two 1 s tones a second apart"
-bounded 20 pdtone -r 48000 -f 660 -s 1 -d @TONEDB@ -n first
-sleep 1
-bounded 20 pdtone -r 48000 -f 660 -s 1 -d @TONEDB@ -n second
-step 6 "8 s of silence, then 880 Hz for 1 s"
-idle 15 before-restart
-sleep 2
-bounded 20 pdtone -r 48000 -f 880 -s 1 -d @TONEDB@ -n restart
-step 7 "1 kHz for 2 s through pcmplay"
-bounded 20 pcmplay /usr/share/sysaudio-test.pcm
+monspk S3
+
+step P1 "a tone on the speakers for up to 80 s: PLUG THE HEADPHONES IN NOW"
+pdtone -r 48000 -f 440 -s 80 -d @SPKDB@ -n switch 2>&1 &
+a=$!
+jackwait 1
+sleep 4
+mon P1; monspk P1
+step P2 "UNPLUG THE HEADPHONES NOW"
+jackwait 0
+sleep 4
+mon P2; monspk P2
+kill "$a" 2>/dev/null; wait "$a" 2>/dev/null
+printf 'SA_LISTEN PLUG THE HEADPHONES IN AGAIN for part 3\n'
+jackwait 1
+if [ "$(get kern.pd_sound.jack)" = 0 ]; then
+    printf 'SA_LISTEN no headphones: part 3 is skipped\n'
+else
+    bounded 10 pdvolume unmute
+    bounded 10 pdvolume set 50
+    step H1 "headphones: 440 Hz, both ears, 3 s"
+    bounded 20 pdtone -r 48000 -f 440 -s 3 -d @TONEDB@ -n both
+    step H2 "headphones: left 2 s then right 2 s"
+    bounded 20 pdtone -r 48000 -f 440 -s 2 -d @TONEDB@ -c l -n left
+    bounded 20 pdtone -r 48000 -f 440 -s 2 -d @TONEDB@ -c r -n right
+    step H3 "headphones: 440 Hz left (44.1 kHz client) and 660 Hz right (48 kHz client) together, 5 s"
+    pdtone -r 44100 -f 440 -s 5 -d @TONEDB@ -c l -n mix44 2>&1 &
+    a=$!
+    pdtone -r 48000 -f 660 -s 5 -d @TONEDB@ -c r -n mix48 2>&1 &
+    b=$!
+    wait_pids 25 "$a" "$b"
+    step H4 "headphones: 14 s, four steps down, four up, 2 s mute, back"
+    pdtone -r 48000 -f 440 -s 14 -d @TONEDB@ -n volume 2>&1 &
+    a=$!
+    sleep 2
+    for c in down down down down up up up up; do pdvolume $c 2>&1; sleep 1; done
+    pdvolume mute 2>&1; sleep 2; pdvolume unmute 2>&1
+    wait_pids 25 "$a"
+    step H5 "headphones: 660 Hz, two 1 s tones a second apart"
+    bounded 20 pdtone -r 48000 -f 660 -s 1 -d @TONEDB@ -n first
+    sleep 1
+    bounded 20 pdtone -r 48000 -f 660 -s 1 -d @TONEDB@ -n second
+    step H6 "headphones: 8 s of silence, then 880 Hz for 1 s"
+    idle 15 before-restart
+    sleep 2
+    bounded 20 pdtone -r 48000 -f 880 -s 1 -d @TONEDB@ -n restart
+    step H7 "headphones: 1 kHz for 2 s through pcmplay"
+    bounded 20 pcmplay /usr/share/sysaudio-test.pcm
+fi
 idle 15 end
+idlespk 15 end
 showlog
-mon end
+mon end; monspk end
+[ -d /tmp/ssd ] && { touch /tmp/ssd/stop; pkill speakersafetyd 2>/dev/null || kill $(ps ax | grep '[s]peakersafetyd' | awk '{print $1}') 2>/dev/null; sed 's/^/SA_DAEMON_LOG /' /tmp/ssd/log | tail -30; }
 sysctl -w kern.pd_sound.volume_db=@VOLUME@ 2>&1
 kill "$server" 2>/dev/null
 printf 'SA_END_%s\n' "$nonce"

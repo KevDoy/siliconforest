@@ -4,6 +4,8 @@
  * coreaudiod to the sound driver without anyone listening.
  *
  *   pdtone [-r rate] [-f hertz] [-s seconds] [-d dB below full scale] [-c l|r|b] [-n name]
+ *   pdtone -u <device UID> [-f hertz] [-s seconds] [-d dB] [-c l|r|b] [-n name]
+ *   pdtone -l
  *
  * The queue is given signed 16-bit stereo at the rate asked for (default 48000 Hz, 440 Hz,
  * 3 s, 20 dB below full scale, both channels); AudioToolbox converts it to the device's
@@ -11,6 +13,10 @@
  * the queue took the frames, measured from the callbacks after the first two seconds (the
  * start of the output device is not steady): that rate is the device's clock as the client
  * sees it.
+ *
+ * With -u the tone goes to that device whatever the default output is, through an IOProc on
+ * it (an AudioQueue always plays on the default), in the device's own format. -l lists the
+ * output devices with their UIDs; the default is marked.
  */
 #include <AudioToolbox/AudioToolbox.h>
 #include <mach/mach_time.h>
@@ -92,6 +98,139 @@ played(void *user, AudioQueueRef q, AudioQueueBufferRef b)
     fill(t, q, b);
 }
 
+/* the device's cycle: interleaved float at the device's rate */
+static OSStatus
+cycle(AudioObjectID device, const AudioTimeStamp *now, const AudioBufferList *input, const AudioTimeStamp *inputTime,
+      AudioBufferList *output, const AudioTimeStamp *outputTime, void *user)
+{
+    struct tone *t = user;
+    AudioBuffer *b = &output->mBuffers[0];
+    UInt32 ch = b->mNumberChannels, frames = ch ? b->mDataByteSize / (ch * (UInt32)sizeof(float)) : 0;
+    float *out = b->mData;
+    double at = seconds();
+
+    (void)device; (void)now; (void)input; (void)inputTime; (void)outputTime;
+    for (UInt32 i = 0; i < frames; i++) {
+        float s = t->made < t->total ? (float)(t->amplitude / 32767.0 * sin(t->phase)) : 0;
+
+        t->phase += 2 * M_PI * t->hertz / t->rate;
+        if (t->phase > 2 * M_PI)
+            t->phase -= 2 * M_PI;
+        if (t->made < t->total)
+            t->made++;
+        for (UInt32 c = 0; c < ch; c++)
+            out[i * ch + c] = c == 0 ? (t->left ? s : 0) : c == 1 ? (t->right ? s : 0) : 0;
+    }
+    t->callbacks++;
+    t->returned += frames;
+    if (at - t->start >= 2.0 && t->firstAt == 0) {
+        t->firstAt = at;
+        t->firstReturned = t->returned;
+    }
+    t->lastAt = at;
+    if (t->made >= t->total) {
+        pthread_mutex_lock(&t->lock);
+        t->outstanding = 0;
+        pthread_cond_signal(&t->cond);
+        pthread_mutex_unlock(&t->lock);
+    }
+    return noErr;
+}
+
+static void
+copyString(AudioObjectID object, AudioObjectPropertySelector selector, char *out, size_t size)
+{
+    AudioObjectPropertyAddress a = { selector, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+    CFStringRef s = NULL;
+    UInt32 n = sizeof(s);
+
+    out[0] = 0;
+    if (AudioObjectGetPropertyData(object, &a, 0, NULL, &n, &s) == noErr && s) {
+        CFStringGetCString(s, out, (CFIndex)size, kCFStringEncodingUTF8);
+        CFRelease(s);
+    }
+}
+
+static int
+list(void)
+{
+    AudioObjectPropertyAddress a = { kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+    AudioDeviceID devices[16], def = kAudioObjectUnknown;
+    UInt32 size = sizeof(devices);
+
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &size, devices) != noErr) {
+        fprintf(stderr, "pdtone: no device list (is coreaudiod running?)\n");
+        return 1;
+    }
+    UInt32 n = size / sizeof(devices[0]), one = sizeof(def);
+    a.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+    AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &one, &def);
+    for (UInt32 i = 0; i < n; i++) {
+        char uid[128], name[64];
+
+        copyString(devices[i], kAudioDevicePropertyDeviceUID, uid, sizeof(uid));
+        copyString(devices[i], kAudioObjectPropertyName, name, sizeof(name));
+        printf("pdtone: device %s \"%s\"%s\n", uid, name, devices[i] == def ? " (default output)" : "");
+    }
+    printf("pdtone: %u device%s\n", (unsigned)n, n == 1 ? "" : "s");
+    return 0;
+}
+
+/* the tone on one device, by its UID */
+static int
+onDevice(struct tone *t, const char *uid, double length, double db)
+{
+    AudioObjectPropertyAddress a = { kAudioHardwarePropertyTranslateUIDToDevice, kAudioObjectPropertyScopeGlobal,
+                                     kAudioObjectPropertyElementMain };
+    CFStringRef cfUID = CFStringCreateWithCString(NULL, uid, kCFStringEncodingUTF8);
+    AudioDeviceID device = kAudioObjectUnknown;
+    AudioDeviceIOProcID proc = NULL;
+    UInt32 size = sizeof(device);
+    Float64 rate = 0;
+    OSStatus err;
+
+    err = AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, sizeof(cfUID), &cfUID, &size, &device);
+    CFRelease(cfUID);
+    if (err != noErr || device == kAudioObjectUnknown) {
+        fprintf(stderr, "pdtone[%s]: no device %s\n", t->name, uid);
+        return 1;
+    }
+    a.mSelector = kAudioDevicePropertyNominalSampleRate;
+    size = sizeof(rate);
+    if (AudioObjectGetPropertyData(device, &a, 0, NULL, &size, &rate) != noErr || rate <= 0) {
+        fprintf(stderr, "pdtone[%s]: %s has no sample rate\n", t->name, uid);
+        return 1;
+    }
+    t->rate = rate;
+    t->total = (long)(length * rate);
+    t->outstanding = 1;
+    if ((err = AudioDeviceCreateIOProcID(device, cycle, t, &proc)) != noErr) {
+        fprintf(stderr, "pdtone[%s]: AudioDeviceCreateIOProcID failed (%d)\n", t->name, (int)err);
+        return 1;
+    }
+    t->start = seconds();
+    if ((err = AudioDeviceStart(device, proc)) != noErr) {
+        fprintf(stderr, "pdtone[%s]: AudioDeviceStart failed (%d)\n", t->name, (int)err);
+        return 1;
+    }
+    fprintf(stderr, "pdtone[%s]: %.0f Hz on %s (%.0f Hz) for %.1f s, %.0f dB below full scale\n", t->name, t->hertz, uid,
+            rate, length, db);
+    pthread_mutex_lock(&t->lock);
+    while (t->outstanding > 0)
+        pthread_cond_wait(&t->cond, &t->lock);
+    pthread_mutex_unlock(&t->lock);
+    usleep(400000);
+    AudioDeviceStop(device, proc);
+    AudioDeviceDestroyIOProcID(device, proc);
+
+    double span = t->lastAt - t->firstAt;
+    fprintf(stderr, "pdtone[%s]: done: %ld frames in %d cycles on %s, %.2f s from start to the last frame; "
+            "taken at %.0f frames/s over the last %.2f s (device %.0f)\n", t->name, t->made, t->callbacks, uid,
+            t->lastAt - t->start, t->firstAt > 0 && span > 0 ? (t->returned - t->firstReturned) / span : 0.0,
+            t->firstAt > 0 ? span : 0.0, rate);
+    return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -102,9 +241,10 @@ main(int argc, char **argv)
     Float64 deviceRate = 0;
     UInt32 size = sizeof(deviceRate);
     OSStatus err;
+    const char *uid = NULL;
     int c;
 
-    while ((c = getopt(argc, argv, "r:f:s:d:c:n:")) != -1) {
+    while ((c = getopt(argc, argv, "r:f:s:d:c:n:u:l")) != -1) {
         switch (c) {
         case 'r': t.rate = atof(optarg); break;
         case 'f': t.hertz = atof(optarg); break;
@@ -112,8 +252,11 @@ main(int argc, char **argv)
         case 'd': db = atof(optarg); break;
         case 'c': t.left = optarg[0] != 'r'; t.right = optarg[0] != 'l'; break;
         case 'n': t.name = optarg; break;
+        case 'u': uid = optarg; break;
+        case 'l': return list();
         default:
-            fprintf(stderr, "usage: pdtone [-r rate] [-f hertz] [-s seconds] [-d dB below full scale] [-c l|r|b] [-n name]\n");
+            fprintf(stderr, "usage: pdtone [-r rate | -u device UID] [-f hertz] [-s seconds] [-d dB below full scale] "
+                    "[-c l|r|b] [-n name]\n       pdtone -l\n");
             return 2;
         }
     }
@@ -126,6 +269,8 @@ main(int argc, char **argv)
     t.bufferFrames = (UInt32)(t.rate / 10);
     pthread_mutex_init(&t.lock, NULL);
     pthread_cond_init(&t.cond, NULL);
+    if (uid)
+        return onDevice(&t, uid, length, db);
 
     fmt.mSampleRate = t.rate;
     fmt.mFormatID = kAudioFormatLinearPCM;

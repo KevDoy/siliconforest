@@ -8,7 +8,6 @@ let
   copied = pkgs.runCommand "puredarwin-sound-source" {} ''
     mkdir -p "$out"
     cp ${./kernel}/* "$out/"
-    cp ${./include/pd_speaker_safety.h} "$out/pd_speaker_safety.h"
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
   pname = "puredarwin-sound";
