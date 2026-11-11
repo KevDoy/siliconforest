@@ -5,18 +5,34 @@ ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'artifacts/m1-desktop-010/apcie-port-candidate-003'
 NAME=sys.argv[1] if len(sys.argv)>1 else 'pcie-enum-candidate-001'
 OUT=ROOT/'artifacts/m1-desktop-010'/NAME
-LAB=ROOT/'runs/m1-desktop-010/pcie-m2-host-001/lab'
 import os
+# PCIE_LAB: a private copy of the launcher tree for this boot (tools/pcie_iterate.sh makes one,
+# so nothing shared is written while other boots are queued or running).
+LAB=Path(os.environ['PCIE_LAB']).resolve() if os.environ.get('PCIE_LAB') else ROOT/'runs/m1-desktop-010/pcie-m2-host-001/lab'
 WIFI=os.environ.get('PCIE_WIFI')=='1'
 KERNEL=(ROOT/('runs/m1-desktop-010/bwfm-kc-build-001/result/kernel' if WIFI else 'runs/m1-desktop-010/apcie-host-kc-build-001/result/kernel')).resolve()
 SUPERVISOR=ROOT/('integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-test' if WIFI else 'integrations/puredarwin/m1-apcie-host/supervisor/darwin-pcie-enum-test')
 STAGER=ROOT/'integrations/puredarwin/chonkstep-darwin/stage_ramdisk.py'
 ORIGINAL=ROOT/'artifacts/m1-bringup-009/ramdisk.img'
 SRC=ROOT/'integrations/puredarwin/m1-apcie-host'
-sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+_sha={}
+def sha(p):
+ # One read per file state: the RAM disk (480 MiB) is hashed for the record and for the manifest.
+ p=Path(p);k=(str(p),p.stat().st_mtime_ns,p.stat().st_size)
+ if k not in _sha:_sha[k]=hashlib.sha256(p.read_bytes()).hexdigest()
+ return _sha[k]
 load=lambda p:json.loads(Path(p).read_text())
 def save(p,d):
  with Path(p).open('x')as f:json.dump(d,f,indent=2);f.write('\n')
+# PCIE_ASSEMBLE_STAGE: 'all' (default), 'build' (packet only) or 'check' (the offline load check of
+# an assembled packet only); tools/pcie_iterate.sh runs the check alongside the delivery.
+STAGE=os.environ.get('PCIE_ASSEMBLE_STAGE','all')
+def check():
+ code='''import sys,json\nfrom pathlib import Path\nfrom types import SimpleNamespace\nlab,p=map(Path,sys.argv[1:]);sys.path[:0]=[str(lab),str(lab/'integrations/puredarwin/m1-bringup')]\nimport host_progress as h,normal_image as n\nreport,contents=n.verify_manifest(p/'manifest.json');i=SimpleNamespace(report=report,contents=contents)\nassert h.apcie_port_observer_enabled(i) is True;h.apcie_port_runtime(i,120,240)\nargs=h.guest_bootargs(i);assert args.endswith(' pdapciebridge=1'),args\nprint(json.dumps({'bootargs':args,'members':len(report['kernel']['members'])}))\n'''
+ x=subprocess.run([sys.executable,'-B','-c',code,str(LAB),str(OUT)],capture_output=True,text=True,timeout=120,cwd=LAB)
+ print(x.stdout[-600:],x.stderr[-3000:]);x.check_returncode()
+if STAGE=='check':
+ check();print(OUT);sys.exit(0)
 OUT.mkdir(mode=0o700)
 JOIN=os.environ.get('PCIE_WIFI_JOIN')=='1'
 if JOIN:
@@ -67,7 +83,5 @@ save(OUT/'build-record.json',record)
 manifest=load(BASE/'manifest.json')
 manifest['artifacts']={k:{'path':n,'sha256':sha(OUT/n),'bytes':(OUT/n).stat().st_size}for k,n in [('kernel','kernel.macho'),('source_patch','source.patch'),('build_record','build-record.json'),('ramdisk','ramdisk.img')]}
 save(OUT/'manifest.json',manifest)
-code='''import sys,json\nfrom pathlib import Path\nfrom types import SimpleNamespace\nlab,p=map(Path,sys.argv[1:]);sys.path[:0]=[str(lab),str(lab/'integrations/puredarwin/m1-bringup')]\nimport host_progress as h,normal_image as n\nreport,contents=n.verify_manifest(p/'manifest.json');i=SimpleNamespace(report=report,contents=contents)\nassert h.apcie_port_observer_enabled(i) is True;h.apcie_port_runtime(i,120,240)\nargs=h.guest_bootargs(i);assert args.endswith(' pdapciebridge=1'),args\nprint(json.dumps({'bootargs':args,'members':len(report['kernel']['members'])}))\n'''
-x=subprocess.run([sys.executable,'-B','-c',code,str(LAB),str(OUT)],capture_output=True,text=True,timeout=120,cwd=LAB)
-print(x.stdout[-600:],x.stderr[-3000:]);x.check_returncode()
+if STAGE!='build':check()
 print(OUT)

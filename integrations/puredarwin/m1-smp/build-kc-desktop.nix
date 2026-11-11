@@ -3,11 +3,13 @@
 # multitouch trackpad (../m1-trackpad-child/multitouch/build-kc-multitouch.nix), with the
 # two SMP pieces of ./build-kc.nix swapped in (platform kext that starts the secondary
 # cores, kernel that names the reset vector). One CPU unless the boot-args carry cpus=N.
-{ agx ? true, wifi ? true, slim ? true, kernelPatched ? true }:
+# `--argstr kernelConfig development`: the kernel of that XNU configuration
+# (../m1-dcp/kernel.nix); the kexts are the same builds, see ../m1-dcp/README.md.
+{ agx ? true, wifi ? true, slim ? true, kernelPatched ? true, kernelConfig ? "debug" }:
 let
   base = import ../m1-trackpad-child/multitouch/build-kc-multitouch.nix { inherit agx wifi slim; };
   baseKernel = import ../m1-dcp/kernel.nix { };
-  kernel = import ./kernel.nix { patched = kernelPatched; };
+  kernel = import ./kernel.nix { patched = kernelPatched; inherit kernelConfig; };
   platform = import ./build-platform.nix;
   platformNeedle = ''-kext "$KEXTS/PDArmPlatformExpert.kext"'';
   swap = needle: replacement: text:

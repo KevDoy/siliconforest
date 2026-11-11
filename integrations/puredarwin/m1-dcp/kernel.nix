@@ -18,8 +18,18 @@
 #   nix-build kernel.nix --arg patched false --no-out-link   # control: the pinned recipe
 #
 # kernel-swap.nix puts the result into a collection recipe.
-{ patched ? true }:
+#
+# `--argstr kernelConfig development`: the same source, patches and toolchain built as XNU's
+# DEVELOPMENT configuration instead of DEBUG (plus kernel-patches/0004, which lets the tree's
+# build accept that for T8103). The only difference
+# in the recipe is -DPUREDARWIN_XNU_KERNEL_CONFIG, which is also the only difference between
+# the flake's own release and debug kernels. DEBUG stays the default.
+{ patched ? true, kernelConfig ? "debug" }:
 let
+  # the tree refuses RELEASE for this machine (no serial console, no -unsafe_kernel_text)
+  configs = { debug = "DEBUG"; development = "DEVELOPMENT"; };
+  config = configs.${kernelConfig};
+  configNeedle = "-DPUREDARWIN_XNU_KERNEL_CONFIG=DEBUG";
   pins = import ../m1-rust-kext/pins.nix;
   sp = builtins.storePath;
   toolchain = sp "/nix/store/c17dkymcla7drga7i6l4qpppfffwz54g-darwin-cross-toolchain-nix";
@@ -36,11 +46,17 @@ in base.overrideAttrs (old:
     pname = "puredarwin-kernel-arm64-t8103-bringup";
     name = "puredarwin-kernel-arm64-t8103-bringup-0.1";
     src = sp "/nix/store/fzwhq5qb2cn381dd6hza7ffisclc1vxk-source";
-    configurePhase = builtins.replaceStrings [ needle ] [ "MACHINE_CONFIG=T8103" ] old.configurePhase;
+    configurePhase =
+      assert builtins.stringLength old.configurePhase
+        != builtins.stringLength (builtins.replaceStrings [ configNeedle ] [ "" ] old.configurePhase);
+      builtins.replaceStrings [ needle configNeedle ]
+        [ "MACHINE_CONFIG=T8103" "-DPUREDARWIN_XNU_KERNEL_CONFIG=${config}" ] old.configurePhase;
   } // (if patched then {
     patches = [
       ./kernel-patches/0001-xnu-pdlfile-descriptors-are-sendable.patch
       ./kernel-patches/0002-xnu-pdlfile-select-poll-kevent-waiters.patch
       ./kernel-patches/0003-xnu-pdlfile-mmap.patch
-    ];
+    ] ++ (if kernelConfig == "debug" then [ ] else [
+      ./kernel-patches/0004-xnu-t8103-may-be-built-as-development.patch
+    ]);
   } else { }))

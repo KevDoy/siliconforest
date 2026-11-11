@@ -1473,3 +1473,36 @@ rate-limits SSH: batch commands into one session.
   intermediate test stages that the Linux driver does not need.
 - The M5's disk fills up: delivered packets under `pcie-m2/` are copies of `artifacts/` here and can be
   deleted there.
+
+## Bench queue and boot speed (November 10)
+
+- The bench is taken with `tools/bench.sh`, not with a bare `flock`. `tools/pcie_iterate.sh` (and
+  so `dcp_boot.sh`, `agx_boot.sh`, `wm_gl_boot.sh`, ...) queues for it by itself: call them
+  without a wrapper. For anything else that needs the M1 or the M5: `tools/bench.sh run <command>`.
+  `tools/bench.sh status` shows who holds it, who waits and for how long; set `BENCH_WHO=<name>`.
+  Waiters are served in arrival order. It is re-entrant: a script that already holds the bench
+  (through `bench.sh`, or an old `flock runs/bench.lock ...` wrapper, which still works and
+  still excludes) can call tools that take it. Never wrap a self-locking script in a bare `flock`.
+- Faster boots (measured on the `bq01`..`bq09` boots: a 5 s guest test went from 242 s end to
+  end to 78 s with all of these). Options of `tools/pcie_iterate.sh` (described at the end of
+  that file), all off unless set:
+  - The guest script ends with `printf '\nPD_BENCH_DONE\n'`: the capture stops a second later
+    instead of running out `<runtime>`, which becomes an upper bound. `PCIE_DONE=prompt` ends
+    it when the shell prompt returns after the guest command, with no change to the script.
+  - `PCIE_TIMEWAIT=1,5`: XNU's `IOKitInitializeTime` waits 30 s for an RTC that does not exist
+    and 30 s for a registry that does not go quiet; this shortens both in the loaded image
+    (58 s to about 5 s). The numbers add up to the time drivers get to settle before the root
+    mounts. The patch is matched by instruction pattern (DEBUG and DEVELOPMENT kernels so far);
+    `TIME_WAIT_PATCH` in `guest/worker.log` says whether it applied, and a kernel it does not
+    recognise boots unpatched.
+  - `maxmem=4096` in `PCIE_BOOTARGS`: `pmap_startup` takes 3 s instead of 11 s.
+  - `PCIE_CHAIN=1`: the script returns with the console as soon as the guest stops. The M1 stays
+    in the m1n1 proxy, the bench stays held, and a keeper either gives the M1 directly to the
+    next queued `PCIE_CHAIN=1` boot (no Linux boot in between) or returns it to verified Linux
+    (`tools/m1_return_linux.sh`) and then releases the bench. `result.json` then says
+    `..._HANDOFF_PENDING` instead of `..._LINUX_VERIFIED`: that is expected, do not reset the M1
+    by hand. If `runs/bench.finisher.failed` exists the return failed: run
+    `tools/bench.sh run tools/m1_return_linux.sh`.
+- `tools/pcie_iterate.sh` works from a private copy of the launcher tree per boot
+  (`runs/m1-desktop-010/pcie-enum-attempt-<n>/lab`) and deletes its packet on the M5 afterwards
+  (`PCIE_KEEP_PACKET=1` keeps it). It reaches the M5 over the dock Ethernet when that answers.

@@ -157,6 +157,20 @@ and is cached by nix.
 `build-kc.nix` here and `../m1-rust-kext/build-agx-kc.nix` use it. The layer's patch 0022 calls
 `pd_lfile_wakeup`, so a DRM kext built from it does not link against the pinned kernel.
 
+**DEVELOPMENT configuration.** `kernel.nix --argstr kernelConfig development` (passed on by
+`../m1-smp/kernel.nix` and `../m1-smp/build-kc-desktop.nix`) builds the same source and patches
+as XNU's DEVELOPMENT configuration: optimised, without the DEBUG-only options, assertions
+(`mach_assert`) still on. The bring-up tree refused anything but DEBUG for T8103 in three
+places (the xnu CMake file and two assembly includes); `kernel-patches/0004` lets them accept
+DEVELOPMENT and is applied only for this configuration, so the DEBUG kernel is unchanged.
+RELEASE is refused (no serial console, no `-unsafe_kernel_text`). The kexts are the same
+builds for both: no kext reference resolves in the DEBUG kernel and not in DEVELOPMENT, the
+kexts are compiled without `DEBUG` or `MACH_ASSERT`, and the IOKit/libkern headers have no
+DEBUG-only layout. The launcher's image check must accept `DEVELOPMENT_ARM64_T8103` (one line
+of `normal_image.py` in the launcher tree, and its hash pin in `tools/pcie_iterate.sh`).
+Boots smnd02 (session) and smnd03 (benchmark): single thread 864-888 MB/20 s against 616-632
+on DEBUG, eight threads 7,056 against 5,056.
+
 The wakeup is not per object: any linux file's wakeup makes every select/kevent waiter on a
 linux file poll once more.
 
