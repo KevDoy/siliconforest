@@ -56,6 +56,16 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     cp build-commands.txt "$out/nix-support/build-commands"
     cp build-nix/PDAgx.map "$out/nix-support/PDAgx.map"
     ${crossToolchain}/bin/arm64-apple-darwin20.4-nm -u "$bundle/Contents/MacOS/PDAgx" | sed 's/^ *//' | sort -u > "$out/nix-support/undefined"
+    # the kext link accepts undefined symbols (the kernel and other kexts provide them at
+    # collection time), so a layer function that nothing defines (a missing extern "C", a
+    # misspelt name) links and then faults at its first call. Names of this layer must be
+    # defined here; the three families below come from PDDRMDri and the kernel (pd_usb_*
+    # is referenced by the USB bus glue, which no driver of this machine registers with).
+    bad=$(grep -E '^_(pd|linux_|lkpi_)' "$out/nix-support/undefined" | grep -Ev '^_pd_(dri|lfile|usb)_' || true)
+    if [ -n "$bad" ]; then
+      echo "PDAgx: layer symbols that nothing defines:" >&2; echo "$bad" >&2
+      exit 1
+    fi
     runHook postInstall
   '';
 })
