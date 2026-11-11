@@ -31,6 +31,25 @@ The amplifiers can damage the speakers under software control. Linux enables spe
 | I6 | Speakers behind the hard cap, sense capture verified | Quiet tone per speaker; sense slots carry plausible data | ~700 lines + safety review |
 | I7 | Capture: headset microphone, then built-in microphones via AOP (needs capture support in `coreaudiod`, which has none) | Record and play back a clip | largest unknown |
 
+## Status (November 11)
+Headphone-jack playback runs on the M1 from a native kext, `PDAppleSound` (`integrations/puredarwin/m1-sound/`, GPL-2.0), without `IOAudioFamily`: boots `sd01` to `sd04` (8 CPUs, DEVELOPMENT kernel). Nobody has listened yet, and the jack was empty in every boot (Linux reports the same).
+- **Done on hardware:** I1 (node table below), I2 for the CS42L83 only (device ID `0x42a83`, revision `0xb0`), the transport of I3 as a polled DMA ring (not an `IOAudioEngine`), the playback path of I4 at 44.1 and 48 kHz with jack state polled every 2 s and volume.
+- **Unattended evidence:** the codec's PLL locks to the bit clock, its input sample-rate converter reports lock and its serial port reports no framing error while data flows; the DMA controller's 24 MHz timestamps give 48000.02 Hz and 44100.02 Hz; no DART fault, no I2C error.
+- **Measured:** the codec's input converter locks 1.04 s (48 kHz) to 1.16 s (44.1 kHz) after a start; the driver plays silence until then (`kern.pd_sound.preroll_ms`). Whether the codec would pass sound before the lock is not known.
+- **User interface for now:** `/dev/pdaudio` (signed 16-bit stereo), `pdplay` (tones, WAVE files), `kern.pd_sound.*`. Output starts 30 dB below the codec's full scale.
+- **Not done:** `IOAudioEngine`/`coreaudiod` (I3 as specified, I5), speakers (I6, amplifiers untouched, shutdown pin 181 stays low), capture (I7), headset type and button detection, amplifier revisions of I2.
+- **Shared services written here because SF-A has none yet** (`m1-sound/kernel/`, reusable as they are): `pd_soc` (register maps by node, PMGR enable with parents and reset), `pd_gpio`, `pd_i2c` (polled), `pd_dart_fixed` (one fixed window on a T8020 DART stream).
+
+| Apple device tree node | Used for |
+|---|---|
+| `/arm-io/i2c2` (`i2c,t8101`, clock-gate `I2C2`) | codec bus; pins 162/163 of `/arm-io/gpio`, function 1 |
+| `/arm-io/i2c2/audio-codec-output` (`audio-control,cs42l83`, reg `0x48`) | codec; reset `/arm-io/nub-gpio` pin 11, interrupt `/arm-io/gpio` pin 183 |
+| `/arm-io/nco` (`nco,t8101`, 900 MHz reference) | one clock channel per cluster |
+| `/arm-io/mca-switch` (`mca-switch,t8103`; reg 0 clusters, reg 1 DMA switch; clock-gates `MCA0`..`MCA5`, parent `AUDIO_P`) | I2S; cluster 0 drives the port of cluster 2 (the jack), as Linux does |
+| `/arm-io/admac-sio` (`admac,t8103`, clock-gates `SIO_ADMA`, `AUDIO-P-V`) | DMA channel 4 x cluster |
+| `/arm-io/dart-sio` (`dart,t8020`, clock-gate `SIO-CPU-DART`), child `mapper-admac` (stream 2) | DMA translation |
+| `/arm-io/i2c1`, `/arm-io/i2c3` (TAS5770L), `/arm-io/gpio` pin 181 | speakers: not touched |
+
 ## Dependencies
 SF-A (A2 power domains, A5 DART instance for `dart-sio`, A6 GPIO, A7 I2C; A3 RTKit for I7).
 
