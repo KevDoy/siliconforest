@@ -324,7 +324,9 @@ impl Pty {
         let mut argv: Vec<*const libc::c_char> = args.iter().map(|s| s.as_ptr()).collect();
         argv.push(std::ptr::null());
         let env: Vec<CString> = [
-            "TERM=dumb",
+            // The emulation is xterm-style with 256 and direct colour (src/term.rs).
+            "TERM=xterm-256color",
+            "COLORTERM=truecolor",
             "LC_ALL=C",
             "PATH=/bin:/usr/bin:/sbin:/usr/sbin",
             "HOME=/private/tmp",
@@ -752,6 +754,93 @@ mod tests {
         }
         Ok(out)
     }
+    /// Run a program on a real PTY through the emulation until `done` says
+    /// so (or 4 s pass), answering its queries, and return the screen.
+    fn through_terminal(
+        p: &mut Pty,
+        screen: &mut crate::term::Term,
+        mut done: impl FnMut(&crate::term::Term) -> bool,
+    ) -> bool {
+        let end = Instant::now() + Duration::from_secs(4);
+        while Instant::now() < end {
+            p.setup().unwrap();
+            let mut b = [0; 4096];
+            if let Ok(n) = p.read(&mut b) {
+                screen.feed(&b[..n]);
+                let replies = screen.take_replies();
+                let mut sent = 0;
+                while sent < replies.len() {
+                    sent += p.write(&replies[sent..]).unwrap_or(0);
+                }
+            }
+            if done(screen) || p.eof {
+                return done(screen);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
+    fn type_keys(p: &mut Pty, bytes: &[u8]) {
+        let mut sent = 0;
+        while sent < bytes.len() {
+            sent += p.write(&bytes[sent..]).unwrap();
+        }
+    }
+    /// Real full-screen programs of this host on a real PTY, seen through the
+    /// emulation: `less` (terminfo-driven: alternate screen, cursor
+    /// addressing, application cursor keys) and `vim` (scroll regions,
+    /// colours, device queries). Each must draw and leave the prompt screen
+    /// as it was. Skipped where the program is not installed.
+    #[test]
+    fn host_full_screen_programs_draw_and_exit_cleanly() {
+        let file = std::env::temp_dir().join(format!("chonk-terminal-{}.txt", std::process::id()));
+        let text: String = (1..=200).map(|i| format!("content line {i}\n")).collect();
+        std::fs::write(&file, text).unwrap();
+        let path = file.to_str().unwrap().to_owned();
+        let row = |t: &crate::term::Term, y: usize| t.text().lines().nth(y).unwrap_or("").to_string();
+
+        if std::path::Path::new("/usr/bin/less").exists() {
+            let mut p = Pty::spawn("/usr/bin/less", &["less", &path], 80, 24, 0).unwrap();
+            let mut t = crate::term::Term::new(80, 24).unwrap();
+            assert!(through_terminal(&mut p, &mut t, |t| t.alternate_screen() && t.text().contains("content line 23")), "less drew:\n{}", t.text());
+            assert_eq!(row(&t, 0), "content line 1");
+            assert!(t.application_cursor(), "less switches the cursor keys to application mode");
+            // Down, as the key encoder sends it in that mode; then the end; then quit.
+            type_keys(&mut p, b"\x1bOB");
+            assert!(through_terminal(&mut p, &mut t, |t| t.text().lines().next() == Some("content line 2")), "after Down:\n{}", t.text());
+            type_keys(&mut p, b"G");
+            assert!(through_terminal(&mut p, &mut t, |t| t.text().contains("content line 200")), "after G:\n{}", t.text());
+            type_keys(&mut p, b"q");
+            assert!(through_terminal(&mut p, &mut t, |t| !t.alternate_screen()), "less left the alternate screen");
+            assert!(!t.application_cursor());
+            assert!(!t.text().contains("content line"), "the prompt screen is restored:\n{}", t.text());
+            let result = p.cleanup();
+            assert!(result.complete);
+        } else {
+            eprintln!("SKIPPED less: not installed");
+        }
+
+        if std::path::Path::new("/usr/bin/vim").exists() {
+            let mut p = Pty::spawn("/usr/bin/vim", &["vim", "-u", "NONE", "-N", &path], 80, 24, 0).unwrap();
+            let mut t = crate::term::Term::new(80, 24).unwrap();
+            assert!(through_terminal(&mut p, &mut t, |t| t.alternate_screen() && t.text().contains("content line 23")), "vim drew:\n{}", t.text());
+            assert_eq!(row(&t, 0), "content line 1");
+            // Jump to the end: the screen scrolls inside vim's scroll region.
+            type_keys(&mut p, b"G");
+            assert!(through_terminal(&mut p, &mut t, |t| t.text().contains("content line 200")), "after G:\n{}", t.text());
+            // Insert text on a new line at the top and see it where vim put it.
+            type_keys(&mut p, b"ggOtyped through the emulation\x1b");
+            assert!(through_terminal(&mut p, &mut t, |t| t.text().lines().next() == Some("typed through the emulation")), "after insert:\n{}", t.text());
+            type_keys(&mut p, b":q!\r");
+            assert!(through_terminal(&mut p, &mut t, |t| !t.alternate_screen()), "vim left the alternate screen");
+            assert!(!t.text().contains("content line"), "the prompt screen is restored:\n{}", t.text());
+            let result = p.cleanup();
+            assert!(result.complete);
+        } else {
+            eprintln!("SKIPPED vim: not installed");
+        }
+        let _ = std::fs::remove_file(&file);
+    }
     #[test]
     fn host_real_pre_exec_fd_check_and_exec_without_proc() {
         let sentinel = std::fs::File::open("/dev/null").unwrap();
@@ -958,9 +1047,16 @@ mod tests {
             sent += p.write(&command[sent..]).unwrap();
         }
         out.extend(drive(&mut p).unwrap());
-        assert!(out
-            .windows(b"\r\npty_actualOutput\r\n".len())
-            .any(|b| b == b"\r\npty_actualOutput\r\n"));
+        // With an xterm TERM the shell's line editor wraps its output in
+        // control sequences (bracketed paste and so on); what counts is what
+        // a terminal shows. Through the emulation, one line is the output.
+        let mut screen = crate::term::Term::new(90, 30).unwrap();
+        screen.feed(&out);
+        assert!(
+            screen.text().lines().any(|line| line == "pty_actualOutput"),
+            "screen:\n{}",
+            screen.text()
+        );
         let result = p.cleanup();
         assert!(result.complete);
         assert_eq!(result.status, Some(0));

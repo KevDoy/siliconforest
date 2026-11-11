@@ -2,7 +2,7 @@
 
 Separate ordinary terminal application derived from the frozen native-startup
 observer, whose 14 original source hashes remain intact. The app uses a real
-owned `/bin/sh -i +m` PTY, compositor XKB keymap, bounded TERM=dumb grid, CPU font
+owned `/bin/sh -i +m` PTY, compositor XKB keymap, an xterm emulation (TERM=xterm-256color, see below), CPU font
 renderer, SHM buffer ownership and server-side decorations. The former response
 recognizer and startup-only title/readiness policy are removed.
 
@@ -21,7 +21,7 @@ focus leave. Normal close, shell EOF, signal and deadline stop cleanly after own
 cleanup even before READY. Final records retain unsent input counts and real raw
 wait status. A status-channel/final-record failure is an application failure.
 
-Limits are explicit: TERM=dumb, no xterm/editor compatibility promise, no detached
+Limits are explicit: the emulation is what the section below lists, no detached
 or background jobs, and no foreground-group relaxation. Input is bounded to
 16,384 lifetime bytes and PTY output to the inherited 1 MiB budget (one bounded
 read may expose quota overflow before shutdown). The supplied 1–120 second
@@ -73,3 +73,43 @@ A terminal still ends itself when it passes either quota. The binary built from 
 
 `source-validation.json`, `host-tests.log` and `revisions/` describe earlier revisions and were
 not regenerated for this one.
+
+## Terminal emulation and scrollback (10 November, build-004)
+
+The TERM=dumb grid (`src/grid.rs`) is gone. `src/term.rs` wraps the `vt100` crate
+(0.18.1, parser `vte` 0.15.0; with `arrayvec` 0.7.8, `itoa` 1.0.18, `memchr` 2.8.3,
+`unicode-width` 0.2.3 — all pinned in `Cargo.lock`, built `--offline --locked` from
+the cargo registry cache like the other dependencies; no platform code in any of them).
+
+* Screen: cursor addressing, erase, insert/delete, scroll regions, SGR with the 16,
+  256 and 24-bit colours, bold, dim, underline, inverse, the alternate screen (1049/47),
+  cursor hide/show, wide characters. `CSI s`/`CSI u` are mapped to save/restore
+  cursor (toybox `vi` measures the screen with them). The terminal answers `CSI 5n`,
+  `CSI 6n` (cursor position), `CSI c` and `CSI > c`.
+* Environment: `TERM=xterm-256color`, `COLORTERM=truecolor`. The RAM root has no
+  terminfo; the boot wrappers stage `../terminfo/xterm-256color` (ncurses 6.6, sha256
+  1eb6ddea…) as `/usr/share/terminfo/x/xterm-256color` and `/usr/share/terminfo/78/…`.
+* Keys (`src/keys.rs`): arrows (CSI, or SS3 while the program has application cursor
+  keys on, `CSI 1;m X` with modifiers), Home/End, Insert/Delete/PageUp/PageDown,
+  F1–F12, Shift+Tab, Alt as an ESC prefix.
+* Resize: a configure changes the grid; the PTY gets TIOCSWINSZ and the foreground
+  program SIGWINCH. Bounds: 20–400 columns, 6–150 rows.
+* Scrollback: 5000 lines. Two-finger scroll (wheel events, three lines a detent) and
+  Shift+PageUp / Shift+PageDown (a page less one line) move the view; typing returns
+  to the bottom. On the alternate screen wheel steps are sent to the program as
+  Up/Down arrow keys instead.
+* Drawing: only rows whose content changed are redrawn, written to the shm file and
+  damaged.
+* State for checks from outside: `<records>/term-live.txt`, rewritten (rename) at most
+  every 200 ms when it changed: a `TERMSTATE cols= rows= alternate_screen= application_cursor=
+  bracketed_paste= cursor= cursor_hidden= scrollback_offset= scrollback_lines= unsupported=`
+  line, then the text on screen. The compositor's autopilot reads it.
+
+Open: copy/paste. The compositor does not advertise `wl_data_device_manager`, so there
+is no selection to paste from; the emulator tracks bracketed-paste mode (reported in
+TERMSTATE) but nothing pastes. There is no mouse selection and no mouse reporting to
+programs. Blink and italic are parsed but not drawn differently.
+
+Host tests (`cargo test --offline --locked`, 47): emulator unit tests, and
+`host_full_screen_programs_draw_and_exit_cleanly`, which runs the host's real `less`
+and `vim` on a PTY through the emulator.

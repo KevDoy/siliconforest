@@ -1,5 +1,5 @@
 //! Focus-local Wayland input. Accepted bytes survive Leave; releases produce none.
-use crate::{keys::Keys, protocol::MAX_TX};
+use crate::{keys::{KeyAction, Keys}, protocol::MAX_TX};
 use std::{
     collections::{BTreeSet, VecDeque},
     io,
@@ -11,6 +11,8 @@ pub struct Input {
     pending: VecDeque<u8>,
     pub accepted: usize,
     pub written: usize,
+    /// The program's cursor-key mode (DECCKM), kept current by the session loop.
+    pub application_cursor: bool,
 }
 impl Input {
     pub fn new() -> Self {
@@ -20,6 +22,7 @@ impl Input {
             pending: VecDeque::new(),
             accepted: 0,
             written: 0,
+            application_cursor: false,
         }
     }
     pub fn enter(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
@@ -42,12 +45,25 @@ impl Input {
         self.held.clear();
         // Already accepted bytes belong to this PTY, independently of new focus.
     }
-    pub fn key(&mut self, key: u32, down: bool) -> Result<(), &'static str> {
+    /// Bytes the terminal itself owes the program (answers to its queries)
+    /// or generates for it (wheel steps on the alternate screen). They share
+    /// the quota and the transcript with typed input.
+    pub fn send(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        if self.accepted + bytes.len() > MAX_TX {
+            return Err("input quota exceeded");
+        }
+        self.accepted += bytes.len();
+        self.pending.extend(bytes);
+        Ok(())
+    }
+    /// A key event. `Some(pages)` asks the terminal to scroll its history;
+    /// `typed` tells whether bytes were queued for the program.
+    pub fn key(&mut self, key: u32, down: bool) -> Result<(Option<i32>, bool), &'static str> {
         if key > 0x2ff {
             return Err("out of range Wayland key");
         }
         if !self.keys.focused {
-            return Ok(());
+            return Ok((None, false));
         }
         if down {
             if !self.held.insert(key) {
@@ -57,13 +73,14 @@ impl Input {
             // A release may belong to an earlier focus or compositor-owned chord.
             self.held.remove(&key);
         }
-        let bytes = self.keys.press(key, down)?;
-        if self.accepted + bytes.len() > MAX_TX {
-            return Err("input quota exceeded");
+        match self.keys.press(key, down, self.application_cursor)? {
+            KeyAction::None => Ok((None, false)),
+            KeyAction::ScrollPages(pages) => Ok((Some(pages), false)),
+            KeyAction::Bytes(bytes) => {
+                self.send(&bytes)?;
+                Ok((None, true))
+            }
         }
-        self.accepted += bytes.len();
-        self.pending.extend(bytes);
-        Ok(())
     }
     pub fn pending_len(&self) -> usize {
         self.pending.len()

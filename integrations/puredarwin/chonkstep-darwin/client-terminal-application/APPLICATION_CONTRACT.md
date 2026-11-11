@@ -83,9 +83,10 @@ record only actual successful writes. Closing/EOF/error may retire remaining
 bytes only with an explicit final unsent-byte count and stop cause, never silent
 loss. No synthetic key presses/releases repair focus transitions.
 
-Retain real XKB translation, TERM=dumb grid, SHM buffer ownership/release, SSD
+Retain real XKB translation, the terminal grid (since build-004 an xterm
+emulation, TERM=xterm-256color; README, last section), SHM buffer ownership/release, SSD
 negotiation, resize and idempotent child cleanup. The shell is `/bin/sh -i +m`,
-TERM=dumb. No full xterm/editor compatibility, detached/background jobs or changed
+TERM=dumb until build-003. No detached/background jobs or changed
 job-control support is claimed. Keep the existing checked foreground-group
 refusal. Transcript and input queues remain bounded; limits cause recorded
 failure and cleanup rather than unbounded growth.

@@ -1,5 +1,5 @@
 //! Owned Darwin desktop terminal application; real /bin/sh PTY and Wayland window.
-mod grid;
+mod term;
 #[cfg(test)]
 mod host_wayland_tests;
 mod input;
@@ -28,8 +28,8 @@ use std::{
 use wayland_client::{
     delegate_noop,
     protocol::{
-        wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_shm,
-        wl_shm_pool, wl_surface,
+        wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat,
+        wl_shm, wl_shm_pool, wl_surface,
     },
     Connection, Dispatch, QueueHandle, WEnum,
 };
@@ -70,6 +70,13 @@ struct State {
     decoration: Option<zxdg_decoration_manager_v1::ZxdgDecorationManagerV1>,
     seat: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    pointer: Option<wl_pointer::WlPointer>,
+    /// Scrollback requests not yet applied: pages from Shift+PageUp/PageDown,
+    /// and wheel travel in Wayland axis units (10 per detent; negative: up).
+    scroll_pages: i32,
+    wheel: f64,
+    /// Bytes were typed since the last look: the view returns to the live screen.
+    typed: bool,
     own: Option<wl_surface::WlSurface>,
     registry_done: bool,
     closed: bool,
@@ -92,6 +99,10 @@ impl State {
             decoration: None,
             seat: None,
             keyboard: None,
+            pointer: None,
+            scroll_pages: 0,
+            wheel: 0.0,
+            typed: false,
             own: None,
             registry_done: false,
             closed: false,
@@ -167,6 +178,29 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
             } else if s.keyboard.is_some() {
                 s.reject("keyboard capability removed");
             }
+            // The pointer is used for the wheel only (scrollback).
+            if matches!(capabilities,WEnum::Value(c) if c.contains(wl_seat::Capability::Pointer)) {
+                if s.pointer.is_none() {
+                    s.pointer = Some(p.get_pointer(q, ()));
+                }
+            } else if let Some(pointer) = s.pointer.take() {
+                pointer.release(); // the seat is bound at version 5 or later
+            }
+        }
+    }
+}
+impl Dispatch<wl_pointer::WlPointer, ()> for State {
+    fn event(
+        s: &mut Self,
+        _: &wl_pointer::WlPointer,
+        e: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_pointer::Event::Axis { axis: WEnum::Value(wl_pointer::Axis::VerticalScroll), value, .. } = e {
+            // Bounded: a flood of axis events cannot build an unbounded backlog.
+            s.wheel = (s.wheel + value).clamp(-100_000.0, 100_000.0);
         }
     }
 }
@@ -238,8 +272,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                         return;
                     }
                 };
-                if let Err(e) = s.input.key(key, down) {
-                    s.reject(e);
+                match s.input.key(key, down) {
+                    Ok((pages, typed)) => {
+                        s.scroll_pages = (s.scroll_pages + pages.unwrap_or(0)).clamp(-1000, 1000);
+                        s.typed |= typed;
+                    }
+                    Err(e) => s.reject(e),
                 }
             }
             _ => (),
@@ -314,8 +352,8 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for State {
                 } else {
                     height as usize
                 };
-                if !(20 * render::CW + 16..=160 * render::CW + 16).contains(&w)
-                    || !(6 * render::CH + 16..=60 * render::CH + 16).contains(&h)
+                if !(term::MIN_COLS * render::CW + 16..=term::MAX_COLS * render::CW + 16).contains(&w)
+                    || !(term::MIN_ROWS * render::CH + 16..=term::MAX_ROWS * render::CH + 16).contains(&h)
                 {
                     s.reject("configure dimensions outside bounded grid");
                 } else {
@@ -383,7 +421,7 @@ impl Buffer {
             .checked_mul(size.1)
             .and_then(|n| n.checked_mul(4))
             .ok_or("buffer overflow")?;
-        if bytes > 32 * 1024 * 1024 {
+        if bytes > 64 * 1024 * 1024 {
             return Err("buffer exceeds bound".into());
         }
         let path = dir.join(format!("shm-{seq}"));
@@ -626,8 +664,12 @@ fn session(
     let mut window = None;
     let mut buffer: Option<Buffer> = None;
     let mut seq = 0;
-    let mut grid = grid::Grid::new(80, 24)?;
-    let renderer = render::Renderer::new()?;
+    let mut grid = term::Term::new(80, 24)?;
+    let mut renderer = render::Renderer::new()?;
+    // The window's pixels, kept between frames: only changed rows are redrawn.
+    let mut pixels: Vec<u8> = Vec::new();
+    // The live state file (for unattended checks): what was last written, and when.
+    let mut live = (String::new(), Instant::now() - Duration::from_secs(1));
     let started = Instant::now();
     let mut received = 0;
     let mut checked_child_recorded = false;
@@ -670,6 +712,11 @@ fn session(
                             return Err("PTY output quota".into());
                         }
                         grid.feed(&b[..n]);
+                        // Answers to the program's queries (cursor position, attributes).
+                        let replies = grid.take_replies();
+                        if !replies.is_empty() {
+                            s.input.send(&replies)?;
+                        }
                         s.dirty = true;
                     }
                     Err(e)
@@ -686,6 +733,47 @@ fn session(
             if pty.eof {
                 break;
             }
+            // Keys go out in the cursor-key mode the program asked for.
+            s.input.application_cursor = grid.application_cursor();
+            // Scrollback: typing returns to the live screen; Shift+PageUp/Down
+            // move by pages; the wheel by three lines a detent. On the
+            // alternate screen there is no history, so the wheel becomes
+            // cursor keys for the full-screen program instead.
+            if std::mem::take(&mut s.typed) && grid.scroll_to_bottom() {
+                s.dirty = true;
+            }
+            let pages = std::mem::take(&mut s.scroll_pages);
+            if pages != 0 && grid.scroll_view(pages as isize * (grid.rows as isize - 1).max(1)) {
+                s.dirty = true;
+            }
+            let detents = (s.wheel / 10.0).trunc();
+            if detents != 0.0 {
+                s.wheel -= detents * 10.0;
+                let lines = -(detents as isize) * 3;
+                if grid.alternate_screen() {
+                    let key: &[u8] = match (lines > 0, grid.application_cursor()) {
+                        (true, true) => b"\x1bOA",
+                        (true, false) => b"\x1b[A",
+                        (false, true) => b"\x1bOB",
+                        (false, false) => b"\x1b[B",
+                    };
+                    for _ in 0..lines.unsigned_abs().min(30) {
+                        s.input.send(key)?;
+                    }
+                } else if grid.scroll_view(lines) {
+                    s.dirty = true;
+                }
+            }
+            // The state file: what the screen shows, for checks from outside.
+            if live.1.elapsed() >= Duration::from_millis(200) {
+                let now = format!("{}\n{}\n", grid.state_line(), grid.text());
+                if now != live.0 {
+                    let tmp = dir.join("term-live.txt.tmp");
+                    std::fs::write(&tmp, &now)?;
+                    std::fs::rename(&tmp, dir.join("term-live.txt"))?;
+                    live = (now, Instant::now());
+                }
+            }
             if s.frames.can_draw(s.ssd.ready()) && s.dirty {
                 if buffer.as_ref().is_none_or(|b| b.size != s.size) {
                     buffer.take();
@@ -700,31 +788,27 @@ fn session(
                     let cols = (s.size.0 - 16) / render::CW;
                     let rows = (s.size.1 - 16) / render::CH;
                     grid.resize(cols, rows)?;
+                    // TIOCSWINSZ; the kernel sends the foreground program SIGWINCH.
                     pty.resize(cols as u16, rows as u16)?;
+                    pixels = vec![0u8; s.size.0 * s.size.1 * 4];
+                    renderer.invalidate();
                 }
                 let b = buffer.as_mut().unwrap();
-                let source = renderer.pixels(&grid);
-                let sw = grid.cols * render::CW + 16;
-                let sh = grid.rows * render::CH + 16;
-                let mut pixels = vec![0u8; s.size.0 * s.size.1 * 4];
-                for p in pixels.as_chunks_mut::<4>().0 {
-                    p.copy_from_slice(&[26, 22, 20, 255]);
+                // Only rows that changed are drawn, written and damaged.
+                if let Some((y0, y1)) = renderer.draw(&grid, &mut pixels, s.size.0, s.size.1) {
+                    let row = s.size.0 * 4;
+                    b.file.seek(SeekFrom::Start((y0 * row) as u64))?;
+                    b.file.write_all(&pixels[y0 * row..y1 * row])?;
+                    let w = window.as_ref().ok_or("no configured window")?;
+                    w.xdg
+                        .set_window_geometry(0, 0, s.size.0 as i32, s.size.1 as i32);
+                    s.frames.commit(s.ssd.ready(), received)?;
+                    w.surface.frame(&q, 1u8);
+                    w.surface.attach(Some(&b.buffer), 0, 0);
+                    w.surface
+                        .damage_buffer(0, y0 as i32, s.size.0 as i32, (y1 - y0) as i32);
+                    w.surface.commit();
                 }
-                for y in 0..sh {
-                    pixels[y * s.size.0 * 4..y * s.size.0 * 4 + sw * 4]
-                        .copy_from_slice(&source[y * sw * 4..(y + 1) * sw * 4]);
-                }
-                b.file.seek(SeekFrom::Start(0))?;
-                b.file.write_all(&pixels)?;
-                let w = window.as_ref().ok_or("no configured window")?;
-                w.xdg
-                    .set_window_geometry(0, 0, s.size.0 as i32, s.size.1 as i32);
-                s.frames.commit(s.ssd.ready(), received)?;
-                w.surface.frame(&q, 1u8);
-                w.surface.attach(Some(&b.buffer), 0, 0);
-                w.surface
-                    .damage_buffer(0, 0, s.size.0 as i32, s.size.1 as i32);
-                w.surface.commit();
                 s.dirty = false;
             }
             if !s.ready
@@ -790,7 +874,7 @@ fn session(
     } else {
         "deadline"
     };
-    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported,"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
+    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"alternate_screen":grid.alternate_screen(),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
     // Preserve a protocol failure even if writing the final grid also fails.
     let grid_result = (|| -> Result<()> {
         let mut final_grid = log(dir, "grid-final.txt")?;
@@ -846,7 +930,7 @@ fn run() -> Result<()> {
     json_record(
         &dir,
         "application.json",
-        &serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"socket":socket,"seconds":seconds,"shell":"/bin/sh","argv":["sh","-i","+m"],"term":"dumb"}),
+        &serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"socket":socket,"seconds":seconds,"shell":"/bin/sh","argv":["sh","-i","+m"],"term":term::TERM_NAME}),
     )?;
     let deadline = started + Duration::from_secs(seconds);
     let mut pty = None;
@@ -895,7 +979,7 @@ fn run() -> Result<()> {
             cleanup.complete = false;
         }
     }
-    let record = serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"shell":"/bin/sh","term":"dumb","child_pid":child_pid,"child_exec_boundary":pty.as_ref().map(child_exec_facts),"session":audit,"cleanup":{"complete":cleanup.complete,"status":cleanup.status,"term_sent":cleanup.term_sent,"kill_sent":cleanup.kill_sent,"error":cleanup.error},"errors":errors});
+    let record = serde_json::json!({"schema":1,"instance":instance,"app_pid":std::process::id(),"shell":"/bin/sh","term":term::TERM_NAME,"child_pid":child_pid,"child_exec_boundary":pty.as_ref().map(child_exec_facts),"session":audit,"cleanup":{"complete":cleanup.complete,"status":cleanup.status,"term_sent":cleanup.term_sent,"kill_sent":cleanup.kill_sent,"error":cleanup.error},"errors":errors});
     if let Err(error) = json_record(&dir, "result.json", &record) {
         errors.push(format!("final record: {error}"));
         cleanup.complete = false;

@@ -20,9 +20,13 @@ X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
 # output and 1 MiB of input per terminal). The desktop passes each terminal the session's
 # remaining time, which the RAM root's older terminal refuses.
-TERM_BIN=runs/m1-desktop-010/terminal-application-build-003/target/aarch64-apple-darwin/release/chonk-terminal-darwin
+# build-004 adds the xterm emulation (full-screen programs, scrollback, TERM=xterm-256color).
+TERM_BIN=runs/m1-desktop-010/terminal-application-build-004/target/aarch64-apple-darwin/release/chonk-terminal-darwin
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
+# The terminfo entry for that TERM; the RAM root has none.
+TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
+[ -r "$TI" ] && X="$X;$ROOT/$TI=/usr/share/terminfo/x/xterm-256color;$ROOT/$TI=/usr/share/terminfo/78/xterm-256color"
 # The desk picture; the guest script points CHONKSTEP_BACKGROUND_DIR at its directory.
 BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png}
 [ -f "$BG" ] && X="$X;$ROOT/$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
