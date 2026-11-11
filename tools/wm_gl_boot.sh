@@ -36,7 +36,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
 # The collection with the multitouch trackpad (two-finger click = right button, two-finger
 # drag = wheel). pdm1tpmt=0 as an extra boot-arg falls back to the basic pointer mode.
-KC=${2:-/nix/store/k7xlish9lxldkjvkfccjyj0sg9ddjgz1-puredarwin-kc-arm64-0.1}
+KC=${2:-/nix/store/y3686pr4rvwp63fql8gi0rm50jx5vd1i-puredarwin-kc-arm64-0.1}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}

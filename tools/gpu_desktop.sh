@@ -10,8 +10,8 @@ N=${1:?name}; MIN=${2:-30}
 [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
 BOOT=140                                   # seconds from hypervisor start to the guest script
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
-KC=${GPU_DESKTOP_KC:-/nix/store/k7xlish9lxldkjvkfccjyj0sg9ddjgz1-puredarwin-kc-arm64-0.1}
-[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-smp && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc-desktop.nix --no-out-link | tail -1)
+KC=${GPU_DESKTOP_KC:-/nix/store/y3686pr4rvwp63fql8gi0rm50jx5vd1i-puredarwin-kc-arm64-0.1}
+[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-cpufreq && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --argstr kernelConfig development --no-out-link | tail -1)
 ln -sfn "$KC" runs/m1-desktop-010/bwfm-kc-build-001/result
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
