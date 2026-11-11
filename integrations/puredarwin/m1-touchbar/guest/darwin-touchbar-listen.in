@@ -1,0 +1,54 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# The Touch Bar with a person at the M1, without the desktop. Run:
+#   TB_GUEST=guest/darwin-touchbar-listen.in TB_RUNTIME=420 tools/tb_boot.sh tb<NN>
+# The idle timeouts are off for the session, so the strip stays lit. What to do, and what
+# must be on the strip and in the log (TBKEY lines are the keys as the system receives them,
+# TB_LISTEN lines the last finger the digitizer reported):
+#   1. From about 20 s after the boot picture: the strip shows, left to right,
+#      ESC F1 F2 ... F12 FN, white on grey buttons on black, upright, not mirrored, the
+#      buttons evenly spaced across the whole strip.
+#   2. Touch each key once from ESC to F12. Every touch must make the button lighter
+#      while the finger is on it and log "usage=29 down=1/0", then 3a, 3b ... 45
+#      (TB_LISTEN shows x growing from about 800 to 20600 and the key number 0 to 12).
+#   3. Touch FN: the strip changes to ESC, small sun, large sun, crossed speaker,
+#      speaker, loud speaker, FN. Touch each: 29, 3a, 3b, 43, 44, 45. Touch FN again:
+#      the function keys are back.
+#   4. Put a finger on F5 and slide to F8 without lifting: F5 lights and logs 3e down,
+#      goes dark and logs 3e up when the finger leaves it; nothing else is pressed.
+#   5. From t=150 the timeouts are 5 s (dim) and 10 s (dark): keep off the strip and
+#      watch it dim and go dark. Touch it once: it lights and logs no key. Touch a key
+#      again: it presses.
+# (@SSID@/@PSK@ are unused; the assembler fills templates.)
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+get() { sysctl -n "kern.pd_touchbar.$1" 2>/dev/null; }
+printf '\nTB_BEGIN_%s\n' "$nonce"
+n=0
+while [ "$n" -lt 150 ]; do
+    case "$(get state)" in ready*|display-only*|display-failed*|off*|'') break;; esac
+    sleep 1; n=$((n+1))
+done
+printf 'TB_STATE %s\nTB_DISPLAY %s\nTB_TOUCH %s\n' "$(get state)" "$(get display)" "$(get touch)"
+sysctl -w kern.pd_touchbar.dim_ms=0 kern.pd_touchbar.off_ms=0 kern.pd_touchbar.brightness=128 > /dev/null 2>&1
+pdtbtest --label listen wait:300000 2>&1 &
+t0=$(date +%s); last=
+while [ $(( $(date +%s) - t0 )) -lt 300 ]; do
+    t=$(( $(date +%s) - t0 ))
+    if [ "$t" -ge 150 ] && [ "$(get off_ms)" = 0 ]; then
+        sysctl -w kern.pd_touchbar.dim_ms=5000 kern.pd_touchbar.off_ms=10000 > /dev/null 2>&1
+        printf 'TB_LISTEN t=%s the strip now dims after 5 s and goes dark after 10 s\n' "$t"
+    fi
+    now="$(get last_touch) layer=$(get layer) brightness=$(get actual_brightness) wakes=$(get wakes)"
+    if [ "$now" != "$last" ]; then
+        printf 'TB_LISTEN t=%s %s reports=%s irqs=%s bad_reports=%s spi_errors=%s\n' "$t" "$now" "$(get reports)" \
+            "$(get irqs)" "$(get bad_reports)" "$(get spi_errors)"
+        last=$now
+    fi
+    sleep 1
+done
+wait
+sysctl -w kern.pd_touchbar.dim_ms=30000 kern.pd_touchbar.off_ms=60000 > /dev/null 2>&1
+sysctl kern.pd_touchbar 2>&1 | grep -v 'keys:\|trace:\|fetch:' | cut -c1-600
+printf 'TB_END_%s\n' "$nonce"
+printf '\nPD_BENCH_DONE\n'
