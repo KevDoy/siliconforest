@@ -27,8 +27,9 @@
  *   /arm-io/admac-sio                audio DMA controller, channel 4 * cluster
  *   /arm-io/dart-sio                 its DART; stream 2 (mapper-admac)
  *
- * Not touched: the speaker amplifiers (TAS5770L on i2c1/i2c3, shutdown gpio pin 181)
- * and the I2S ports of clusters 0 and 1 that feed them; microphones.
+ * The speakers (TAS5770L amplifiers on i2c1/i2c3, the I2S ports of clusters 0 and 1,
+ * shutdown gpio pin 181) are pd_speakers.cpp, which shares only the DART window and the
+ * GPIO block with this file. Not touched: microphones.
  *
  * Interfaces:
  *   /dev/pdaudio          write-only, one writer: signed 16-bit little-endian stereo
@@ -46,6 +47,7 @@
  *                         DART and transport set up, no playback; 3 (default): all
  *   pdsound_tone=<s>      play the test tone for s seconds once brought up
  *   pdsound_delay=<ms>    wait before touching hardware (default 2000)
+ *   pdspeakers=0          leave the speaker amplifiers alone (they stay in hardware shutdown)
  *   pdsound_fe=<0..3>     front-end cluster (default 0, as Linux); pdsound_port=<n>
  *                         the cluster whose I2S pins are driven (default 2, the jack)
  *
@@ -79,6 +81,7 @@
 #include "pd_i2c.h"
 #include "pd_mca.h"
 #include "pd_soc.h"
+#include "pd_speakers.h"
 
 #define LOG(fmt, ...) IOLog("PDSound: " fmt "\n", ##__VA_ARGS__)
 
@@ -121,6 +124,7 @@ static PDMca       gMca;
 static uint32_t gLevel = 3;                 /* pdsound= */
 static uint32_t gDelayMs = 2000;
 static uint32_t gFe = 0, gPort = 2;
+static uint32_t gSpeakers = 1;              /* pdspeakers= */
 static int      gState = kStateOff;
 static char     gFailure[96];               /* why the bring-up stopped */
 
@@ -552,7 +556,7 @@ bring_up(void)
 		return;
 	}
 	LOG("pins before: i2c2 sda(%u)=0x%08x scl(%u)=0x%08x, codec reset(nub %u)=0x%08x irq(%u)=0x%08x, "
-	    "speaker shutdown(%u)=0x%08x (not written)", PIN_I2C2_SDA, gGpio.raw(PIN_I2C2_SDA), PIN_I2C2_SCL,
+	    "speaker shutdown(%u)=0x%08x", PIN_I2C2_SDA, gGpio.raw(PIN_I2C2_SDA), PIN_I2C2_SCL,
 	    gGpio.raw(PIN_I2C2_SCL), PIN_CODEC_RESET, gNub.raw(PIN_CODEC_RESET), PIN_CODEC_IRQ, gGpio.raw(PIN_CODEC_IRQ),
 	    PIN_SPEAKER_SDZ, gGpio.raw(PIN_SPEAKER_SDZ));
 	/* i2c2_pins of the Linux device tree */
@@ -578,12 +582,12 @@ bring_up(void)
 		return;
 
 	pd_adt_u32("/arm-io/dart-sio/mapper-admac", "reg", 0, &sid);
-	err = gDart.attach("/arm-io/dart-sio", sid, RING_IOVA, RING_BYTES);
+	err = gDart.attach("/arm-io/dart-sio", sid, RING_IOVA, RING_BYTES + PD_SPK_PLAY_RING_BYTES + PD_SPK_SENSE_RING_BYTES);
 	if (err != 0) {
 		fail("dart-sio", err);
 		return;
 	}
-	err = gMca.attach(gFe, gPort);
+	err = gMca.attach(gFe, 1u << gPort, 2, 2, 0);
 	if (err != 0) {
 		fail("audio transport", err);
 		return;
@@ -599,6 +603,9 @@ bring_up(void)
 		return;
 	}
 	gState = kStateIdle;
+	if (gSpeakers)
+		pd_speakers_bring_up(&gGpio, &gDart, gDart.buf + RING_BYTES, gDart.iova + RING_BYTES,
+		    gDart.buf + RING_BYTES + PD_SPK_PLAY_RING_BYTES, gDart.iova + RING_BYTES + PD_SPK_PLAY_RING_BYTES);
 }
 
 /* ---- /dev/pdaudio --------------------------------------------------------------------- */
@@ -962,6 +969,7 @@ PDAppleSound::start(IOService *provider)
 	PE_parse_boot_argn("pdsound", &gLevel, sizeof(gLevel));
 	if (PE_parse_boot_argn("pdsound_delay", &value, sizeof(value)) && value <= 60000)
 		gDelayMs = value;
+	PE_parse_boot_argn("pdspeakers", &gSpeakers, sizeof(gSpeakers));
 	if (PE_parse_boot_argn("pdsound_fe", &value, sizeof(value)) && value <= 3)
 		gFe = value;
 	if (PE_parse_boot_argn("pdsound_port", &value, sizeof(value)) && value <= 5)
@@ -988,6 +996,7 @@ PDAppleSound::start(IOService *provider)
 void
 PDAppleSound::systemWillShutdown(IOOptionBits specifier)
 {
+	pd_speakers_quiesce();
 	if (gLock != NULL) {
 		IOLockLock(gLock);
 		if (gState == kStatePlaying) {

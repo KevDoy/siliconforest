@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Builds PDAppleSound.kext (GPL-2.0: J293 headphone jack playback) in the pinned PureDarwin
-# tree. Sources: ./kernel.
+# tree. Sources: ./kernel and ./include.
 #   nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kext.nix
 let
   pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
@@ -8,6 +8,7 @@ let
   copied = pkgs.runCommand "puredarwin-sound-source" {} ''
     mkdir -p "$out"
     cp ${./kernel}/* "$out/"
+    cp ${./include/pd_speaker_safety.h} "$out/pd_speaker_safety.h"
   '';
 in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
   pname = "puredarwin-sound";

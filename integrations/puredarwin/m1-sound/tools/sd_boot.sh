@@ -12,6 +12,7 @@
 #   SD_VOLUME    codec attenuation in dB for the test (default 30); SD_TONEDB tone level in
 #                dB below full scale (default 20); SD_SECONDS length of each tone (default 5);
 #                SD_CYCLES start/stop cycles of guest/darwin-sound-stress.in (default 20)
+#   SD_FILES     further files for the RAM root: "source=/destination;..."
 #   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
@@ -39,7 +40,7 @@ for n in range(2 * 44100):
     w.writeframes(struct.pack('<hh', s if n < 44100 else 0, 0 if n < 44100 else s))
 w.close()
 PY
-FILES="$PLAY/usr/bin/pdplay=/usr/bin/pdplay;$W/test.wav=/usr/share/pdsound-test.wav"
+FILES="$PLAY/usr/bin/pdplay=/usr/bin/pdplay;$PLAY/usr/bin/pdspk-test=/usr/bin/pdspk-test;$W/test.wav=/usr/share/pdsound-test.wav${SD_FILES:+;$SD_FILES}"
 PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
