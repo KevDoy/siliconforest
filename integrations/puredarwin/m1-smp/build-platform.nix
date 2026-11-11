@@ -13,6 +13,7 @@ in
       ./platform-patches/0001-PDAppleBootCPUPMGR-start-secondary-cores.patch
       ./platform-patches/0002-PDPerfControl-apple-start-after-all-cpus-initialized.patch
       ./platform-patches/0003-PDAppleBootCPUPMGR-accept-core-and-cluster-power-down.patch
+      ./platform-patches/0004-PDAppleAIC-handler-barriers-for-disable-and-unregister.patch
     ];
   };
 })
