@@ -741,7 +741,7 @@ enum {
 	kCtlTone, kCtlToneHz, kCtlToneDb, kCtlVolume, kCtlRate, kCtlJack, kCtlPeriods, kCtlFrames, kCtlLate,
 	kCtlRingErrors, kCtlDartFaults, kCtlI2CErrors, kCtlRateMilliHz, kCtlSessions, kCtlPlaying, kCtlLockMs,
 	kCtlPreroll, kCtlJackIrqs, kCtlJackServices, kCtlJackPolled, kCtlJackButtons, kCtlJackButtonEvents,
-	kCtlJackPlugs, kCtlJackUnplugs, kCtlJackDetects, kCtlJackSelfTest,
+	kCtlJackPlugs, kCtlJackUnplugs, kCtlJackDetects, kCtlJackSelfTest, kCtlFifoFrames,
 };
 
 static int
@@ -777,6 +777,7 @@ pd_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sys
 	case kCtlJackUnplugs: value = (int)gCodec.unplugEvents; break;
 	case kCtlJackDetects: value = (int)gCodec.detectsDone; break;
 	case kCtlJackSelfTest: value = (int)gCodec.hsType; break;
+	case kCtlFifoFrames:  value = (int)gFifoCount; break;
 	}
 	IOLockUnlock(gLock);
 
@@ -897,6 +898,7 @@ PD_INT(tone_db, kCtlToneDb, CTLFLAG_RW, "test tone level, dB below full scale");
 PD_INT(volume_db, kCtlVolume, CTLFLAG_RW, "codec attenuation in dB, 63 mutes");
 PD_INT(rate, kCtlRate, CTLFLAG_RW, "sample rate");
 PD_INT(jack, kCtlJack, CTLFLAG_RD, "0 nothing plugged, 1 headphones, 2 headset, -1 unknown");
+PD_INT(fifo_frames, kCtlFifoFrames, CTLFLAG_RD, "frames a writer has queued that are not yet in the DMA ring");
 PD_INT(jack_irqs, kCtlJackIrqs, CTLFLAG_RD, "codec interrupts taken");
 PD_INT(jack_services, kCtlJackServices, CTLFLAG_RD, "times the codec's interrupt status was serviced");
 PD_INT(jack_polled, kCtlJackPolled, CTLFLAG_RD, "services started by finding the interrupt line low without an interrupt");
@@ -907,7 +909,7 @@ PD_INT(jack_unplugs, kCtlJackUnplugs, CTLFLAG_RD, "unplug events");
 PD_INT(jack_detects, kCtlJackDetects, CTLFLAG_RD, "plug type detections completed");
 PD_INT(jack_selftest, kCtlJackSelfTest, CTLFLAG_RW, "write: run the plug type detection once on the empty jack; reads the last type (3: none)");
 PD_INT(periods, kCtlPeriods, CTLFLAG_RD, "DMA periods played since boot");
-PD_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot");
+PD_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot (wraps)");
 PD_INT(late, kCtlLate, CTLFLAG_RD, "times the descriptor ring ran empty in the last session");
 PD_INT(ring_errors, kCtlRingErrors, CTLFLAG_RD, "DMA ring errors in the last session");
 PD_INT(dart_faults, kCtlDartFaults, CTLFLAG_RD, "DART faults since boot");
@@ -930,7 +932,7 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_sound_jack_irqs, &sysctl__kern_pd_sound_jack_services, &sysctl__kern_pd_sound_jack_polled,
 	&sysctl__kern_pd_sound_jack_buttons, &sysctl__kern_pd_sound_jack_button_events,
 	&sysctl__kern_pd_sound_jack_plugs, &sysctl__kern_pd_sound_jack_unplugs, &sysctl__kern_pd_sound_jack_detects,
-	&sysctl__kern_pd_sound_jack_selftest,
+	&sysctl__kern_pd_sound_jack_selftest, &sysctl__kern_pd_sound_fifo_frames,
 };
 
 /* ---- IOKit ---------------------------------------------------------------------------- */

@@ -1,0 +1,62 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Listening script for the built-in speakers. A PERSON MUST BE AT THE M1: this is the
+# first time the speakers make sound under this system. It runs the ported speakersafetyd
+# (the only thing that can raise the volume above -100 dB) and plays quiet tones.
+# Run: SD_GUEST=guest/darwin-sound-listen-speakers.in SD_RUNTIME=300 \
+#      SD_FILES="<safetyd>/build/speakersafetyd=/usr/bin/speakersafetyd;<safetyd>/conf/apple/j293.conf=/usr/share/speakersafetyd/apple/j293.conf" \
+#      tools/sd_boot.sh sd<NN>
+# What happens, and what to check:
+#   1. 5 s of silence with the daemon running: no hiss or hum that was not there before,
+#      no pop when the amplifiers start.
+#   2. A 440 Hz tone, 3 s, 50 dB below full scale: barely audible, from both sides.
+#   3. The same at -40 and -30 dB: each step clearly louder, clean (no buzz, no rattle).
+#   4. 1 kHz left only, then right only, at -30 dB: the sides must be right.
+#   5. The daemon is killed while a tone plays: the sound must stop within a moment
+#      (the kernel locks the volume) although the tone goes on for 3 more seconds.
+# After each step the log shows the sense readings: with a tone the current and voltage
+# peaks of the playing speakers must be well above the idle ones (about 30-60 of 32768)
+# and voltage must grow with each level step; a silent side must stay at the idle level.
+# If anything sounds wrong: close the lid or hold the power button; the kernel also shuts
+# the amplifiers down on any amplifier fault.
+# (@SSID@/@PSK@ are unused; the assembler fills templates.)
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+printf '\nSD_BEGIN_%s\n' "$nonce"
+get() { sysctl -n "$1" 2>/dev/null; }
+mon() {
+    printf 'SD_LISTEN %s unlocked=%s playing=%s trips=%s lease_timeouts=%s %s | %s | %s\n' "$1" "$(get kern.pd_speaker.unlocked)" \
+        "$(get kern.pd_speaker.playing)" "$(get kern.pd_speaker.trips)" "$(get kern.pd_speaker.lease_timeouts)" \
+        "$(get kern.pd_speaker.volume)" "$(get kern.pd_speaker.sense)" "$(get kern.pd_speaker.state)"
+}
+mkdir -p /tmp/ssd
+# the daemon ends on every error by design; restart it as systemd does on Linux
+( while [ ! -f /tmp/ssd/stop ]; do
+      speakersafetyd -c /usr/share/speakersafetyd --machine j293 --runtime-dir /tmp/ssd -v >> /tmp/ssd/log 2>&1
+      sleep 1
+  done ) &
+sleep 3; mon daemon-up
+play() {        # tag, pdplay arguments
+    tag=$1; shift
+    pdplay -o speakers "$@" 2>&1 &
+    sleep 2; mon "$tag"
+    wait $!
+    sleep 1
+}
+dd if=/dev/zero bs=4096 count=235 2>/dev/null > /dev/pdspeaker; mon silence
+play tone-50 -t 440 -s 3 -d 50
+play tone-40 -t 440 -s 3 -d 40
+play tone-30 -t 440 -s 3 -d 30
+play left-30 -t 1000 -s 3 -d 30 -c l
+play right-30 -t 1000 -s 3 -d 30 -c r
+touch /tmp/ssd/stop
+pdplay -o speakers -t 440 -s 6 -d 30 2>&1 &
+sleep 2; mon before-kill
+pkill speakersafetyd 2>/dev/null || kill $(ps ax | grep '[s]peakersafetyd' | awk '{print $1}') 2>/dev/null
+sleep 1; mon after-kill
+wait
+mon end
+sed 's/^/SD_DAEMON_LOG /' /tmp/ssd/log | tail -60
+sysctl kern.pd_speaker 2>&1
+printf 'SD_END_%s\n' "$nonce"
+printf '\nPD_BENCH_DONE\n'

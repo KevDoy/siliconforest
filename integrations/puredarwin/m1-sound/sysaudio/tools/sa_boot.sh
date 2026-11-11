@@ -1,0 +1,61 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# One boot of the M1 with coreaudiod, the audio frameworks and the test tools staged into the RAM
+# root and a guest script from ../guest, through tools/pcie_iterate.sh, which queues for the bench
+# itself: do not wrap it. Nothing shared is written; the collection is handed over with PCIE_KC.
+# Usage: sa_boot.sh <name, sd20..sd39> [guest template, default ../guest/darwin-sysaudio-test.in]
+#   SD_KC        collection store path (default: the collection the path was proven with; build
+#                ../../build-kc.nix for the current kext)
+#   SD_RUNTIME   upper bound of the guest's run in seconds, at most 600 (default 300)
+#   SD_BOOTARGS  further kernel boot arguments; SD_CPUS guest processors (default 8)
+#   SD_VOLUME    codec attenuation in dB at the start (default 30); SD_TONEDB tone level in dB
+#                below full scale (default 20)
+#   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
+export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
+N=${1:?name}
+GUEST=${2:-$HERE/guest/darwin-sysaudio-test.in}
+case "$N" in sd2[0-9]|sd3[0-9]) ;; *) echo "boot names for the system audio path are sd20 to sd39" >&2; exit 2;; esac
+[ ! -e "runs/m1-desktop-010/pcie-enum-attempt-$N" ] || { echo "boot $N exists" >&2; exit 2; }
+[ ! -e runs/bench.finisher.failed ] || { echo "runs/bench.finisher.failed exists: the bench needs a person" >&2; exit 2; }
+NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
+KC=${SD_KC:-/nix/store/bsnkaxg6x54psa1qzj7yhhgf40kzxrwm-puredarwin-kc-arm64-0.1}
+[ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
+A=$(cd "$HERE" && $NIX build-sysaudio.nix -A all --no-out-link 2> "${TMPDIR:-/tmp}/sa-build.$$.log" | tail -1)
+[ -x "$A/usr/sbin/coreaudiod" ] || { tail -30 "${TMPDIR:-/tmp}/sa-build.$$.log" >&2; echo "build failed" >&2; exit 2; }
+rm -f "${TMPDIR:-/tmp}/sa-build.$$.log"
+RUNTIME=${SD_RUNTIME:-300}
+[ "$RUNTIME" -le 600 ] || { echo "boots are capped at 600 s" >&2; exit 2; }
+W=$(mktemp -d)
+python3 -B - "$GUEST" "$HERE/guest/sysaudio-common.sh" "$W/guest" "${SD_VOLUME:-30}" "${SD_TONEDB:-20}" <<'PY'
+import sys
+guest, common, out, volume, tonedb = sys.argv[1:]
+text = open(guest).read().replace('@COMMON@', open(common).read())
+open(out, 'w').write(text.replace('@VOLUME@', volume).replace('@TONEDB@', tonedb))
+PY
+# raw frames for pcmplay: 2 s of 1 kHz, 16 bit stereo, 48 kHz, 30 dB below full scale
+python3 -B - "$W/test.pcm" <<'PY'
+import math, struct, sys
+amp = 32767 * 10 ** (-30 / 20)
+with open(sys.argv[1], 'wb') as f:
+    for n in range(2 * 48000):
+        s = int(amp * math.sin(2 * math.pi * 1000 * n / 48000))
+        f.write(struct.pack('<hh', s, s))
+PY
+FW=System/Library/Frameworks
+FILES="$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pcmplay=/usr/bin/pcmplay"
+FILES="$FILES;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume"
+for f in CoreAudio AudioToolbox AudioUnit; do
+    FILES="$FILES;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"
+done
+FILES="$FILES;$W/test.pcm=/usr/share/sysaudio-test.pcm"
+PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
+  PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
+  tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
+  grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space\|BENCH_TIMES" | cut -c1-240 || true
+rm -rf "$W"
+R=runs/m1-desktop-010/pcie-enum-attempt-$N
+grep -o '"status": *"[^"]*"' "$R/result.json" 2>/dev/null || echo "no result.json: check the M1 before anything else"
+[ ! -e runs/bench.finisher.failed ] || echo "runs/bench.finisher.failed exists: STOP, the bench needs a person"
+"$HERE/tools/sa_summary.sh" "$R/guest/console.bin"

@@ -1,0 +1,51 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Unattended start/stop check of the ported speakersafetyd against the real safety device.
+# NOTHING IS PLAYED on the speakers in this script: with the daemon holding the lock the
+# volumes may be at 0 dB, so this boot only shows that the daemon starts on this system,
+# takes the lock the way it does on Linux, waits for sense data, and that killing it locks
+# the volumes again. The amplifiers stay in hardware shutdown throughout.
+# (@SSID@/@PSK@ are unused; the assembler fills templates.)
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+printf '\nSD_BEGIN_%s\n' "$nonce"
+get() { sysctl -n "$1" 2>/dev/null; }
+mon() {
+    printf 'SD_DAEMON %s owner=%s unlocked=%s playing=%s pings=%s volume_sets=%s volume_refused=%s trips=%s\n' "$1" \
+        "$(get kern.pd_speaker.owner)" "$(get kern.pd_speaker.unlocked)" "$(get kern.pd_speaker.playing)" \
+        "$(get kern.pd_speaker.pings)" "$(get kern.pd_speaker.volume_sets)" "$(get kern.pd_speaker.volume_refused)" \
+        "$(get kern.pd_speaker.trips)"
+    printf 'SD_DAEMON_VOLUME %s %s\n' "$1" "$(get kern.pd_speaker.volume)"
+}
+n=0
+while [ "$n" -lt 40 ]; do
+    case "$(get kern.pd_speaker.state)" in idle*|failed*|disabled*) break;; esac
+    sleep 1; n=$((n+1))
+done
+printf 'SD_SPK_STATE %s\n' "$(get kern.pd_speaker.state)"
+sysctl hw.target hw.model 2>&1
+mon before
+mkdir -p /tmp/ssd
+speakersafetyd -c /usr/share/speakersafetyd --machine j293 --runtime-dir /tmp/ssd -v > /tmp/ssd/log 2>&1 &
+pid=$!
+sleep 4
+mon running
+ls -l /tmp/ssd 2>&1
+printf 'SD_DAEMON alive=%s\n' "$(kill -0 $pid 2>/dev/null && echo 1 || echo 0)"
+kill -TERM $pid 2>/dev/null; wait $pid 2>/dev/null
+printf 'SD_DAEMON exit=%s\n' "$?"
+sleep 1
+mon killed
+sed 's/^/SD_DAEMON_LOG /' /tmp/ssd/log | head -40
+# a second start is a warm start (the flag file is there): it must take the lock again
+speakersafetyd -c /usr/share/speakersafetyd --machine j293 --runtime-dir /tmp/ssd > /tmp/ssd/log2 2>&1 &
+pid=$!
+sleep 3
+mon warm
+kill -QUIT $pid 2>/dev/null; wait $pid 2>/dev/null
+printf 'SD_DAEMON exit_after_sigquit=%s\n' "$?"
+sleep 1
+mon end
+sed 's/^/SD_DAEMON_LOG2 /' /tmp/ssd/log2 | head -30
+printf 'SD_END_%s\n' "$nonce"
+printf '\nPD_BENCH_DONE\n'

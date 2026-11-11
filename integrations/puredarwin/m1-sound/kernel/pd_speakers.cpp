@@ -795,7 +795,7 @@ static struct cdevsw safety_cdevsw = {
 enum {
 	kCtlTone, kCtlToneDb, kCtlRate, kCtlPlaying, kCtlUnlocked, kCtlOwner, kCtlPings, kCtlLeaseTimeouts,
 	kCtlVolumeRefused, kCtlVolumeSets, kCtlPeriods, kCtlSensePeriods, kCtlTrips, kCtlSessions, kCtlRateMilliHz,
-	kCtlSenseDropped, kCtlTestShutdown,
+	kCtlSenseDropped, kCtlTestShutdown, kCtlFrames, kCtlFifoFrames, kCtlLockMs, kCtlPrerollMs,
 };
 
 static int
@@ -821,6 +821,11 @@ spk_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sy
 	case kCtlSessions:      value = (int)gSessions; break;
 	case kCtlRateMilliHz:   value = (int)gLastRateMilliHz; break;
 	case kCtlSenseDropped:  value = (int)gSenseDropped; break;
+	case kCtlFrames:        value = (int)(gTotalDone * PERIOD_FRAMES); break;
+	case kCtlFifoFrames:    value = (int)gFifoCount; break;
+	/* the amplifiers need no lock time: both are 0, so a client of either output can read the same names */
+	case kCtlLockMs:        value = 0; break;
+	case kCtlPrerollMs:     value = 0; break;
 	}
 	IOLockUnlock(gLock);
 	error = sysctl_handle_int(oidp, &value, 0, req);
@@ -925,6 +930,10 @@ SPK_INT(trips, kCtlTrips, CTLFLAG_RD, "times the amplifiers were shut down for a
 SPK_INT(sessions, kCtlSessions, CTLFLAG_RD, "playback sessions started");
 SPK_INT(rate_mhz, kCtlRateMilliHz, CTLFLAG_RD, "sample rate of the last session from the DMA timestamps, in mHz");
 SPK_INT(test_shutdown, kCtlTestShutdown, CTLFLAG_RW, "write while playing: shut the amplifiers down as a fault would");
+SPK_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot (wraps)");
+SPK_INT(fifo_frames, kCtlFifoFrames, CTLFLAG_RD, "frames a writer has queued that are not yet in the DMA ring");
+SPK_INT(lock_ms, kCtlLockMs, CTLFLAG_RD, "always 0 (kern.pd_sound.lock_ms has the codec's lock time)");
+SPK_INT(preroll_ms, kCtlPrerollMs, CTLFLAG_RD, "always 0: playback starts with the first frames");
 SPK_INT(sense_dropped, kCtlSenseDropped, CTLFLAG_RD, "sense frames the daemon did not read in time");
 
 static struct sysctl_oid *const gOids[] = {
@@ -936,6 +945,8 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_speaker_volume_sets, &sysctl__kern_pd_speaker_periods, &sysctl__kern_pd_speaker_sense_periods,
 	&sysctl__kern_pd_speaker_trips, &sysctl__kern_pd_speaker_sessions, &sysctl__kern_pd_speaker_rate_mhz,
 	&sysctl__kern_pd_speaker_sense_dropped, &sysctl__kern_pd_speaker_test_shutdown,
+	&sysctl__kern_pd_speaker_frames, &sysctl__kern_pd_speaker_fifo_frames, &sysctl__kern_pd_speaker_lock_ms,
+	&sysctl__kern_pd_speaker_preroll_ms,
 };
 
 /* ---- bring-up ------------------------------------------------------------------------- */

@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * pdplay: plays PCM through /dev/pdaudio (PDAppleSound, the J293 headphone jack).
+ * pdplay: plays PCM through PDAppleSound: /dev/pdaudio (the J293 headphone jack) or
+ * /dev/pdspeaker.
  *
  *   pdplay file.wav              a RIFF/WAVE file: PCM, 8/16/24/32 bit, mono or stereo,
  *                                44100 or 48000 Hz
  *   pdplay -t <hz> [-s <sec>] [-d <dB below full scale>] [-r <rate>] [-c l|r|lr]
  *                                a sine tone (default 2 s at -20 dB, both channels)
- *   pdplay -v <dB>               set the codec attenuation first (0..63, 63 mutes)
+ *   pdplay -v <dB>               set the headphone codec attenuation first (0..63, 63 mutes)
+ *   pdplay -o speakers ...       play through /dev/pdspeaker (the built-in speakers; their
+ *                                volume is the safety daemon's, not this tool's)
  *
  * The device takes signed 16-bit little-endian stereo at kern.pd_sound.rate; this tool
  * sets that rate (it can only change while nothing plays) and converts.
@@ -20,7 +23,9 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
-#define DEVICE "/dev/pdaudio"
+/* -o speakers: the built-in speakers instead of the headphone jack */
+static const char *DEVICE = "/dev/pdaudio";
+static const char *RATE_SYSCTL = "kern.pd_sound.rate";
 
 static int
 set_sysctl(const char *name, int value)
@@ -39,15 +44,15 @@ set_rate(int rate)
 	for (int i = 0; i < 50; i++) {
 		int now = 0;
 		size_t len = sizeof(now);
-		if (sysctlbyname("kern.pd_sound.rate", &now, &len, NULL, 0) == 0 && now == rate)
+		if (sysctlbyname(RATE_SYSCTL, &now, &len, NULL, 0) == 0 && now == rate)
 			return 0;
-		if (sysctlbyname("kern.pd_sound.rate", NULL, NULL, &rate, sizeof(rate)) == 0)
+		if (sysctlbyname(RATE_SYSCTL, NULL, NULL, &rate, sizeof(rate)) == 0)
 			return 0;
 		if (errno != EBUSY)
 			break;
 		usleep(100000);
 	}
-	fprintf(stderr, "pdplay: cannot set kern.pd_sound.rate=%d: %s\n", rate, strerror(errno));
+	fprintf(stderr, "pdplay: cannot set %s=%d: %s\n", RATE_SYSCTL, rate, strerror(errno));
 	return -1;
 }
 
@@ -221,7 +226,7 @@ main(int argc, char **argv)
 	int hz = 0, seconds = 2, db = 20, rate = 48000, volume = -1, c;
 	const char *channels = "lr";
 
-	while ((c = getopt(argc, argv, "t:s:d:r:c:v:")) != -1) {
+	while ((c = getopt(argc, argv, "t:s:d:r:c:v:o:")) != -1) {
 		switch (c) {
 		case 't': hz = atoi(optarg); break;
 		case 's': seconds = atoi(optarg); break;
@@ -229,6 +234,15 @@ main(int argc, char **argv)
 		case 'r': rate = atoi(optarg); break;
 		case 'c': channels = optarg; break;
 		case 'v': volume = atoi(optarg); break;
+		case 'o':
+			if (strcmp(optarg, "speakers") == 0) {
+				DEVICE = "/dev/pdspeaker";
+				RATE_SYSCTL = "kern.pd_speaker.rate";
+			} else if (strcmp(optarg, "headphones") != 0) {
+				fprintf(stderr, "pdplay: -o headphones|speakers\n");
+				return 2;
+			}
+			break;
 		default:
 			fprintf(stderr, "usage: pdplay [-v dB] file.wav | pdplay [-v dB] -t hz [-s sec] [-d dB] [-r rate] [-c l|r|lr]\n");
 			return 2;
