@@ -129,7 +129,9 @@ def main():
 
     base = RUNS / 'qemu/system-base.img'
     if a.refresh_system or not base.exists():
-        templates = sorted((LAB / 'runs/qemu-dev/base').glob('template-release-*.img'), key=lambda f: f.stat().st_mtime)
+        base_dir = LAB / 'runs/qemu-dev/base'
+        templates = sorted(list(base_dir.glob('template-release-minimal-*.img')) or
+                           [f for f in base_dir.glob('template-release-*.img') if 'wayland' not in f.name], key=lambda f: f.stat().st_mtime)
         if not templates:
             raise SystemExit('no qemu-dev template; run tools/qemu_desktop.sh once')
         subprocess.run(['cp', '--reflink=auto', str(templates[-1]), str(base)], check=True)

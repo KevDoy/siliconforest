@@ -269,12 +269,74 @@ The tree's own Python 3.13 also has no call to the probe, so its lost `print` ou
 | M1 | boot `ls02` (`libsystem-default/tools/ls_desktop_boot.sh`): default fast-boot collection `z66w83kk…`, `pd_quiet_wait=0 pd_rtc_wait=0`, `launcher-fast-quiet.patch`, slim stager, compositor build-009, terminal build-008, new libSystem staged for this boot only | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`, `linux_verified: True`. Every autopilot phase line has the verdict it has in `ds09` (both sessions `done result=ok`, no `FAILED`), `DSDESK_WIFI_JOIN_RC=0`, `DSDESK_NET_UP_RC=0`, `DSDESK_PING_RC=0 … joined=1`, the `PDSpeakers` and `PDTouchBar` lines as before. The RAM root image of the packet contains the new library byte for byte |
 `ls01` never reached the bench: staging refused to overwrite the base RAM root's libSystem because `PCIE_EXTRA_FILES` drops the `replaces_sha256` field. `tools/ls_stager.py` (a `PCIE_STAGER` wrapper) restores it in the boot's own mapping. With the default changed in `mapping.json` this wrapper is not needed.
 
+## Claude Code and Codex CLI (2026-11-12)
+No sign-in was done and no credential of any kind is in the guest: the harness types scripts over the serial console, QEMU was started with an emptied host environment, and the guest reported 0 environment lines naming a key or token. Everything stops at the first screen.
+
+### How they are distributed for macOS arm64 (from the vendors' pages and registries, fetched 2026-11-12)
+| | Claude Code (Anthropic) | Codex CLI (OpenAI) |
+|---|---|---|
+| Documented installs | `curl -fsSL https://claude.ai/install.sh \| bash` (recommended), `brew install --cask claude-code`, npm `@anthropic-ai/claude-code` | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh`, `npm install -g @openai/codex`, `brew install --cask codex`, GitHub release archives |
+| Version examined | 2.1.322 (`downloads.claude.ai/claude-code-releases/2.1.322/darwin-arm64/claude`, checksum as in its manifest) | 0.167.2 (`codex-package-aarch64-apple-darwin.tar.gz`, checksum as in the Homebrew cask) |
+| What it is | one 324 MB executable, a Bun-compiled JavaScript program; the npm package only selects this binary per platform (`engines: node >= 22` for the installer stub) | a Rust executable (271 MB) plus `codex-exec-server`, `codex-code-mode-host`, its own `rg`, and a voice helper with GStreamer libraries |
+| Requires (vendor) | macOS 13.0+ | binary says minimum macOS 11.0 |
+| Signature | Developer ID (`com.anthropic.claude-code`): not ad-hoc, so never rewritten by our tools; this kernel does not check it | Developer ID |
+Anthropic's installer script was read before use: it downloads `latest`, the manifest and the binary from `downloads.claude.ai`, checks the SHA-256, and runs `claude install`; it needs bash and curl (or wget).
+
+### Static survey (`hb_check.py`, against the default userland and against it plus the overlay)
+- **Claude Code** links only `libSystem`, `libc++`, `libicucore`, `libresolv`. All 838 imports are exported by the stock image (old and new default libSystem alike); one weak import is absent (`posix_spawn_file_actions_addfchdir`). It does not call the stack probe. Nothing proprietary is linked.
+- **Codex** (`codex`, `codex-exec-server`) links frameworks the image does not have, so dyld refuses it at launch:
+| Needed | State here | Kind of work |
+|---|---|---|
+| `LocalAuthentication.framework` (linked, nothing imported) | absent; tree source `src/Frameworks/LocalAuthentication`, built for x86_64 only (`app-frameworks`) | build for arm64 |
+| `CFNetwork.framework`: `CFNetworkCopyProxiesForURL`, PAC execution, 11 proxy constants | absent; tree source `src/Frameworks/CFNetwork/CFProxySupport.c`, x86_64 only | build for arm64 |
+| `AppKit.framework/Versions/C` (4 pasteboard constants), `CoreGraphics.framework` (linked only) | absent from the default image; present in the Cocoa stream's arm64 root, where 1 constant is missing: `NSPasteboardURLReadingFileURLsOnlyKey` | Cocoa stream's root + one constant |
+| Security: `kSecAttrKeyTypeAES`, `kSecMatchSubjectWholeString`, `kSecUseKeychain` (data, bound at launch) | declared in the tree's headers, not exported | small |
+| Security: 19 SecureTransport calls (`SSLCreateContext`, `SSLHandshake`, …), `SecItemImport`, 3 keychain calls | header only in the tree | large; bound lazily, so only fatal if Codex takes that path (it carries rustls as well; not determined which it uses) |
+| CoreServices: `log2`, `exp2` recorded against CoreServices; FSEvents (present) | the two math names are not re-exported by our CoreServices | small (re-export libSystem's), lazy |
+`codex-code-mode-host` needs CFNetwork and the Security items only. Codex's bundled `rg` runs (executed).
+
+### Executed (QEMU, `guest/cli-session.sh`, runs `c2`, `c3`; binaries placed on the prefix disk byte for byte as downloaded, run as uid 1000)
+| | Claude Code | Codex |
+|---|---|---|
+| `--version` | `2.1.322 (Claude Code)` | dyld: `Library not loaded: …/LocalAuthentication.framework/Versions/A/LocalAuthentication` |
+| `--help` | prints | – |
+| First screen on a PTY (tmux 100x30, `TERM` set by tmux) | "Welcome to Claude Code v2.1.322 … Choose the text style", then after one Enter "Select login method: 1. Claude account with subscription / 2. Anthropic Console account / 3. 3rd-party platform". Stopped there | the dyld message |
+| Rendering (screen read back from the disk image, since the serial console is 7-bit) | UTF-8 block and shade glyphs (U+2588, U+2584, U+2591, U+2592), `❯`, `·`; 256-colour SGR (`38;5;n`, `48;5;n`), bold | – |
+| Input | Down moved the selection and the preview changed theme; Enter advanced | – |
+| Resize 100x30 → 70x24 | layout redrawn at the new width | – |
+| Network over TLS | `~/.claude/cache/changelog.md` (1.19 MB) was fetched; the log says "CA certs: Loaded 118 bundled root certificates"; one request (MCP registry) hit its own 5 s timeout | – |
+| State written | `~/.claude.json`, `~/.claude/{sessions,projects,plugins,cache,debug,backups}`, `settings.json`; file watching on `settings.json` started without error | – |
+| Non-interactive `claude -p hello` without credentials | **does not return** (ended by the 15-minute limit, twice). Its log stops 50 s in, after "API error (attempt 1/11): Could not resolve authentication method". On macOS this prints a "not logged in" message and exits. Cause not found | – |
+| Installed by the vendor's script in the guest | yes, with one tool supplied. First try (`c4`): `shasum: command not found`, "Checksum verification failed" (on Darwin the script calls `shasum -a 256`; the image has only `sha256sum`). With a `/usr/bin/shasum` that runs `sha256sum` for that mode (`c5`): download, checksum, `claude install`: "Claude Code successfully installed! Version: 2.1.322, Location: ~/.local/bin/claude"; `~/.local/bin/claude --version` prints `2.1.322 (Claude Code)`. The whole run took 23 minutes under emulation | not attempted (cannot start) |
+Not tested: Claude Code in the lab's own terminal on the desktop (tmux was the terminal here), anything after sign-in (the agent loop, the Bash tool, ripgrep search, sandboxing), `brew install --cask`.
+
+### What they need that the system lacks
+Checked in the guest (`command -v`): `security` no, `open` no, `pbcopy`/`pbpaste` no, `osascript` no, `sandbox-exec` no, `pgrep` no, `script` no, `stty` no, `tput` no, `locale` no, `defaults` no; `ps`, `rg` (bottle), `git` (bottle), `bash` (bottle), `zsh`, `sh`, `sw_vers`, `uname` yes. `/tmp` is `/private/tmp`; there is no `/var/folders` and `TMPDIR` is unset (Claude Code used `/tmp` without complaint).
+| Gap | Who needs it | Effort |
+|---|---|---|
+| `/bin/bash`, a user account, `/usr/bin/curl`, UTF-8 locale data | installer script; both tools' shell tool | small: already on the fold-in list |
+| `/usr/bin/shasum` | Anthropic's installer script (stops with "Checksum verification failed" without it) | small |
+| `git`, `rg` in the default image | both (Claude Code brings its own ripgrep; Codex ships `rg`) | small |
+| `/usr/bin/security` and a keychain | Claude Code stores the login in the macOS Keychain through `security`; when that fails it documents a fallback to `~/.claude/.credentials.json` (mode 0600). The log here shows "[keychain] readAsync failed". Codex: `cli_auth_credentials_store = "file"` keeps `~/.codex/auth.json` | none for a first login if the documented file fallback works here (untested: needs a sign-in); a real keychain is large |
+| `/usr/bin/open` | browser hand-off at login (both) | small once a browser exists; until then see below |
+| `pbcopy` | "press c to copy the login URL" | small (needs a clipboard service) |
+| `sandbox-exec` (Seatbelt) | Codex confines commands with it on macOS; Claude Code's optional sandbox uses it | medium: the tree has a `Sandbox.kext` and a `libsandbox` that compiles SBPL profiles (it says some rule classes are recognised but not enforced), but no `sandbox-exec` command; whether the profiles these tools generate are accepted is untested. Until then Codex would have to run with its sandbox disabled |
+| `pgrep`, `stty`, `tput`, `script`, `locale`, `defaults` | conveniences either tool may call | small each |
+| Codex's frameworks (table above) | Codex cannot start | medium: two tree frameworks for arm64, three Security constants, one AppKit constant, and the Cocoa root in the image |
+| `claude -p` not returning | scripts and CI use of Claude Code | unknown: to be debugged |
+
+### Sign-in with no browser on the system (from the vendors' documentation; nothing was tried)
+- **Claude Code:** the login screen prints a URL; the documentation says to open it in any browser (another machine works) and paste the code shown there at "Paste code here if prompted". Alternatives: `ANTHROPIC_API_KEY` in the environment, or an `apiKeyHelper` script. So a browser on SiliconForest is not required.
+- **Codex:** default is a browser flow that returns to a local port, which needs a browser on the same machine. Documented for headless machines: `codex login --device-auth` (device code, beta, must be enabled in the account's settings), signing in with an API key, or copying `~/.codex/auth.json` from a machine that has a browser.
+
 ## What should be folded into the default images
 1. The `___chkstk_darwin` hunk (all images, now).
 2. The rest of `libsystem-homebrew.patch` (fenv ABI, long double, ucontext, exports).
 3. `libz`, `libncurses`, `libxml2`, `libexpat`, `libffi`, `libsqlite3`, `libbz2`, `libedit`, `libcurl` in `/usr/lib`; `CoreServices`, `Security`, `SystemConfiguration` frameworks; `Foundation` `Versions/C`; `/usr/share/locale`; `kIOMainPortDefault`; `SecTrustCopyCertificateChain`.
 4. For brew: `/bin/bash`, `/usr/bin/sw_vers`, `/dev/fd`, a non-root user and a way to become it, `/usr/bin/curl`, `/usr/bin/git` (or the bottle), `/usr/bin/codesign` (a re-signer; `hb_macho.py` shows the needed logic is small).
 5. Build the userland optimised (libSystem is `-O0`).
+6. For Claude Code and Codex: `/usr/bin/shasum`, `git` and `rg`, `pgrep`, `stty`, `tput`, `locale`; `/usr/bin/open` and `pbcopy`/`pbpaste` when there is something for them to talk to; `/usr/bin/security` (at least the generic-password subcommands over a file store) so credential storage does not depend on a fallback; `/dev/fd`; an 8-bit-clean console.
+7. For Codex: `LocalAuthentication` and `CFNetwork` built for arm64, the three Security constants, `NSPasteboardURLReadingFileURLsOnlyKey` in AppKit, `log2`/`exp2` reachable through CoreServices.
 
 ## Open gaps, in order of formulae unblocked
 | Gap | Unblocks | Kind |
