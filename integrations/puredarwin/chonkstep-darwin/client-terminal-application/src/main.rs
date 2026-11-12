@@ -9,6 +9,7 @@ mod negotiation;
 mod protocol;
 mod pty;
 mod render;
+mod scale;
 mod status;
 use protocol::{FrameState, MAX_RX};
 use std::{
@@ -30,10 +31,14 @@ use wayland_client::{
     delegate_noop,
     protocol::{
         wl_buffer, wl_callback, wl_compositor, wl_data_device, wl_data_device_manager,
-        wl_data_offer, wl_data_source, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm,
+        wl_data_offer, wl_data_source, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
         wl_shm_pool, wl_surface,
     },
     Connection, Dispatch, QueueHandle, WEnum,
+};
+use wayland_protocols::wp::{
+    fractional_scale::v1::client::{wp_fractional_scale_manager_v1, wp_fractional_scale_v1},
+    viewporter::client::{wp_viewport, wp_viewporter},
 };
 use wayland_protocols::xdg::{
     decoration::zv1::client::{zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1},
@@ -106,12 +111,34 @@ struct State {
     instance: String,
     ready: bool,
     frames: FrameState,
+    /// Output scale. Optional globals, and what each source last said: the
+    /// fractional protocol (120ths), `wl_surface.preferred_buffer_scale`, the
+    /// outputs (registry name, object, scale) and those the surface is on.
+    fractional_manager: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
+    viewporter: Option<wp_viewporter::WpViewporter>,
+    /// The window has a viewport and a fractional-scale object: fractional
+    /// scales can be presented.
+    fractional_mode: bool,
+    fractional: Option<u32>,
+    preferred: Option<i32>,
+    outputs: Vec<(u32, wl_output::WlOutput, i32)>,
+    entered: Vec<wl_output::WlOutput>,
+    /// Font size in logical pixels, and the cell metrics of the buffer on
+    /// screen (pointer positions are mapped with these).
+    base_px: u32,
+    metrics: scale::Metrics,
+    /// Logical sizes: asked for by a toplevel configure not yet acknowledged,
+    /// the last one acknowledged (`None`: the compositor left it to us), and
+    /// what is committed.
     pending_size: Option<(usize, usize)>,
-    size: (usize, usize),
+    configured: Option<(usize, usize)>,
+    logical: (usize, usize),
     dirty: bool,
 }
 impl State {
     fn new(instance: String) -> Self {
+        let base_px = scale::font_px(std::env::var(scale::FONT_ENV).ok().as_deref());
+        let metrics = scale::Metrics::new(base_px, scale::UNIT);
         Self {
             compositor: None,
             shm: None,
@@ -144,10 +171,26 @@ impl State {
             instance,
             ready: false,
             frames: FrameState::new(),
+            fractional_manager: None,
+            viewporter: None,
+            fractional_mode: false,
+            fractional: None,
+            preferred: None,
+            outputs: Vec::new(),
+            entered: Vec::new(),
+            base_px,
+            metrics,
             pending_size: None,
-            size: (80 * render::CW + 16, 24 * render::CH + 16),
+            configured: None,
+            logical: scale::layout(&metrics, None, (80, 24), false).logical,
             dirty: true,
         }
+    }
+    /// The effective scale in 120ths (see `scale::effective`). Of several
+    /// outputs the surface is on, the largest scale counts.
+    fn scale120(&self) -> u32 {
+        let output = self.outputs.iter().filter(|(_, o, _)| self.entered.contains(o)).map(|(_, _, scale)| *scale).max();
+        scale::effective(self.fractional.filter(|_| self.fractional_mode), self.preferred, output)
     }
     fn reject(&mut self, e: impl ToString) {
         if self.error.is_none() {
@@ -164,7 +207,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         q: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global {
+        if let wl_registry::Event::GlobalRemove { name } = e {
+            if let Some(at) = s.outputs.iter().position(|(n, _, _)| *n == name) {
+                let (_, output, _) = s.outputs.remove(at);
+                s.entered.retain(|o| *o != output);
+                if wayland_client::Proxy::version(&output) >= 3 {
+                    output.release();
+                }
+                s.dirty = true;
+            }
+        } else if let wl_registry::Event::Global {
             name,
             interface,
             version,
@@ -175,8 +227,19 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     if s.compositor.is_some() || version < 4 {
                         s.reject("ambiguous/old compositor")
                     } else {
-                        s.compositor = Some(r.bind(name, 4, q, ()));
+                        // Version 6 has wl_surface.preferred_buffer_scale.
+                        s.compositor = Some(r.bind(name, version.min(6), q, ()));
                     }
+                }
+                // Optional, for the output scale: all absent means scale 1.
+                "wl_output" if s.outputs.len() < 16 => {
+                    s.outputs.push((name, r.bind(name, version.min(4), q, ()), 1));
+                }
+                "wp_fractional_scale_manager_v1" if s.fractional_manager.is_none() => {
+                    s.fractional_manager = Some(r.bind(name, 1, q, ()));
+                }
+                "wp_viewporter" if s.viewporter.is_none() => {
+                    s.viewporter = Some(r.bind(name, 1, q, ()));
                 }
                 "wl_shm" => s.shm = Some(r.bind(name, 1, q, ())),
                 "xdg_wm_base" => s.shell = Some(r.bind(name, version.min(6), q, ())),
@@ -234,12 +297,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        let cell = |x: f64, y: f64| {
-            let at = |v: f64, size: usize| ((v.max(0.0) as usize).saturating_sub(render::PAD)) / size;
-            (at(x, render::CW), at(y, render::CH))
-        };
+        // Positions are in logical surface units; cells are device pixels.
+        let metrics = s.metrics;
+        let cell = |x: f64, y: f64| metrics.cell_at(x, y);
         match e {
             wl_pointer::Event::Axis { axis: WEnum::Value(wl_pointer::Axis::VerticalScroll), value, .. } => {
+                // Axis values are logical too: the same travel is the same number
+                // of lines at every scale.
                 // Bounded: a flood of axis events cannot build an unbounded backlog.
                 s.wheel = (s.wheel + value).clamp(-100_000.0, 100_000.0);
             }
@@ -472,7 +536,7 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
             p.ack_configure(serial);
             s.ssd.surface_configured(serial);
             if let Some(size) = s.pending_size.take() {
-                s.size = size;
+                s.configured = Some(size);
                 s.dirty = true;
             }
         }
@@ -507,15 +571,17 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for State {
                 if width == 0 && height == 0 {
                     return;
                 }
-                let w = if width == 0 { s.size.0 } else { width as usize };
+                // Logical units, like everything in xdg-shell.
+                let w = if width == 0 { s.logical.0 } else { width.max(0) as usize };
                 let h = if height == 0 {
-                    s.size.1
+                    s.logical.1
                 } else {
-                    height as usize
+                    height.max(0) as usize
                 };
-                if !(term::MIN_COLS * render::CW + 16..=term::MAX_COLS * render::CW + 16).contains(&w)
-                    || !(term::MIN_ROWS * render::CH + 16..=term::MAX_ROWS * render::CH + 16).contains(&h)
-                {
+                // Strict against a compositor that does not scale, as before.
+                let scales = s.fractional_mode || s.preferred.is_some() || !s.outputs.is_empty();
+                let (low, high) = scale::Metrics::new(s.base_px, s.scale120()).configure_bounds(scales);
+                if !(low.0..=high.0).contains(&w) || !(low.1..=high.1).contains(&h) {
                     s.reject("configure dimensions outside bounded grid");
                 } else {
                     s.pending_size = Some((w, h));
@@ -557,8 +623,65 @@ impl Dispatch<wl_callback::WlCallback, u8> for State {
         }
     }
 }
+impl Dispatch<wl_surface::WlSurface, ()> for State {
+    fn event(
+        s: &mut Self,
+        _: &wl_surface::WlSurface,
+        e: wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match e {
+            wl_surface::Event::Enter { output } => {
+                if !s.entered.contains(&output) && s.entered.len() < 16 {
+                    s.entered.push(output);
+                }
+            }
+            wl_surface::Event::Leave { output } => s.entered.retain(|o| *o != output),
+            wl_surface::Event::PreferredBufferScale { factor } => s.preferred = Some(factor),
+            _ => return,
+        }
+        // The session loop compares the effective scale with what is shown.
+        s.dirty = true;
+    }
+}
+impl Dispatch<wl_output::WlOutput, ()> for State {
+    fn event(
+        s: &mut Self,
+        output: &wl_output::WlOutput,
+        e: wl_output::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_output::Event::Scale { factor } = e {
+            if let Some(known) = s.outputs.iter_mut().find(|(_, o, _)| o == output) {
+                known.2 = factor;
+                s.dirty = true;
+            }
+        }
+    }
+}
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for State {
+    fn event(
+        s: &mut Self,
+        _: &wp_fractional_scale_v1::WpFractionalScaleV1,
+        e: wp_fractional_scale_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = e {
+            s.fractional = Some(scale);
+            s.dirty = true;
+        }
+    }
+}
 delegate_noop!(State: ignore wl_compositor::WlCompositor);
-delegate_noop!(State: ignore wl_surface::WlSurface);
+delegate_noop!(State: ignore wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
+delegate_noop!(State: ignore wp_viewporter::WpViewporter);
+delegate_noop!(State: ignore wp_viewport::WpViewport);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1);
@@ -576,13 +699,16 @@ impl Buffer {
         dir: &Path,
         size: (usize, usize),
         seq: u32,
+        scale120: u32,
     ) -> Result<Self> {
         let bytes = size
             .0
             .checked_mul(size.1)
             .and_then(|n| n.checked_mul(4))
             .ok_or("buffer overflow")?;
-        if bytes > 64 * 1024 * 1024 {
+        // 64 MiB of pixels at scale 1: the same window area at every scale.
+        let unit = scale::UNIT as usize;
+        if bytes > 64 * 1024 * 1024 * (scale120 as usize).div_ceil(unit).pow(2) {
             return Err("buffer exceeds bound".into());
         }
         let path = dir.join(format!("shm-{seq}"));
@@ -624,6 +750,11 @@ struct Window {
     xdg: xdg_surface::XdgSurface,
     top: xdg_toplevel::XdgToplevel,
     dec: zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1,
+    /// Both or neither: the fractional scale is only usable with a viewport.
+    viewport: Option<wp_viewport::WpViewport>,
+    fractional: Option<wp_fractional_scale_v1::WpFractionalScaleV1>,
+    /// `wl_surface.set_buffer_scale` as last sent (1 until then).
+    buffer_scale: i32,
 }
 impl Window {
     fn new(s: &mut State, q: &QueueHandle<State>) -> Result<Self> {
@@ -644,11 +775,15 @@ impl Window {
         let top = xdg.get_toplevel(q, ());
         top.set_title(format!("Terminal {}", &s.instance[..12]));
         top.set_app_id("chonk-terminal-darwin".into());
-        top.set_min_size((20 * render::CW + 16) as i32, (6 * render::CH + 16) as i32);
-        top.set_max_size(
-            (160 * render::CW + 16) as i32,
-            (60 * render::CH + 16) as i32,
-        );
+        Self::limits(&top, &s.metrics);
+        let (viewport, fractional) = match (&s.viewporter, &s.fractional_manager) {
+            (Some(viewporter), Some(manager)) => (
+                Some(viewporter.get_viewport(&surface, q, ())),
+                Some(manager.get_fractional_scale(&surface, q, ())),
+            ),
+            _ => (None, None),
+        };
+        s.fractional_mode = viewport.is_some();
         let dec = s
             .decoration
             .as_ref()
@@ -661,11 +796,30 @@ impl Window {
             xdg,
             top,
             dec,
+            viewport,
+            fractional,
+            buffer_scale: 1,
         })
+    }
+    /// Smallest and largest window (20 x 6 and 160 x 60 cells), in logical units.
+    fn limits(top: &xdg_toplevel::XdgToplevel, m: &scale::Metrics) {
+        let logical = |cols, rows| {
+            let grid = m.grid_px(cols, rows);
+            (scale::to_logical(grid.0, m.scale120) as i32, scale::to_logical(grid.1, m.scale120) as i32)
+        };
+        let (min, max) = (logical(20, 6), logical(160, 60));
+        top.set_min_size(min.0, min.1);
+        top.set_max_size(max.0, max.1);
     }
 }
 impl Drop for Window {
     fn drop(&mut self) {
+        if let Some(fractional) = self.fractional.take() {
+            fractional.destroy();
+        }
+        if let Some(viewport) = self.viewport.take() {
+            viewport.destroy();
+        }
         self.dec.destroy();
         self.top.destroy();
         self.xdg.destroy();
@@ -822,8 +976,10 @@ fn session(
     conn.display().get_registry(&q, ());
     conn.display().sync(&q, 0u8);
     let mut s = State::new(instance.to_owned());
-    let mut window = None;
+    let mut window: Option<Window> = None;
     let mut buffer: Option<Buffer> = None;
+    // The metrics and sizes of what is committed (`None` before the first buffer).
+    let mut shown: Option<(scale::Metrics, scale::Layout)> = None;
     let mut seq = 0;
     let mut grid = term::Term::new(80, 24)?;
     let mut renderer = render::Renderer::new()?;
@@ -911,10 +1067,8 @@ fn session(
             if pages != 0 && grid.scroll_view(pages as isize * (grid.rows as isize - 1).max(1)) {
                 s.dirty = true;
             }
-            let detents = (s.wheel / 10.0).trunc();
-            if detents != 0.0 {
-                s.wheel -= detents * 10.0;
-                let lines = -(detents as isize) * 3;
+            let lines = scale::wheel_lines(&mut s.wheel);
+            if lines != 0 {
                 if grid.alternate_screen() {
                     let key: &[u8] = match (lines > 0, grid.application_cursor()) {
                         (true, true) => b"\x1bOA",
@@ -991,10 +1145,14 @@ fn session(
             // The state file: what the screen shows, for checks from outside.
             if live.1.elapsed() >= Duration::from_millis(200) {
                 let now = format!(
-                    "{} selected_bytes={} copies={copies} pastes={pastes} pasted_bytes={pasted_bytes} clipboard={}\n{}\n",
+                    "{} selected_bytes={} copies={copies} pastes={pastes} pasted_bytes={pasted_bytes} clipboard={}{}\n{}\n",
                     grid.state_line(),
                     selected.as_ref().map_or(0, |t| t.len()),
                     if s.data_device.is_some() { "available" } else { "absent" },
+                    shown.as_ref().map_or(String::new(), |(m, l)| format!(
+                        " scale120={} cell={}x{} buffer={}x{} logical={}x{}",
+                        m.scale120, m.cw, m.ch, l.buffer.0, l.buffer.1, l.logical.0, l.logical.1
+                    )),
                     grid.text()
                 );
                 if now != live.0 {
@@ -1005,38 +1163,69 @@ fn session(
                 }
             }
             if s.frames.can_draw(s.ssd.ready()) && s.dirty {
-                if buffer.as_ref().is_none_or(|b| b.size != s.size) {
-                    buffer.take();
-                    seq += 1;
-                    buffer = Some(Buffer::new(
-                        s.shm.as_ref().ok_or("no shm")?,
-                        &q,
-                        dir,
-                        s.size,
-                        seq,
-                    )?);
-                    let cols = (s.size.0 - 16) / render::CW;
-                    let rows = (s.size.1 - 16) / render::CH;
-                    grid.resize(cols, rows)?;
+                // The cell metrics at the effective scale, and the grid and
+                // sizes for the configured logical size at those metrics. A
+                // new scale alone (same configure) lands here too.
+                let metrics = scale::Metrics::new(s.base_px, s.scale120());
+                let layout = scale::layout(&metrics, s.configured, (grid.cols, grid.rows), s.fractional_mode);
+                if shown != Some((metrics, layout)) {
+                    let w = window.as_mut().ok_or("no configured window")?;
+                    if buffer.as_ref().is_none_or(|b| b.size != layout.buffer) {
+                        buffer.take();
+                        seq += 1;
+                        buffer = Some(Buffer::new(
+                            s.shm.as_ref().ok_or("no shm")?,
+                            &q,
+                            dir,
+                            layout.buffer,
+                            seq,
+                            metrics.scale120,
+                        )?);
+                        pixels = vec![0u8; layout.buffer.0 * layout.buffer.1 * 4];
+                    }
+                    grid.resize(layout.cols, layout.rows)?;
                     // TIOCSWINSZ; the kernel sends the foreground program SIGWINCH.
-                    pty.resize(cols as u16, rows as u16)?;
-                    pixels = vec![0u8; s.size.0 * s.size.1 * 4];
+                    pty.resize(layout.cols as u16, layout.rows as u16)?;
+                    // Glyphs are rasterised again at the new pixel size.
+                    renderer.set_metrics(metrics);
                     renderer.invalidate();
+                    // Surface state for the commit below. With a viewport the
+                    // buffer is device pixels at buffer scale 1 and the
+                    // destination is the logical size; without, the buffer
+                    // is the logical size times the whole scale.
+                    if w.buffer_scale != layout.buffer_scale {
+                        w.surface.set_buffer_scale(layout.buffer_scale);
+                        w.buffer_scale = layout.buffer_scale;
+                    }
+                    if let Some(viewport) = &w.viewport {
+                        viewport.set_destination(layout.logical.0 as i32, layout.logical.1 as i32);
+                    }
+                    if s.metrics != metrics {
+                        Window::limits(&w.top, &metrics);
+                    }
+                    s.metrics = metrics;
+                    s.logical = layout.logical;
+                    shown = Some((metrics, layout));
+                    // One line per change, for unattended checks of the scale.
+                    // A closed or full stderr must not stop the terminal.
+                    let _ = writeln!(io::stderr(), "{}", scale::status_line(&metrics, &layout));
                 }
                 let b = buffer.as_mut().unwrap();
+                let size = b.size;
                 // Only rows that changed are drawn, written and damaged.
-                if let Some((y0, y1)) = renderer.draw(&grid, &mut pixels, s.size.0, s.size.1) {
-                    let row = s.size.0 * 4;
+                if let Some((y0, y1)) = renderer.draw(&grid, &mut pixels, size.0, size.1) {
+                    let row = size.0 * 4;
                     b.file.seek(SeekFrom::Start((y0 * row) as u64))?;
                     b.file.write_all(&pixels[y0 * row..y1 * row])?;
                     let w = window.as_ref().ok_or("no configured window")?;
+                    // Window geometry is in logical units; damage in buffer pixels.
                     w.xdg
-                        .set_window_geometry(0, 0, s.size.0 as i32, s.size.1 as i32);
+                        .set_window_geometry(0, 0, s.logical.0 as i32, s.logical.1 as i32);
                     s.frames.commit(s.ssd.ready(), received)?;
                     w.surface.frame(&q, 1u8);
                     w.surface.attach(Some(&b.buffer), 0, 0);
                     w.surface
-                        .damage_buffer(0, y0 as i32, s.size.0 as i32, (y1 - y0) as i32);
+                        .damage_buffer(0, y0 as i32, size.0 as i32, (y1 - y0) as i32);
                     w.surface.commit();
                 }
                 s.dirty = false;
@@ -1111,7 +1300,7 @@ fn session(
     } else {
         "deadline"
     };
-    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"clipboard_copies":copies,"clipboard_pastes":pastes,"clipboard_pasted_bytes":pasted_bytes,"alternate_screen":grid.alternate_screen(),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
+    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"clipboard_copies":copies,"clipboard_pastes":pastes,"clipboard_pasted_bytes":pasted_bytes,"alternate_screen":grid.alternate_screen(),"scale":shown.as_ref().map(|(m, l)| serde_json::json!({"scale120":m.scale120,"font_px":m.font_px(),"cell":[m.cw,m.ch],"grid":[l.cols,l.rows],"buffer":[l.buffer.0,l.buffer.1],"logical":[l.logical.0,l.logical.1],"buffer_scale":l.buffer_scale,"fractional_protocol":s.fractional_mode})),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
     // Preserve a protocol failure even if writing the final grid also fails.
     let grid_result = (|| -> Result<()> {
         let mut final_grid = log(dir, "grid-final.txt")?;

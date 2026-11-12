@@ -10,7 +10,7 @@ resolver = "2"
 [dependencies]
 libc = "=0.2.190"
 wayland-client = "=0.31.15"
-wayland-protocols = { version = "=0.32.13", features = ["client", "unstable"] }
+wayland-protocols = { version = "=0.32.13", features = ["client", "unstable", "staging"] }
 xkbcommon = { version = "=0.8.0", default-features = false }
 tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
 ttf-parser = "=0.25.1"
@@ -20,4 +20,4 @@ vt100 = "=0.18.1"
 
 [dev-dependencies]
 wayland-server = "=0.31.14"
-wayland-protocols = { version = "=0.32.13", features = ["server", "unstable"] }
+wayland-protocols = { version = "=0.32.13", features = ["server", "unstable", "staging"] }

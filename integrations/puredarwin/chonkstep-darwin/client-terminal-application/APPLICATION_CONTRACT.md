@@ -27,6 +27,14 @@ PATH executable search, challenge, expected output or automatic restart exists.
 Title: `Terminal <first 12 instance hex bytes>`; app ID: `chonk-terminal-darwin`.
 Those display strings authorize neither process ownership nor signalling.
 
+Output scale (build-006, README last section): the terminal follows the compositor's
+`wp_fractional_scale_v1` / `preferred_buffer_scale` / `wl_output.scale`, all optional. The
+only new launch input is the optional environment variable `CHONK_TERMINAL_FONT_PX` (logical
+font px, 6..96) read by the terminal itself; it is not passed to the shell. Each scale or grid
+change writes one `TERMSCALE ...` line to stderr. Arguments, fd 3 frames and record file
+names are unchanged; `result.json` gains `session.scale` and the `TERMSTATE` line gains
+trailing `scale120= cell= buffer= logical=` fields.
+
 The session's reviewed pinned-SDK C adapter supplies stdin/stdout/stderr and a
 private connected Unix stream at fd 3 through explicit `adddup2` actions under
 `POSIX_SPAWN_CLOEXEC_DEFAULT`. The terminal adopts only fd 3 as its status channel,

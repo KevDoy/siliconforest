@@ -133,3 +133,47 @@ and `vim` on a PTY through the emulator.
   `clipboard=absent`. Its state line also carries `selected_bytes= copies= pastes=
   pasted_bytes=`.
 * `src/clipboard.rs` holds the type choice, the paste filter and the two pipe pumps.
+
+## Output scale (11 November, build-006)
+
+The terminal draws at the output's real pixel density. `src/scale.rs` holds every rule, in
+integers; a scale is a whole number of 120ths.
+
+* Scale S, first that applies: `wp_fractional_scale_v1.preferred_scale` (only when
+  `wp_viewporter` is there too, so it can be presented), `wl_surface.preferred_buffer_scale`
+  (`wl_compositor` 6), the largest `wl_output.scale` of the outputs the surface entered, 1.
+  All of them are optional: a compositor with none gets exactly what build-005 drew.
+* Font: 18 logical px, or `CHONK_TERMINAL_FONT_PX` (whole number 6..96, logical px) in the
+  terminal's own environment. Glyph outlines are rasterised at font px x S; nothing is drawn
+  small and enlarged. Cell, with f = font px x S: width round(0.6 f), height round(22 f / 18),
+  baseline round(17 f / 18), padding round(8 S) on each side (11 x 22, 17 and 8 at scale 1).
+* A configure of W x H logical: columns = floor((round(W S) - 2 pad) / cell width), rows
+  likewise, bounded to 20..400 x 6..150; grid = cells + 2 pad device px. Committed: logical
+  L = ceil(grid / S) per axis (never more than the configured size), buffer B = round(L S),
+  halves up; the at most ceil(S) spare pixels right and below are background. With the
+  fractional protocol: buffer scale 1 and `wp_viewport.set_destination(L)`. Without: whole
+  scale N, buffer N x L, `set_buffer_scale(N)`. Window geometry and min/max size are logical;
+  damage is `damage_buffer`.
+* A new scale re-rasterises the glyphs, recomputes the grid for the last configured logical
+  size (or keeps the columns and rows if the compositor never gave a size) and sets the PTY
+  size (TIOCSWINSZ), without waiting for a new configure.
+* Pointer positions (logical) are multiplied by S before they are mapped to cells. Wheel
+  travel is logical: three lines a detent at every scale.
+* Each change prints one line on stderr:
+  `TERMSCALE scale120=240 font_px=36 cell=22x44 grid=80x24 buffer=1792x1088 logical=896x544 pad=16 buffer_scale=1`.
+  The `TERMSTATE` line of `term-live.txt` ends with `scale120= cell= buffer= logical=`, and
+  `result.json` has `session.scale`.
+* A configure outside the bounded grid is still refused; against a compositor that scales, an
+  eighth either way is tolerated and bounded instead (cell rounding differs between scales).
+  The 64 MiB buffer bound is multiplied by ceil(S) squared: the same window area as before.
+* `wayland-protocols` now also has its `staging` feature on (for `wp_fractional_scale_v1`);
+  `Cargo.lock` is unchanged.
+
+Host tests (`cargo test --offline --locked`, 65): the rules above for the steps 120, 150, 180,
+210, 240, 300 and 360; the fixture compositor sending fractional 240 then 180 (and 150 then
+300 with a configured size, whole scales through `preferred_buffer_scale` and `wl_output`,
+and no scale protocol at all), checking buffer size, viewport destination, buffer scale,
+window geometry, PTY size, a drag selection and the wheel; and
+`text_is_rasterised_at_device_pixels_at_every_scale_not_enlarged`, which with
+`CHONK_SCALE_PROOF_DIR=<dir>` also writes the rendered lines (PPM) and its numbers there.
+Not run on the M1 yet.
