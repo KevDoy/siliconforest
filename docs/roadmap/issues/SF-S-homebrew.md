@@ -96,7 +96,7 @@ Building `appkit-msm-arm64` and the `app-frameworks` set for arm64 pulls in Mesa
 `integrations/puredarwin/homebrew/build-overlay.nix` builds one tree rooted at `/`; `hb_qemu.py --overlay` writes it onto a private copy of the qemu-dev system image. Contents and origin:
 | Path | Origin |
 |---|---|
-| `usr/lib/libSystem.B.dylib` | `build-libsystem.nix`: the lab's recipe + `patches/libsystem-homebrew.patch` |
+| `usr/lib/libSystem.B.dylib` | `../libsystem-default/build-libsystem.nix` (the proposed default; `build-libsystem.nix` here imports it) |
 | `usr/lib/libz.1`, `libcurl.4` | the tree's own dylib packages, unchanged |
 | `usr/lib/libncurses.5.4`, `libpanel.5.4`, `libxml2.2`, `libexpat.1`, `libffi`, `libsqlite3` | `build-syslibs.nix`: the tree's arm64 static builds linked into dylibs under macOS's install names |
 | `usr/lib/libbz2.1.0`, `libedit.3` | upstream bzip2 1.0.8 and libedit, cross-built (`build-syslibs.nix`, `build-libedit.nix`) |
@@ -109,7 +109,7 @@ Building `appkit-msm-arm64` and the `app-frameworks` set for arm64 pulls in Mesa
 | `usr/bin/curl` | the tree's curl |
 | `usr/lib/libhbcrash.dylib`, `usr/bin/hb-runas` | diagnostics of this stream, not for the default image |
 
-### `patches/libsystem-homebrew.patch`
+### `../libsystem-default/patches/macos-abi.patch`
 | Change | Detail |
 |---|---|
 | Stack probe | above |
@@ -237,6 +237,37 @@ Version to claim: keep `ProductVersion 26.x`. brew then reports `macOS: 26.5-arm
 - A linker: Homebrew has `lld` as a formula; the tree builds its own `ld` for the host only.
 - brew's source builds also assume `/usr/bin/{make,patch,install_name_tool,codesign,xcrun}` and sandbox-exec.
 - Realistic order: bottles first (this ticket), then a "Command Line Tools" equivalent as its own project.
+
+## Default libSystem (issue 46 follow-up, 2026-11-11)
+Recipe: `integrations/puredarwin/libsystem-default/build-libsystem.nix` = baseline `e7aa00a6` + the two patches of the previous default (`vm-page-size-symbol`, `posix-spawnattr-init-zero`) + `patches/macos-abi.patch` (the whole patch described above). Output: `/nix/store/wk4zidyvpi1xadhq6jabxxnidbp5a5fm-puredarwin-libsystem-default-0.1`. The Homebrew recipes import it. **No default was changed by this stream.**
+
+The default to change is one line: in `artifacts/m1-desktop-010/apcie-port-candidate-003/mapping.json`, the entry with destination `/usr/lib/libSystem.B.dylib`, set `source` to `<that store path>/usr/lib/libSystem.B.dylib` and keep its `replaces_sha256`. `tools/pcie_assemble.py` (M1 RAM root) and `qemu-dev/qd_image.py` (QEMU images) both read that file. The many `build-*.nix` that link against `m1-userspace-diagnostics/build-libsystem-spawnattr.nix` can stay: the new library exports a superset.
+
+Why the whole patch and not only the stack probe: no binary of the lab or of the base image imports any `fe*` function (checked with `llvm-nm -u` over the compositor, terminal, sysaudio, pd-netd tools, Mesa, every file of `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec` and `/usr/lib` of the base image), so the fenv layout change cannot reach existing code; everything else is additional exports.
+
+### Why the linker dropped the stub's `ret`
+Reproduced outside the build with the tree's linker (Apple ld64, `puredarwin-native-ld`) and three small objects. `pd_chkstk_darwin.s` has two global labels on one instruction and no `.subsections_via_symbols`: ld64 makes `___chkstk_darwin` a zero-size atom and gives the `ret` to `____chkstk_darwin`. libpthread's archive member also defines `____chkstk_darwin`; ld64 only warns for an object-versus-archive duplicate (`ld: warning: duplicate symbol '____chkstk_darwin'`, present in the build log), keeps the archive's definition and discards the stub's atom with the `ret`. The zero-size `___chkstk_darwin` atom remains and is laid out at whatever comes next. In the reproduction the dangling label moves with the link order, and with the order reversed it is libpthread's own `_thread_chkstk_darwin` that dangles.
+
+So the class is: a label that shares its address with a symbol that loses a duplicate-definition contest. Audit of the built library (`llvm-nm -n`):
+- Exported text symbols sharing an address: old default 3 (`___chkstk_darwin`/`_sandbox_check`: the defect; `_madvise`/`_posix_madvise` and `_statfs`/`_statfs64`: intended aliases). New default: the two intended pairs only.
+- Exported symbols sharing an address with a local symbol: 64, identical in both builds: the libunwind `unw_*`/`__unw_*` pairs, system-call wrappers and their `___name` stubs (`_accept`/`___accept`, `_close$NOCANCEL`/`___close_nocancel`, …), the `stat`/`stat64` family, `____chkstk_darwin`/`_thread_chkstk_darwin`. All are the same routine under two names.
+- Not audited: local (non-exported) labels, data symbols.
+
+The link still prints 74 `duplicate symbol` warnings (71 before the patch; the patch removes `____chkstk_darwin` and adds four `CC_MD5*`, defined in both `pd_cc_digest_bridge.c` and `CommonDigest.c`). They are C functions defined twice, mostly a hand-written copy in `stub/pd_libSystem_compat.c`, `dyld/pd_stubs.c` or `libsystem_kernel/_libc_funcptr.c` next to the real one in libc, libplatform, libpthread or libsystem_kernel: `memcpy`/`memmove`/`memset`/`bzero`/`strlen`/`strcmp`/`strchr`/`strstr`/`memchr`/`memcmp`, `OSAtomic*` (8), `OSSpinLock*`, `os_unfair_lock_lock/unlock`, `mk_timer_*`, `arc4random*`, `sigaddset`/`sigemptyset`/`sigfillset`, `sigwait`, `pthread_atfork`, `qos_class_self`, `strtol_l` family, `strtod_l`, `fprintf_l`, `snprintf_l`, `strxfrm`, `statvfs`, `backtrace_symbols*`, `mach_vm_region`, `task_threads`, `thread_suspend/resume`, `mach_task_self`, `environ`, `__cxa_atexit`, `__cleanup`, `_NSGetMachExecuteHeader`, `__stdoutp`/`__stderrp` (dyld's `glue.c` and libc's `findfp.c`). None dangles (C objects have no zero-size labels), but for each the linker chooses which body the system runs, silently. Which one wins was not determined per symbol. This deserves its own cleanup: make the duplicates errors.
+
+### Exposure of the lab's own binaries
+`libsystem-default/chkstk_audit.py` lists the call sites of `___chkstk_darwin` in a Mach-O and what each function does with x0 afterwards (validated on the bottles: libjq 4 of 4 exposed, gsed 3 of 3). Result for the lab: **no call sites at all.** None of these imports `___chkstk_darwin`: the compositor (build-009), the terminal (build-008), coreaudiod, pdtone, pdvolume, pcmplay and the three audio frameworks, pd-dhcp, pd-net-up, pd-netd, the four Mesa libraries, and all 147 Mach-O files examined including the base image's `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec` (wifiutil, mdnsd, zsh, launchd …) and `/usr/lib`. The tree's cross toolchain does not emit stack probes and Rust uses its own. The lab's binaries were therefore never affected; the defect only hits code built by Apple's toolchain defaults (bottles, any third-party macOS binary).
+
+The tree's own Python 3.13 also has no call to the probe, so its lost `print` output (QEMU stream) is **not** this defect. Not investigated further; the duplicate `__stdoutp` above is one thing to rule out.
+
+### Proof
+| Where | What | Result |
+|---|---|---|
+| QEMU | Homebrew smoke suite with the overlay rebuilt on the new default (`r11`, `r12`) | 39 of 45 and 3 of 6: the same tests pass and fail as before (`r8`, `r10`) |
+| QEMU | throw-away desktop, full autopilot, new libSystem (`runs/qemu-dev/libsystem-default`, `libsystem-default2`) | **not a PASS**: `clipboard`, `scale`, `menuterm`, `limit` fail |
+| QEMU | the same with the old default, run side by side (`libsystem-control`) | the same four phases fail. The failures are the QEMU loop's own at this host load, not the library's; a PASS of the full autopilot in QEMU was not obtained with either library |
+| M1 | boot `ls02` (`libsystem-default/tools/ls_desktop_boot.sh`): default fast-boot collection `z66w83kk…`, `pd_quiet_wait=0 pd_rtc_wait=0`, `launcher-fast-quiet.patch`, slim stager, compositor build-009, terminal build-008, new libSystem staged for this boot only | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`, `linux_verified: True`. Every autopilot phase line has the verdict it has in `ds09` (both sessions `done result=ok`, no `FAILED`), `DSDESK_WIFI_JOIN_RC=0`, `DSDESK_NET_UP_RC=0`, `DSDESK_PING_RC=0 … joined=1`, the `PDSpeakers` and `PDTouchBar` lines as before. The RAM root image of the packet contains the new library byte for byte |
+`ls01` never reached the bench: staging refused to overwrite the base RAM root's libSystem because `PCIE_EXTRA_FILES` drops the `replaces_sha256` field. `tools/ls_stager.py` (a `PCIE_STAGER` wrapper) restores it in the boot's own mapping. With the default changed in `mapping.json` this wrapper is not needed.
 
 ## What should be folded into the default images
 1. The `___chkstk_darwin` hunk (all images, now).
