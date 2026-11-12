@@ -31,7 +31,7 @@ W=$(mktemp -d)
 # the pictures' checksums from the same renderer, built for this machine
 "$HERE/host-test/run-host-tests.sh" "$W" > "$W/host.log" || { cat "$W/host.log" >&2; echo "host tests failed" >&2; exit 2; }
 crc() { sed -n "s/^TBHOST picture $1 crc32=//p" "$W/host.log"; }
-sed -e "s/@CRC_FN@/$(crc layer-fn)/g" -e "s/@CRC_MEDIA@/$(crc layer-media)/g" -e "s/@CRC_F10_HELD@/$(crc layer-fn-f10-held)/g" \
+sed -e "s/@CRC_FN@/$(crc layer-fn)/g" -e "s/@CRC_MEDIA@/$(crc layer-media)/g" -e "s/@CRC_MUTE_HELD@/$(crc layer-media-mute-held)/g" \
     "${TB_GUEST:-$HERE/guest/darwin-touchbar-test.in}" > "$W/guest"
 FILES="$TEST/usr/bin/pdtbtest=/usr/bin/pdtbtest${TB_FILES:+;$TB_FILES}"
 FW=$ROOT/private/firmware/apple/dfrmtfw-j293.bin

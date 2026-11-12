@@ -20,12 +20,19 @@
  * machine's own file, as the Wi-Fi firmware); its calibration is the Apple device
  * tree's /arm-io/spi0/multi-touch "multi-touch-calibration".
  *
+ * The layer is chosen by the built-in keyboard's Fn key, as on a Mac: the default layer
+ * (media) while Fn is up, the other one while it is held. PDM1SPIHID (the build of
+ * ../build-spihid.nix) tells this driver about Fn and about typing with an IOService
+ * message (pd_touchbar_kbd.h); typing keeps the strip lit like a touch does.
+ *
  * One thread owns the hardware. gLock serialises it with the sysctl handlers.
  *
  * Boot arguments: pdtouchbar=0 off, 1 survey only (nothing written), 2 display only,
  * 3 everything (default); pdtouchbar_bright=<1..255> (default 128, tiny-dfr's);
  * pdtouchbar_dim=<seconds>, pdtouchbar_off=<seconds> (30, 60 as tiny-dfr; 0 never);
- * pdtouchbar_layer=<0|1>; pdtouchbar_direct=1 pushes keys into the PDHID queue directly;
+ * pdtouchbar_default=media|fn (the layer shown while the keyboard's Fn key is up; media);
+ * pdtouchbar_hold=<seconds a key stays held without a finger report, 0 for ever; 3>;
+ * pdtouchbar_direct=1 pushes keys into the PDHID queue directly;
  * pdtouchbar_dcs=0 does not read the panel's registers at start; pdtouchbar_probe=1 runs the
  * fetch probe at start (the strip shows garbage for its 300 ms; kern.pd_touchbar.fetch_probe
  * runs it on request).
@@ -56,6 +63,7 @@
 #include "pd_spi.h"
 #include "pd_tb_keys.h"
 #include "pd_z2.h"
+#include "pd_touchbar_kbd.h"
 
 extern "C" {
 vnode_t vfs_rootvnode(void);
@@ -152,6 +160,12 @@ static uint32_t     *gShadow;           /* the picture before it is copied to th
 static int           gState = kOff;
 static char          gReason[160] = "";
 static uint32_t      gLevel = 3;
+static uint32_t      gDefaultLayer = TB_LAYER_MEDIA;    /* the layer while Fn is up */
+static uint32_t      gHoldMs = 3000;    /* a held key is let go after this long without a finger report */
+static uint64_t      gLastFingerMs;
+/* told by the keyboard's driver, in any context; taken up by the thread */
+static volatile UInt32 gKbdFn, gKbdFnKnown, gKbdActivity, gKbdNotes;
+static uint32_t      gFnApplied, gFailsafes, gLayerChanges, gKbdWakes;
 static uint32_t      gBright = 128;     /* brightness while in use */
 static uint32_t      gDimMs = 30000, gOffMs = 60000;
 static uint32_t      gDirect;
@@ -265,6 +279,7 @@ tb_finger(__unused void *ctx, unsigned finger, unsigned state, unsigned x, unsig
 	gLast.y = y;
 	gLast.key = touching ? tb_key_at(gKeys.layer, (int)(((uint64_t)(x > TB_TOUCH_X ? TB_TOUCH_X : x) * TB_W) / (TB_TOUCH_X + 1))) : -1;
 	gLast.count++;
+	gLastFingerMs = now_ms();
 	if (touching) {
 		bool dark = gAdp.up && gAdp.brightness == 0;
 		gLastTouchMs = now_ms();
@@ -283,6 +298,41 @@ tb_finger(__unused void *ctx, unsigned finger, unsigned state, unsigned x, unsig
 	}
 	n = tb_touch(&gKeys, finger, touching, x, TB_TOUCH_Y > y ? TB_TOUCH_Y - 1 - y : 0, ev, 2 * TB_MAX_KEYS, &changed);
 	light();
+	if (changed)
+		redraw();
+	deliver(ev, n);
+}
+
+/* What the keyboard's driver told and the held-key failsafe, once per turn of the thread. gLock held. */
+static void
+housekeeping(void)
+{
+	struct tb_event ev[TB_MAX_KEYS];
+	int changed = 0, n = 0;
+
+	if (OSCompareAndSwap(1, 0, &gKbdActivity)) {
+		/* typing counts as use of the strip: it stays lit, and lights if it was dark */
+		if (gAdp.up && gAdp.brightness == 0)
+			gKbdWakes++;
+		gLastTouchMs = now_ms();
+	}
+	gFnApplied = gKbdFn;
+	unsigned want = gFnApplied ? (gDefaultLayer == TB_LAYER_MEDIA ? TB_LAYER_FN : TB_LAYER_MEDIA) : gDefaultLayer;
+	if (want != gKeys.layer) {
+		/* a key held on the strip is released before the layer changes under the finger */
+		n = tb_set_layer(&gKeys, want, ev, TB_MAX_KEYS, &changed);
+		gLayerChanges++;
+	} else if (gHoldMs != 0 && now_ms() - gLastFingerMs > gHoldMs) {
+		/* a finger whose lift was never reported must not hold its key for ever */
+		bool held = false;
+		for (int k = 0; k < 6; k++)
+			held = held || gHeldUsages[k] != 0;
+		if (held) {
+			n = tb_drop_all(&gKeys, ev, TB_MAX_KEYS, &changed);
+			gFailsafes++;
+			LOG("a key was held for %u ms without a finger report: released", gHoldMs);
+		}
+	}
 	if (changed)
 		redraw();
 	deliver(ev, n);
@@ -683,7 +733,7 @@ pd_touchbar_thread(__unused void *arg, __unused wait_result_t wr)
 		set_state(kDisplayOnly, "%s", gLevel < 3 ? "pdtouchbar=2" : "no gpio block");
 
 	for (;;) {
-		bool irq = touch ? wait_irq(20) : (IOSleep(100), false);
+		bool irq = touch ? wait_irq(20) : (IOSleep(20), false);
 
 		IOLockLock(gLock);
 		if (touch && gZ2.booted && (irq || gGpio.get(PIN_IRQ) == 0)) {
@@ -694,6 +744,7 @@ pd_touchbar_thread(__unused void *arg, __unused wait_result_t wr)
 					break;
 			}
 		}
+		housekeeping();
 		light();
 		gAdp.tick();
 		IOLockUnlock(gLock);
@@ -703,7 +754,8 @@ pd_touchbar_thread(__unused void *arg, __unused wait_result_t wr)
 /* ---- sysctl --------------------------------------------------------------------------- */
 
 enum {
-	kCtlLevel, kCtlLayer, kCtlBrightness, kCtlActual, kCtlDimMs, kCtlOffMs, kCtlIrqs, kCtlIrqPolled, kCtlPolls,
+	kCtlLevel, kCtlLayer, kCtlDefaultLayer, kCtlFn, kCtlFnKnown, kCtlHoldMs, kCtlFailsafes, kCtlKbdNotes, kCtlKbdWakes,
+	kCtlKbdReport, kCtlLayerChanges, kCtlBrightness, kCtlActual, kCtlDimMs, kCtlOffMs, kCtlIrqs, kCtlIrqPolled, kCtlPolls,
 	kCtlReplies, kCtlReports, kCtlBadReports, kCtlFingers, kCtlSpiErrors, kCtlSpiTimeouts, kCtlKeyEvents,
 	kCtlHidReports, kCtlHidErrors, kCtlDirect, kCtlInjected, kCtlFlushes, kCtlRedraws, kCtlDartFaults, kCtlDsiErrors,
 	kCtlVblankHz, kCtlWakes, kCtlZ2Poll, kCtlFetchProbe, kCtlIdleMs, kCtlFlushProbe,
@@ -719,6 +771,14 @@ pd_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sys
 	switch (arg2) {
 	case kCtlLevel: value = (int)gLevel; break;
 	case kCtlLayer: value = gKeys.layer; break;
+	case kCtlDefaultLayer: value = (int)gDefaultLayer; break;
+	case kCtlFn: value = (int)gKbdFn; break;
+	case kCtlFnKnown: value = (int)gKbdFnKnown; break;
+	case kCtlHoldMs: value = (int)gHoldMs; break;
+	case kCtlFailsafes: value = (int)gFailsafes; break;
+	case kCtlKbdNotes: value = (int)gKbdNotes; break;
+	case kCtlKbdWakes: value = (int)gKbdWakes; break;
+	case kCtlLayerChanges: value = (int)gLayerChanges; break;
 	case kCtlBrightness: value = (int)gBright; break;
 	case kCtlActual: value = gAdp.brightness; break;
 	case kCtlDimMs: value = (int)gDimMs; break;
@@ -750,22 +810,42 @@ pd_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sys
 	error = sysctl_handle_int(oidp, &value, 0, req);
 	if (error != 0 || req->newptr == USER_ADDR_NULL)
 		return error;
+	if (arg2 == kCtlKbdReport) {
+		/*
+		 * For tests: the keyboard's driver makes up a keyboard report with the Fn bit as given
+		 * and looks at it as at one the keyboard sent. Then the thread gets a turn.
+		 */
+		OSDictionary *match = IOService::serviceMatching(kPDKeyboardServiceClass);
+		IOService *kbd = match ? IOService::copyMatchingService(match) : NULL;
+		IOReturn kr = kbd ? kbd->message(kPDTouchBarTestKeyboardReport, gService, (void *)(uintptr_t)(value & 1)) : kIOReturnNotFound;
+		OSSafeReleaseNULL(match);
+		OSSafeReleaseNULL(kbd);
+		if (kr == kIOReturnSuccess) {
+			IOLockLock(gLock);
+			housekeeping();
+			light();
+			IOLockUnlock(gLock);
+		}
+		return kr == kIOReturnSuccess ? 0 : kr == kIOReturnNotFound ? ENOENT : kr == kIOReturnUnsupported ? ENOTSUP : EIO;
+	}
 
 	IOLockLock(gLock);
 	switch (arg2) {
-	case kCtlLayer: {
-		struct tb_event ev[TB_MAX_KEYS];
-		int changed = 0;
+	case kCtlDefaultLayer:
 		if (value < 0 || value >= TB_LAYERS) {
 			error = EINVAL;
 			break;
 		}
-		int n = tb_set_layer(&gKeys, (unsigned)value, ev, TB_MAX_KEYS, &changed);
-		if (changed)
-			redraw();
-		deliver(ev, n);
+		gDefaultLayer = (uint32_t)value;
+		housekeeping();
 		break;
-	}
+	case kCtlHoldMs:
+		if (value < 0) {
+			error = EINVAL;
+			break;
+		}
+		gHoldMs = (uint32_t)value;
+		break;
 	case kCtlBrightness:
 		if (value < 1 || value > 255) {
 			error = EINVAL;
@@ -937,7 +1017,16 @@ PD_STR(panel, kCtlPanel, "the panel's answers to DCS reads at start");
 PD_STR(trace, kCtlTrace, "result of the last flush_probe");
 PD_STR(last_touch, kCtlLast, "the last finger record, real or injected");
 PD_INT(level, kCtlLevel, CTLFLAG_RD, "pdtouchbar boot argument");
-PD_INT(layer, kCtlLayer, CTLFLAG_RW, "0 function keys, 1 media keys");
+PD_INT(layer, kCtlLayer, CTLFLAG_RD, "the layer shown: 0 function keys, 1 media keys");
+PD_INT(default_layer, kCtlDefaultLayer, CTLFLAG_RW, "the layer while the keyboard's Fn key is up (0 function keys, 1 media keys)");
+PD_INT(fn, kCtlFn, CTLFLAG_RD, "the keyboard's Fn key as its driver last told");
+PD_INT(fn_known, kCtlFnKnown, CTLFLAG_RD, "1 once the keyboard's driver has said where Fn is in its reports");
+PD_INT(hold_ms, kCtlHoldMs, CTLFLAG_RW, "a held key is released after this long without a finger report (0 never)");
+PD_INT(failsafes, kCtlFailsafes, CTLFLAG_RD, "times a held key was released for want of finger reports");
+PD_INT(kbd_notes, kCtlKbdNotes, CTLFLAG_RD, "messages from the keyboard's driver");
+PD_INT(kbd_wakes, kCtlKbdWakes, CTLFLAG_RD, "times typing lit the dark strip");
+PD_INT(layer_changes, kCtlLayerChanges, CTLFLAG_RD, "layer changes");
+PD_INT(kbd_report, kCtlKbdReport, CTLFLAG_RW, "write 0|1: the keyboard's driver takes a made-up report with Fn up|down");
 PD_INT(brightness, kCtlBrightness, CTLFLAG_RW, "panel brightness while in use, 1..255");
 PD_INT(actual_brightness, kCtlActual, CTLFLAG_RD, "brightness last sent to the panel");
 PD_INT(dim_ms, kCtlDimMs, CTLFLAG_RW, "time without a touch until the strip dims (0 never)");
@@ -974,6 +1063,9 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_touchbar_state, &sysctl__kern_pd_touchbar_display, &sysctl__kern_pd_touchbar_touch,
 	&sysctl__kern_pd_touchbar_keys, &sysctl__kern_pd_touchbar_fb_crc, &sysctl__kern_pd_touchbar_fetch,
 	&sysctl__kern_pd_touchbar_panel, &sysctl__kern_pd_touchbar_level, &sysctl__kern_pd_touchbar_layer,
+	&sysctl__kern_pd_touchbar_default_layer, &sysctl__kern_pd_touchbar_fn, &sysctl__kern_pd_touchbar_fn_known,
+	&sysctl__kern_pd_touchbar_hold_ms, &sysctl__kern_pd_touchbar_failsafes, &sysctl__kern_pd_touchbar_kbd_notes,
+	&sysctl__kern_pd_touchbar_kbd_wakes, &sysctl__kern_pd_touchbar_layer_changes, &sysctl__kern_pd_touchbar_kbd_report,
 	&sysctl__kern_pd_touchbar_brightness, &sysctl__kern_pd_touchbar_actual_brightness,
 	&sysctl__kern_pd_touchbar_dim_ms, &sysctl__kern_pd_touchbar_off_ms, &sysctl__kern_pd_touchbar_idle_ms,
 	&sysctl__kern_pd_touchbar_irqs, &sysctl__kern_pd_touchbar_irq_polled, &sysctl__kern_pd_touchbar_polls,
@@ -996,6 +1088,7 @@ class PDAppleTouchBar : public IOService {
 public:
 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
 	void systemWillShutdown(IOOptionBits specifier) APPLE_KEXT_OVERRIDE;
+	IOReturn message(UInt32 type, IOService *provider, void *argument = NULL) APPLE_KEXT_OVERRIDE;
 };
 
 OSDefineMetaClassAndStructors(PDAppleTouchBar, IOService);
@@ -1044,8 +1137,12 @@ PDAppleTouchBar::start(IOService *provider)
 		return false;
 	gService = this;
 	tb_init(&gKeys);
-	if (PE_parse_boot_argn("pdtouchbar_layer", &value, sizeof(value)) && value < TB_LAYERS)
-		gKeys.layer = (uint8_t)value;
+	char which[16] = "";
+	if (PE_parse_boot_argn("pdtouchbar_default", which, sizeof(which)) && strcmp(which, "fn") == 0)
+		gDefaultLayer = TB_LAYER_FN;
+	if (PE_parse_boot_argn("pdtouchbar_hold", &value, sizeof(value)) && value <= 3600)
+		gHoldMs = value * 1000;
+	gKeys.layer = (uint8_t)gDefaultLayer;
 	gState = kStarting;
 	for (unsigned i = 0; i < sizeof(gOids) / sizeof(gOids[0]); i++)
 		sysctl_register_oid(gOids[i]);
@@ -1054,6 +1151,30 @@ PDAppleTouchBar::start(IOService *provider)
 	thread_deallocate(thread);
 	registerService();
 	return true;
+}
+
+/*
+ * From the keyboard's driver, on its own work loop: nothing is done here but to note the
+ * state and wake the thread, so the keyboard never waits for the Touch Bar.
+ */
+IOReturn
+PDAppleTouchBar::message(UInt32 type, IOService *provider, void *argument)
+{
+	if (type != kPDTouchBarKeyboardMessage)
+		return IOService::message(type, provider, argument);
+	uintptr_t word = (uintptr_t)argument;
+	gKbdFn = (word & kPDTouchBarKeyboardFn) ? 1 : 0;
+	if (word & kPDTouchBarKeyboardFnKnown)
+		gKbdFnKnown = 1;
+	if (word & kPDTouchBarKeyboardActivity)
+		gKbdActivity = 1;
+	OSIncrementAtomic(&gKbdNotes);
+	if (gWait != NULL) {
+		IOLockLock(gWait);
+		IOLockWakeup(gWait, (void *)&gIrqPending, true);
+		IOLockUnlock(gWait);
+	}
+	return kIOReturnSuccess;
 }
 
 /* A strip left lit by a system that is gone would burn in: dark, and the digitizer in reset. */

@@ -10,7 +10,11 @@
  *     tap:<usage hex>    finger down on that key's middle, a small move, finger up
  *     hold:<usage hex>   finger down and left there (finger number = step number)
  *     lift               every finger of earlier hold steps up
- *     switch             tap the layer key
+ *     release            every finger of earlier hold steps up, expecting no key event
+ *     up:<usage hex>     expect that key's release without doing anything (a layer change or
+ *                        the held-key failsafe let it go)
+ *     fn:<0|1>           the keyboard's Fn key up or down: kern.pd_touchbar.kbd_report makes the
+ *                        keyboard's driver take a made-up keyboard report with that Fn bit
  *     slide:<a>:<b>      down on key a, move to key b, up
  *     dark:<usage hex>   tap a key expecting no key event (the strip is dark)
  *     wait:<ms>
@@ -107,7 +111,7 @@ main(int argc, char **argv)
 		unsigned a = 0, b = 0, finger = (unsigned)(i - first + 1);
 		int x, x2;
 
-		if (sscanf(argv[i], "tap:%x", &a) == 1 || sscanf(argv[i], "dark:%x", &a) == 1 || strcmp(argv[i], "switch") == 0) {
+		if (sscanf(argv[i], "tap:%x", &a) == 1 || sscanf(argv[i], "dark:%x", &a) == 1) {
 			x = key_x(a);
 			failed = x < 0 || inject(finger, 3, x) != 0;
 			drain(60);
@@ -125,6 +129,21 @@ main(int argc, char **argv)
 			drain(100);
 			expect(a, 1);
 			/* remembered for lift: the usage in the high bits of want is enough to release in order */
+		} else if (strcmp(argv[i], "release") == 0) {
+			for (int j = first; j < i; j++) {
+				if (sscanf(argv[j], "hold:%x", &a) == 1)
+					failed = failed || inject((unsigned)(j - first + 1), 7, 0) != 0;
+			}
+			drain(150);
+		} else if (sscanf(argv[i], "up:%x", &a) == 1) {
+			expect(a, 0);
+		} else if (sscanf(argv[i], "fn:%u", &a) == 1) {
+			int value = a ? 1 : 0;
+			if (sysctlbyname("kern.pd_touchbar.kbd_report", NULL, NULL, &value, sizeof(value)) != 0) {
+				printf("TBTEST kern.pd_touchbar.kbd_report=%d: errno %d\n", value, errno);
+				failed = 1;
+			}
+			drain(150);
 		} else if (strcmp(argv[i], "lift") == 0) {
 			for (int j = first; j < i; j++) {
 				if (sscanf(argv[j], "hold:%x", &a) == 1) {

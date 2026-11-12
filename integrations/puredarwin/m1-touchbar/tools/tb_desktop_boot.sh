@@ -8,7 +8,7 @@
 # Usage: tb_desktop_boot.sh <name, prefix tb>
 #   TB_KC           collection store path (default: build ../build-kc.nix)
 #   TB_DESKTOP_BIN  compositor binary (default: the build with the touchbar autopilot phase,
-#                   runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-001)
+#                   runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-002)
 #   TB_VERBOSE=1    text boot instead of the quiet boot (no launcher patch, no boot picture)
 #   TB_BOOTARGS     further kernel boot arguments
 #   SD_VOLUME, SD_TONEDB, SD_SPKDB   as in sd_desktop_boot.sh (30, 20, 22 and not louder)
@@ -27,7 +27,7 @@ A=$(cd "$SOUND/sysaudio" && $NB build-sysaudio.nix -A all 2>/dev/null | tail -1)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
 PLAY=$(cd "$SOUND" && $NB build-pdplay.nix 2>/dev/null | tail -1)
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-D=${TB_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+D=${TB_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-002/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
 TERM_BIN=$ROOT/runs/m1-desktop-010/terminal-application-build-005/target/aarch64-apple-darwin/release/chonk-terminal-darwin
@@ -49,7 +49,7 @@ TEST=$(cd "$HERE" && $NB build-pdtbtest.nix 2>/dev/null | tail -1)
 X="$X;$FW=/Library/Firmware/apple/dfrmtfw-j293.bin;$TEST/usr/bin/pdtbtest=/usr/bin/pdtbtest"
 W=$(mktemp -d)
 "$HERE/host-test/run-host-tests.sh" "$W" > "$W/host.log" || { cat "$W/host.log" >&2; echo "host tests failed" >&2; exit 2; }
-CRC=$(sed -n "s/^TBHOST picture layer-fn crc32=//p" "$W/host.log")
+CRC=$(sed -n "s/^TBHOST picture layer-media crc32=//p" "$W/host.log")
 QUIET=()
 QD=
 if [ "${TB_VERBOSE:-0}" != 1 ] && [ -f "$BG" ]; then
@@ -59,7 +59,7 @@ if [ "${TB_VERBOSE:-0}" != 1 ] && [ -f "$BG" ]; then
   QUIET=(PCIE_LAB_PATCH="$ROOT/$Q/quiet-boot.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
 fi
 S=$(mktemp)
-sed -e "s/@VOLUME@/${SD_VOLUME:-30}/g" -e "s/@TONEDB@/${SD_TONEDB:-20}/g" -e "s/@SPKDB@/$SPKDB/g" -e "s/@CRC_FN@/$CRC/g" "$HERE/guest/darwin-touchbar-desktop.in" > "$S"
+sed -e "s/@VOLUME@/${SD_VOLUME:-30}/g" -e "s/@TONEDB@/${SD_TONEDB:-20}/g" -e "s/@SPKDB@/$SPKDB/g" -e "s/@CRC_MEDIA@/$CRC/g" "$HERE/guest/darwin-touchbar-desktop.in" > "$S"
 env "${QUIET[@]}" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=8 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 ${TB_BOOTARGS:-}" PCIE_EXTRA_FILES="$X" \
   PCIE_GUEST_TEMPLATE="$S" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" 420 2>&1 |
   grep -a '"status"\|rror\|delivered\|No space' | cut -c1-240 || true

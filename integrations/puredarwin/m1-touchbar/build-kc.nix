@@ -2,8 +2,9 @@
 # The proposed desktop collection with sound (../m1-sound/build-kc-desktop.nix: quiet-boot
 # kernel, eight cores, Wi-Fi, GPU, display, sound) plus PDAppleTouchBar.kext
 # (./build-kext.nix) with its debug map stripped, as that recipe does for PDAppleSound.
-# pdtouchbar=0 in the boot-args leaves the Touch Bar's hardware untouched. No default
-# collection is changed by this file.
+# The built-in keyboard's driver in it is replaced by the build of ./build-spihid.nix, which
+# tells the Touch Bar about the Fn key and typing. pdtouchbar=0 in the boot-args leaves the
+# Touch Bar's hardware untouched. No default collection is changed by this file.
 #   nix-build ... build-kc.nix --argstr kernelConfig development --no-out-link
 { kernelConfig ? "development" }:
 let
@@ -11,18 +12,29 @@ let
   pkgs = pins.pkgs;
   base = import ../m1-sound/build-kc-desktop.nix { inherit kernelConfig; };
   strip = "${pins.crossToolchain}/bin/arm64-apple-darwin20.4-strip";
-  full = import ./build-kext.nix;
-  kext = pkgs.runCommand "${full.name}-no-debug-map" { } ''
+  slim = name: full: pkgs.runCommand "${full.name}-no-debug-map" { } ''
     mkdir -p $out
-    cp -R ${full}/System/Library/Extensions/PDAppleTouchBar.kext $out/bundle.kext
+    cp -R ${full}/System/Library/Extensions/${name}.kext $out/bundle.kext
     chmod -R u+w $out
-    ${strip} -S $out/bundle.kext/Contents/MacOS/PDAppleTouchBar
+    ${strip} -S $out/bundle.kext/Contents/MacOS/${name}
   '';
+  kext = slim "PDAppleTouchBar" (import ./build-kext.nix);
+  spihid = slim "PDM1SPIHID" (import ./build-spihid.nix);
   needle = "-o kernel";
+  # The base recipe names the keyboard's bundle by the store path of a debug-map-stripped
+  # copy (../m1-cpufreq/build-kc.nix). It is found among the bundles on the link line by
+  # what it contains, which needs the base collection's inputs built (build
+  # ../m1-sound/build-kc-desktop.nix first).
+  named = builtins.concatLists (builtins.filter builtins.isList
+    (builtins.split ''-kext "(/nix/store/[^"]+[.]kext)"'' base.buildPhase));
+  olds = builtins.filter (p: builtins.pathExists (p + "/Contents/MacOS/PDM1SPIHID"))
+    (map builtins.unsafeDiscardStringContext named);
 in base.overrideAttrs (old:
   assert builtins.stringLength old.buildPhase
     != builtins.stringLength (builtins.replaceStrings [ needle ] [ "" ] old.buildPhase);
+  assert builtins.length olds == 1;
   {
-    buildPhase = builtins.replaceStrings [ needle ] [ ''-kext "${kext}/bundle.kext" \
+    buildPhase = builtins.replaceStrings [ ''-kext "${builtins.head olds}"'' needle ]
+      [ ''-kext "${spihid}/bundle.kext"'' ''-kext "${kext}/bundle.kext" \
       -o kernel'' ] old.buildPhase;
   })

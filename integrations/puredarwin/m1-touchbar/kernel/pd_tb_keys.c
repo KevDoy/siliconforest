@@ -16,15 +16,15 @@
 #define COLOR_INK   0x00ffffffu
 
 enum {
-	G_ESC, G_F1, G_F2, G_F3, G_F4, G_F5, G_F6, G_F7, G_F8, G_F9, G_F10, G_F11, G_F12, G_FN,
+	G_F1, G_F2, G_F3, G_F4, G_F5, G_F6, G_F7, G_F8, G_F9, G_F10, G_F11, G_F12,
 	G_DIM, G_BRIGHT, G_MUTE, G_QUIETER, G_LOUDER, G_COUNT
 };
 
-static const char *const kLabels[G_FN + 1] = {
-	"ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "FN",
+static const char *const kLabels[G_F12 + 1] = {
+	"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
 };
 
-/* 5x7 capitals and digits, one byte per row, bit 4 the left column */
+/* 5x7 digits and F, one byte per row, bit 4 the left column */
 static const struct { char c; uint8_t rows[7]; } kFont[] = {
 	{ '0', { 0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e } },
 	{ '1', { 0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e } },
@@ -36,11 +36,7 @@ static const struct { char c; uint8_t rows[7]; } kFont[] = {
 	{ '7', { 0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08 } },
 	{ '8', { 0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e } },
 	{ '9', { 0x0e, 0x11, 0x11, 0x0f, 0x01, 0x02, 0x0c } },
-	{ 'C', { 0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e } },
-	{ 'E', { 0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f } },
 	{ 'F', { 0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10 } },
-	{ 'N', { 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 } },
-	{ 'S', { 0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e } },
 };
 #define FONT_SCALE 4
 #define FONT_GAP   4
@@ -139,9 +135,8 @@ static const char *const kIcons[G_COUNT - G_DIM][16] = {
 /* usage, glyph of each layer's keys from left to right */
 static const uint8_t kLayerKeys[TB_LAYERS][TB_MAX_KEYS][2] = {
 	{
-		{ 0x29, G_ESC }, { 0x3a, G_F1 }, { 0x3b, G_F2 }, { 0x3c, G_F3 }, { 0x3d, G_F4 },
-		{ 0x3e, G_F5 }, { 0x3f, G_F6 }, { 0x40, G_F7 }, { 0x41, G_F8 }, { 0x42, G_F9 },
-		{ 0x43, G_F10 }, { 0x44, G_F11 }, { 0x45, G_F12 }, { TB_SWITCH, G_FN },
+		{ 0x3a, G_F1 }, { 0x3b, G_F2 }, { 0x3c, G_F3 }, { 0x3d, G_F4 }, { 0x3e, G_F5 }, { 0x3f, G_F6 },
+		{ 0x40, G_F7 }, { 0x41, G_F8 }, { 0x42, G_F9 }, { 0x43, G_F10 }, { 0x44, G_F11 }, { 0x45, G_F12 },
 	}, {
 		/*
 		 * The system takes brightness from F1/F2 and mute and volume from F10/F11/F12
@@ -149,11 +144,10 @@ static const uint8_t kLayerKeys[TB_LAYERS][TB_MAX_KEYS][2] = {
 		 * carries keyboard-page usages only. The media layer sends those same usages
 		 * under their symbols.
 		 */
-		{ 0x29, G_ESC }, { 0x3a, G_DIM }, { 0x3b, G_BRIGHT }, { 0x43, G_MUTE },
-		{ 0x44, G_QUIETER }, { 0x45, G_LOUDER }, { TB_SWITCH, G_FN },
+		{ 0x3a, G_DIM }, { 0x3b, G_BRIGHT }, { 0x43, G_MUTE }, { 0x44, G_QUIETER }, { 0x45, G_LOUDER },
 	},
 };
-static const uint8_t kLayerCount[TB_LAYERS] = { 14, 7 };
+static const uint8_t kLayerCount[TB_LAYERS] = { 12, 5 };
 
 static struct tb_key gKeys[TB_LAYERS][TB_MAX_KEYS];
 static int gKeysReady;
@@ -263,6 +257,16 @@ tb_release_all(struct tb_state *s, struct tb_event *out, int max, int *redraw)
 }
 
 int
+tb_drop_all(struct tb_state *s, struct tb_event *out, int max, int *redraw)
+{
+	int n = tb_release_all(s, out, max, redraw);
+
+	for (unsigned i = 0; i < TB_FINGERS; i++)
+		s->fingers[i].used = 0;
+	return n;
+}
+
+int
 tb_set_layer(struct tb_state *s, unsigned layer, struct tb_event *out, int max, int *redraw)
 {
 	int n;
@@ -317,8 +321,6 @@ tb_touch(struct tb_state *s, unsigned finger, int touching, unsigned raw_x, unsi
 	s->fingers[spare].key = -1;
 	if (k < 0)
 		return 0;
-	if (gKeys[s->layer][k].usage == TB_SWITCH)
-		return tb_set_layer(s, s->layer == TB_LAYER_FN ? TB_LAYER_MEDIA : TB_LAYER_FN, out, max, redraw);
 	s->fingers[spare].key = (int8_t)k;
 	if (s->holds[k]++ == 0) {
 		n = emit(out, n, max, gKeys[s->layer][k].usage, 1);
@@ -416,7 +418,7 @@ tb_render(const struct tb_state *s, uint32_t *fb)
 	for (unsigned i = 0; i < kLayerCount[s->layer]; i++) {
 		const struct tb_key *key = &gKeys[s->layer][i];
 		button(fb, key->x, KEY_TOP, key->w, KEY_BOTTOM - KEY_TOP, s->holds[i] ? COLOR_HELD : COLOR_IDLE);
-		if (key->glyph <= G_FN)
+		if (key->glyph <= G_F12)
 			label(fb, key, kLabels[key->glyph]);
 		else
 			icon(fb, key, key->glyph - G_DIM);

@@ -4,7 +4,8 @@
 # (Wi-Fi joins in the background, coreaudiod runs, the shared-shell desktop runs on the GL
 # renderer with two terminals and drives itself, sound plays meanwhile) with PDAppleTouchBar
 # in the collection. The compositor's autopilot has one more phase, `touchbar`: it writes
-# finger records for F11 F11 F12 F12 F10 F10 and Escape to kern.pd_touchbar.inject; the
+# finger records for F11 F11 F12 F12 F10 F10 (the media layer's quieter, louder and mute
+# keys) to kern.pd_touchbar.inject; the
 # driver parses them as it parses the digitizer's reports, the keys travel through
 # IOHIDFamily and /dev/usb_hid_kbd like the built-in keyboard's, and the compositor's
 # volume keys move coreaudiod's level. The strip's idle timeouts are switched off for the
@@ -32,8 +33,8 @@ while [ "$n" -lt 60 ]; do
     sleep 1; n=$((n+1))
 done
 tb() {
-    printf 'TBDESK_TOUCHBAR %s state=%s | fb_crc=%s layer=%s brightness=%s | reports=%s fingers=%s injected=%s key_events=%s hid_reports=%s hid_errors=%s direct=%s | dart_faults=%s dsi_errors=%s spi_errors=%s irqs=%s\n' \
-        "$1" "$(get kern.pd_touchbar.state)" "$(get kern.pd_touchbar.fb_crc)" "$(get kern.pd_touchbar.layer)" \
+    printf 'TBDESK_TOUCHBAR %s state=%s | fb_crc=%s layer=%s fn_known=%s kbd_notes=%s brightness=%s | reports=%s fingers=%s injected=%s key_events=%s hid_reports=%s hid_errors=%s direct=%s | dart_faults=%s dsi_errors=%s spi_errors=%s irqs=%s\n' \
+        "$1" "$(get kern.pd_touchbar.state)" "$(get kern.pd_touchbar.fb_crc)" "$(get kern.pd_touchbar.layer)" "$(get kern.pd_touchbar.fn_known)" "$(get kern.pd_touchbar.kbd_notes)" \
         "$(get kern.pd_touchbar.actual_brightness)" "$(get kern.pd_touchbar.reports)" "$(get kern.pd_touchbar.fingers)" \
         "$(get kern.pd_touchbar.injected)" "$(get kern.pd_touchbar.key_events)" "$(get kern.pd_touchbar.hid_reports)" \
         "$(get kern.pd_touchbar.hid_errors)" "$(get kern.pd_touchbar.direct_events)" "$(get kern.pd_touchbar.dart_faults)" \
@@ -43,7 +44,7 @@ sysctl -w kern.pd_touchbar.dim_ms=0 kern.pd_touchbar.off_ms=0 > /dev/null 2>&1
 tb start
 printf 'TBDESK_TOUCHBAR_DISPLAY %s\n' "$(get kern.pd_touchbar.display)"
 printf 'TBDESK_TOUCHBAR_TOUCH %s\n' "$(get kern.pd_touchbar.touch)"
-printf 'TBDESK_TOUCHBAR_CRC expected=@CRC_FN@ got=%s\n' "$(get kern.pd_touchbar.fb_crc)"
+printf 'TBDESK_TOUCHBAR_CRC expected=@CRC_MEDIA@ got=%s\n' "$(get kern.pd_touchbar.fb_crc)"
 (
     if command -v wifiutil >/dev/null 2>&1 && [ -d /Library/Firmware/brcm ]; then
         sleep 4; pd-dhcp --up en0 >/dev/null 2>&1; sleep 2

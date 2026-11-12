@@ -3,7 +3,9 @@
  * The Touch Bar's key strip: layout, picture and touch-to-key logic. Plain C with no
  * kernel dependency, so the same object runs in the kext and in the host tests
  * (../host-test). Modelled on tiny-dfr (AsahiLinux/tiny-dfr, MIT): a row of buttons
- * 16 px apart, grey when idle and lighter while touched, two layers.
+ * 16 px apart, grey when idle and lighter while touched, two layers. The strip has no
+ * Escape and no layer key: this machine has both as real keys, and the keyboard's Fn
+ * key chooses the layer (the driver calls tb_set_layer).
  *
  * Coordinates: the strip is TB_W x TB_H pixels as a person sees it (x from the left end
  * to the right end, y from the top edge down). The panel shows TB_H pixels of each of
@@ -31,18 +33,15 @@ extern "C" {
 #define TB_TOUCH_X  23045               /* touchscreen-size-x of the J293 device tree */
 #define TB_TOUCH_Y  640
 
-#define TB_LAYER_FN    0                /* esc, F1..F12, fn */
-#define TB_LAYER_MEDIA 1                /* esc, brightness, mute, volume, fn */
+#define TB_LAYER_FN    0                /* F1..F12 */
+#define TB_LAYER_MEDIA 1                /* brightness down and up, mute, quieter, louder */
 #define TB_LAYERS      2
-#define TB_MAX_KEYS    14
+#define TB_MAX_KEYS    12
 #define TB_FINGERS     8
-
-/* What a key sends: a HID keyboard-page usage, or TB_SWITCH for the layer key. */
-#define TB_SWITCH 0
 
 struct tb_key {
 	uint16_t x, w;          /* strip pixels */
-	uint8_t  usage;
+	uint8_t  usage;         /* HID keyboard-page usage the key sends */
 	uint8_t  glyph;         /* index of the label or icon */
 };
 
@@ -73,13 +72,14 @@ unsigned tb_key_touch_x(const struct tb_key *k);
  * (started or moved). Appends the key events this causes to out[] (at most max) and
  * returns their number; *redraw is set when the picture changed.
  *   - a finger that comes down on a key presses it, leaving the key or lifting releases it;
- *   - a finger that slides onto another key presses nothing;
- *   - the layer key switches layers when touched and releases every held key first.
+ *   - a finger that slides onto another key presses nothing.
  */
 int tb_touch(struct tb_state *s, unsigned finger, int touching, unsigned raw_x, unsigned raw_y,
     struct tb_event *out, int max, int *redraw);
-/* Lets go of everything (the digitizer went away, the strip was switched off). */
+/* Lets go of every key; the fingers stay known, so one still resting on the strip presses nothing. */
 int tb_release_all(struct tb_state *s, struct tb_event *out, int max, int *redraw);
+/* The same and forgets the fingers too: for fingers whose lift was never reported. */
+int tb_drop_all(struct tb_state *s, struct tb_event *out, int max, int *redraw);
 /* Switches layers, releasing held keys first. */
 int tb_set_layer(struct tb_state *s, unsigned layer, struct tb_event *out, int max, int *redraw);
 

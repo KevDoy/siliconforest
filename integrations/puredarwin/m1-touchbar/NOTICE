@@ -40,6 +40,13 @@ pd_gpio and a power domain lookup by name in pd_soc.
 
 kernel/pd_tb_keys.c and pd_tb_keys.h (the key strip's layout, picture and touch logic),
 user/pdtbtest.c, host-test/, guest/ and tools/ are original work under the MIT license.
+
+spihid/ (MIT, original work) is added to PDM1SPIHID.kext, the built-in keyboard's driver of
+../m1-keyboard and ../m1-trackpad-child/multitouch, by build-spihid.nix: the place of the
+Fn key in the keyboard's reports, read from the keyboard's own report descriptor (the usage
+Linux drivers/hid/hid-apple.c takes as KEY_FN: page 0xff, usage 0x03), and the message that
+tells PDAppleTouchBar about Fn and typing. The rest of that kext is unchanged and keeps
+its own notices.
 The strip's layout numbers and colours, its two layers and its idle timeouts are those
 of tiny-dfr (https://github.com/AsahiLinux/tiny-dfr, MIT OR Apache-2.0, Copyright The
 Asahi Linux Contributors); no code or image of tiny-dfr is included.

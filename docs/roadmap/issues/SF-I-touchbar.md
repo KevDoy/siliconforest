@@ -1,10 +1,10 @@
 ## Goal
-A working Touch Bar on the 13-inch M1 MacBook Pro (J293, T8103): the strip shows Escape, F1 to F12 and a media layer (brightness, mute, volume); touching a key delivers a key press to the system through the path the built-in keyboard uses, so the compositor's F1/F2 backlight keys and F10/F11/F12 volume keys work from touches without a special case.
+A working Touch Bar on the 13-inch M1 MacBook Pro (J293, T8103): the strip shows a media layer (brightness, mute, volume) and, while the keyboard's Fn key is held, F1 to F12; touching a key delivers a key press to the system through the path the built-in keyboard uses, so the compositor's F1/F2 backlight keys and F10/F11/F12 volume keys work from touches without a special case.
 
 ## Decision
 **One native kext, `PDAppleTouchBar` (`integrations/puredarwin/m1-touchbar/`, GPL-2.0), with everything in the kernel: display, digitizer, the picture of the keys, the touch-to-key logic and the key device. No daemon.**
 - Linux splits this into three drivers (`adp` display, `apple_z2` digitizer, `spi-apple`) and a userland renderer, tiny-dfr, which reads touches from the input layer and injects keys through uinput. On Linux the keys die with that process.
-- Here Escape and the function keys are part of the keyboard: they must work at the console, before any session, and whatever is or is not running. The strip is thirteen fixed keys and a layer switch; drawing it takes a 5x7 font, five 16x16 icons and 300 lines of C (`kernel/pd_tb_keys.c`, MIT, shared with the host tests). A richer strip (application-defined keys) would be a client of this driver later, not a replacement for it.
+- Here the function keys are part of the keyboard: they must work at the console, before any session, and whatever is or is not running. The strip is twelve function keys or five media keys; drawing it takes a 5x7 font, five 16x16 icons and 300 lines of C (`kernel/pd_tb_keys.c`, MIT, shared with the host tests). A richer strip (application-defined keys) would be a client of this driver later, not a replacement for it.
 - Register sequences are ported from Omacom `integration/aurora` (`adp_drv.c`, `adp-mipi.c`, `panel-summit.c`, `apple_z2.c`, `spi-apple.c`); layout, colours, layers and idle timeouts follow tiny-dfr.
 
 ## Hardware map
@@ -26,7 +26,22 @@ A working Touch Bar on the 13-inch M1 MacBook Pro (J293, T8103): the strip shows
 - Like Linux, the driver relies on that state: it cannot bring the panel up from a powered-off `DISPDFR_BE` (Linux marks the domain always-on for the same reason). It never turns a domain off.
 
 ## Status (November 11)
-The kext runs on the M1 in the proposed desktop collection. **Nobody has looked at the strip or touched it.**
+The kext runs on the M1 in the proposed desktop collection. In the user's first session with it (boot `ht01`, the first layout) the strip was upright and readable, touches landed on the drawn keys and the brightness keys worked: orientation, the x direction and real finger reports are confirmed by a person for that build. The table below is what the unattended boots `tb01` to `tb06` proved for it.
+
+### Second round: no Escape, no layer key, Fn chooses the layer (boots `tb08` to `tb11`)
+The user's objection to the first layout: this Mac has a real Escape key and a real Fn key. Now:
+- **Layout:** function layer F1 to F12 (twelve keys of 152 px), media layer brightness down, brightness up, mute, quieter, louder (five keys of 388 px); both use the whole strip, 16 px apart. No Escape, no layer key.
+- **Fn:** as on a Mac, the default layer (media) shows while Fn is up and the other one while it is held. `pdtouchbar_default=fn` in the boot arguments or `kern.pd_touchbar.default_layer=0` swaps them. A key held on the strip when the layer changes is released first, and the finger resting there presses nothing.
+- **How the Touch Bar learns about Fn:** `PDM1SPIHID`, the keyboard's driver, is built with a small addition (`m1-touchbar/spihid/`, applied by `build-spihid.nix` to a copy of the trackpad stream's build tree; nothing in that stream's directory is changed). It looks up the Fn usage (page `0xff`, usage `0x03`, the one Linux `hid-apple` takes as its Fn key) in the report descriptor the keyboard itself hands over, and for every keyboard report sends `PDAppleTouchBar` an IOService message with the Fn state. No kext links against the other; nothing in userland is involved. On this keyboard the descriptor (90 bytes, logged at boot) declares Fn as a 7-bit field at bit 73 of report 1, after the 1-bit eject key.
+- **Typing keeps the strip lit:** the same message counts as use, so typing holds off the dim and dark timeouts and lights a dark strip (`kbd_wakes`). At most four messages a second.
+- **Lost lift:** a key held for `kern.pd_touchbar.hold_ms` (3000; `pdtouchbar_hold=` seconds, 0 never) without any finger report is released, and its finger forgotten. Whether the digitizer keeps reporting a finger that rests still has not been measured; if it does not, a key cannot be held longer than that.
+- **Proven without a person (`tb10`, 37 checks, none failed):** both pictures' CRCs (`afe4c860` media, `9bed9ab6` function, `dba87bf8` mute held); the media layer's five keys and, with Fn down, F1 to F12 arrive on `/dev/usb_hid_kbd`; a held key is released when Fn goes down; slide-off; two fingers; the failsafe releases a key after 1.5 s without a report (`failsafes=1`) and the same finger number presses again; the function layer as default; the dark strip; a keyboard report lights the dark strip. Display, digitizer and DART checks as before.
+- **How Fn was pressed in those tests:** nobody pressed it. `kern.pd_touchbar.kbd_report` asks the keyboard's driver to make up a keyboard report with the Fn field of its own descriptor set or clear and to treat it as a report the keyboard sent (`PDM1SPIHID: Fn down; told to the Touch Bar`). **A real Fn press is unproven**: that the keyboard sets that field when Fn is held is its descriptor's word and Linux's.
+- **Whole desktop (`tb11`, 8 processors):** the autopilot's `touchbar` phase without Escape: `key_events_after_each=[2, 4, 6, 8, 10, 12]`, last key F10 released, level `45,39,45,52,52m,52` as expected, `result=PASS`; all other phases, Wi-Fi join and ping, sound through the headphone output (a headset was plugged in during this boot, `jack=1`, so the default output was not the speakers); at the end `injected=12 key_events=12 hid_reports=12 hid_errors=0 dart_faults=0 spi_errors=0`.
+- **Collection:** `/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1` (`build-kc.nix`: as before, with the keyboard's bundle replaced by the build with the Fn message). Room left `0xe3000`.
+- `tb08` found no Fn bit (the first lookup only took one-bit fields); `tb09` found it and failed one check through the test's own timing.
+
+### First round (boots `tb01` to `tb06`, the layout with Escape and a layer key)
 
 | Layer | Proven without a person | By | Not proven |
 |---|---|---|---|
@@ -36,8 +51,8 @@ The kext runs on the M1 in the proposed desktop collection. **Nobody has looked 
 | Desktop | see below | `tb05`, `tb06` | |
 
 - **How keys are delivered:** `PDTouchBarKeys`, an `IOHIDDevice` with a boot keyboard descriptor published by the kext; reports go through `IOHIDFamily` to `PDHIDPushKeyboardEvent` and the console, exactly as `PDM1SPIHID`'s do. Vendor and product numbers are not Apple's, so nothing treats it as an Apple keyboard with an Fn row. If the device does not start, or with `pdtouchbar_direct=1`, keys are pushed into the PDHID queue directly.
-- **Media layer:** the PDHID queue carries keyboard-page usages only, and the compositor already takes brightness from F1/F2 and mute and volume from F10/F11/F12. The media layer therefore sends those same usages under their symbols; both layers act alike today, and the layer key (`FN`, right end) switches the picture. The keyboard's Fn key is not seen by this driver (it is a usage of Apple's vendor page inside `PDM1SPIHID`).
-- **Burn-in:** the strip is an OLED. As tiny-dfr does, it dims 30 s after the last touch and goes dark after 60 s; a touch on the dark strip only lights it. Typing on the keyboard does not keep it lit (tiny-dfr counts any input; this driver sees only its own). `kern.pd_touchbar.dim_ms`, `.off_ms`, boot arguments `pdtouchbar_dim=`, `pdtouchbar_off=` (seconds, 0 never). At shutdown the strip is made dark and the digitizer put into reset.
+- **Media layer:** the PDHID queue carries keyboard-page usages only, and the compositor already takes brightness from F1/F2 and mute and volume from F10/F11/F12. The media layer therefore sends those same usages under their symbols.
+- **Burn-in:** the strip is an OLED. As tiny-dfr does, it dims 30 s after the last touch and goes dark after 60 s; a touch on the dark strip only lights it. Typing counts as use since the second round. `kern.pd_touchbar.dim_ms`, `.off_ms`, boot arguments `pdtouchbar_dim=`, `pdtouchbar_off=` (seconds, 0 never). At shutdown the strip is made dark and the digitizer put into reset.
 - **Found on the way:** frame buffer lines of 60 pixels do not work (stride 240 read back as 192; tiny-dfr allocates 64). With the front end as Linux's `adp_drm_bind()` leaves it (`0x601`) the pipe does not fetch the layer; it does with the vertical blank bits on (`0x613`), which every DRM commit sets on Linux. The driver sets them at each flush and clears them a second later. On this DART an unmapped page inside a mapped second-level table raises no fault; an address without a second-level table does. SPI0 moves about 0.45 Mbit/s where 11.5 was asked for (the firmware takes 1.2 s); the cause is not established. (The flush trace, nominally 100 ms of 50-microsecond steps with two register reads each, saw 12 vertical blanks, so it took about 200 ms: a register access seems to cost tens of microseconds in this guest, which would explain a polled SPI as well. Not measured directly.)
 - **Collection:** `integrations/puredarwin/m1-touchbar/build-kc.nix` = `m1-sound/build-kc-desktop.nix` plus this kext, debug map stripped. Room between `__PRELINK_INFO` and the kernel's `__TEXT`: `0x114000` before, `0xeb000` after (the kext takes `0x29000`). `pdtouchbar=0` leaves the hardware untouched; `pdtouchbar=1` only reads and logs; `pdtouchbar=2` display only.
 - **Interface:** `kern.pd_touchbar.*` (state, display, touch, panel, keys, layer, brightness, counters, `inject` for tests, `fetch_probe`, `flush_probe`).
@@ -50,16 +65,16 @@ Eight processors, the proposed collection, quiet boot, `tools/tb_desktop_boot.sh
 - The autopilot's keys are synthetic everywhere else; in this phase only the touch is synthetic. The strip's idle timeouts are switched off for the run (a touch on a dark strip only lights it).
 
 ## Test with a person
-1. `TB_GUEST=guest/darwin-touchbar-listen.in TB_RUNTIME=420 integrations/puredarwin/m1-touchbar/tools/tb_boot.sh tb<NN>` (no desktop; the script's header lists what to touch and what must appear on the strip and in the log).
-2. In the desktop (`tools/tb_desktop_boot.sh` shape, or the interactive desktop with this collection): touch the strip once if it is dark; F11 and F12 must step the volume notice down and up, F10 must mute and unmute, F1 and F2 must step the panel brightness, Escape must act as Escape in a terminal (leave insert mode in `vi`); `FN` must switch to the symbols and back.
+1. `TB_GUEST=guest/darwin-touchbar-listen.in TB_RUNTIME=420 integrations/puredarwin/m1-touchbar/tools/tb_boot.sh tb<NN>` (no desktop; the script's header lists what to touch, when to hold Fn, and what must appear on the strip and in the log). Not booted yet in its new form.
+2. In the desktop with the new collection: the strip shows small sun, large sun, crossed speaker, speaker, loud speaker. They must step the panel brightness, mute and unmute, and step the volume notice down and up. Hold Fn: F1 to F12 appear for as long as it is held and send function keys; let go: the symbols return. With a finger on a key, press Fn: the key is released. Leave strip and keyboard alone for a minute: the strip dims, then goes dark; typing lights it; a touch on the dark strip lights it without pressing.
 
 ## Open
 - Everything in the "Not proven" column.
-- The compositor's `touchbar` autopilot phase is a working-tree change in `sources/chonkstep-darwin` (`m1-touchbar/wm-darwin-touchbar-phase.patch`, on top of the uncommitted volume keys); it needs a commit there.
-- Fn on the keyboard as a momentary layer switch (needs `PDM1SPIHID` to tell this driver); keeping the strip lit while typing; sleep and wake (the digitizer loses its firmware across `SPI0` power-down; Linux reloads it on resume).
+- A real Fn press, and whether the digitizer reports a resting finger (decides whether `hold_ms` limits how long a key can be held).
+- The compositor's `touchbar` phase is committed there (3944e53); dropping its Escape touch is a working-tree change (`m1-touchbar/wm-darwin-touchbar-no-escape.patch`) that needs a commit.
+- Sleep and wake (the digitizer loses its firmware across `SPI0` power-down; Linux reloads it on resume).
 - A distinct media usage set once the PDHID queue carries the consumer page.
 - SPI0's speed.
-- No failsafe for a lost lift report: a key whose finger-up packet never arrives stays held.
 
 ## Research and references
 Omacom `linux-aurora` `integration/aurora` 6a08a08e; m1n1 `proxyclient/experiments/touchbar_rainbow.py`, `src/kboot.c` (`dt_set_multitouch`); tiny-dfr.
