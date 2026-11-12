@@ -1,10 +1,20 @@
-../m1-quiet-boot/quiet-boot.patch and ./launcher-tip-members.patch in one file (PCIE_LAB_PATCH takes one):
-the quiet boot, with the kernel's own waits, of a collection built at the tip. Regenerate when either changes.
+../m1-quiet-boot/quiet-boot.patch on ./launcher-tip-text.patch in one file (PCIE_LAB_PATCH takes one): the quiet boot,
+with the kernel's own waits, of a collection built at the tip; the challenge is typed at a silent console
+(see launcher-tip-text.patch for why the tip needs that). Regenerate when a source changes.
 
 diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/puredarwin/m1-bringup/host_progress.py
 --- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 23:57:41.032392638 -0800
-+++ d/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 00:13:32.692772084 -0800
-@@ -225,7 +225,7 @@
++++ d/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 00:32:59.960750543 -0800
+@@ -61,6 +61,8 @@
+ # A guest script that prints this at the start of a line ends the capture about a second
+ # later instead of waiting out --runtime (which stays the upper bound).
+ DONE_MARKER = b'PD_BENCH_DONE'
++# Seconds of console silence after a prompt before the challenge is typed.
++SETTLE = 1.0
+ 
+ 
+ def done_mode():
+@@ -225,7 +227,7 @@
  
  
  BOOTARGS = ('-v -s debug=0x14e keepsyms=1 serial=3 serial-device-name=uart0 '
@@ -13,7 +23,7 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
  # Guest processors. One (`cpus=1`, the hypervisor's device tree pruned to the boot CPU,
  # secondary start refused) unless the extra boot arguments carry `cpus=N` with N > 1: then
  # all eight /cpus nodes stay in the tree, that argument replaces `cpus=1`, and the pinned
-@@ -254,17 +254,54 @@
+@@ -254,17 +256,54 @@
  
  
  def configure_display_console(hv, backend, carveouts):
@@ -73,7 +83,73 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
  def configure_entropy(hv):
      # ARM64 prng_random.c requests 4*SHA512_DIGEST_LENGTH (256 bytes).
      # Fresh OS CSPRNG output, never repetition/padding or a weakened XNU check.
-@@ -790,7 +827,7 @@
+@@ -441,25 +480,40 @@
+                             'wb', buffering=0) as tx_log):
+                 self.tx_log = tx_log
+                 shell_path_sent = False
++                # The kernel no longer leaves 5 s of silence before the shell: drivers that
++                # finish in the background (Wi-Fi firmware, Touch Bar digitizer, sound) still
++                # log while the prompt is up, and a kernel line inside the challenge's answer
++                # fails the proof (boot bs01). The challenge is typed once a prompt has been
++                # seen and the console has then been silent for SETTLE seconds; the desktop
++                # command as before at a clean prompt, or after the same silence when kernel
++                # lines follow the prompt. The proof itself is unchanged.
++                prompt_seen, last_rx = False, time.monotonic()
+                 while not self.finish.is_set():
+                     data = self.dev.read(4096)
+-                    if not data:
++                    if data:
++                        log.write(data)
++                        self.proof.feed(data)
++                        self.note_time()
++                        last_rx = time.monotonic()
++                    tail = console_prompt_text(bytes(self.proof.output[-1024:]))
++                    at_prompt = re.search(rb'(?:^|\n)[^\n]{0,100}[#$] ?$', tail) is not None
++                    # a prompt anywhere in what just arrived (kernel lines may follow it in the same read)
++                    prompt_seen = prompt_seen or (bool(data) and re.search(
++                        rb'(?:^|\n)[^\n ]{0,30}[#$] ', console_prompt_text(bytes(self.proof.output[-(len(data) + 256):]))) is not None)
++                    settled = prompt_seen and time.monotonic() - last_rx >= SETTLE
++                    if not data and not settled:
+                         self.advance_virtual(b'')
+                         continue
+-                    log.write(data)
+-                    self.proof.feed(data)
+-                    self.note_time()
+-                    tail = console_prompt_text(bytes(self.proof.output[-1024:]))
+                     if not shell_path_sent and self.proof.sent_at is None and b'Enter full pathname of shell' in tail:
+                         shell_path_sent = True
+                         self.send(b'/bin/sh\r')
+-                    if self.proof.sent_at is None and re.search(rb'(?:^|\n)[^\n]{0,100}[#$] ?$', tail):
++                    if self.proof.sent_at is None and settled:
++                        prompt_seen = False
+                         self.proof.sent()
+                         bq_mark('shell_prompt')
+                         old.write_private(self.directory, 'challenge-input.bin', self.proof.command())
+                         self.send(self.proof.command())
+-                    elif self.desktop and self.proof.complete and not self.desktop_sent and re.search(
+-                            rb'(?:^|\n)[^\n]{0,100}[#$] ?$', tail):
++                    elif self.desktop and self.proof.complete and not self.desktop_sent and (at_prompt or settled):
+                         # Fixed, single-use RAM-root experiment. Never accept a
+                         # command string from guest output or arbitrary metadata.
+                         command = desktop_command(self.proof.nonce)
+@@ -467,12 +521,14 @@
+                         self.desktop_sent = True
+                         bq_mark('guest_command')
+                         self.send(command)
+-                    elif self.keyboard and self.proof.complete and not self.keyboard_sent and re.search(
+-                            rb'(?:^|\n)[^\n]{0,100}[#$] ?$', tail):
++                    elif self.keyboard and self.proof.complete and not self.keyboard_sent and (at_prompt or settled):
+                         command = keyboard_command(self.proof.nonce)
+                         old.write_private(self.directory, 'keyboard-input.bin', command)
+                         self.keyboard_sent = True
+                         self.send(command)
++                    if not data:
++                        self.advance_virtual(b'')
++                        continue
+                     self.check_done(tail)
+                     self.advance_virtual(data)
+         except BaseException as error:
+@@ -790,7 +846,7 @@
  
  
  # Original isolated opt-in. No hardware operation; consumed by prepare.py.
@@ -82,7 +158,7 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
  APCIE_OBSERVER_MEMBER = 'org.puredarwin.driver.PDApcieT8103Bridge'
  
  def apcie_port_observer_enabled(inputs):
-@@ -1316,6 +1353,9 @@
+@@ -1316,6 +1372,9 @@
          old.write_private(directory, 'original-bootargs.bin', ba)
          old.write_private(directory, 'original-adt.bin', adt)
          carveouts = read_carveouts(backend, directory)

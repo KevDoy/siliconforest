@@ -24,7 +24,144 @@ owner switches the defaults.
 | Collection at the tip (`rebase/build-kc.nix`) | **builds, with upstream's kext link rule** (`-text_exec`): `/nix/store/8yk7f7qnp7mcsm40a291ja1wh8dwyw5j-puredarwin-kc-arm64-0.1`, 34 277 246 bytes (pin: 33 851 054). Every kext compiled unchanged, the Rust GPU driver included. `kc_overlap.py`: 0 overlapping segments. Members: the pin's 60 minus `PDSun50iMMC` |
 | Launcher's offline load check | **passes** with `rebase/launcher-tip-members.patch` (59 members) |
 | libSystem at the tip (`rebase/build-libsystem.nix`, the three patches of `libsystem-default`) | **builds**: `/nix/store/69sdpjfj7aypp318yqldys9a7b7a60w8-puredarwin-libsystem-siliconforest-0.1` |
-| Tip images, RAM root, QEMU, M1 | see the sections below as they are filled |
+| Tip minimal image and RAM root | **built**: image `/nix/store/ggmrin8nc318cnmd6mrw9r1viggswg28-puredarwin-image-0.1`; RAM root base `artifacts/rebase/ramdisk-tip.img` (375 529 472 bytes, sha256 `bd6b06c1…`; pin: 373 284 864), same partition offsets as the pin's image. The slim stager makes a 384 MiB RAM root from it unchanged |
+| QEMU | **desktop reached, autopilot results equal to the pin's** in two of three sequences; one timing difference, see "QEMU" |
+| M1 | **twelve boots `rb01`..`rb12`, every area passes** against its pin reference; one launcher-proof failure (`rb03`) explained and avoided since; see "M1 boots" and "Equivalence" |
+
+## QEMU (12 November)
+Tip runs: `rebase/tools/rb_qemu.sh` (the QEMU stream's `tools/qemu_desktop.sh`, `qd_image.py`
+and `qd_run.py` unmodified, output root `runs/qemu-dev-rebase`; base image `rebase/qemu-image.nix`
+= `/nix/store/8a0dain89f8ga6kp73ldb2kpmd4mfl45-puredarwin-image-0.1`, upstream's RELEASE virt
+kernel and kexts at the tip with that stream's three patches; the tip's libSystem staged; the
+M1's compositor build-009, terminal build-008 and the pin-built audio server, as on the pin).
+Pin runs of the same commands on the same night: `tools/qemu_desktop.sh --name rbpin<n>`.
+
+| Sequence (`--only`) | Pin | Tip |
+|---|---|---|
+| settle, drag, type, fullscreen, scrollback, resize, redrag, minimize, menu, settings, chords, menuterm, limit | `rbpin1`: every phase as the tip; verdict FAILED because **resize is NOT-RESIZED with build-009 on the pin too** (not a rebase matter) | `rq01`: the same 22 result lines, phase for phase |
+| the same without resize and redrag | `rbpin2`: ok | `rq02`: ok, same result lines |
+| settle, type, clipboard | `rbpin3`..`rbpin6`: ok, 4 of 4 | `rq03`..`rq06`: clipboard PASS 4 of 4; **type NO-CHANGE in 2 of 4** (`rq03`, `rq04`), ok in `rq05`, `rq06` |
+
+The one difference: in the short sequence the `type` phase (the first after a 2 s settle) twice
+saw no pixel change in the terminal at the tip. In both runs the screen after `settle` has a hash
+(`3f2cf481…`) that no passing run has, and the screen after the later phases is the same as the
+pin's (`rq04` after `type`, all four after `clipboard`): the desktop was not yet in its usual
+state when the 2 s settle ended, and it converged. In the long sequences (`rq01`, `rq02`), where
+`drag` comes first, `type` passed. Not explained further; it is a start-up timing difference of
+the tip's user space in QEMU and is listed under "Regressed or not proven".
+
+Also seen at the tip only: a line `pdpowerd: no org.puredarwin.acpi events, nothing to watch` on
+the console (a daemon upstream added).
+
+## M1 boots (12 November)
+All through `rebase/tools/rb_boot.sh` → `tools/pcie_iterate.sh` (queued, `BENCH_WHO=rebase`,
+`PCIE_KC` = the tip collection, `PCIE_STAGER` = the tip RAM root, no chain, never `pdnvme=`).
+Every guest script starts with `rebase/guest/rb-prologue.sh`: if anything is attached to the
+NVMe nub, or any object of an NVMe class exists, the session ends at once. Every boot so far
+printed `RB_NVME ioreg_rc=0 entries=1 nvme_objects=0` (the nub `ans@77400000` alone, an
+`IOPlatformDevice` with no child) and returned to verified Linux.
+
+| Boot | What | Result | Pin reference |
+|---|---|---|---|
+| `rb01` | shell, 1 CPU, text boot; registry of our drivers' nodes | shell reached, `DEVELOPMENT_ARM64_T8103` kernel `xnu-12377.121.6`, all drivers attached (PCIe bridge, PDBwfm/en0, SPI keyboard + trackpad, PDGpuDT, PDCpuPower, sound, Touch Bar), no panic; device memory of `apcie`, `dart-apcie0`, `smc`, `ans` at the addresses the device tree gives | no pin boot of this script; drivers and messages as pin boots |
+| `rb02`, `rb04`, `rb07` | 8 CPUs, SMP bench (`darwin-smp-bench.in`) | 8 of 8 processors, 4 P + 4 E; par8 435.2 / 435.6 / 438.4 MB/s, big8 594.6 MB/s each; begin and end markers, no panic | `sm33`, `sm34`: par8 435.2 / 436.8 MB/s |
+| `rb03` | the same | **the launcher's console proof failed** (`NO_COMMAND_LINE_OBSERVED`): the system was up at the shell on 8 CPUs, but the Wi-Fi driver's lines landed inside the answer to the launcher's challenge. Cause and fix below. Linux verified afterwards | none |
+| `rb05` | Wi-Fi: scan, join, DHCP, ping gateway and internet, HTTP, DNS (`darwin-wifi-join-test.in`), 8 CPUs | every return code 0, 0 % loss | as the join/DHCP reports |
+| `rb06` | GPU + display + compositor autopilot, both sessions, as `ds09` (235 s, quiet boot with the kernel's waits) | all 44 autopilot result lines identical to `ds09` (24 verdicts, both `done result=ok`); GL on KMS 2560x1600, dmabuf v3; mean 10.1 fps over the phases, 7 missed refreshes | `ds09`: 10.2 fps, 4 missed |
+| `rb08` | sound, headphone path (`darwin-sound-test.in`) | the same 55 result lines as the pin, 7 phases, PLL locked at 48 and 44.1 kHz, late/ring/DART/I2C errors 0, end marker | `sd05` |
+| `rb09` | speakers, `kern.pd_speaker.hold_probe=1` (`darwin-speaker-test.in`) | hold set, tone measured by the sense amplifiers on all four, model in charge, fault 0, end marker | `sd14` (which monitored a longer tone: 100 lines to 85) |
+| `rb10` | Touch Bar (`darwin-touchbar-test.in`) | 37 of 37 checks PASS, the same list as the pin | `tb10`: 37 of 37 |
+| `rb11` | boot timeline (`darwin-gpu-desktop-fast.in`, quiet fast boot, slim RAM root) | **first frame 6.44 s** after the hypervisor starts the guest (bound 7.5 s); kernel start to root 0.89 s; 48.2 s after the cycle starts | `df02`: 7.27 s and 51.2 s |
+| `rb12` | the whole desktop as `tools/gpu_desktop.sh` stages it, 120 s, nobody at the machine | Wi-Fi joined, network up, coreaudiod, Touch Bar ready, keyboard and trackpad nodes, GL on KMS, session ended cleanly (`cleanup=Complete`) | `df02` |
+
+Twelve boots, twelve returns to verified Linux, no panic line in any console.
+
+**`rb03` and the launcher's challenge.** At the tip a text boot mounts its root 32 s after the first
+console byte instead of 62 s: upstream's platform expert now publishes `IORTC` on this machine, so
+the kernel's 30 s wait for a clock is gone (the 30 s registry wait is still there:
+`IOKitInitializeTime: registry not quiet after 30 s`). On the pin the Wi-Fi driver finishes 0.4 s
+before the root mounts; at the tip it finishes 0.5 to 1 s after, when the launcher is already
+typing its challenge at the prompt, and a kernel line inside the answer fails the proof. That is
+the situation `m1-boot-speed/launcher-fast-quiet.patch` was written for. `rb01`..`rb04` ran with
+only the member patch (3 of 4 got through); from `rb05` on, text boots carry
+`rebase/launcher-tip-text.patch` (member patch + the fast-quiet patch's "type at a silent console"
+hunks, nothing else) and the stock quiet boot `launcher-tip-quiet.patch` (the same on
+`quiet-boot.patch`): 8 of 8 since.
+
+**8 CPUs and the corecrypto hang.** Three good boots do not show that the hang the DRBG patch fixed
+(1 boot in 9 without the patch) is absent at the tip; the patched kext is in the collection and
+upstream's corecrypto changed one unrelated header. `rebase/tools/rb_overnight_smp.sh <first
+number> 20` is the longer run, for the overnight batch; it has not been run.
+
+## Equivalence, pin against tip
+| Suite | Pin | Tip | Equal |
+|---|---|---|---|
+| Collection builds, fits, passes the launcher's offline check | `z66w83kk…`, 60 members | `8yk7f7qn…`, 59 members (no `PDSun50iMMC`), upstream's `-text_exec` link rule | yes, with the launcher member patch |
+| QEMU desktop, long autopilot sequences | `rbpin1`, `rbpin2` | `rq01`, `rq02` | yes |
+| QEMU desktop, `settle,type,clipboard` | 4 of 4 | clipboard 4 of 4, type 2 of 4 | **no** (start-up timing, see "QEMU") |
+| Shell on 1 CPU | (earlier boots) | `rb01` | yes |
+| 8 CPUs, throughput | `sm33`, `sm34` | `rb02`, `rb04`, `rb07` | yes; hang not re-proven (overnight run) |
+| Wi-Fi scan, join, DHCP, ping, DNS | join reports | `rb05` | yes |
+| GPU, display, compositor autopilot (20 phases, 2 sessions) | `ds09` | `rb06` | yes, line for line |
+| Sound, headphones | `sd05` | `rb08` | yes (the kernel driver and `pdplay`; the audio server is the pin's build) |
+| Sound, speakers held | `sd14` | `rb09` | yes |
+| Touch Bar | `tb10` | `rb10` | yes |
+| First frame after guest start | 7.27 s (`df02`) | 6.44 s (`rb11`) | yes, faster |
+| Whole desktop | `df02` | `rb12` | yes (unattended; nobody has looked at the panel or listened) |
+| Read-only NVMe | not booted by this stream | not booted | n/a |
+
+## Regressed or not proven
+- **QEMU `type` after a 2 s settle** fails intermittently at the tip (2 of 4), never on the pin
+  (0 of 4). The end states agree. Not explained.
+- **Text and stock-quiet boots need the launcher to type at a silent console** at the tip (a
+  consequence of upstream removing the clock wait). Without it about one text boot in four fails
+  the console proof (`rb03`). Every suite script that still uses `quiet-boot.patch` or no launcher
+  patch (`ds_desktop_boot.sh`, `tb_*`, `sd_*`, `smp_boot.sh`) is affected once the tip is default.
+- **`PCIE_TIMEWAIT`** (the instruction-pattern patch) was not tried on the tip kernel; the tip
+  needs it less (one 30 s wait instead of two) and the default desktop uses boot-args.
+- **The audio server and frameworks, Mesa, compositor, terminal and Wi-Fi tools were not rebuilt**
+  at the tip: the pin's binaries ran on the tip's kernel and libSystem in every boot above. No
+  rebuild of the compositor was needed. Whether they *build* against the tip's SDK is not shown
+  (21 leaf recipes evaluate; only the kexts, kernel, libSystem, ioreg and the images were built).
+- **`/arm-io/ans`** is published as a nub at the tip (`ans@77400000`, `IOPlatformDevice`,
+  registered, no child, no NVMe object, no disk node) in all twelve boots. Nothing drives it; it
+  is new surface for any NVMe kext added later.
+- **Console:** 24 `PD-IOK` lines per boot from upstream, and `cs_invalid_page … allowing` lines
+  for the staged `ioreg` (the pin prints the same kind for other unsigned binaries).
+- The 20-boot 8-CPU run, a person at the panel, and listening tests: not done.
+- `puredarwin-patches/` (the generated exports) and the Cocoa stream's patches 0004..0006 are
+  not ported.
+
+## Default switch (for the owner)
+1. `integrations/puredarwin/rebase/default-changes.patch` (applies to `tools/gpu_desktop.sh`):
+   the tip collection `/nix/store/8yk7f7qnp7mcsm40a291ja1wh8dwyw5j-puredarwin-kc-arm64-0.1` and
+   `rebase/tools/stage_ramdisk_rebase.py` become the defaults, the launcher patch becomes
+   `rebase/launcher-tip-fast-quiet.patch` (text boot: `launcher-tip-text.patch`);
+   `GPU_DESKTOP_PIN=1` boots the pin as today.
+2. In the launcher tree (`runs/m1-desktop-010/pcie-m2-host-001/lab`, not in git): apply
+   `rebase/launcher-tip-text.patch` once. Then the member gate no longer names `PDSun50iMMC`,
+   the challenge is typed at a silent console in every mode, and the three `launcher-tip-*`
+   patches are replaced by the originals (`quiet-boot.patch`, `launcher-fast-quiet.patch` must be
+   regenerated against that tree: both touch the lines the text patch changes). A pin collection
+   then needs the old tree or a patch putting the name back.
+3. RAM root inputs at the tip: base `artifacts/rebase/ramdisk-tip.img` (+ `.json`), made by
+   `rebase/tools/rb_ramdisk_base.sh` from `/nix/store/ggmrin8nc318cnmd6mrw9r1viggswg28-puredarwin-image-0.1`;
+   libSystem `/nix/store/69sdpjfj7aypp318yqldys9a7b7a60w8-puredarwin-libsystem-siliconforest-0.1`
+   (`rebase/build-libsystem.nix`); every other staged file as on the pin. To make that the
+   assembler's own default: `ORIGINAL` in `tools/pcie_assemble.py`, `BASE_SHA` in
+   `chonkstep-darwin/stage_ramdisk.py`, and the libSystem entry of
+   `artifacts/m1-desktop-010/apcie-port-candidate-003/mapping.json` (source and `replaces_sha256`
+   `29074679…`).
+4. The suite scripts' `*_KC` defaults (`ds`, `tb`, `sd`, `smp`, `bs`), `nb_boot.sh` and
+   `ls_desktop_boot.sh` name pin collections; until they are changed, `rebase/tools/rb_boot.sh`
+   runs any guest template against the tip.
+5. `SF_PD=tip` stays the way the tip is built; flipping the default inside `rebase/pd.nix` would
+   send the pin's fifteen-recipe collection chain to the tip, where it does not evaluate (it names
+   pin store paths). That chain can be retired, not switched.
+6. QEMU: `rebase/tools/rb_qemu.sh`; for the QEMU stream's own default, `build-image.nix` and
+   `build-kc.nix` in `qemu-dev/` take `(import ../rebase/pd.nix).pd` and `PD_REV` in `qd_image.py`
+   follows.
+
 
 ## The switch (deliverable 2)
 `rebase/pd.nix` holds both sources (checkout + revision) and returns the flake for `SF_PD`
@@ -234,6 +371,12 @@ and the launcher patches (`quiet-boot.patch`, `launcher-fast-quiet.patch`, `host
   build.
 
 ## Risks
+Outcome of each, after the builds and boots: 1 did not occur (the collection fits and boots with
+upstream's link rule); 2 handled by the launcher patch; 3 checked in every boot, nothing attached;
+4 and 5 did not show (GPU autopilot identical, device memory right); 6 measured (first frame
+6.44 s); 7 not tried; 8 as planned; 9 avoided by the wrapper; 10 as planned. The list as written
+before the builds:
+
 1. **Kext code moves to `__TEXT_EXEC`.** The pin's collection has less than one kext of room
    below the kernel's `__TEXT` (`kc_overlap.py`), `kc-tools` carries our arm64 `__TEXT` patch, and
    the launcher's `normal_image.py` (hash-pinned, not to be edited) parses the collection's

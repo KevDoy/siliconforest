@@ -1,0 +1,45 @@
+diff -ru a/tools/gpu_desktop.sh b/tools/gpu_desktop.sh
+--- a/tools/gpu_desktop.sh	2026-11-12 01:06:28.222197151 -0800
++++ b/tools/gpu_desktop.sh	2026-11-12 01:06:28.240585462 -0800
+@@ -23,11 +23,20 @@
+ # (m1-boot-speed/build-kc.nix: m1-touchbar/build-kc.nix with m1-boot-speed/kernel.nix; boots bs02, bs03).
+ # It needs pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args and the launcher patch below (which waits
+ # for a silent console before it types): without the patch the harness fails its console proof.
+-KC=${GPU_DESKTOP_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
++# Since the rebase (docs/roadmap/issues/SF-V-rebase.md): the collection built from upstream's tip
++# (integrations/puredarwin/rebase/build-kc.nix, SF_PD=tip) and the RAM root made from the tip's
++# image. GPU_DESKTOP_PIN=1 boots the last collection of the pinned revision e7aa00a6 as before.
++if [ "${GPU_DESKTOP_PIN:-0}" = 1 ]; then
++  KC=${GPU_DESKTOP_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
++else
++  KC=${GPU_DESKTOP_KC:-/nix/store/8yk7f7qnp7mcsm40a291ja1wh8dwyw5j-puredarwin-kc-arm64-0.1}
++fi
+ # Store paths of the staged builds, without evaluating a recipe whose inputs are unchanged
+ # (each evaluation is 20 to 70 s; BS_NIX_CACHE=0 evaluates always).
+ NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
+-[ -f "$KC/kernel" ] || KC=$($NP m1-boot-speed build-kc.nix)
++if [ ! -f "$KC/kernel" ]; then
++  if [ "${GPU_DESKTOP_PIN:-0}" = 1 ]; then KC=$($NP m1-boot-speed build-kc.nix); else KC=$(SF_PD=tip $NP rebase build-kc.nix); fi
++fi
+ T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
+ # The compositor with display scaling, the settings menu, volume keys and the Touch Bar phase (wm-darwin merge, boot ds06).
+ D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+@@ -77,12 +86,16 @@
+   B=integrations/puredarwin/m1-bringup
+   # the quiet boot's launcher patch, with the boot picture painted in 0.2 s instead of 4.7 s and
+   # the challenge typed only once the console is silent
+-  QUIET=(PCIE_LAB_PATCH="$ROOT/integrations/puredarwin/m1-boot-speed/launcher-fast-quiet.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
++  LP=integrations/puredarwin/rebase/launcher-tip-fast-quiet.patch; [ "${GPU_DESKTOP_PIN:-0}" = 1 ] && LP=integrations/puredarwin/m1-boot-speed/launcher-fast-quiet.patch
++  QUIET=(PCIE_LAB_PATCH="$ROOT/$LP" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
+ fi
+ S=$(mktemp); sed -e "s/@SECONDS@/$DESK/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/$VOL/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
+ echo "GPU desktop: $MIN minutes; the desktop appears about 50 seconds after the M1 reboots"
+ # The RAM root without the unused kernel archive, 384 MiB, free blocks zeroed: 92 MB on the wire instead of 150.
+-env "${QUIET[@]}" PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $FASTARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
++STAGER=integrations/puredarwin/rebase/tools/stage_ramdisk_rebase.py; [ "${GPU_DESKTOP_PIN:-0}" = 1 ] && STAGER=integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py
++# the text boot of the tip collection needs the launcher's member list without PDSun50iMMC
++[ "${GPU_DESKTOP_VERBOSE:-0}" = 1 ] && [ "${GPU_DESKTOP_PIN:-0}" != 1 ] && QUIET=(PCIE_LAB_PATCH="$ROOT/integrations/puredarwin/rebase/launcher-tip-text.patch")
++env "${QUIET[@]}" PCIE_STAGER="$ROOT/$STAGER" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $FASTARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
+ PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
+ rm -rf "$S" ${QD:+"$QD"}
+ strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic\|PDSpeakers:\|PDTouchBar:' | cut -c1-260 | tail -40

@@ -9,7 +9,7 @@
 #   RB_BOOTARGS    further kernel boot arguments (pdnvme is refused)
 #   RB_EXTRA       further files, "source=/destination;..." (PCIE_EXTRA_FILES)
 #   RB_QUIET=1     the quiet fast boot: boot picture, launcher-tip-fast-quiet.patch,
-#                  pd_quiet_wait=0 pd_rtc_wait=0 (default: text boot, launcher-tip-members.patch)
+#                  pd_quiet_wait=0 pd_rtc_wait=0 (default: text boot, launcher-tip-text.patch)
 #   RB_QUIET=stock the quiet boot with the kernel's own waits (launcher-tip-quiet.patch), as the
 #                  suites that predate the fast boot run it
 #   RB_DONE        marker or prompt, as PCIE_DONE (default: marker when the template prints PD_BENCH_DONE)
@@ -58,7 +58,7 @@ if [ "${RB_STAGE:-}" = desktop ]; then
   [ -f "$TBFW" ] && X="$X;$TBFW=/Library/Firmware/apple/dfrmtfw-j293.bin"
 fi
 ARGS="cpus=${RB_CPUS:-1} ${RB_BOOTARGS:-}"
-LAB=(PCIE_LAB_PATCH="$HERE/launcher-tip-members.patch"); QD=
+LAB=(PCIE_LAB_PATCH="$HERE/launcher-tip-text.patch"); QD=
 if [ "${RB_QUIET:-0}" != 0 ]; then
   BG=integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
   QD=$(mktemp -d); python3 integrations/puredarwin/m1-quiet-boot/boot_logo.py pack "$BG" "$QD" > /dev/null
