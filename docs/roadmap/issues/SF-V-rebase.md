@@ -16,17 +16,15 @@ owner switches the defaults.
   are the same revisions; the cross toolchain is rebuilt only because the SDK changed (no LLVM
   build: `arm64-cross-toolchain` is 14 small derivations).
 
-## State (11 November, end of the inventory)
-Inventory and plan done; nothing has been built at the tip and nothing has been booted. The pin's
-recipes are unchanged on disk. What exists:
-
-| File | What it is | State |
-|---|---|---|
-| `integrations/puredarwin/rebase/pd.nix` | the one source switch (`SF_PD=tip`; default pin) | written; used by nothing shared yet |
-| `integrations/puredarwin/rebase/tools/convert_recipes.py` | rewrites the 79 live recipes to import `pd.nix` | written; run only on a scratch copy |
-| `integrations/puredarwin/rebase/kernel.nix` | the lab kernel at the tip, one patch list | evaluates (`SF_PD=tip`), not built |
-| `integrations/puredarwin/m1-bringup/kernel-patches-tip/0001-…` | bring-up base merged with upstream's T8103 | applies to the tip, not compiled |
-| `integrations/puredarwin/m1-smp/kernel-patches-tip/0003-…` | park/idle patch, one hunk moved | applies in series, not compiled |
+## State
+| Step | State |
+|---|---|
+| Source switch applied to the shared recipes | **done** (commit `510737cc2`): 76 recipes import `rebase/pd.nix`; all 79 recipes that named the pin instantiate to the same derivation before and after, as do the default collection (`rjlxj88c….drv` → `z66w83kk…`) and the Nix-built RAM root inputs. Three recipes keep the revision because their own text is a build input (`m1-keyboard/build-kext.nix`, `m1-network-default-route/build.nix`, `m1-apcie-bridge/root-build/build-private-policy-objects-001.nix`); found by the comparison, which first showed 6 differing derivations |
+| Kernel at the tip (`rebase/kernel.nix`, DEVELOPMENT) | **builds**: `/nix/store/2g19j25q7c4hsa4lamvh4ffrjwj2460c-puredarwin-kernel-arm64-t8103-siliconforest-0.1`. The two ported patches compile |
+| Collection at the tip (`rebase/build-kc.nix`) | **builds, with upstream's kext link rule** (`-text_exec`): `/nix/store/8yk7f7qnp7mcsm40a291ja1wh8dwyw5j-puredarwin-kc-arm64-0.1`, 34 277 246 bytes (pin: 33 851 054). Every kext compiled unchanged, the Rust GPU driver included. `kc_overlap.py`: 0 overlapping segments. Members: the pin's 60 minus `PDSun50iMMC` |
+| Launcher's offline load check | **passes** with `rebase/launcher-tip-members.patch` (59 members) |
+| libSystem at the tip (`rebase/build-libsystem.nix`, the three patches of `libsystem-default`) | **builds**: `/nix/store/69sdpjfj7aypp318yqldys9a7b7a60w8-puredarwin-libsystem-siliconforest-0.1` |
+| Tip images, RAM root, QEMU, M1 | see the sections below as they are filled |
 
 ## The switch (deliverable 2)
 `rebase/pd.nix` holds both sources (checkout + revision) and returns the flake for `SF_PD`
@@ -301,6 +299,30 @@ and the launcher patches (`quiet-boot.patch`, `launcher-fast-quiet.patch`, `host
   own that points them at `runs/qemu-dev-rebase` (no file of theirs edited, nothing shared
   written). The second needs no one else; say if the first is preferred.
 - **Cocoa stream:** its patches `0004`, `0005`, `0006` do not apply at the tip; `0001` is upstream.
+
+## Open, not in this stream: our audio backend on upstream's new coreaudiod
+Owner decision (11 November): the equivalence proof runs the pin-built audio server and
+frameworks on the tip's kernel and libSystem; the port is a follow-up.
+
+What upstream's coreaudiod at the tip is (`src/Userspace/coreaudiod/coreaudiod.c`, 1721 lines):
+a server for IOAudioFamily engines only. It finds every `IOAudioEngine` in the registry, opens
+its user client (status buffer, `performClientIO` trap, register/unregister client buffer),
+runs one IO thread per engine that mixes the clients' shared rings one period ahead of the
+engine's playback head, and since the pin has gained input streams (capture, input IOProcs),
+several devices with stable ids by UID, default-device choice and per-device preferences, and
+volume/mute through `IOAudioLevelControl`/`IOAudioToggleControl`. **It has no pluggable device
+backend**: an engine is an IOKit service or nothing. Our patch added a second kind of engine to
+the old single-device server (a table of `/dev/pdaudio` and `/dev/pdspeaker` character devices
+with `kern.pd_sound`/`kern.pd_speaker` sysctls for volume, jack state and the speaker hold).
+
+Two ways to follow, to be decided by the sound stream:
+1. Port the `/dev` engines onto the new `struct engine` (they become two more devices beside
+   any IOAudioEngine; the new multi-device, default-device and preference code then applies to
+   them). The patch is a rewrite, about the size of the old one (640 lines).
+2. Make PDAppleSound an IOAudioFamily driver (`IOAudioDevice`/`IOAudioEngine` with level and
+   mute controls). Upstream's server then drives it unpatched, capture comes for free when the
+   microphone path exists, and the lab carries no coreaudiod patch at all. IOAudioFamily is in
+   the tree and unchanged between pin and tip. This is the direction upstream's design points to.
 
 ## What could be dropped once the tip is the default (so far)
 `m1-smp/kernel-patches/0002`; the register-name block of the bring-up patch's `board_config.h`;
