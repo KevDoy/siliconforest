@@ -13,10 +13,13 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 N=${1:?name}; STAGES=${2:-all}; SCALE=${3:-20}; CPUS=${LA_CPUS:-8}
 case "$N" in la*) ;; *) echo "boot names are prefixed la" >&2; exit 2;; esac
-KC=${LA_KC:-$(cd "$HERE/../m1-smp" && $NIX build-kc-desktop.nix | tail -1)}
+KC=${LA_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 T=$(cd "$HERE/../m1-mesa-asahi" && $NIX agx-offscreen-test.nix 2>/dev/null | tail -1)
 ST=$(cd "$HERE" && $NIX drm-storm.nix 2>/dev/null | tail -1)

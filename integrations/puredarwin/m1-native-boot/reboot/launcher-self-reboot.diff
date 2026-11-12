@@ -1,5 +1,6 @@
---- a/integrations/puredarwin/m1-bringup/host_progress.py
-+++ b/integrations/puredarwin/m1-bringup/host_progress.py
+diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py b/integrations/puredarwin/m1-bringup/host_progress.py
+--- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.540822787 -0800
++++ b/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.541750509 -0800
 @@ -67,6 +67,10 @@
  # A guest script that prints this at the start of a line ends the capture about a second
  # later instead of waiting out --runtime (which stays the upper bound).
@@ -83,8 +84,9 @@
              'keyboard_command_sent': self.keyboard_sent,
              'terminal_input_enabled': self.terminal_input,
              'native_keyboard_desktop_enabled': self.native_keyboard_desktop,
---- a/tools/m1_bringup_cycle.py
-+++ b/tools/m1_bringup_cycle.py
+diff -ru a/tools/m1_bringup_cycle.py b/tools/m1_bringup_cycle.py
+--- a/tools/m1_bringup_cycle.py	2026-11-12 08:14:45.540610032 -0800
++++ b/tools/m1_bringup_cycle.py	2026-11-12 08:14:45.541531038 -0800
 @@ -118,6 +118,53 @@
          return False
  

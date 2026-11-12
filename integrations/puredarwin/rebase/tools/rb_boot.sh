@@ -8,9 +8,9 @@
 #   RB_CPUS        guest processors (default 1)
 #   RB_BOOTARGS    further kernel boot arguments (pdnvme is refused)
 #   RB_EXTRA       further files, "source=/destination;..." (PCIE_EXTRA_FILES)
-#   RB_QUIET=1     the quiet fast boot: boot picture, launcher-tip-fast-quiet.patch,
-#                  pd_quiet_wait=0 pd_rtc_wait=0 (default: text boot, launcher-tip-text.patch)
-#   RB_QUIET=stock the quiet boot with the kernel's own waits (launcher-tip-quiet.patch), as the
+#   RB_QUIET=1     the quiet fast boot: boot picture, m1-boot-speed/launcher-fast-quiet.patch,
+#                  pd_quiet_wait=0 pd_rtc_wait=0 (default: text boot, no launcher patch)
+#   RB_QUIET=stock the quiet boot with the kernel's own waits (m1-quiet-boot/quiet-boot.patch), as the
 #                  suites that predate the fast boot run it
 #   RB_DONE        marker or prompt, as PCIE_DONE (default: marker when the template prints PD_BENCH_DONE)
 #   RB_SED         further sed expressions for the template (e.g. "-e s/@SECONDS@/45/g")
@@ -58,13 +58,13 @@ if [ "${RB_STAGE:-}" = desktop ]; then
   [ -f "$TBFW" ] && X="$X;$TBFW=/Library/Firmware/apple/dfrmtfw-j293.bin"
 fi
 ARGS="cpus=${RB_CPUS:-1} ${RB_BOOTARGS:-}"
-LAB=(PCIE_LAB_PATCH="$HERE/launcher-tip-text.patch"); QD=
+LAB=(); QD=
 if [ "${RB_QUIET:-0}" != 0 ]; then
   BG=integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
   QD=$(mktemp -d); python3 integrations/puredarwin/m1-quiet-boot/boot_logo.py pack "$BG" "$QD" > /dev/null
   B=integrations/puredarwin/m1-bringup
-  LP=launcher-tip-fast-quiet.patch; [ "$RB_QUIET" = stock ] && LP=launcher-tip-quiet.patch
-  LAB=(PCIE_LAB_PATCH="$HERE/$LP" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
+  LP=m1-boot-speed/launcher-fast-quiet.patch; [ "$RB_QUIET" = stock ] && LP=m1-quiet-boot/quiet-boot.patch
+  LAB=(PCIE_LAB_PATCH="$HERE/../$LP" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
   [ "$RB_QUIET" = stock ] || ARGS="$ARGS pd_quiet_wait=0 pd_rtc_wait=0"
 fi
 # The template with the prologue as its first command after the shebang line.
@@ -73,7 +73,7 @@ S=$(mktemp)
 # A script without the end marker ends the capture when the prompt returns.
 DONE=${RB_DONE:-$(grep -q PD_BENCH_DONE "$G" && echo marker || echo prompt)}
 R=runs/m1-desktop-010/pcie-enum-attempt-$N
-env -u PCIE_CHAIN -u SF_PD "${LAB[@]}" PCIE_STAGER="$HERE/tools/stage_ramdisk_rebase.py" PCIE_KC="$KC" PCIE_BOOTARGS="$ARGS" \
+env -u PCIE_CHAIN -u SF_PD ${LAB[@]+"${LAB[@]}"} PCIE_STAGER="$HERE/../m1-boot-speed/tools/stage_ramdisk_slim.py" PCIE_KC="$KC" PCIE_BOOTARGS="$ARGS" \
   PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" PCIE_DONE="$DONE" \
   PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$LIMIT" 2>&1 |
   grep -a '"status"\|rror\|delivered\|No space\|BENCH_TIMES\|REQUIRES_REVIEW\|not booting' | cut -c1-240 || true

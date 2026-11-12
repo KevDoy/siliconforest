@@ -16,7 +16,59 @@ owner switches the defaults.
   are the same revisions; the cross toolchain is rebuilt only because the SDK changed (no LLVM
   build: `arm64-cross-toolchain` is 14 small derivations).
 
-## State
+## The tip is the default (switch of 12 November; owner: "Finish rebase")
+**What a boot gets now when nothing names anything else**
+- Source: `integrations/puredarwin/rebase/pd.nix` defaults to the tip `c713d8fb`; `SF_PD=pin` is `e7aa00a6`.
+- Collection: `tools/default_kc.sh` (one place; every wrapper asks it) =
+  `rebase/build-kc.nix` = `/nix/store/71zynndd213vab1q6iwbqx4bc3f23f8b-puredarwin-kc-arm64-0.1`:
+  the collection proven in `rb01`..`rb12` plus, folded in, the no-recovery kernel patch
+  (`m1-native-boot/kernel-patches/0001`, `IOSetRecoveryBoot` logs and returns) and `PDAppleAVD`
+  (inert without `pdavd=1`). Variants: `default_kc.sh native`
+  (`/nix/store/xwj7sc8c0rpq65cnm9hmp4db2x4gfhi3-…`, the platform expert with the held-cores patch),
+  `storage` (`/nix/store/gjxjz2rpp2bzgrg0qf406rmf3pwidsa4-…`, + PDAppleNVMe; built, never booted),
+  `reboot` (`/nix/store/mx63hv3mz6anxryhg7rhv8n04ap20vp5-…`, PDCpuPower with SMC restart; built,
+  not booted).
+- The 15-recipe chain: every collection and kernel recipe of it (`m1-boot-speed`, `m1-touchbar`,
+  `m1-sound`, `m1-cpufreq`, `m1-smp`, `m1-quiet-boot`, `m1-dcp`, `m1-bwfm`, `m1-rust-kext/build-agx-kc`,
+  `m1-avd`, `m1-storage`, `m1-native-boot` and its `reboot/`) now begins with one line that returns
+  the flat recipe at the tip; its old body is reached only with `SF_PD=pin` and still evaluates to
+  the pin's derivation (`rjlxj88c….drv` → `z66w83kk…`). Retired at the tip, kept for the pin.
+- RAM root: `tools/pcie_assemble.py` takes `artifacts/rebase/ramdisk-tip.img` and the base
+  `mapping.json`, whose libSystem is `/nix/store/rdi193a97w1mjkpzzcalh28nb4spp78f-puredarwin-libsystem-default-0.1`
+  (`libsystem-default/build-libsystem.nix` at the tip). `chonkstep-darwin/stage_ramdisk.py`
+  accepts the tip's and the pin's base image by hash.
+- Launcher base tree (`runs/m1-desktop-010/pcie-m2-host-001/lab`): member gate without
+  `PDSun50iMMC` (a collection that has it still passes), challenge typed at a silent console in
+  every boot; record and way back: `rebase/launcher-base-change-20261112.patch`. Regenerated
+  against it and verified to give the same launcher as before plus that change: `quiet-boot.patch`,
+  `launcher-fast-quiet.patch` (now without the silent-console hunks: 99 → 60 changed lines),
+  `launcher-native.patch` (197 → 158), `reboot/launcher-self-reboot.diff`, `m1-smp-audit/host/vcpu-dump.patch`,
+  `no-video-mirror.patch`, `m1-apcie-port-packet/…/skip-port-framebuffer.patch`.
+- User space staged from Nix by the wrappers (Mesa, audio server and frameworks, `pdplay`,
+  `pdtbtest`, `pd-netd`, the AVD player and FFmpeg) is **still the pin's builds**: each wrapper says
+  `export SF_PD=pin` for those lookups. They run on the tip's kernel and libSystem (proven);
+  building them at the tip is open.
+
+**Booting the pin:** `GPU_DESKTOP_PIN=1 tools/gpu_desktop.sh <name> <minutes>`; for other wrappers
+`SF_KC=pin PCIE_PIN=1 <wrapper>` (collection `z66w83kk…`, the pin's RAM root
+`artifacts/m1-bringup-009/ramdisk.img`, the mapping as it was: `mapping.json.before-tip-20261112`).
+Building anything of the pin: `SF_PD=pin nix-build …`.
+
+**Files changed outside git, with backups**
+- `runs/m1-desktop-010/pcie-m2-host-001/lab/integrations/puredarwin/m1-bringup/host_progress.py`
+  (backup `host_progress.py.before-tip-20261112` beside it)
+- `artifacts/m1-desktop-010/apcie-port-candidate-003/mapping.json` (backup
+  `mapping.json.before-tip-20261112`)
+- new: `artifacts/rebase/ramdisk-tip.img`, `.json`, `.log`
+
+**Proof boots through the default entry points:** SWITCH_BOOTS_PLACEHOLDER
+
+**Hand-over, if this is read mid-way:** the edits above are in the working tree; proof boots are
+listed as they finish; open are the QEMU default (a sub-agent is on `qemu-dev/`), AGENTS.md, the
+clean-up of `m1-smp/kernel-patches/0002` and the T8010 override (both are pin-only code now and
+stay for `SF_PD=pin`), and the report to the coordinator.
+
+## State (before the switch)
 | Step | State |
 |---|---|
 | Source switch applied to the shared recipes | **done** (commit `510737cc2`): 76 recipes import `rebase/pd.nix`; all 79 recipes that named the pin instantiate to the same derivation before and after, as do the default collection (`rjlxj88c….drv` → `z66w83kk…`) and the Nix-built RAM root inputs. Three recipes keep the revision because their own text is a build input (`m1-keyboard/build-kext.nix`, `m1-network-default-route/build.nix`, `m1-apcie-bridge/root-build/build-private-policy-objects-001.nix`); found by the comparison, which first showed 6 differing derivations |

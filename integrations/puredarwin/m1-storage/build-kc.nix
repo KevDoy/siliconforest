@@ -7,6 +7,9 @@
 #   nix-build ... build-kc.nix --argstr kernelConfig development --no-out-link
 # Check the layout afterwards: ../m1-rust-kext/tools/kc_overlap.py <result>/kernel
 { kernelConfig ? "development" }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { inherit kernelConfig; more = [ { name = "PDAppleNVMe"; from = import ./build-kext.nix; } ]; } else
 let
   pins = import ../m1-rust-kext/pins.nix;
   pkgs = pins.pkgs;

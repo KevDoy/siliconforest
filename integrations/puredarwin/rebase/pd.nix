@@ -4,9 +4,10 @@
 #   pd = (import ../rebase/pd.nix).pd;
 # instead of naming a revision themselves.
 #
-#   SF_PD unset, empty or "pin"   the pin (default): the same flake reference the recipes
-#                                 carried before, so every derivation is unchanged
-#   SF_PD=tip                     the rebase target below
+#   SF_PD unset, empty or "tip"   the default since 12 November 2026: upstream's tip below
+#   SF_PD=pin                     the revision the lab was pinned to until then (e7aa00a6), with
+#                                 the same flake reference the recipes carried, so every pin
+#                                 derivation is the one it always was
 #
 # The switch is an environment variable because the recipes import each other by path and
 # nix-build has no argument that reaches every import. Two caches in this lab key on recipe
@@ -24,7 +25,7 @@ let
     tip = { checkout = "sources/puredarwin-rebase"; rev = "c713d8fb9b048a38e2242d67e29b9957ced8c495"; };
   };
   asked = builtins.getEnv "SF_PD";
-  which = if asked == "" then "pin" else asked;
+  which = if asked == "" then "tip" else asked;
   source = sources.${which} or (throw "SF_PD=${asked}: expected pin or tip");
 in rec {
   inherit which;

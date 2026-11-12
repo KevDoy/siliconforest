@@ -15,6 +15,9 @@
 # tree (git archive HEAD integrations/puredarwin | tar -x -C <dir>) while ../m1-smp is
 # being worked on by someone else.
 { kernelConfig ? "debug", desktop ? ../m1-smp/build-kc-desktop.nix }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { inherit kernelConfig; } else
 let
   pins = import ../m1-rust-kext/pins.nix;
   pkgs = pins.pkgs;

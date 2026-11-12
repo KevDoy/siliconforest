@@ -9,6 +9,9 @@
 # collection header and the kernel's __TEXT; PDRustPlat would also bind the same node).
 # Boot with `pdgpudt=2 pdgpudt_stringprops=1 pdagx=1`; without pdagx=1 PDAgx does not attach.
 { wifi ? false }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { } else
 let
   base = if wifi then import ../m1-bwfm/build-kc.nix else import ../m1-apcie-host/build-kc.nix;
   agx = import ./build-agx-kext.nix;

@@ -1,6 +1,7 @@
---- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 10:07:08.524141977 -0800
-+++ b/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 10:07:08.542783098 -0800
-@@ -225,7 +225,7 @@
+diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py b/integrations/puredarwin/m1-bringup/host_progress.py
+--- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.369437094 -0800
++++ b/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.370466797 -0800
+@@ -227,7 +227,7 @@
  
  
  BOOTARGS = ('-v -s debug=0x14e keepsyms=1 serial=3 serial-device-name=uart0 '
@@ -9,7 +10,7 @@
  # Guest processors. One (`cpus=1`, the hypervisor's device tree pruned to the boot CPU,
  # secondary start refused) unless the extra boot arguments carry `cpus=N` with N > 1: then
  # all eight /cpus nodes stay in the tree, that argument replaces `cpus=1`, and the pinned
-@@ -254,17 +254,54 @@
+@@ -256,17 +256,54 @@
  
  
  def configure_display_console(hv, backend, carveouts):
@@ -69,7 +70,7 @@
  def configure_entropy(hv):
      # ARM64 prng_random.c requests 4*SHA512_DIGEST_LENGTH (256 bytes).
      # Fresh OS CSPRNG output, never repetition/padding or a weakened XNU check.
-@@ -1316,6 +1353,9 @@
+@@ -1335,6 +1372,9 @@
          old.write_private(directory, 'original-bootargs.bin', ba)
          old.write_private(directory, 'original-adt.bin', adt)
          carveouts = read_carveouts(backend, directory)

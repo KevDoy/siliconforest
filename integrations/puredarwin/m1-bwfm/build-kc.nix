@@ -1,5 +1,8 @@
 # The m1-apcie-host kernel collection (the PDApcieT8103Bridge build named in
 # ../m1-apcie-host/build-kc.nix) plus IO80211Family and PDBwfm.
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { } else
 let
   base = import ../m1-apcie-host/build-kc.nix;
   wifi = import ./build-kexts.nix { };

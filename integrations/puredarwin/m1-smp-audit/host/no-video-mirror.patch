@@ -1,6 +1,7 @@
---- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 08:10:32.198409334 -0800
-+++ b/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 08:10:32.199071979 -0800
-@@ -225,7 +225,7 @@
+diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py b/integrations/puredarwin/m1-bringup/host_progress.py
+--- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.479318133 -0800
++++ b/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 08:14:45.480232295 -0800
+@@ -227,7 +227,7 @@
  
  
  BOOTARGS = ('-v -s debug=0x14e keepsyms=1 serial=3 serial-device-name=uart0 '

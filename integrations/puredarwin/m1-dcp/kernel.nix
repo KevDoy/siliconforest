@@ -25,6 +25,9 @@
 # in the recipe is -DPUREDARWIN_XNU_KERNEL_CONFIG, which is also the only difference between
 # the flake's own release and debug kernels. DEBUG stays the default.
 { patched ? true, kernelConfig ? "debug" }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/kernel.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/kernel.nix { inherit kernelConfig; } else
 let
   # the tree refuses RELEASE for this machine (no serial console, no -unsafe_kernel_text)
   configs = { debug = "DEBUG"; development = "DEVELOPMENT"; };

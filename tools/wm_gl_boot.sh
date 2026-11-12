@@ -36,7 +36,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
 # The collection with the multitouch trackpad (two-finger click = right button, two-finger
 # drag = wheel). pdm1tpmt=0 as an extra boot-arg falls back to the basic pointer mode.
-KC=${2:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1}
+KC=${2:-$(tools/default_kc.sh)}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin}
@@ -57,6 +57,9 @@ TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
 [ -r "$TEMPLATE" ] || { echo "no guest script at $TEMPLATE" >&2; exit 2; }
 [ -d "$KC" ] || { echo "no kernel collection at $KC" >&2; exit 2; }
 export PATH=$HOME/.nix-profile/bin:$PATH
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 # The same Mesa bundle the zero-copy demo runs on (DCP_TEST=kms in tools/dcp_boot.sh).
 T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
 X="$BIN=/usr/bin/chonkstep-darwin-desktop"

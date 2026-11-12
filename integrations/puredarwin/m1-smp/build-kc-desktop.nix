@@ -7,6 +7,9 @@
 # `--argstr kernelConfig development`: the kernel of that XNU configuration
 # (../m1-dcp/kernel.nix); the kexts are the same builds, see ../m1-dcp/README.md.
 { agx ? true, wifi ? true, slim ? true, kernelPatched ? true, kernelConfig ? "debug" }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { inherit kernelConfig; } else
 let
   base = import ../m1-trackpad-child/multitouch/build-kc-multitouch.nix { inherit agx wifi slim; };
   baseKernel = import ../m1-dcp/kernel.nix { };

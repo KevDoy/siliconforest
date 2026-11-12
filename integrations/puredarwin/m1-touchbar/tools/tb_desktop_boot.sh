@@ -15,11 +15,14 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-touchbar}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}
 case "$N" in tb*) ;; *) echo "boot names are prefixed tb" >&2; exit 2;; esac
 SOUND=$ROOT/integrations/puredarwin/m1-sound
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
-KC=${TB_KC:-$(cd "$HERE" && $NB build-kc.nix 2>/dev/null | tail -1)}
+KC=${TB_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
 SPKDB=${SD_SPKDB:-22}
 [ "$SPKDB" -ge 22 ] || { echo "SD_SPKDB: 22 dB below full scale or quieter" >&2; exit 2; }

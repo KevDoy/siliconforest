@@ -16,10 +16,13 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-avd}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; shift
 case "$N" in av*) ;; *) echo "boot names are prefixed av" >&2; exit 2;; esac
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
-KC=${AVD_KC:-$($NP m1-avd build-kc.nix)}
+KC=${AVD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
 python3 "$ROOT/integrations/puredarwin/m1-rust-kext/tools/kc_overlap.py" "$KC/kernel" | tail -1
 U=$($NP m1-avd build-user.nix)

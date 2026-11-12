@@ -16,9 +16,10 @@
 #   m1-smp/kernel-patches-tip/0003       park offline cores, idle accounting, deep idle (ported)
 #   m1-quiet-boot/kernel-patches/0001,0002
 #   m1-boot-speed/kernel-patches/0001    registry-quiet wait ignores the daemon hold
+#   m1-native-boot/kernel-patches/0001   IOSetRecoveryBoot does nothing (in every kernel since the switch)
 #
-#   SF_PD=tip nix-build kernel.nix --no-out-link                       # DEVELOPMENT, as the default collection
-#   SF_PD=tip nix-build kernel.nix --argstr kernelConfig debug --no-out-link
+#   nix-build kernel.nix --no-out-link                       # DEVELOPMENT, as the default collection
+#   nix-build kernel.nix --argstr kernelConfig debug --no-out-link
 #   `upTo` stops the series early, for bisecting: "bringup", "dcp", "smp", "quiet" or "all".
 { kernelConfig ? "development", upTo ? "all" }:
 let
@@ -49,6 +50,9 @@ let
     ]
     ++ pkgs.lib.optionals (through "all") [
       ../m1-boot-speed/kernel-patches/0001-xnu-registry-quiet-wait-ignores-the-daemon-hold.patch
+      # a safety fix that belongs in every kernel: IOSetRecoveryBoot logs and returns, so no
+      # panic or failed boot can ask the machine's firmware for recovery mode
+      ../m1-native-boot/kernel-patches/0001-xnu-IOSetRecoveryBoot-does-nothing.patch
     ];
   base = pd.packages.x86_64-linux.kernel-arm64-t8103-debug;
 in

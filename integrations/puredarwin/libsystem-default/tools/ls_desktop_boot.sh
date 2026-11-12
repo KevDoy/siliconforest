@@ -16,6 +16,9 @@ set -euo pipefail
 LSHERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$LSHERE/../../.." && pwd); cd "$ROOT"
 HERE=$ROOT/integrations/puredarwin/m1-desktop-scale
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-libsystem}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; LIMIT=${2:-480}
 case "$N" in ls*) ;; *) echo "boot names are prefixed ls" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -23,7 +26,7 @@ SECONDS_DESK=${DS_SECONDS:-215}; AUTO=${DS_AUTOPILOT:-1}
 [ "$SECONDS_DESK" -ge 11 ] && [ "$SECONDS_DESK" -le 14400 ] || { echo "DS_SECONDS is 11..14400" >&2; exit 2; }
 case "${DS_SCALE:-}" in ''|1|1.25|1.5|1.75|2|2.5|3) ;; *) echo "DS_SCALE is one of 1 1.25 1.5 1.75 2 2.5 3" >&2; exit 2;; esac
 case "${DS_THEME:-}${DS_ONLY:-}" in *[!a-z0-9,-]*) echo "DS_THEME and DS_ONLY are lower-case ids" >&2; exit 2;; esac
-KC=${DS_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
+KC=${DS_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)

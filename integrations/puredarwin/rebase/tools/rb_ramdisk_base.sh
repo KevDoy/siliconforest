@@ -13,9 +13,9 @@ OUT=artifacts/rebase/ramdisk-tip.img
 [ -e "$OUT" ] && { echo "keeping $OUT"; exit 0; }
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 R=integrations/puredarwin/rebase
-SRC=${1:-$(cd $R && SF_PD=tip $NIX -E '(import ./pd.nix).pd.packages.x86_64-linux.image-arm64-virt-minimal' | tail -1)}
+SRC=${1:-$(cd $R && $NIX -E '(import ./pd.nix).pd.packages.x86_64-linux.image-arm64-virt-minimal' | tail -1)}
 IMG=$(ls "$SRC"/*.img | head -1)
-LIB=${RB_LIBSYSTEM:-$(cd $R && SF_PD=tip $NIX build-libsystem.nix | tail -1)}
+LIB=${RB_LIBSYSTEM:-$(cd integrations/puredarwin/libsystem-default && $NIX build-libsystem.nix | tail -1)}
 mkdir -p artifacts/rebase; TMP=$(mktemp artifacts/rebase/ramdisk-tip.XXXXXX); trap 'rm -f "$TMP"' EXIT
 read -r FIRST COUNT < <(python3 - "$IMG" <<'PY'
 import struct, sys

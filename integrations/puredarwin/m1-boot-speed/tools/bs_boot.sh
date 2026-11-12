@@ -26,6 +26,9 @@ main() {
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-bootspeed}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; LIMIT=${2:-180}
 case "$N" in bs*) ;; *) echo "boot names are prefixed bs" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -37,7 +40,7 @@ NP="$HERE/tools/bs_nix_path.py"
 STOCK_KC=/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1
 case "${BS_KC:-}" in
   stock) KC=$STOCK_KC;;
-  '') KC=$("$NP" m1-boot-speed build-kc.nix);;
+  '') KC=$("$ROOT/tools/default_kc.sh");;
   *) KC=$BS_KC;;
 esac
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }

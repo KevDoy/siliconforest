@@ -15,7 +15,13 @@ import re
 import subprocess
 import tempfile
 
-BASE_SHA = 'b1154b2854c9771445a9b1b631d3d48837b35f655a4747665b94c72da10e4d05'
+# The qualified base images: the root of upstream's arm64 minimal image at the tip (the default
+# since 12 November 2026, artifacts/rebase/ramdisk-tip.img) and at the pinned revision e7aa00a6
+# (artifacts/m1-bringup-009/ramdisk.img, for PCIE_PIN=1 boots).
+BASE_SHAS = {
+    'bd6b06c1cfbd53037f3db3f906af4b5705fdb0147280e24ce4b31590ea8e5a1a': 'tip c713d8fb',
+    'b1154b2854c9771445a9b1b631d3d48837b35f655a4747665b94c72da10e4d05': 'pin e7aa00a6',
+}
 LAB = Path(__file__).resolve().parents[3]
 
 
@@ -42,8 +48,9 @@ def main():
     artifacts = (LAB / 'artifacts').resolve()
     if not output.parent.resolve().is_relative_to(artifacts) or output.exists():
         raise ValueError('Require a new output under the lab artifacts directory')
-    if digest(args.base) != BASE_SHA:
-        raise ValueError('Baseline RAM root does not match the qualified image')
+    BASE_SHA = digest(args.base)
+    if BASE_SHA not in BASE_SHAS:
+        raise ValueError('Baseline RAM root does not match a qualified image')
     mapping = json.loads(args.mapping.read_text())
     files, destinations = [], set()
     for entry in mapping['files']:

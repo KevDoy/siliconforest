@@ -20,6 +20,9 @@ main() {
 set -euo pipefail
 B1=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); HERE=$(cd "$B1/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-stage}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; LIMIT=${2:-175}
 case "$N" in sfb*) ;; *) echo "boot names are prefixed sfb" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -30,7 +33,7 @@ PROFILE=${SF_PROFILE:-shell}
 STAGE=${SF_STAGE:-$B1/out/m1n1-sf-stage.bin}
 [ -f "$STAGE" ] || { echo "no stage image at $STAGE: run $B1/build.sh" >&2; exit 2; }
 WORDS="native stage vdm-return ${SF_WORDS-vdm-serial noiolog}"
-KC=${SF_KC:-/nix/store/k2w23az428jr3nmqlca19da00kn4wshn-puredarwin-kc-arm64-0.1}
+KC=${SF_KC:-$("$ROOT/tools/default_kc.sh" native)}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 B=integrations/puredarwin/m1-bringup
 QD=$(mktemp -d); S=$(mktemp); trap 'rm -rf "$QD" "$S"' EXIT

@@ -5,6 +5,9 @@
 #   nix-build build-kc.nix --no-out-link
 # Boot-args and launcher patch that go with it: see ./kernel.nix.
 { kernelConfig ? "development" }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { inherit kernelConfig; } else
 let
   base = import ../m1-touchbar/build-kc.nix { inherit kernelConfig; };
   from = import ../m1-quiet-boot/kernel.nix { inherit kernelConfig; };

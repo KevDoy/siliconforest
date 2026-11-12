@@ -2,7 +2,7 @@
 # The lab's default arm64 libSystem: what the M1 RAM root and the QEMU images stage as
 # /usr/lib/libSystem.B.dylib.
 #
-#   baseline e7aa00a6 (upstream PureDarwin, arm64)
+#   upstream PureDarwin, arm64, at the revision of ../rebase/pd.nix (the tip; SF_PD=pin: e7aa00a6)
 #   + ../m1-userspace-diagnostics/fix-root/vm-page-size-symbol.patch
 #   + ../m1-userspace-diagnostics/fix-spawnattr/posix-spawnattr-init-zero.patch
 #       (those two are the previous default, build-libsystem-spawnattr.nix)
@@ -15,7 +15,7 @@
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  pd = (import ../rebase/pd.nix).pd;
 in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
   pname = "puredarwin-libsystem-default";
   patches = (old.patches or []) ++ [

@@ -14,6 +14,9 @@
 # link maps (nix-support/*.map, tools/symbolize.sh) stay. Wi-Fi + PDAgx + PDDcp only fits
 # with this. The default since boots ws04 and ws05; `--arg slim false` keeps the debug map.
 { agx ? false, wifi ? false, slim ? true }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { } else
 let
   base = if wifi then import ../m1-bwfm/build-kc.nix else import ../m1-apcie-host/build-kc.nix;
   tc = (import ../m1-rust-kext/pins.nix).crossToolchain;

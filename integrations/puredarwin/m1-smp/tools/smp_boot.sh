@@ -12,9 +12,12 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; SOAK=${2:-0}; CPUS=${SMP_CPUS:-8}
 case "$N" in sm*) ;; *) echo "boot names are prefixed sm" >&2; exit 2;; esac
-KC=${SMP_KC:-$(cd "$HERE" && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)}
+KC=${SMP_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 RUNTIME=${SMP_RUNTIME:-$((150 + 50 + 40 + 60 + 90 + 30 + SOAK))}
 S=$(mktemp); sed "s/@SOAK@/$SOAK/g" "${SMP_GUEST:-$HERE/guest/darwin-smp-bench.in}" > "$S"

@@ -2,6 +2,9 @@
 # patched kernel) with one change: the PDM1SPIHID bundle is the multitouch build of this
 # directory instead of ../../m1-trackpad-input-trace's. Nothing else in the recipe is touched.
 { agx ? true, wifi ? true, slim ? true }:
+# Since 12 November 2026 the default source is upstream's tip (../../rebase/pd.nix), where this is
+# ../../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../../rebase/pd.nix).tip then import ../../rebase/build-kc.nix { } else
 let
  base = import ../../m1-dcp/build-kc.nix { inherit agx wifi slim; };
  old = import ../../m1-trackpad-input-trace/build-input-trace.nix;

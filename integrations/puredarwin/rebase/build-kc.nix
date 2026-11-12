@@ -22,13 +22,19 @@
 #                          tools apply ./launcher-tip-members.patch)
 #   added                  PDM1SPIHID (m1-touchbar/build-spihid.nix), PDApcieT8103Bridge,
 #                          IO80211Family, PDBwfm, PDGpuDT, PDDRMDri, PDAgx, PDDcp, PDCpuPower,
-#                          PDAppleSound, PDAppleTouchBar
+#                          PDAppleSound, PDAppleTouchBar, PDAppleAVD (inert without pdavd=1)
 # Every member's debug map is stripped (`strip -S`), as on the pin, where the collection does
 # not fit otherwise. The build ends with the launcher's overlap check (kc_overlap.py).
 #
-#   SF_PD=tip nix-build build-kc.nix --no-out-link
+#   nix-build build-kc.nix --no-out-link
 #   --arg extra '[ "<bundle path>" ]'    further bundles;  --arg omit '[ "Name" ]'  fewer boot kexts
-{ kernelConfig ? "development", extra ? [ ], omit ? [ ], kernel ? import ./kernel.nix { inherit kernelConfig; } }:
+{ kernelConfig ? "development", extra ? [ ], omit ? [ ], kernel ? import ./kernel.nix { inherit kernelConfig; }
+# the platform expert build (m1-native-boot passes its own, with the held-cores patch)
+, platform ? import ../m1-smp/build-platform.nix
+# the PDCpuPower build (m1-native-boot/reboot passes its own, with restart and power-off)
+, cpupower ? import ../m1-cpufreq/build-kext.nix
+# further kexts by recipe: [ { name = "PDAppleNVMe"; from = <derivation>; } ]
+, more ? [ ] }:
 let
   source = import ./pd.nix;
   inherit (source) pd pkgs;
@@ -37,7 +43,7 @@ let
   ext = "System/Library/Extensions";
   set = import ../m1-smp/build-corecrypto.nix;
   ours = {
-    PDArmPlatformExpert = import ../m1-smp/build-platform.nix;
+    PDArmPlatformExpert = platform;
     IOGOPFramebuffer = import ../m1-display/console-return/build-framebuffer.nix;
     IOHIDFamily = import ../m1-native-input/build-hid-rev002.nix;
   };
@@ -64,7 +70,7 @@ let
   wifi = import ../m1-bwfm/build-kexts.nix { };
   dcp = import ../m1-dcp/build-kext.nix;
   agx = import ../m1-rust-kext/build-agx-kext.nix;
-  added = map (m: "${slim m.name m.from}/${m.name}.kext") [
+  added = map (m: "${slim m.name m.from}/${m.name}.kext") ([
     { name = "PDM1SPIHID"; from = import ../m1-touchbar/build-spihid.nix; }
     { name = "PDApcieT8103Bridge"; from = import ../m1-apcie-host/build-kext.nix; }
     { name = "IO80211Family"; from = wifi; }
@@ -73,10 +79,12 @@ let
     { name = "PDDRMDri"; from = dcp; }
     { name = "PDAgx"; from = agx; }
     { name = "PDDcp"; from = dcp; }
-    { name = "PDCpuPower"; from = import ../m1-cpufreq/build-kext.nix; }
+    { name = "PDCpuPower"; from = cpupower; }
     { name = "PDAppleSound"; from = import ../m1-sound/build-kext.nix; }
     { name = "PDAppleTouchBar"; from = import ../m1-touchbar/build-kext.nix; }
-  ];
+    # the video decoder: does nothing without pdavd=1 in the boot-args
+    { name = "PDAppleAVD"; from = import ../m1-avd/build-kext.nix; }
+  ] ++ more);
   afterPin = [ "PDTegraSDMMC" "PDGadgetFamily" "PDTegraUSB" "PDTegraXUSB" "PDTegraDisplay" "PDFBSDem" ];
   collection = pkgs.callPackage (pd.outPath + "/nix/pkgs/toolchain/kc-arm64.nix") {
     kcTools = import ../m1-bringup/kc-tools-fixed.nix;

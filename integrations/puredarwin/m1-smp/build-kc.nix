@@ -8,6 +8,9 @@
 # hypervisor, whose loader writes it).
 # Each replacement fails the evaluation when its needle is not in the base recipe.
 { agx ? true, wifi ? true, slim ? true, kernelPatched ? true }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { } else
 let
   base = import ../m1-dcp/build-kc.nix { inherit agx wifi slim; };
   baseKernel = import ../m1-dcp/kernel.nix { };

@@ -19,7 +19,14 @@ STAGER=ROOT/'integrations/puredarwin/chonkstep-darwin/stage_ramdisk.py'
 # PCIE_STAGER=<script>: another stager with the same arguments and record (the slim RAM root:
 # integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py). Default: the one above.
 if os.environ.get('PCIE_STAGER'): STAGER=Path(os.environ['PCIE_STAGER']).resolve(strict=True)
-ORIGINAL=ROOT/'artifacts/m1-bringup-009/ramdisk.img'
+# The RAM root's base image and the base mapping. Since 12 November 2026 both are the tip's
+# (docs/roadmap/issues/SF-V-rebase.md): the root of upstream's arm64 minimal image at the tip
+# (integrations/puredarwin/rebase/tools/rb_ramdisk_base.sh) and a mapping whose libSystem is the
+# tip's build of integrations/puredarwin/libsystem-default. PCIE_PIN=1: the pin's image and the
+# mapping as it was before the switch, for booting a collection of the pinned revision.
+PIN=os.environ.get('PCIE_PIN')=='1'
+ORIGINAL=ROOT/('artifacts/m1-bringup-009/ramdisk.img' if PIN else 'artifacts/rebase/ramdisk-tip.img')
+MAPPING=BASE/('mapping.json.before-tip-20261112' if PIN else 'mapping.json')
 SRC=ROOT/'integrations/puredarwin/m1-apcie-host'
 _sha={}
 def sha(p):
@@ -49,7 +56,7 @@ if JOIN:
  filled.chmod(0o700)
  SUPERVISOR=filled
 mapping=[]
-for e in load(BASE/'mapping.json')['files']:
+for e in load(MAPPING)['files']:
  e=dict(e)
  if e['destination']=='/usr/bin/darwin-desktop-test':e['source']=str(SUPERVISOR)
  mapping.append(e)

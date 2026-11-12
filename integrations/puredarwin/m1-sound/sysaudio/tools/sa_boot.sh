@@ -16,13 +16,16 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}
 GUEST=${2:-$HERE/guest/darwin-sysaudio-test.in}
 case "$N" in sd2[0-9]|sd3[0-9]) ;; *) echo "boot names for the system audio path are sd20 to sd39" >&2; exit 2;; esac
 [ ! -e "runs/m1-desktop-010/pcie-enum-attempt-$N" ] || { echo "boot $N exists" >&2; exit 2; }
 [ ! -e runs/bench.finisher.failed ] || { echo "runs/bench.finisher.failed exists: the bench needs a person" >&2; exit 2; }
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
-KC=${SD_KC:-/nix/store/a4q9xb09s3xblmj17jal2rmm59wvnadp-puredarwin-kc-arm64-0.1}
+KC=${SD_KC:-$("$ROOT/tools/default_kc.sh")}
 SPKDB=${SD_SPKDB:-30}
 [ "$SPKDB" -ge 30 ] || { echo "SD_SPKDB: 30 dB below full scale or quieter" >&2; exit 2; }
 EXTRA=${SD_FILES:-}

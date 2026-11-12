@@ -20,6 +20,9 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-storage}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; LEVEL=${2:?level 1, 2 or 3}
 case "$N" in nv[0-9]*) ;; *) echo "boot names are nv01, nv02, ..." >&2; exit 2;; esac
 case "$LEVEL" in 1|2|3) ;; *) echo "level is 1, 2 or 3" >&2; exit 2;; esac
@@ -27,7 +30,7 @@ case "$LEVEL" in 1|2|3) ;; *) echo "level is 1, 2 or 3" >&2; exit 2;; esac
 [ ! -e runs/bench.finisher.failed ] || { echo "runs/bench.finisher.failed exists: the M1 did not return to Linux; stop" >&2; exit 3; }
 [ ! -e runs/m1-storage/STOP ] || { echo "runs/m1-storage/STOP exists: $(cat runs/m1-storage/STOP)" >&2; exit 3; }
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
-KC=${NV_KC:-$(cd "$HERE" && $NIX build-kc.nix 2> "${TMPDIR:-/tmp}/nv-kc-build.$$.log" | tail -1)}
+KC=${NV_KC:-$("$ROOT/tools/default_kc.sh" storage)}
 [ -f "$KC/kernel" ] || { tail -30 "${TMPDIR:-/tmp}/nv-kc-build.$$.log" >&2; echo "no collection" >&2; exit 2; }
 rm -f "${TMPDIR:-/tmp}/nv-kc-build.$$.log"
 python3 "$ROOT/integrations/puredarwin/m1-rust-kext/tools/kc_overlap.py" "$KC/kernel" | tail -1

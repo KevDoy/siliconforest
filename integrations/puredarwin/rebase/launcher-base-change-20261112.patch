@@ -1,10 +1,18 @@
-../m1-quiet-boot/quiet-boot.patch on ./launcher-tip-text.patch in one file (PCIE_LAB_PATCH takes one): the quiet boot,
-with the kernel's own waits, of a collection built at the tip; the challenge is typed at a silent console
-(see launcher-tip-text.patch for why the tip needs that). Regenerate when a source changes.
+The change made to the launcher base tree (runs/m1-desktop-010/pcie-m2-host-001/lab, not in git) on
+12 November 2026, when the tip became the default. Kept as the record and as the way back
+(`patch -R -p1 -d <tree>`, or the copy host_progress.py.before-tip-20261112 beside the file):
+  - the member gate no longer requires org.puredarwin.kext.PDSun50iMMC, which upstream removed. A
+    collection that has it (every pin collection) still passes: names starting org.puredarwin.
+    beyond the required set are accepted, as before;
+  - the console challenge is typed once the console has been silent for a second, in every boot
+    (these are the hunks m1-boot-speed/launcher-fast-quiet.patch used to carry). At the tip the
+    kernel no longer waits 30 s for a clock, the root mounts while the Wi-Fi driver still logs,
+    and a kernel line inside the challenge's answer fails the proof (boot rb03).
+Every per-boot launcher patch was regenerated against the new tree the same day.
 
-diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/puredarwin/m1-bringup/host_progress.py
+diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py e/integrations/puredarwin/m1-bringup/host_progress.py
 --- a/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-11 23:57:41.032392638 -0800
-+++ d/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 00:32:59.960750543 -0800
++++ e/integrations/puredarwin/m1-bringup/host_progress.py	2026-11-12 00:32:47.026387171 -0800
 @@ -61,6 +61,8 @@
  # A guest script that prints this at the start of a line ends the capture about a second
  # later instead of waiting out --runtime (which stays the upper bound).
@@ -14,76 +22,7 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
  
  
  def done_mode():
-@@ -225,7 +227,7 @@
- 
- 
- BOOTARGS = ('-v -s debug=0x14e keepsyms=1 serial=3 serial-device-name=uart0 '
--            'disable-uart-irq=1 cpus=1 rd=md0 serial_video_mirror=1 pdtextboot=1')
-+            'disable-uart-irq=1 cpus=1 rd=md0 serial_video_mirror=0 pdtextboot=0 -noprogress')
- # Guest processors. One (`cpus=1`, the hypervisor's device tree pruned to the boot CPU,
- # secondary start refused) unless the extra boot arguments carry `cpus=N` with N > 1: then
- # all eight /cpus nodes stay in the tree, that argument replaces `cpus=1`, and the pinned
-@@ -254,17 +256,54 @@
- 
- 
- def configure_display_console(hv, backend, carveouts):
--    # Pinned HV.set_bootargs(-v) uses legacy display=0. This kernel requires
--    # nonzero to enter PE_create_console's video/mirror branch; 2 means text.
-+    # Quiet boot. Pinned HV.set_bootargs(-v) uses legacy display=0, which this kernel
-+    # treats as a text console; 1 is its graphics boot: the video console is initialised
-+    # on the firmware framebuffer but paints no character and does not clear it. The
-+    # console stays on the UART (serial=3, no mirror), -noprogress keeps the kernel's
-+    # progress indicator off, and -v stays for launchd's console log.
-     # Retain firmware's actual framebuffer, pixel format, stride and geometry.
-     video = hv.tba.video
-     fields = framebuffer_geometry(video, backend, carveouts)
--    video.display = 2
--    return dict(guest_display=2, mode='text', geometry=fields,
--                serial_video_mirror=True, pdtextboot=True,
-+    video.display = 1
-+    return dict(guest_display=1, mode='graphics', geometry=fields,
-+                serial_video_mirror=False, pdtextboot=False,
-+                boot_logo=getattr(backend, 'boot_logo', None),
-                 framebuffer_geometry_preserved=True, physical_panel_observed=False)
- 
- 
-+def paint_boot_logo(backend, carveouts):
-+    """Put boot-logo.gz (next to this file, with boot-logo.json; made by
-+    integrations/puredarwin/m1-quiet-boot/boot_logo.py) on the panel: m1n1's own
-+    framebuffer console is shut down without restoring its saved logo, then the picture is
-+    decompressed on the target straight into the firmware framebuffer and read back.
-+    After the shutdown the pinned HV.start()'s fb_improve_logo/fb_shutdown do nothing, so the
-+    picture stays until a guest driver changes the display. Without the two files, or with
-+    another framebuffer geometry, nothing is painted and the screen is left as it was."""
-+    here = Path(__file__).resolve().parent
-+    try:
-+        meta = json.loads((here / 'boot-logo.json').read_text())
-+        payload = (here / 'boot-logo.gz').read_bytes()
-+    except OSError:
-+        return dict(painted=False, reason='no boot-logo.gz/boot-logo.json in the launcher tree')
-+    fields = framebuffer_geometry(backend.ba.video, backend, carveouts)
-+    size = fields['stride'] * fields['height']
-+    if (fields['width'], fields['height'], fields['stride'], fields['depth'] & 0xff, size) != (
-+            meta['width'], meta['height'], meta['stride'], meta['depth'], meta['bytes']):
-+        return dict(painted=False, reason='framebuffer geometry differs from the picture', geometry=fields)
-+    image.require(0 < len(payload) <= 32 << 20, 'Boot picture payload size')
-+    backend.p.fb_shutdown(False)
-+    began = time.time()
-+    with backend.u.heap.guarded_malloc(len(payload)) as address:
-+        backend.iface.writemem(address, payload)
-+        written = backend.p.gzdec(address, len(payload), fields['base'], size)
-+    image.require(written == size, 'Boot picture decompressed to an unexpected size')
-+    painted = time.time()
-+    readback = image.sha(backend.iface.readmem(fields['base'], size))
-+    return dict(painted=True, sha256=meta['sha256'], readback_sha256=readback,
-+                readback_matches=readback == meta['sha256'], painted_at=round(painted, 3),
-+                paint_seconds=round(painted - began, 3), readback_seconds=round(time.time() - painted, 3))
-+
-+
- def configure_entropy(hv):
-     # ARM64 prng_random.c requests 4*SHA512_DIGEST_LENGTH (256 bytes).
-     # Fresh OS CSPRNG output, never repetition/padding or a weakened XNU check.
-@@ -441,25 +480,40 @@
+@@ -441,25 +443,40 @@
                              'wb', buffering=0) as tx_log):
                  self.tx_log = tx_log
                  shell_path_sent = False
@@ -132,7 +71,7 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
                          # Fixed, single-use RAM-root experiment. Never accept a
                          # command string from guest output or arbitrary metadata.
                          command = desktop_command(self.proof.nonce)
-@@ -467,12 +521,14 @@
+@@ -467,12 +484,14 @@
                          self.desktop_sent = True
                          bq_mark('guest_command')
                          self.send(command)
@@ -149,7 +88,7 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
                      self.check_done(tail)
                      self.advance_virtual(data)
          except BaseException as error:
-@@ -790,7 +846,7 @@
+@@ -790,7 +809,7 @@
  
  
  # Original isolated opt-in. No hardware operation; consumed by prepare.py.
@@ -158,13 +97,3 @@ diff -ru a/integrations/puredarwin/m1-bringup/host_progress.py d/integrations/pu
  APCIE_OBSERVER_MEMBER = 'org.puredarwin.driver.PDApcieT8103Bridge'
  
  def apcie_port_observer_enabled(inputs):
-@@ -1316,6 +1372,9 @@
-         old.write_private(directory, 'original-bootargs.bin', ba)
-         old.write_private(directory, 'original-adt.bin', adt)
-         carveouts = read_carveouts(backend, directory)
-+        backend.boot_logo = paint_boot_logo(backend, carveouts)
-+        print('QUIET_BOOT_LOGO ' + json.dumps(backend.boot_logo), flush=True)
-+        bq_mark('boot_logo_done')
-         reservation = check_reservation(backend, inputs, layout, carveouts)
-         old.write_private(directory, 'original-observations.json',
-                           dict(snapshot=snapshot, layout=layout, packet=inputs.report,

@@ -36,7 +36,7 @@ if [ "${DCP_TEST:-0}" = prime ]; then
 fi
 if [ "${DCP_TEST:-0}" = 1 ]; then
   export PATH=$HOME/.nix-profile/bin:$PATH
-  T=$(cd integrations/puredarwin/m1-dcp && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes dcp-flip-test.nix --no-out-link)
+  T=$(cd integrations/puredarwin/m1-dcp && SF_PD=pin nix-build --extra-experimental-features nix-command --extra-experimental-features flakes dcp-flip-test.nix --no-out-link)
   export PCIE_EXTRA_FILES="$T/usr/local/bin/dcp-flip-test=/usr/local/bin/dcp-flip-test;$T/usr/local/lib/mesa-asahi/libdrm.2.dylib=/usr/local/lib/mesa-asahi/libdrm.2.dylib"
   # The guest script replaces the supervisor directly (PCIE_GUEST_TEMPLATE is only honoured on the Wi-Fi join path).
   export PCIE_EXTRA_FILES="$PCIE_EXTRA_FILES;${DCP_TEMPLATE:-$ROOT/integrations/puredarwin/m1-dcp/supervisor/darwin-dcp-flip-test.in}=/usr/bin/darwin-desktop-test"
@@ -48,7 +48,7 @@ fi
 # DCP_KMS_REF=<panel-linux-kms.fp>.
 if [ "${DCP_TEST:-0}" = kms ]; then
   export PATH=$HOME/.nix-profile/bin:$PATH
-  T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
+  T=$(cd integrations/puredarwin/m1-mesa-asahi && SF_PD=pin nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
   X="$T/usr/local/bin/agx-panel-demo=/usr/local/bin/agx-panel-demo"
   for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
   [ -n "${DCP_KMS_REF:-}" ] && X="$X;$DCP_KMS_REF=/usr/local/share/agx/panel-linux-kms.fp"

@@ -33,6 +33,9 @@ main() {
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-native}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}; LIMIT=${2:-175}
 case "$N" in nb*) ;; *) echo "boot names are prefixed nb" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -62,7 +65,7 @@ if [ "${NB_REBOOT:-}" = 1 ]; then
   case " ${NB_BOOTARGS:-} " in *" pdreboot=0 "*) echo "NB_REBOOT=1 with pdreboot=0 cannot restart" >&2; exit 2;; esac
 fi
 [ "${NB_SESSION:-}" = launchd ] && { [ "$MODE" = native ] || { echo "NB_SESSION=launchd is for native boots" >&2; exit 2; }; WORDS="$WORDS multiuser"; }
-KC=${NB_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
+KC=${NB_KC:-$("$ROOT/tools/default_kc.sh" native)}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 B=integrations/puredarwin/m1-bringup
 QD=$(mktemp -d); S=$(mktemp); trap 'rm -rf "$QD" "$S"' EXIT

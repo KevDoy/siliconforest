@@ -23,11 +23,19 @@ RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
 # (m1-boot-speed/build-kc.nix: m1-touchbar/build-kc.nix with m1-boot-speed/kernel.nix; boots bs02, bs03).
 # It needs pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args and the launcher patch below (which waits
 # for a silent console before it types): without the patch the harness fails its console proof.
-KC=${GPU_DESKTOP_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
+# Since 12 November 2026 it is built from upstream's tip (tools/default_kc.sh, SF-V-rebase.md), with
+# the RAM root made from the tip's image. GPU_DESKTOP_PIN=1: the last collection and the RAM root
+# of the pinned revision e7aa00a6, as this script booted them before.
+PIN=${GPU_DESKTOP_PIN:-0}
+[ "$PIN" = 1 ] && export SF_KC=pin PCIE_PIN=1
+KC=${GPU_DESKTOP_KC:-$(tools/default_kc.sh)}
+# What is staged from Nix below (Mesa, the audio server and its frameworks, pdplay) are still the
+# builds of the pinned revision, which run on the tip's kernel and libSystem.
+export SF_PD=pin
 # Store paths of the staged builds, without evaluating a recipe whose inputs are unchanged
 # (each evaluation is 20 to 70 s; BS_NIX_CACHE=0 evaluates always).
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
-[ -f "$KC/kernel" ] || KC=$($NP m1-boot-speed build-kc.nix)
+[ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
 # The compositor with display scaling, the settings menu, volume keys and the Touch Bar phase (wm-darwin merge, boot ds06).
 D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}

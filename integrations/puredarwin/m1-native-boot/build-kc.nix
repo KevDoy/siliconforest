@@ -11,6 +11,9 @@
 # holds (the default collection must be in the store, which it is once it has been built),
 # and replaced by a copy of ours stripped the same way.
 { kernelConfig ? "development" }:
+# Since 12 November 2026 the default source is upstream's tip (../rebase/pd.nix), where this is
+# ../rebase/build-kc.nix; what follows builds the pinned revision and is reached with SF_PD=pin.
+if (import ../rebase/pd.nix).tip then import ../rebase/build-kc.nix { inherit kernelConfig; platform = import ./build-platform.nix; } else
 let
   pins = import ../m1-rust-kext/pins.nix;
   pkgs = pins.pkgs;

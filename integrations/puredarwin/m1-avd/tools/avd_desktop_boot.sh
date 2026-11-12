@@ -21,6 +21,9 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-avd}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}
 case "$N" in av*) ;; *) echo "boot names are prefixed av" >&2; exit 2;; esac
 if [ "${AVD_INTERACTIVE:-0}" = 1 ]; then
@@ -33,7 +36,7 @@ else
   [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
 fi
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
-KC=${AVD_KC:-$($NP m1-avd build-kc.nix)}
+KC=${AVD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
 T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
 D=runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop

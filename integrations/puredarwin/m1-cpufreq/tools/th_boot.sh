@@ -18,9 +18,12 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}
 case "$N" in th*) ;; *) echo "boot names are prefixed th" >&2; exit 2;; esac
-KC=${TH_KC:-$(cd "$HERE" && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)}
+KC=${TH_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 RUNTIME=${TH_RUNTIME:-520}
 if [ "$RUNTIME" -gt 600 ] && [ "${TH_LONG:-0}" != 1 ]; then echo "boots are capped at 600 s (TH_LONG=1 for the overnight soak)" >&2; exit 2; fi

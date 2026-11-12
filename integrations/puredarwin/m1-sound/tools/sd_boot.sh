@@ -19,10 +19,13 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
+# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
+# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
+export SF_PD=pin
 N=${1:?name}
 case "$N" in sd*) ;; *) echo "boot names are prefixed sd" >&2; exit 2;; esac
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
-KC=${SD_KC:-$(cd "$HERE" && $NIX build-kc.nix --no-out-link 2> "${TMPDIR:-/tmp}/sd-kc-build.$$.log" | tail -1)}
+KC=${SD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { tail -30 "${TMPDIR:-/tmp}/sd-kc-build.$$.log" >&2; echo "no collection" >&2; exit 2; }
 rm -f "${TMPDIR:-/tmp}/sd-kc-build.$$.log"
 PLAY=$(cd "$HERE" && $NIX build-pdplay.nix --no-out-link 2>/dev/null | tail -1)
