@@ -11,7 +11,8 @@ times before each boot. The answer is kept in runs/nix-path-cache, keyed by the 
 the content of everything the recipe names: the .nix file, every relative path in it (a .nix
 file is followed, another file is hashed, a directory is hashed whole), the pinned Linux
 tree's commit and tracked changes, and absolute lab paths under runs/. The flake and nixpkgs
-are pinned by revision in the recipes themselves. A cached path is used only while it exists
+are pinned by revision in rebase/pd.nix, which the recipes import (SF_PD, when set, is part
+of the key). A cached path is used only while it exists
 in the store. BS_NIX_CACHE=0 always evaluates; BS_NIX_DEBUG=1 lists the inputs.
 """
 import hashlib
@@ -87,6 +88,10 @@ def main(argv):
         for command in (['rev-parse', 'HEAD'], ['diff', 'HEAD']):
             state.update(hashlib.sha256(subprocess.run(['git', '-C', str(LINUX)] + command, capture_output=True).stdout).digest())
     state.update('\0'.join([directory, name] + arguments).encode())
+    # The source switch of rebase/pd.nix selects another PureDarwin tree for the same recipe
+    # text. Part of the key only when set, so the keys of the default (the pin) are unchanged.
+    if os.environ.get('SF_PD'):
+        state.update(b'\0SF_PD=' + os.environ['SF_PD'].encode())
     if os.environ.get('BS_NIX_DEBUG'):
         sys.stderr.write('%d input files, linux tree %s\n' % (len(files), linux))
         sys.stderr.write(''.join('  %s\n' % p.relative_to(ROOT) for p in files[:400]))

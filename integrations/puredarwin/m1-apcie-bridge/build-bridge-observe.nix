@@ -4,7 +4,7 @@
 # stages nothing. board.c and survey.h are the frozen m1-dart-survey revision-2
 # files, checked against that leaf's own source-validation.json.
 let
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  pd = (import ../rebase/pd.nix).pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   survey = builtins.fromJSON (builtins.readFile ../m1-dart-survey/source-validation.json);
   copied = pkgs.runCommand "puredarwin-apcie-bridge-observe-source" {} ''

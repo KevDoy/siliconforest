@@ -2,7 +2,7 @@
 # admitted. This expression neither selects a KC nor stages a boot packet.
 let
   pin = "e7aa00a60f0b56ef35aa24252e81467787bf71ea";
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=${pin}";
+  pd = (import ../../rebase/pd.nix).pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   providerRecipe = ./build-private-policy-objects-001.nix;
   provider = import providerRecipe;

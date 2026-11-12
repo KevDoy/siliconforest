@@ -1,6 +1,6 @@
 # Isolated original passive input trace; inherited T2 transport/dispatch remain unchanged.
 let
- pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+ pd = (import ../rebase/pd.nix).pd;
  pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
  inputs = builtins.fromJSON (builtins.readFile ./sdk-build-inputs-001.json);
  names = [ "CMakeLists.txt" "Info.plist" "PDM1KeyboardHW.cpp" "PDM1KeyboardHW.h" "PDM1SPIHID.cpp" "PDM1SPIHID.h" "m1kbd_board.c" "m1kbd_hw.h" "m1kbd_pio.c" "m1kbd_hid.c" "m1kbd_hid.h" "native_protocol/dl_spi_hid.c" "native_protocol/dl_spi_hid.h" "observation_layout.h" "m1tp_enum.c" "m1tp_enum.h" "PDM1SPIHIDChild.inc" "PDM1SPITrackpad.cpp" "PDM1SPITrackpad.h" "m1tp_child_policy.c" "m1tp_child_policy.h" "child_state.h" "trackpad_reference.h" "m1tp_trace.c" "m1tp_trace.h" ];

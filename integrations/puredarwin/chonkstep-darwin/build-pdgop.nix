@@ -1,7 +1,7 @@
 # Keep PDGOP's string-based PDIOKitLib calls bound to the matching static IOKit.
 # libIOKitCF has different matching-function signatures and is not interchangeable.
 let
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  pd = (import ../rebase/pd.nix).pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
 in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
   pname = "puredarwin-chonkstep-pdgop-static";

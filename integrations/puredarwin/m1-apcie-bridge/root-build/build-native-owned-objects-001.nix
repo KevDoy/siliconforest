@@ -1,7 +1,7 @@
 # Original owned-reference provider OBJECT package only; effect backend unavailable. No kext, KC, image or boot.
 let
   pin = "e7aa00a60f0b56ef35aa24252e81467787bf71ea";
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=${pin}";
+  pd = (import ../../rebase/pd.nix).pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   p = pd.packages.x86_64-linux;
   ownerReceiptText = builtins.readFile ../native_owned/source-validation-001.json;

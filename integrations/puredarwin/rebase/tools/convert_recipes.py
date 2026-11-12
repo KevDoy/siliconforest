@@ -9,9 +9,10 @@ Rewrites, in every live recipe, the expression
 (the revision written out, or as "${pin}" next to a `pin = "<pin>";` binding) into
     (import <relative path>/rebase/pd.nix).pd
 and nothing else. Without --write it only lists what it would change. Not touched: frozen
-history (revisions/, attempts/, implementation-revisions/, host-revision*/, source/) and
-the directories of other streams (cocoa, qemu-dev, homebrew, libsystem-default,
-m1-native-boot), which keep naming the pin. Running it again changes nothing.
+history (revisions/, attempts/, implementation-revisions/, host-revision*/, source/), the
+directories of other streams (cocoa, qemu-dev, homebrew, libsystem-default, m1-native-boot)
+and the three recipes of SELF_INPUT below; all of these keep naming the pin. Running it
+again changes nothing.
 """
 import os
 import re
@@ -23,6 +24,18 @@ URL = 'git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submod
 CALL = re.compile(r'builtins\.getFlake "' + re.escape(URL) + r'(?:' + PIN + r'|\$\{pin\})"')
 FROZEN = ('revisions', 'attempts', 'implementation-revisions', 'source', 'build-recipes')
 OTHERS = ('cocoa', 'qemu-dev', 'homebrew', 'libsystem-default', 'm1-native-boot', 'rebase')
+# Recipes whose own text is an input of a build: converting them would change what the pin
+# builds, so they keep naming the pin. None is on the path of a current collection or RAM root.
+#   m1-keyboard/build-kext.nix          its directory, recipe included, is the kext's source
+#   m1-network-default-route/build.nix  the network guests take that whole directory as an
+#                                       include path (-I${../m1-network-default-route})
+#   m1-apcie-bridge/root-build/build-private-policy-objects-001.nix
+#                                       build-private-probe-bundle-001.nix checks this file's hash
+SELF_INPUT = (
+    'm1-keyboard/build-kext.nix',
+    'm1-network-default-route/build.nix',
+    'm1-apcie-bridge/root-build/build-private-policy-objects-001.nix',
+)
 
 
 def main(argv):
@@ -35,6 +48,9 @@ def main(argv):
             continue
         text = path.read_text()
         if not CALL.search(text):
+            continue
+        if str(path.relative_to(root)) in SELF_INPUT:
+            print('kept (its text is a build input): %s' % path.relative_to(root)); skipped += 1
             continue
         if '${pin}' in CALL.search(text).group(0) and not re.search(r'\bpin = "' + PIN + '";', text):
             print('SKIP (pin bound elsewhere): %s' % path.relative_to(root)); skipped += 1
