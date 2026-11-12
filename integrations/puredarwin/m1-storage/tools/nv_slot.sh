@@ -10,6 +10,9 @@
 # NV_VERDICT_MODE=part: the boot names the SiliconForest partition (NV_PART=1) and mounts it
 # read-only (guest/darwin-disk-ro.in); the verdict then also wants the tree digest of
 # NV_TREE_REF and our partition unchanged. <expected write_refused> may be "any".
+# NV_VERDICT_MODE=write: a boot of the WRITE-FENCED build (../build-kc-rw.nix; guest/darwin-disk-rw.in,
+# root on the memory disk): pdnvme_write=1, read fence on. After the boot Linux also checks our
+# partition (tools/dr_linux_root.sh wcheck: e2fsck -fn, the written files' hashes).
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; LEVEL=${2:?level}; EXPECT=${3:?expected write_refused}
@@ -32,10 +35,22 @@ if [ "${NV_VERDICT_MODE:-}" = part ]; then
   export NV_PART=1 NV_PART_LBA=$SF_PART_LBA NV_GUEST=${NV_GUEST:-$HERE/guest/darwin-disk-ro.in} NV_TREE_REF=${NV_TREE_REF:-$ROOT/runs/m1-storage/ref-tree-sw01.txt} NV_VERDICT_MODE
   [ -s "$NV_TREE_REF" ] || { echo "no tree reference $NV_TREE_REF" >&2; exit 2; }
 fi
+if [ "${NV_VERDICT_MODE:-}" = write ]; then
+  . private/disk-root/sf-part.env || exit 2
+  export PATH=$HOME/.nix-profile/bin:$PATH
+  export NV_PART=1 NV_PART_LBA=$SF_PART_LBA NV_PART_BLOCKS=$SF_PART_BLOCKS NV_GUEST=${NV_GUEST:-$HERE/guest/darwin-disk-rw.in} NV_VERDICT_MODE
+  export NV_KC=${NV_KC:-$(cd "$HERE" && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-kc-rw.nix 2>/dev/null | tail -1)}
+  [ -f "$NV_KC/kernel" ] || { echo "no write-fenced collection" >&2; exit 2; }
+  export NV_BOOTARGS="pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 ${NV_BOOTARGS:-}"
+  export NV_WCHECK=$ROOT/runs/m1-storage/$N-wcheck.txt
+fi
 "$HERE/tools/linux_m1.sh" all "$N-before" "$R" || exit 2
 [ "$(grep -c '^NVT_HASH [0-9]* [0-9]* [0-9a-f]\{64\}$' "runs/m1-storage/$N-before/hashes")" = "$(grep -c . "$R")" ] || { echo "the Linux baseline is incomplete; not booting" >&2; exit 2; }
 NV_RANGES=$R "$HERE/tools/nv_boot.sh" "$N" "$LEVEL"
 grep -q '"status": *"DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED"' "runs/m1-desktop-010/pcie-enum-attempt-$N/result.json" 2>/dev/null ||
   stop "$N: the cycle did not end DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED; all storage boots stopped"
 "$HERE/tools/linux_m1.sh" all "$N-after" "$R" || stop "$N: Linux could not be read after the boot; all storage boots stopped"
+if [ "${NV_VERDICT_MODE:-}" = write ]; then
+  DR_OUT=$NV_WCHECK "$HERE/tools/dr_linux_root.sh" wcheck || stop "$N: our partition could not be checked from Linux after the write boot; all storage boots stopped"
+fi
 python3 -B "$HERE/tools/nv_verdict.py" "runs/m1-storage/$N-before" "runs/m1-storage/$N-after" "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" "$EXPECT" "$LEVEL" | tee "runs/m1-storage/$N-verdict.txt"

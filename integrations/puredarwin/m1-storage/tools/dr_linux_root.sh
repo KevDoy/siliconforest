@@ -8,16 +8,22 @@
 #   check                  identity, e2fsck -fn, usage
 #   transform <sf-roinit>  mount, tools/sf-root-transform.sh on it, unmount, e2fsck -fn
 #   tree                   mount read-only (noload), a listing digest, unmount
+#   wcheck                 after a fenced-write boot: the superblock's state BEFORE anything else,
+#                          e2fsck -fn (nothing is repaired or replayed), then a read-only mount
+#                          without journal replay and the SHA-256 of everything under
+#                          /private/sf-wtest. DR_REPLAY=1 (an unclean stop was intended): after
+#                          the first e2fsck -fn, e2fsck -fy replays the journal, then -fn again.
+#   DR_OUT=<file>          where the output goes (default below)
 # Output: runs/m1-storage/linux-root-<cmd>-<time>.txt
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 . private/disk-root/sf-part.env
-CMD=${1:?check|transform|tree}; INIT=${2:-}
+CMD=${1:?check|transform|tree|wcheck}; INIT=${2:-}
 M1="ssh -o HostKeyAlias=10.1.1.127 -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 chrisk@10.1.1.211"
-OUT=runs/m1-storage/linux-root-$CMD-$(date +%Y%m%d-%H%M%S).txt
+OUT=${DR_OUT:-runs/m1-storage/linux-root-$CMD-$(date +%Y%m%d-%H%M%S).txt}
 for i in $(seq 1 36); do $M1 true 2>/dev/null && break; sleep 5; done
 {
-  echo "WANT_PARTUUID=$SF_PARTUUID WANT_LBA=$SF_PART_LBA WANT_BLOCKS=$SF_PART_BLOCKS CMD=$CMD"
+  echo "WANT_PARTUUID=$SF_PARTUUID WANT_LBA=$SF_PART_LBA WANT_BLOCKS=$SF_PART_BLOCKS CMD=$CMD REPLAY=${DR_REPLAY:-0}"
   if [ "$CMD" = transform ]; then
     [ -f "$INIT" ] || { echo "transform needs the sf-roinit binary" >&2; exit 2; }
     echo "INIT_B64=$(base64 -w0 "$INIT")"; echo "TRANSFORM_B64=$(base64 -w0 "$HERE/sf-root-transform.sh")"
@@ -43,6 +49,19 @@ transform)
   sync; umount $MNT || fail "umount"; rm -rf $T
   echo "SFL_TRANSFORM_RC $rc"
   e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}";;
+wcheck)
+  dumpe2fs -h $P 2>/dev/null | grep -iE 'Filesystem state|features|Journal' | sed 's/^/SFL_SB_FIRST /'
+  e2fsck -fn $P 2>&1 | tail -4 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}"
+  if [ "$REPLAY" = 1 ]; then
+    e2fsck -fy $P 2>&1 | tail -6 | sed 's/^/SFL_REPLAY /'; echo "SFL_REPLAY_RC ${PIPESTATUS[0]}"
+    e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK2 /'; echo "SFL_FSCK2_RC ${PIPESTATUS[0]}"
+  fi
+  mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
+  (cd $MNT/private/sf-wtest 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_WSHA /'
+  (cd $MNT && sha256sum bin/sh usr/lib/libSystem.B.dylib) 2>&1 | sed 's/^/SFL_OLDSHA /'
+  echo "SFL_TREE entries=$(cd $MNT && find . | wc -l)"
+  df -k $MNT | tail -1 | sed 's/^/SFL_DF /'
+  umount $MNT || fail "umount";;
 tree)
   mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
   echo "SFL_TREE entries=$(cd $MNT && find . | wc -l) listing=$(cd $MNT && find . -printf '%y %p %s %l\n' | grep -v '^d ' | LC_ALL=C sort | sha256sum | cut -c1-64)"

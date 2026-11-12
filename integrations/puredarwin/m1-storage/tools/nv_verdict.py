@@ -27,6 +27,9 @@ expect_refused = None if sys.argv[4] == 'any' else int(sys.argv[4])
 # mounted read-only; NV_TREE_REF holds the tree digest of the image it was copied from.
 part_mode = os.environ.get('NV_VERDICT_MODE') == 'part'
 root_mode = os.environ.get('NV_VERDICT_MODE') == 'root'     # the root filesystem was our partition, read-only (guest/darwin-diskroot.in)
+# NV_VERDICT_MODE=write: the write-fenced build wrote files through ext4 on the fenced device (guest/darwin-disk-rw.in);
+# NV_WCHECK is the output of tools/dr_linux_root.sh wcheck, made from Linux after the boot.
+write_mode = os.environ.get('NV_VERDICT_MODE') == 'write'
 ours_lba = int(os.environ.get('NV_PART_LBA', '0'))
 level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
 bad = []
@@ -62,6 +65,11 @@ for (lba, blocks), h in sorted(ha.items()):
     quiet = fs in ('apfs', 'none') or bool(ours)    # Linux mounts none of these (ours: nothing may write it in a read-only boot)
     if ours: name = name + '=SF'
     b, d = hb.get((lba, blocks)), hd.get((lba, blocks))
+    if write_mode and ours:
+        # written on purpose in this boot: before == Darwin's reading before its first write; "after" is reported only
+        ours_n = globals().get('ours_n', 0) + 1; ours_pre = globals().get('ours_pre', 0) + (b == d and b is not None)
+        print('NV_RANGE %10d %4d %-8s %-5s %-22s %s' % (lba, blocks, name, fs, 'unchanged' if b == h else 'written-in-this-boot', 'darwin-before-write==linux-before' if b == d else 'DARWIN-BEFORE-WRITE-DIFFERS'))
+        continue
     state = 'unchanged' if b == h else ('no-before' if b is None else 'CHANGED-BY-LINUX-OR-US')
     rd = 'darwin==linux' if d == h else ('darwin-missing' if d is None else 'DARWIN-DIFFERS')
     print('NV_RANGE %10d %4d %-8s %-5s %-22s %s' % (lba, blocks, name, fs, state, rd))
@@ -73,6 +81,12 @@ for (lba, blocks), h in sorted(ha.items()):
         moved += 1
 check(static_n > 0 and static_ok == static_n, 'ranges Linux never writes (GPTs, APFS partitions%s): ' % (', the SiliconForest partition' if ours_lba else '') + '%d of %d unchanged before/after AND equal under Darwin' % (static_ok, static_n))
 check(stable_ok == stable_n, 'ranges in Linux-mounted filesystems that Linux left alone: %d of %d equal under Darwin' % (stable_ok, stable_n))
+if write_mode:
+    check(globals().get('ours_n', 0) > 0 and globals().get('ours_pre') == globals().get('ours_n'), 'ranges inside the SiliconForest partition: %s of %s read by Darwin before its first write equal Linux before the boot' % (globals().get('ours_pre'), globals().get('ours_n')))
+    haw = hashes(con, 'NVT_AFTER_WRITE_HASH')
+    outside = [k for k in hd if not (k[0] >= ours_lba and k[0] + k[1] <= ours_lba + int(os.environ['NV_PART_BLOCKS']))]
+    same = sum(1 for k in outside if haw.get(k) == hd[k])
+    check(len(haw) == len(hd) and len(outside) > 0 and same == len(outside), 'inside Darwin, after its writes: %d of %d ranges outside our partition hash as before the writes' % (same, len(outside)))
 print('NV_VERDICT note %d range(s) in Linux-mounted filesystems differ between Linux before and after (Linux writes there on every boot; not attributable)' % moved)
 
 sb, sa = (before / 'smart-after.txt').read_text(), (after / 'nvme-id.txt').read_text()
@@ -85,8 +99,9 @@ ds = re.findall(r'^NV_SMART (start|end) (.*)$', con, re.M)
 if len(ds) == 2:
     print('NV_VERDICT note SMART inside Darwin, start to end: ' + ' '.join('%s=%+d' % (k, smart(ds[1][1], k) - smart(ds[0][1], k)) for k in
           ('power_cycles', 'unsafe_shutdowns', 'data_units_read', 'data_units_written', 'host_read_commands', 'host_write_commands')))
-    check(smart(ds[1][1], 'host_write_commands') == smart(ds[0][1], 'host_write_commands') and
-          smart(ds[1][1], 'data_units_written') == smart(ds[0][1], 'data_units_written'), 'write counters did not move during the Darwin session')
+    if not write_mode:
+        check(smart(ds[1][1], 'host_write_commands') == smart(ds[0][1], 'host_write_commands') and
+              smart(ds[1][1], 'data_units_written') == smart(ds[0][1], 'data_units_written'), 'write counters did not move during the Darwin session')
 else:
     check(False, 'SMART start and end lines from Darwin')
 
@@ -125,9 +140,10 @@ if level >= 3 and not root_mode:
     nparts = len(table)
     census = re.findall(r'^NV_MEDIA (.*)$', con, re.M)
     want = 'published=1 partitions=%d guarded=%d foreign=0' % (nparts, nparts)
+    if write_mode: want += ' ours=1'    # all guarded, ours included: it is reached through the fenced device only
     if part_mode: want = 'published=1 partitions=%d guarded=%d foreign=0 ours=1' % (nparts, nparts - 1)
     check(len(census) >= 2 and all(c.strip() == want for c in census), 'below the block device: %s (expected "%s", before and after the reads)' % (' | '.join(census), want))
-    if part_mode:
+    if part_mode or write_mode:
         check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|hfs_mount|msdosfs_mount', con), 'no APFS, HFS or FAT driver line on the console')
     else:
         check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|Ext4FileSystemDriver|hfs_mount|msdosfs_mount|ext4_mount', con), 'no APFS / filesystem driver line on the console')
@@ -135,9 +151,9 @@ if level >= 3 and not root_mode:
     check(bool(mounts_d) and not any('/dev/disk' in m for m in mounts_d), 'nothing from a disk is mounted in Darwin (%d mount lines, all root or devfs)' % len(mounts_d))
     hm = hashes(con, 'NVT_MEDIA_HASH')
     okm = sum(1 for k, h in hm.items() if hd.get(k) == h)
-    check(len(hm) == len(hd) and okm == len(hm), 'through the block device (/dev/rdiskN): %d of %d ranges equal to the same boot\'s /dev/pdnvme0 reads' % (okm, len(hm)))
+    if not write_mode: check(len(hm) == len(hd) and okm == len(hm), 'through the block device (/dev/rdiskN): %d of %d ranges equal to the same boot\'s /dev/pdnvme0 reads' % (okm, len(hm)))
     wt = re.findall(r'^NVT_WTEST_RESULT (\S+) (\S+)', con, re.M)
-    check(len(wt) == (6 if part_mode else 4) and all(r == 'writes-refused' for _, r in wt), 'write attempts: %s' % ' '.join('%s=%s' % x for x in wt))
+    check(len(wt) == (6 if part_mode or write_mode else 4) and all(r == 'writes-refused' for _, r in wt), 'write attempts: %s' % ' '.join('%s=%s' % x for x in wt))
     check('GRANTED' not in con, 'no open for writing was granted on any node')
     gpt = re.findall(r'^NV_GPT (\d+) (\d+) (\d+) GPT part', con, re.M)
     check(sorted((int(a), int(b)) for a, b, _ in gpt) == sorted((st, sz) for _, st, sz, _ in table), 'GPT as parsed by the stack: %d partitions with Linux\' starts and sizes' % len(gpt))
@@ -169,6 +185,60 @@ if part_mode:
     check(bool(am and mm and am.group(2) == mm.group(2)), 'all ranges hash the same after the mounts as before them (inside Darwin)')
     check(not re.search(r'^NV_FAIL', con, re.M), 'no NV_FAIL line')
     for l in re.findall(r'^NV_DMESG .*$|^.*ext4: .*$', con, re.M)[:40]: print('NV_RESULT ' + l[:200])
+if write_mode:
+    first, nblk = ours_lba, int(os.environ['NV_PART_BLOCKS']); last = first + nblk - 1
+    kv = lambda t, k: (re.search(r'\b%s=(\S+)' % re.escape(k), t) or [None, None])[1]
+    # each reading is printed twice; one that a kernel log line cut into lacks its last field and is passed over
+    ws = {}
+    for tag, text in re.findall(r'^NV_WSTATS (\S+) (.*)$', con, re.M):
+        if re.search(r'flush_max_us=\d+$', text) or tag not in ws: ws[tag] = text
+    check(re.search(r'^NV_PART verified first=%d ' % ours_lba, con, re.M) is not None, 'the driver identified our partition in both GPT copies')
+    check('WRITE-FENCED build' in con and 'the write fence is OPEN over the SiliconForest partition' in con, 'the write-fenced build ran and opened the fence after the verification')
+    st = ws.get('start', '')
+    check(kv(st, 'fence') == 'open' and kv(st, 'first') == str(first) and kv(st, 'last') == str(last) and (kv(st, 'device') or '').startswith('disk'), 'fence open over exactly [%d, %d], fenced device %s' % (first, last, kv(st, 'device')))
+    check(kv(st, 'writes') == '0' and kv(st, 'flushes') == '0', 'no write and no flush before the write phase')
+    check(re.search(r'^NV_WGATE_SELFTEST start fence=open admitted=4 refused=13 wrong=0', con, re.M) is not None, 'write-gate self-test on the live fence: 4/13/0')
+    check(re.search(r'^NV_WGATE_SELFTEST final fence=closed admitted=0 refused=17 wrong=0', con, re.M) is not None, 'after the stop the fence is closed: 0/17/0')
+    check(not re.search(r'^NV_FENCED_CHILD', con, re.M), 'the fenced device has no partitions of its own')
+    ft = dict(re.findall(r'^NV_FENCETEST (\S+) (.*)$', con, re.M))
+    check(len(ft) == 2 and all('NVT_FAIL' in v or 'rror' in v or 'not permitted' in v for v in ft.values()), 'reads of an owner partition and of ours through the whole disk refused: %s' % ft)
+    fb, fa = re.search(r'^NV_FENCE before (.*)$', con, re.M), re.search(r'^NV_FENCE after (.*)$', con, re.M)
+    check(bool(fb and fa) and kv(fb.group(1), 'other') == '0' and kv(fa.group(1), 'other') == '0' and kv(fb.group(1), 'readfence') == '1' and int(kv(fa.group(1), 'refused')) > int(kv(fb.group(1), 'refused')),
+          'read fence on (GPT only): served outside 0; refused %s -> %s by the deliberate reads' % (fb and kv(fb.group(1), 'refused'), fa and kv(fa.group(1), 'refused')))
+    pr = re.findall(r'^NV_WPROBE (\S+) lba=(\d+) blocks=(\d+) rc=(\d+)', con, re.M)
+    wrong = [p for p in pr if (p[0].startswith('in-')) != (p[3] == '0')]
+    owners = [p for p in pr if p[0].startswith('out-p')]
+    check(len(pr) >= 8 + 2 * (nparts - 1) and not wrong and len(owners) == 2 * (nparts - 1), 'range check: first and last block of the fence admitted; one before, one after, across either end, block 0, the GPT header and the first and last block of each of the %d owner partitions refused (%d probes, nothing written)%s' % (nparts - 1, len(pr), ' WRONG: %s' % wrong if wrong else ''))
+    for nm, a, b, _ in table:
+        if a != first: check(any(int(p[1]) == a for p in owners) and any(int(p[1]) == a + b - 1 for p in owners), 'probed owner partition %s at its first and last block (%d, %d)' % (nm, a, a + b - 1))
+    check(re.search(r'^NV_PASTEND rc=[1-9]', con, re.M) is not None, 'a write at the block after the fenced device\'s last was refused: %s' % ' '.join(re.findall(r'^NV_PASTEND (.*)$', con, re.M)))
+    rf = ws.get('refuse', '')
+    check(kv(rf, 'writes') == '0' and kv(rf, 'flushes') == '0' and kv(rf, 'io_ops[00,01]') == '0,0', 'after all deliberate attempts: no write or flush command was built (writes=0 flushes=0 io_ops[00,01]=0,0; range_refused=%s)' % kv(rf, 'range_refused'))
+    mrw = re.findall(r'^NV_MOUNT_RW (.*)$', con, re.M)
+    check(len(mrw) == 1 and re.match(r'/dev/%s on /private/tmp/sf \(ext4' % kv(st, 'device'), mrw[0]) is not None and 'read-only' not in mrw[0], 'ext4 mounted read-write from the fenced device: %s' % ' | '.join(mrw))
+    check(re.search(r'^NV_STOP_WHILE_MOUNTED rc=[1-9]\d* state=ready', con, re.M) is not None and 'stop refused: the fenced device is open' in con, 'a stop request while the filesystem was mounted read-write was refused')
+    check(re.search(r'^NV_UMOUNT1 rc=0', con, re.M) is not None and re.search(r'^NV_UMOUNT2 rc=0', con, re.M) is not None, 'both unmounts succeeded')
+    wsha = lambda tag: dict((f, h) for h, f in re.findall(r'^NV_WSHA %s ([0-9a-f]{64})\s+(\S+)' % tag, con, re.M))
+    w1, w2 = wsha('written'), wsha('reread')
+    check(len(w1) == 4 and w1 == w2, 'four files written; after unmount and a new mount they read back with the same SHA-256')
+    um = ws.get('unmounted', ''); fin = ws.get('final', '')
+    check(int(kv(um, 'writes') or 0) > 0 and int(kv(um, 'written_bytes') or 0) >= 34000000, 'writes went through the driver: %s commands, %s bytes by the first unmount, %s flushes' % (kv(um, 'writes'), kv(um, 'written_bytes'), kv(um, 'flushes')))
+    for tag, t in sorted(ws.items()):
+        check(kv(t, 'fence_rejected') == '0' and kv(t, 'copy_failed') == '0' and kv(t, 'sealed_refused') == '0', 'wstats %s: fence_rejected=0 copy_failed=0 sealed_refused=0' % tag)
+    check(kv(fin, 'fence') == 'sealed' and 'flush before the stop: 0' in con, 'the stop flushed first and closed the fence: %s' % ' | '.join(l[:120] for l in re.findall(r'^NV_DMESG .*(?:write side|flush before).*$', con, re.M)))
+    print('NV_VERDICT note final write counters: %s' % fin)
+    print('NV_VERDICT note %s' % ' '.join(re.findall(r'^NV_WRITE_SECONDS .*$', con, re.M)))
+    # from Linux afterwards
+    wc = Path(os.environ['NV_WCHECK']).read_text(errors='replace') if os.path.exists(os.environ.get('NV_WCHECK', '')) else ''
+    check('SFL_IDENTITY ok' in wc and 'SFL_END' in wc, 'Linux identified our partition three ways and finished its check')
+    check(re.search(r'^SFL_FSCK_RC 0$', wc, re.M) is not None, 'Linux e2fsck -fn of our partition: clean (%s)' % ' | '.join(re.findall(r'^SFL_FSCK (.*)$', wc, re.M)[-1:]))
+    check(re.search(r'^SFL_SB_FIRST Filesystem state:\s+clean$', wc, re.M) is not None and not re.search(r'^SFL_SB_FIRST Filesystem features:.*needs_recovery', wc, re.M), 'superblock as Darwin left it: clean, no needs_recovery')
+    lsha = dict((f, h) for h, f in re.findall(r'^SFL_WSHA ([0-9a-f]{64})\s+(\S+)', wc, re.M))
+    check(len(lsha) == 4 and lsha == w1, 'Linux reads the four written files with the SHA-256 Darwin reported: %s' % ' '.join(sorted(lsha)))
+    old_d = dict((f.replace('/tmp/sf/', ''), h) for h, f in re.findall(r'^NV_OLDSHA ([0-9a-f]{64})\s+(\S+)', con, re.M)); old_l = dict((f, h) for h, f in re.findall(r'^SFL_OLDSHA ([0-9a-f]{64})\s+(\S+)', wc, re.M))
+    check(len(old_l) == 2 and old_l == old_d, 'two files that were there before read the same in Darwin and Linux')
+    check(not re.search(r'^NV_FAIL', con, re.M), 'no NV_FAIL line')
+    for l in re.findall(r'^NV_DMESG .*$', con, re.M)[:30]: print('NV_RESULT ' + l[:200])
 if root_mode:
     nparts = len(table)
     def tree(text, tag='NVT_TREE_ALL'):
@@ -212,7 +282,7 @@ for a, b in zip(order, order[1:]):
     diff = [i for i in range(512) if x[i] != y[i]]
     fields = sorted({(i // 16) * 16 if i >= 32 else i for i in diff})
     print('NV_VERDICT note SMART page %s -> %s: bytes differing at offsets %s (1-2 temperature, 32 data units read, 64 host reads, 96 busy time, 112 power cycles, 144 unsafe shutdowns, 48/80 writes; >=192 vendor/other)' % (a, b, fields))
-    check(not any(f in (48, 80, 144, 160, 176) or f == 0 for f in fields), 'SMART %s -> %s: no change in write counters, unsafe shutdowns, media errors, error log, critical warning' % (a, b))
+    check(not any(f in ((144, 160, 176) if write_mode else (48, 80, 144, 160, 176)) or f == 0 for f in fields), 'SMART %s -> %s: no change in %sunsafe shutdowns, media errors, error log, critical warning' % (a, b, '' if write_mode else 'write counters, '))
 starts = con.split('PDAppleNVMe: start ')
 for chunk in starts[1:]:
     n = chunk.split(' ', 1)[0]
