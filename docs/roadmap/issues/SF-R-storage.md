@@ -1,3 +1,42 @@
+## Hand-over: disk-root stream (12 November 2026; read this first)
+The SiliconForest partition exists (64 GiB ext4, Linux `nvme0n1p3`, first block 192,633,862, 16,777,216 blocks of 4096 bytes) and holds the default desktop root. Its unique GUID and the filesystem UUID are in `private/disk-root/sf-part.env` (never in git; re-read with `sudo blkid` on the M1's Linux).
+
+| Step | State |
+|---|---|
+| 1 Read-only driver at the tip, our partition visible | **Proven on the M1: boots dr01, dr02** (below) |
+| 2 Root on the partition, read-only | in work: QEMU rehearsal, root transform and process-1 wrapper written; see "Step 2" |
+| 3 Write-fenced driver | not started. Gate code and host-test list go to the reviewer BEFORE the first fenced-write boot |
+| 4 Boot chain (B1 stage without the RAM root record) | not started |
+
+Commands (all from the lab root; the bench is taken by `tools/bench.sh`, `BENCH_WHO=disk`, one boot at a time, names `drNN`):
+- Host tests (run by every boot wrapper): `integrations/puredarwin/m1-storage/host-test/run-host-tests.sh` (`GATEHOST`, `PARTHOST` 48 cases, `SRCHOST`).
+- One slot with the read-only driver and our partition (Linux baseline, boot, Linux again, verdict):
+  `BENCH_WHO=disk NV_VERDICT_MODE=part NV_RANGE_FILE=runs/m1-storage/linux-b/ranges NV_TTL=300 NV_RUNTIME=420 tools/bench.sh run integrations/puredarwin/m1-storage/tools/nv_slot.sh drNN 3 any`
+  (`linux-b/ranges`: 34 ranges for the layout with our partition; `runs/m1-storage/ref-tree-sw01.txt`: digest of the source image's tree, made with `user/pdnvme-test.c` built on the host over `debugfs rdump` of `artifacts/m1-desktop-010/pcie-enum-candidate-sw01/ramdisk.img`).
+- QEMU rehearsal, no M1: `tools/dr_qemu_disk.py` (a 4096-byte-sector GPT disk around an ext4 image), `tools/dr_qemu.sh <name> <guest script> <disk> ro|rw` (the `qemu-dev` tools unchanged). Rehearse every new guest script there first: three script mistakes that would have cost M1 boots were found this way.
+- A verdict failure writes `runs/m1-storage/STOP`; it is set aside only on the reviewer's word (dr01's is kept as `dr01-STOP-checker-and-node.txt`).
+
+Traps: the collection has about 0x2000 bytes of room before the kernel image and members are padded to 16 KiB per segment (the kext is built `-Os` for that reason; `kc_overlap.py` fails the build otherwise); at the tip devfs is not ready until the root is mounted (about 75 s without `pd_quiet_wait=0 pd_rtc_wait=0`); `mount` resolves `/tmp/x` to `/private/tmp/x`; the shell exits on a failed redirection of `:`; `rm` asks on a read-only filesystem unless `-f </dev/null`; `qd_run.py`'s screenshot after `--up` froze the guest's serial output (the wrapper puts `--up` at the end); `pdnvme-test wtest` must never be pointed at a node that could be writable (it writes block 0 back).
+
+### Step 1: the read-only driver at the tip with our partition visible (dr01, dr02)
+Kext changes: `kernel/pd_nvme_part.c/.h` (plain C, host-tested): the partition is named by three boot arguments, `pdnvme_part=<unique GUID> pdnvme_part_lba=<first block> pdnvme_part_blocks=<length>`, and the driver reads both GPT copies itself (not through the storage stack): each header valid by its checksum and pointing at the other, both tables valid and byte-identical, exactly one entry with that GUID, of type Linux filesystem data, with exactly that first and last block, inside the usable range, overlapped by no other entry. Only then does `PDAppleNVMeMediaGuard` decline that one media (whose position, length and `UUID` property must also match); any doubt and it is guarded like the others. `kern.pd_nvme.part` says which; `kern.pd_nvme.media` gains `ours=N`. Nothing about writing changed: the media is write-protected, the gate is the same. Also: `/dev/pdnvme0` is retried once a second until devfs exists and no longer delays the block device (dr01's verdict failed on its absence at the tip; the rest of dr01 passed), and the kext is built `-Os`.
+Host: `PARTHOST` 48 cases (every field, every boundary, either copy altered with checksums made right, duplicates, overlaps, unreadable blocks); the M1's real GPT copies (read from Linux, kept under `runs/`) are accepted with the real GUID and refused with the start or length off by one.
+Collection (tip, default + PDAppleNVMe): `/nix/store/3qlsc4jqp9ng8vjnw4xl930nsi241km2-puredarwin-kc-arm64-0.1` (dr02); dr01 ran `dp558sl7…`.
+
+Result of dr02 (hypervisor, RAM root, 8 CPUs, `pdnvme=3`, verdict PASSED 45 of 45; dr01 the same except the private node):
+- our partition `verified … found in both GPT copies`; `partitions=8 guarded=7 foreign=0 ours=1` before and after; the stack's GPT equals Linux's 8 starts and sizes; Identify equals Linux's.
+- `/dev/disk0s3` mounted `-o rdonly` with the tree's ext4 driver, twice: the whole tree (9,230 files, 764 directories, 106 links, 258,444,027 bytes) hashes to the source image's digest both times, 5.0 s each (about 52 MB/s through ext4; raw sequential 735 MB/s); three named files equal.
+- writes: a mount without `rdonly` is refused (`Permission denied`), as is a remount read-write; create, mkdir, unlink and append in the mounted filesystem give `Read-only file system`; opens for writing are refused on `rdisk0`, `disk0`, `rdisk0s1`, `rdisk0s3`, `disk0s3`, `pdnvme0`. **The ext4 driver attempts no write on a read-only mount of a clean journaled filesystem** (its own statistics: `writes=0 jreplay=0`; nothing reached the driver: `write_refused` is 2, the two deliberate opens of `/dev/pdnvme0`); `gate_rejected=0`; SMART inside Darwin: write counters +0.
+- ranges: 24 of 24 on the GPTs, `p1`, `p2`, **`p3` (ours)**, `p4`, `p8` and the gaps identical in Linux before, Darwin (private node and block device) and Linux after; 6 of 6 untouched ranges in Linux's filesystems equal; 4 rewritten by Linux itself. The same digest over all ranges after the mounts as before.
+- stop by the script after 22 s, clean; Linux: no recovery or replay line, `p5`/`p6`/`p7` mounted as usual, `p3` not mounted, `unsafe_shutdowns` 107 → 107.
+- for step 3: a read-WRITE mount sets the journal's needs-recovery flag in the superblock at mount (`ext4_jnl_mount`) and clears it at a clean unmount; a root that is still mounted read-write when the machine is reset will therefore be replayed at the next mount.
+
+### Step 2: root on the partition, read-only (design; in work)
+- Root selection: boot arguments `rd=uuid boot-uuid=<filesystem UUID>` (IOKitBSDInit.cpp: an explicit `rd=` overrides the loader's; `Ext4FileSystemDriver` then compares the superblock UUID of every Linux-typed leaf media and publishes `boot-uuid-media`; disk numbers play no part). It reads one block of the owner's two Linux-typed partitions (`/boot`, the btrfs root) to compare: a read, through the read-only driver. `wdt=-1` as well; the recovery path is patched out of the default kernel.
+- The RAM root stays uploaded (the fallback: the same boot with `rd=md0`) and is `/dev/md0` in the guest, writable, in memory.
+- Process 1: `user/sf-roinit.c`, installed as `/usr/appleinternal/sbin/launchd.sfro` and chosen by `launchdsuffix=sfro` (DEVELOPMENT kernels try that path first and fall back to `/sbin/launchd`): mounts devfs and the memory disk on `/private/ram`, then becomes launchd.
+- The root as changed for read-only use (`tools/sf-root-transform.sh`, run on the mounted partition from Linux and on a host copy for the reference digest `runs/m1-storage/ref-tree-diskroot.txt`): `/var`, `/private/var`, `/private/tmp`, `/etc/resolv.conf` are links into `/private/ram` (the originals kept as `*.disk`); `/usr/bin/darwin-desktop-test`, which the bench types, runs the boot's own script from the RAM root image.
+
 ## Goal
 SiliconForest reads, and later boots from, the M1's internal NVMe storage instead of a RAM disk uploaded over USB. The internal disk holds the owner's macOS and Linux installs: **nothing in this ticket may modify it** until the owner authorises a specific write, and the code is built so that it cannot.
 

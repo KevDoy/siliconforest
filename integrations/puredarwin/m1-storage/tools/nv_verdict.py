@@ -20,7 +20,13 @@ runs/m1-storage/STOP so that no further storage boot starts.
 import re, subprocess, sys
 from pathlib import Path
 
-before, after, console, expect_refused = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), int(sys.argv[4])
+import os
+before, after, console = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+expect_refused = None if sys.argv[4] == 'any' else int(sys.argv[4])
+# NV_VERDICT_MODE=part: the SiliconForest partition (first block NV_PART_LBA) was named to the driver and
+# mounted read-only; NV_TREE_REF holds the tree digest of the image it was copied from.
+part_mode = os.environ.get('NV_VERDICT_MODE') == 'part'
+ours_lba = int(os.environ.get('NV_PART_LBA', '0'))
 level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
 bad = []
 def check(ok, text):
@@ -51,7 +57,9 @@ check(len(hd) > 0 and len(ha) >= len(hd), 'hash sets: Linux before %d, Darwin %d
 static_ok = static_n = stable_n = stable_ok = moved = 0
 for (lba, blocks), h in sorted(ha.items()):
     name, fs = where(lba, blocks, table)
-    quiet = fs in ('apfs', 'none')                 # Linux mounts none of these
+    ours = ours_lba and name == next((n for n, st, _, _ in table if st == ours_lba), None)
+    quiet = fs in ('apfs', 'none') or bool(ours)    # Linux mounts none of these (ours: nothing may write it in a read-only boot)
+    if ours: name = name + '=SF'
     b, d = hb.get((lba, blocks)), hd.get((lba, blocks))
     state = 'unchanged' if b == h else ('no-before' if b is None else 'CHANGED-BY-LINUX-OR-US')
     rd = 'darwin==linux' if d == h else ('darwin-missing' if d is None else 'DARWIN-DIFFERS')
@@ -62,7 +70,7 @@ for (lba, blocks), h in sorted(ha.items()):
         stable_n += 1; stable_ok += (d == h)
     else:
         moved += 1
-check(static_n > 0 and static_ok == static_n, 'ranges Linux never writes (GPTs, APFS partitions): %d of %d unchanged before/after AND equal under Darwin' % (static_ok, static_n))
+check(static_n > 0 and static_ok == static_n, 'ranges Linux never writes (GPTs, APFS partitions%s): ' % (', the SiliconForest partition' if ours_lba else '') + '%d of %d unchanged before/after AND equal under Darwin' % (static_ok, static_n))
 check(stable_ok == stable_n, 'ranges in Linux-mounted filesystems that Linux left alone: %d of %d equal under Darwin' % (stable_ok, stable_n))
 print('NV_VERDICT note %d range(s) in Linux-mounted filesystems differ between Linux before and after (Linux writes there on every boot; not attributable)' % moved)
 
@@ -86,13 +94,20 @@ recov = [l for l in klog.splitlines() if 'raid6' not in l and (re.search(r'recov
          (re.search(r'nvme|sart|BTRFS|EXT4|FAT-fs', l) and re.search(r'error|warn|fail|timeout|crash', l, re.I)))]
 check(not recov, 'Linux kernel log after the boot: %d recovery/replay/error line(s)%s' % (len(recov), ''.join('\n    ' + l[:150] for l in recov[:5])))
 mounts = (after / 'mounts.txt').read_text()
-for dev, fs in (('nvme0n1p4', 'vfat'), ('nvme0n1p5', 'ext4'), ('nvme0n1p6', 'btrfs')):
+linux_fs = [('nvme0n1' + n, fs) for n, st, _, fs in table if fs in ('vfat', 'ext4', 'btrfs') and st != ours_lba]
+check(len(linux_fs) == 3, 'Linux has its three filesystems (EFI, /boot, root): %s' % linux_fs)
+if ours_lba:
+    check(not re.search(r'/dev/nvme0n1%s\b' % next((n for n, st, _, _ in table if st == ours_lba), 'pX'), mounts), 'the SiliconForest partition is not mounted in Linux')
+for dev, fs in linux_fs:
     check(re.search(r'/dev/%s\S* %s rw' % (dev, fs), mounts) is not None, 'Linux mounted %s (%s) read-write as usual' % (dev, fs))
 check('state=live' in (after / 'nvme-sysfs.txt').read_text(), 'Linux NVMe controller state live')
 
 gates = re.findall(r'^NV_GATE_REJECTED (\S+)', con, re.M); refused = re.findall(r'^NV_WRITE_REFUSED (\S+)', con, re.M)
 check(bool(gates) and all(g == '0' for g in gates), 'gate_rejected: %s' % ' '.join(gates))
-check(bool(refused) and refused[-1] == str(expect_refused), 'write_refused: %s (expected %d = the deliberate attempts)' % (' '.join(refused), expect_refused))
+if expect_refused is None:
+    check(bool(refused), 'write_refused (requests that reached the driver and were refused there): %s' % ' '.join(refused))
+else:
+    check(bool(refused) and refused[-1] == str(expect_refused), 'write_refused: %s (expected %d = the deliberate attempts)' % (' '.join(refused), expect_refused))
 check(re.search(r'^NV_STATE stopped-clean', con, re.M) is not None, 'controller stopped cleanly inside Darwin')
 check(re.search(r'^NV_GATE_SELFTEST allowed=7 refused=505 wrong=0', con, re.M) is not None, 'gate self-test 7/505/0')
 check(re.search(r'^NV_NCPU 8', con, re.M) is not None, '8 CPUs')
@@ -109,18 +124,50 @@ if level >= 3:
     nparts = len(table)
     census = re.findall(r'^NV_MEDIA (.*)$', con, re.M)
     want = 'published=1 partitions=%d guarded=%d foreign=0' % (nparts, nparts)
+    if part_mode: want = 'published=1 partitions=%d guarded=%d foreign=0 ours=1' % (nparts, nparts - 1)
     check(len(census) >= 2 and all(c.strip() == want for c in census), 'below the block device: %s (expected "%s", before and after the reads)' % (' | '.join(census), want))
-    check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|Ext4FileSystemDriver|hfs_mount|msdosfs_mount|ext4_mount', con), 'no APFS / filesystem driver line on the console')
+    if part_mode:
+        check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|hfs_mount|msdosfs_mount', con), 'no APFS, HFS or FAT driver line on the console')
+    else:
+        check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|Ext4FileSystemDriver|hfs_mount|msdosfs_mount|ext4_mount', con), 'no APFS / filesystem driver line on the console')
     mounts_d = re.findall(r'^NV_MOUNT (.*)$', con, re.M)
     check(bool(mounts_d) and not any('/dev/disk' in m for m in mounts_d), 'nothing from a disk is mounted in Darwin (%d mount lines, all root or devfs)' % len(mounts_d))
     hm = hashes(con, 'NVT_MEDIA_HASH')
     okm = sum(1 for k, h in hm.items() if hd.get(k) == h)
     check(len(hm) == len(hd) and okm == len(hm), 'through the block device (/dev/rdiskN): %d of %d ranges equal to the same boot\'s /dev/pdnvme0 reads' % (okm, len(hm)))
     wt = re.findall(r'^NVT_WTEST_RESULT (\S+) (\S+)', con, re.M)
-    check(len(wt) == 4 and all(r == 'writes-refused' for _, r in wt), 'write attempts: %s' % ' '.join('%s=%s' % x for x in wt))
+    check(len(wt) == (6 if part_mode else 4) and all(r == 'writes-refused' for _, r in wt), 'write attempts: %s' % ' '.join('%s=%s' % x for x in wt))
     check('GRANTED' not in con, 'no open for writing was granted on any node')
     gpt = re.findall(r'^NV_GPT (\d+) (\d+) (\d+) GPT part', con, re.M)
     check(sorted((int(a), int(b)) for a, b, _ in gpt) == sorted((st, sz) for _, st, sz, _ in table), 'GPT as parsed by the stack: %d partitions with Linux\' starts and sizes' % len(gpt))
+if part_mode:
+    check(re.search(r'^NV_PART verified first=%d ' % ours_lba, con, re.M) is not None, 'the driver identified our partition in both GPT copies: %s' % ' | '.join(re.findall(r'^NV_PART (.*)$', con, re.M)))
+    ours_idx = re.search(r'^NV_OURS index=(\d+)', con, re.M)
+    for rnd in ('1', '2'):
+        ml = re.findall(r'^NV_MOUNT%s (.*)$' % rnd, con, re.M)
+        disk = [m for m in ml if '/dev/disk' in m]
+        check(len(disk) == 1 and ours_idx is not None and re.match(r'/dev/disk\d+s%s on /private/tmp/sf \(ext4.*read-only' % ours_idx.group(1), disk[0]) is not None,
+              'mount %s: only our partition, ext4, read-only: %s' % (rnd, ' | '.join(disk)))
+        check(re.search(r'^NV_UMOUNT%s rc=0' % rnd, con, re.M) is not None, 'unmount %s succeeded' % rnd)
+    rw = re.findall(r'^NV_MOUNT_RW_STATE (.*)$', con, re.M)
+    check(all('read-only' in m for m in rw), 'a mount without rdonly did not become writable: %s %s' % (' '.join(re.findall(r'^NV_MOUNT_RW (.*)$', con, re.M)), ' | '.join(rw) or '(not mounted)'))
+    fw = re.findall(r'^NV_FSWRITE (\S+) rc=(\d+) ?(.*)$', con, re.M)
+    check(len(fw) == 5 and all(rc != '0' for _, rc, _ in fw), 'writes into the mounted filesystem refused: %s' % '; '.join('%s rc=%s %s' % x for x in fw))
+    up = re.findall(r'^NV_MOUNT_AFTER_UPGRADE (.*)$', con, re.M)
+    check(len(up) == 1 and 'read-only' in up[0], 'still read-only after the attempt to remount read-write')
+    ref = Path(os.environ['NV_TREE_REF']).read_text()
+    def tree(text, tag='NVT_TREE_ALL'):
+        m = re.search(r'^%s (files=\d+ dirs=\d+ links=\d+ other=\d+ bytes=\d+ errors=\d+ [0-9a-f]{64})' % tag, text, re.M); return m.group(1) if m else None
+    check(tree(con) is not None and tree(con) == tree(ref) and 'errors=0' in tree(con), 'the whole tree read from the mounted partition equals the source image: %s' % tree(con))
+    check(tree(con, 'NVT_TREE2_ALL') == tree(ref), 'the same digest from the second mount')
+    tops_d, tops_r = dict(re.findall(r'^NVT_TREE_TOP (\S+) ([0-9a-f]{64})', con, re.M)), dict(re.findall(r'^NVT_TREE_TOP (\S+) ([0-9a-f]{64})', ref, re.M))
+    if tops_d != tops_r: print('    top-level entries that differ: ' + ' '.join(sorted(k for k in set(tops_d) | set(tops_r) if tops_d.get(k) != tops_r.get(k))))
+    files_d, files_r = re.findall(r'^NVT_FILE (\S+ \d+ [0-9a-f]{64})', con, re.M), re.findall(r'^NVT_FILE (\S+ \d+ [0-9a-f]{64})', ref, re.M)
+    check(len(files_d) == 3 and files_d == files_r, 'three named files hash as in the source image: %s' % ' '.join(f.split()[0] for f in files_d))
+    am = re.search(r'^NVT_AFTER_MOUNT_HASH_ALL ranges=(\d+) errors=0 ([0-9a-f]{64})', con, re.M); mm = re.search(r'^NVT_MEDIA_HASH_ALL ranges=(\d+) errors=0 ([0-9a-f]{64})', con, re.M)
+    check(bool(am and mm and am.group(2) == mm.group(2)), 'all ranges hash the same after the mounts as before them (inside Darwin)')
+    check(not re.search(r'^NV_FAIL', con, re.M), 'no NV_FAIL line')
+    for l in re.findall(r'^NV_DMESG .*$|^.*ext4: .*$', con, re.M)[:40]: print('NV_RESULT ' + l[:200])
 raws = dict(re.findall(r'^NV_SMARTRAW (\S+) ([0-9a-f]{1024})', con, re.M))
 order = [k for k in ('start', 'end', 'start2', 'end2') if k in raws]
 for a, b in zip(order, order[1:]):

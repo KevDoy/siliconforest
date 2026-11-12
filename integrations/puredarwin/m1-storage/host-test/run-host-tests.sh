@@ -11,6 +11,9 @@ HERE=$(cd "$(dirname "$0")" && pwd); K=$HERE/../kernel
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 cc -std=c11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined -o "$OUT/gate_host" "$HERE/gate_host.c" "$K/pd_nvme_gate.c"
 "$OUT/gate_host"
+#   1b. the identification of the SiliconForest partition in both GPT copies (kernel/pd_nvme_part.c)
+cc -std=c11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined -o "$OUT/part_host" "$HERE/part_host.c" "$K/pd_nvme_part.c"
+"$OUT/part_host" | grep -v '^PARTHOST ok'
 fail=0
 check() { if [ "$2" != "$3" ]; then echo "SRCHOST FAIL: $1: $2, expected $3"; fail=1; fi; }
 # the submission doorbells are written in exactly one statement, in PDAns::ring()

@@ -15,6 +15,12 @@
  *                       at the end of a boot, and a controller must not be running then
  *   pdnvme_delay=<ms>   wait before the bring-up (default 3000)
  *   pdnvme_verbose=1    every mailbox message
+ *   pdnvme_part=<GUID> pdnvme_part_lba=<first block> pdnvme_part_blocks=<length>
+ *                       (pdnvme=3) the SiliconForest partition: the one partition the guard
+ *                       below does NOT hold, so that a filesystem can be mounted from it
+ *                       (read-only: the media stays write-protected). All three must be
+ *                       given and must be found exactly so in both GPT copies
+ *                       (pd_nvme_part.c); otherwise every partition is guarded as before
  *
  * What makes it read-only is in pd_nvme_gate.c and PDAns::ring(): there is no code that
  * builds a write, flush, trim, format, sanitize, firmware, namespace or set-features
@@ -50,6 +56,7 @@
 #include <sys/uio.h>
 
 #include "pd_ans.h"
+#include "pd_nvme_part.h"
 
 #define LOG(fmt, ...) IOLog("PDAppleNVMe: " fmt "\n", ##__VA_ARGS__)
 #define T8103_CHIP_ID 0x8103
@@ -88,6 +95,14 @@ static uint32_t  gWriteRefused, gSyncIgnored, gStarts;
 static uint64_t  gMaxMicros, gSumMicros, gCompleted, gBytes, gReadyAtMs, gStartMs, gStopMs;
 static int       gMajor = -1;
 static void     *gDevNode;
+static uint64_t  gNodeTriedMs;
+/* the SiliconForest partition, as asked for in the boot arguments (see pd_nvme_part.h) */
+enum { kPartNotAsked, kPartUnchecked, kPartVerified, kPartRefused };
+static struct pd_part_want gWant;
+static int       gPartState = kPartNotAsked;
+static char      gPartWhy[96] = "not asked for";
+static IOLock   *gPartLock;
+static uint32_t  gExempted;
 
 static uint64_t now_ms(void) { return pd_ans_now_us() / 1000; }
 
@@ -402,6 +417,56 @@ public:
 OSDefineMetaClassAndStructors(PDAppleNVMeMediaGuard, IOService);
 static uint32_t gGuarded;
 
+static int
+part_sink(void *ctx, uint64_t offset, const uint8_t *data, uint32_t len)
+{
+	memcpy((uint8_t *)ctx + offset, data, len);
+	return 0;
+}
+
+static int
+part_read(__unused void *ctx, uint64_t lba, uint32_t blocks, uint8_t *out)
+{
+	return pd_read(lba, blocks, part_sink, out) == kIOReturnSuccess ? 0 : EIO;
+}
+
+/*
+ * Is this media the SiliconForest partition? Its position and length and the unique GUID
+ * the partition scheme read must be the ones asked for, and (checked once, by this driver's
+ * own reads of both GPT copies, not through the storage stack) both copies must say the
+ * same. Any doubt answers no, and the partition is guarded like the others.
+ */
+static bool
+is_our_partition(IOMedia *media)
+{
+	uint8_t guid[16];
+	OSString *uuid;
+	bool ok;
+
+	if (gPartState == kPartNotAsked || gPartLock == NULL)
+		return false;
+	if (media->getBase() != gWant.first * BLOCK || media->getSize() != gWant.blocks * BLOCK ||
+	    media->getPreferredBlockSize() != BLOCK)
+		return false;
+	uuid = OSDynamicCast(OSString, media->getProperty(kIOMediaUUIDKey));
+	if (uuid == NULL || pd_part_parse_guid(uuid->getCStringNoCopy(), guid) != 0 || memcmp(guid, gWant.guid, 16) != 0)
+		return false;
+	IOLockLock(gPartLock);
+	if (gPartState == kPartUnchecked) {
+		uint8_t *work = (uint8_t *)IOMalloc(PD_PART_WORK);
+		int r = work == NULL ? -1 : pd_part_verify(&gWant, gAns.nsBlocks, part_read, NULL, work, gPartWhy, sizeof(gPartWhy));
+
+		if (work != NULL)
+			IOFree(work, PD_PART_WORK);
+		gPartState = r == 0 ? kPartVerified : kPartRefused;
+		LOG("the SiliconForest partition (blocks %llu..%llu): %s (%d): %s", gWant.first, gWant.first + gWant.blocks - 1,
+		    r == 0 ? "identified, not guarded" : "NOT identified, guarded like the others", r, gPartWhy);
+	}
+	ok = gPartState == kPartVerified;
+	IOLockUnlock(gPartLock);
+	return ok;
+}
+
 IOService *
 PDAppleNVMeMediaGuard::probe(IOService *provider, SInt32 *score)
 {
@@ -414,6 +479,10 @@ PDAppleNVMeMediaGuard::probe(IOService *provider, SInt32 *score)
 		ours = e == (IORegistryEntry *)gDisk;
 	if (!ours)
 		return NULL;
+	if (is_our_partition(media)) {
+		OSIncrementAtomic((volatile SInt32 *)&gExempted);
+		return NULL;
+	}
 	*score = 1000000;
 	return this;
 }
@@ -562,6 +631,14 @@ engine(void)
 			IOLockLock(gLock);
 		} else if (gQueueHead == NULL || pick_slot() < 0) {
 			AbsoluteTime deadline;
+
+			if (gDevNode == NULL && now_ms() - gNodeTriedMs >= 1000) {
+				gNodeTriedMs = now_ms();
+				IOLockUnlock(gLock);
+				publish_node();
+				IOLockLock(gLock);
+				continue;
+			}
 			clock_interval_to_deadline(50, kMillisecondScale, &deadline);
 			IOLockSleepDeadline(gLock, &gEvent, deadline, THREAD_UNINT);
 			idleSpins = 0;
@@ -602,11 +679,12 @@ pd_nvme_thread(__unused void *arg, __unused wait_result_t wr)
 	}
 	gReadyAtMs = now_ms();
 	set_state(kStateReady);
-	for (unsigned i = 0; i < 100 && gDevNode == NULL; i++) {
-		publish_node();
-		if (gDevNode == NULL)
-			IOSleep(100);
-	}
+	/*
+	 * /dev/pdnvme0 needs devfs, which is not there before the root is mounted (at the tip
+	 * that can be a minute after this point, and with the root on this disk it is after
+	 * the block device has served it): tried once here, then once a second by the engine.
+	 */
+	publish_node();
 	if (gLevel >= 3 && gDisk == NULL)
 		publish_disk();
 
@@ -681,7 +759,8 @@ request_start(void)
  * holds, and every object that is neither the storage family's plumbing nor the guard.
  */
 static void
-media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsigned *guarded, unsigned *foreign, char *names, size_t len)
+media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsigned *guarded, unsigned *foreign, unsigned *exempt,
+    char *names, size_t len)
 {
 	OSIterator *iter = entry->getChildIterator(gIOServicePlane);
 	OSObject *o;
@@ -698,8 +777,11 @@ media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsig
 		if (child == NULL)
 			continue;
 		if (media != NULL) {
-			if (!media->isWhole())
+			if (!media->isWhole()) {
 				(*partitions)++;
+				if (is_our_partition(media))
+					(*exempt)++;
+			}
 		} else if (strcmp(cls, "PDAppleNVMeMediaGuard") == 0) {
 			(*guarded)++;
 		} else if (strcmp(cls, "IOBlockStorageDriver") != 0 && strcmp(cls, "IOGUIDPartitionScheme") != 0 &&
@@ -708,14 +790,14 @@ media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsig
 			strlcat(names, " ", len);
 			strlcat(names, cls, len);
 		}
-		media_census(child, depth + 1, partitions, guarded, foreign, names, len);
+		media_census(child, depth + 1, partitions, guarded, foreign, exempt, names, len);
 	}
 	iter->release();
 }
 
 /* ---- sysctl -------------------------------------------------------------------------------- */
 
-enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs, kCtlMedia, kCtlSmartRaw, kCtlStart };
+enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs, kCtlMedia, kCtlSmartRaw, kCtlStart, kCtlPart };
 
 static uint64_t le64(const uint8_t *p) { return OSReadLittleInt64(p, 0); }
 static uint32_t le32(const uint8_t *p) { return OSReadLittleInt32(p, 0); }
@@ -840,13 +922,22 @@ pd_sysctl(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sysctl_
 		gate_selftest(text, sizeof(text));
 		break;
 	case kCtlMedia: {
-		unsigned partitions = 0, guarded = 0, foreign = 0;
-		char names[512] = "";
+		unsigned partitions = 0, guarded = 0, foreign = 0, exempt = 0;
+		char names[512] = "", ours[40] = "";
 
 		if (gDisk != NULL)
-			media_census((IORegistryEntry *)gDisk, 0, &partitions, &guarded, &foreign, names, sizeof(names));
-		snprintf(text, sizeof(text), "published=%d partitions=%u guarded=%u foreign=%u%s", gDisk != NULL, partitions, guarded,
-		    foreign, names);
+			media_census((IORegistryEntry *)gDisk, 0, &partitions, &guarded, &foreign, &exempt, names, sizeof(names));
+		if (gPartState != kPartNotAsked)
+			snprintf(ours, sizeof(ours), " ours=%u", exempt);
+		snprintf(text, sizeof(text), "published=%d partitions=%u guarded=%u foreign=%u%s%s", gDisk != NULL, partitions, guarded,
+		    foreign, ours, names);
+		break;
+	}
+	case kCtlPart: {
+		static const char *const names[] = { "not-asked", "unchecked", "verified", "refused" };
+		/* no GUID here: it is in the boot arguments already and belongs in no log of ours */
+		snprintf(text, sizeof(text), "%s first=%llu blocks=%llu exempted=%u: %s", names[gPartState], gWant.first, gWant.blocks,
+		    gExempted, gPartWhy);
 		break;
 	}
 	case kCtlSmartRaw:
@@ -889,11 +980,12 @@ SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, stop, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LO
 
 PD_STR(media, kCtlMedia, "what is attached below the block device");
 PD_STR(smart_raw, kCtlSmartRaw, "SMART / health log page as last read, hexadecimal");
+PD_STR(part, kCtlPart, "the SiliconForest partition: asked for, verified in both GPT copies, or refused");
 SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, start, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, kCtlStart, pd_sysctl, "I",
     "write 1 after a clean stop: start the controller again; reads the number of starts");
 
 static struct sysctl_oid *const gOids[] = {
-	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
+	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_part, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
 	&sysctl__kern_pd_nvme, &sysctl__kern_pd_nvme_state, &sysctl__kern_pd_nvme_stats, &sysctl__kern_pd_nvme_idctrl,
 	&sysctl__kern_pd_nvme_idns, &sysctl__kern_pd_nvme_gate_selftest, &sysctl__kern_pd_nvme_smart,
 	&sysctl__kern_pd_nvme_gate_rejected, &sysctl__kern_pd_nvme_write_refused, &sysctl__kern_pd_nvme_stop,
@@ -944,8 +1036,28 @@ PDAppleNVMe::start(IOService *provider)
 		gAns.verbose = value != 0;
 
 	gLock = IOLockAlloc();
-	if (gLock == NULL)
+	gPartLock = IOLockAlloc();
+	if (gLock == NULL || gPartLock == NULL)
 		return false;
+	{
+		char guid[40] = "";
+		uint64_t first = 0, blocks = 0;
+		bool a = PE_parse_boot_argn("pdnvme_part", guid, sizeof(guid)), b = PE_parse_boot_argn("pdnvme_part_lba", &first, sizeof(first)),
+		    c = PE_parse_boot_argn("pdnvme_part_blocks", &blocks, sizeof(blocks));
+
+		if (a || b || c) {
+			if (gLevel == 3 && a && b && c && blocks != 0 && pd_part_parse_guid(guid, gWant.guid) == 0) {
+				gWant.first = first;
+				gWant.blocks = blocks;
+				gPartState = kPartUnchecked;
+				snprintf(gPartWhy, sizeof(gPartWhy), "not looked at yet");
+			} else {
+				gPartState = kPartRefused;
+				snprintf(gPartWhy, sizeof(gPartWhy), "the three boot arguments are incomplete or malformed, or pdnvme is not 3");
+			}
+			LOG("a SiliconForest partition was asked for: %s", gPartWhy);
+		}
+	}
 	gService = this;
 	for (unsigned i = 0; i < sizeof(gOids) / sizeof(gOids[0]); i++)
 		sysctl_register_oid(gOids[i]);

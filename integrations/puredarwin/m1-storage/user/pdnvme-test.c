@@ -14,12 +14,14 @@
  * reference hashes with identical code: there the device is opened with O_DIRECT.
  */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -313,8 +315,96 @@ static int cmd_head(const char *dev, unsigned long long lba)
 	return 0;
 }
 
+
+/*
+ * tree <dir> [file ...]: one digest over a whole directory tree, for the comparison of a
+ * mounted filesystem with the image it was copied from (this source built on the host computes the same
+ * over a copy taken out of the image). Entries in byte order of their path relative to <dir>; each contributes
+ * "<type> <path>\0" and, for a regular file, its size and SHA-256, for a symbolic link its
+ * target. Also one digest per top-level entry, and the SHA-256 of each named file.
+ */
+struct ent { char *path; char type; };
+static struct ent *ents; static size_t nents, cap;
+static int walk(const char *root, const char *rel)
+{
+	char full[2048];
+	snprintf(full, sizeof(full), "%s/%s", root, rel);
+	DIR *d = opendir(full);
+	if (!d) { printf("NVT_TREE_FAIL opendir %s: %s\n", full, strerror(errno)); return 1; }
+	struct dirent *e; int bad = 0;
+	while ((e = readdir(d)) != NULL) {
+		char child[2048]; struct stat st;
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+		snprintf(child, sizeof(child), "%s%s%s", rel, rel[0] ? "/" : "", e->d_name);
+		snprintf(full, sizeof(full), "%s/%s", root, child);
+		if (lstat(full, &st) != 0) { printf("NVT_TREE_FAIL lstat %s: %s\n", full, strerror(errno)); bad = 1; continue; }
+		if (nents == cap) { cap = cap ? cap * 2 : 4096; ents = realloc(ents, cap * sizeof(*ents)); if (!ents) return 1; }
+		ents[nents].path = strdup(child);
+		ents[nents].type = S_ISREG(st.st_mode) ? 'f' : S_ISDIR(st.st_mode) ? 'd' : S_ISLNK(st.st_mode) ? 'l' : 'o';
+		nents++;
+		if (S_ISDIR(st.st_mode)) bad |= walk(root, child);
+	}
+	closedir(d);
+	return bad;
+}
+static int cmp_ent(const void *a, const void *b) { return strcmp(((const struct ent *)a)->path, ((const struct ent *)b)->path); }
+static int file_sha(const char *path, char hex[65], unsigned long long *size)
+{
+	static uint8_t buf[1 << 20];
+	struct sha256 s; ssize_t n; int fd = open(path, O_RDONLY);
+	if (fd < 0) return 1;
+	sha_init(&s); *size = 0;
+	while ((n = read(fd, buf, sizeof(buf))) > 0) { sha_update(&s, buf, (size_t)n); *size += (unsigned long long)n; }
+	close(fd);
+	sha_final(&s, hex);
+	return n < 0;
+}
+static int cmd_tree(const char *root, int nfiles, char **files)
+{
+	struct sha256 all, top; char hex[65], cur[256] = ""; int bad; double t0 = now();
+	unsigned long long bytes = 0, counts[4] = { 0, 0, 0, 0 };
+	bad = walk(root, "");
+	qsort(ents, nents, sizeof(*ents), cmp_ent);
+	sha_init(&all); sha_init(&top);
+	for (size_t i = 0; i <= nents; i++) {
+		char first[256] = "", full[2048], line[2400]; unsigned long long size = 0; int n;
+		if (i < nents) { snprintf(first, sizeof(first), "%s", ents[i].path); char *slash = strchr(first, '/'); if (slash) *slash = 0; }
+		if (i == nents || strcmp(first, cur) != 0) {
+			if (cur[0]) { sha_final(&top, hex); printf("NVT_TREE_TOP %s %s\n", cur, hex); }
+			if (i == nents) break;
+			snprintf(cur, sizeof(cur), "%s", first); sha_init(&top);
+		}
+		snprintf(full, sizeof(full), "%s/%s", root, ents[i].path);
+		n = snprintf(line, sizeof(line), "%c %s", ents[i].type, ents[i].path) + 1;
+		if (ents[i].type == 'f') {
+			if (file_sha(full, hex, &size)) { printf("NVT_TREE_FAIL read %s: %s\n", full, strerror(errno)); bad = 1; snprintf(hex, sizeof(hex), "unreadable"); }
+			n += snprintf(line + n, sizeof(line) - (size_t)n, "%llu %s", size, hex) + 1;
+			bytes += size; counts[0]++;
+		} else if (ents[i].type == 'l') {
+			char target[1024]; ssize_t t = readlink(full, target, sizeof(target) - 1);
+			if (t < 0) { t = 0; bad = 1; }
+			target[t] = 0;
+			n += snprintf(line + n, sizeof(line) - (size_t)n, "%s", target) + 1;
+			counts[2]++;
+		} else counts[ents[i].type == 'd' ? 1 : 3]++;
+		sha_update(&all, (const uint8_t *)line, (size_t)n); sha_update(&top, (const uint8_t *)line, (size_t)n);
+	}
+	sha_final(&all, hex);
+	printf("NVT_TREE_ALL files=%llu dirs=%llu links=%llu other=%llu bytes=%llu errors=%d %s seconds=%.1f\n", counts[0], counts[1], counts[2],
+	    counts[3], bytes, bad, hex, now() - t0);
+	for (int i = 0; i < nfiles; i++) {
+		char full[2048]; unsigned long long size = 0;
+		snprintf(full, sizeof(full), "%s/%s", root, files[i]);
+		if (file_sha(full, hex, &size)) { printf("NVT_FILE_FAIL %s: %s\n", files[i], strerror(errno)); bad = 1; }
+		else printf("NVT_FILE %s %llu %s\n", files[i], size, hex);
+	}
+	return bad;
+}
+
 int main(int argc, char **argv)
 {
+	if (argc >= 3 && !strcmp(argv[1], "tree"))
+		return cmd_tree(argv[2], argc - 3, argv + 3);
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	if (argc == 4 && !strcmp(argv[1], "hash"))
 		return cmd_hash(argv[2], argv[3]);
