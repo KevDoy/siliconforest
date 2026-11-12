@@ -25,7 +25,7 @@
 #   --autopilot        with --window: the autopilot drives, you watch
 #   --file SRC=/DEST   another file for the guest root (repeatable)
 #   --shot-every N     seconds between screenshots (default 10; 0 none)
-#   --resolution WxH   framebuffer size (default 1280x800; 2560x1600 is the M1 panel)
+#   --resolution WxH   framebuffer size: 640x480, 800x600 or 1024x768 (default), all this firmware's ramfb offers
 #   --kernel debug     upstream's DEBUG kernel instead of RELEASE (much slower)
 #   --bootargs 'A B'   further kernel boot arguments
 #   --smp N, --memory MB, --timeout S, --verbose-boot, --refresh (ask Nix again for inputs)
@@ -34,7 +34,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 Q=integrations/puredarwin/qemu-dev
 NAME=last; WINDOW=0; AUTO=; SRC=; BIN=; ONLY=; SECS=; SCALE=; THEME=; ENVS=; TERMS=2; SOUND=1
 TERMINAL=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
-IMAGE_ARGS=(); RUN_ARGS=(); TIMEOUT=
+IMAGE_ARGS=(); RUN_ARGS=(); TIMEOUT=; RES=1024x768
 while [ $# -gt 0 ]; do
   case "$1" in
     --window) WINDOW=1;; --autopilot) AUTO=1;; --no-sound) SOUND=0;;
@@ -43,7 +43,8 @@ while [ $# -gt 0 ]; do
     --env) ENVS=$2; shift;; --terminals) TERMS=$2; shift;; --timeout) TIMEOUT=$2; shift;;
     --file) IMAGE_ARGS+=(--file "$2"); shift;;
     --verbose-boot|--refresh|--mesa) IMAGE_ARGS+=("$1");;
-    --kernel|--bootargs|--resolution) IMAGE_ARGS+=("$1" "$2"); shift;;
+    --resolution) RES=$2; shift;;
+    --kernel|--bootargs) IMAGE_ARGS+=("$1" "$2"); shift;;
     --shot-every|--smp|--memory|--pointer|--cpu) RUN_ARGS+=("$1" "$2"); shift;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | cut -c3-; exit 0;;
     *) echo "unknown option $1 (see --help)" >&2; exit 2;;
@@ -78,9 +79,9 @@ T1=$(date +%s.%N)
 [ "$AUTO" = 1 ] && STATS=120 || STATS=3600
 EXPORTS=; for kv in $ENVS; do EXPORTS="${EXPORTS}export $kv; "; done
 sed -e "s/@SECONDS@/$SECS/g" -e "s/@AUTOPILOT@/$AUTO/g" -e "s/@SCALE@/$SCALE/g" -e "s/@THEME@/$THEME/g" -e "s/@ONLY@/$ONLY/g" \
-    -e "s/@STATS@/$STATS/g" -e "s/@SOUND@/$SOUND/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/$TERMS/g" -e "s|@ENV@|$EXPORTS|g" \
+    -e "s/@STATS@/$STATS/g" -e "s/@SOUND@/$SOUND/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/$TERMS/g" -e "s/@PERSIST@/0/g" -e "s|@ENV@|$EXPORTS|g" \
     "$Q/guest/qemu-desktop-session.in" > "$OUT/qemu-desktop-session"
-python3 -B "$Q/qd_image.py" --output "$OUT/disk.img" "${IMAGE_ARGS[@]}" \
+python3 -B "$Q/qd_image.py" --output "$OUT/disk.img" --resolution "$RES" "${IMAGE_ARGS[@]}" \
   --file "$BIN=/usr/bin/chonkstep-darwin-desktop" --file "$TERMINAL=/usr/bin/chonk-terminal-darwin" \
   --file "$OUT/qemu-desktop-session=/usr/bin/qemu-desktop-session" \
   --file "$Q/guest/org.siliconforest.qemu-desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.qemu-desktop.plist" > "$OUT/image.json"

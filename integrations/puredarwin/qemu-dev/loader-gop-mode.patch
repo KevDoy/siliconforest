@@ -1,13 +1,13 @@
 SiliconForest QEMU loop: pdgopmode=WxH selects the firmware graphics mode.
 
 The loader keeps whatever GOP mode the firmware left, and QEMU's ramfb under AAVMF comes up
-at 800x600 (the firmware's PlatformConfig variable did not change that here). With
-pdgopmode=1280x800 in boot-args.txt the loader switches to that linear mode before it hands
+at 800x600 (the firmware's PlatformConfig variable did not change that here; its ramfb driver
+offers 640x480, 800x600 and 1024x768). With pdgopmode=1024x768 in boot-args.txt the loader switches to that linear mode before it hands
 the framebuffer to the kernel. Without the argument nothing changes.
 
 --- a/src/boot.c	2026-11-11 20:24:40.141772334 -0800
 +++ b/src/boot.c	2026-11-11 20:24:40.159722126 -0800
-@@ -665,6 +665,49 @@
+@@ -665,6 +665,53 @@
      return EFI_SUCCESS;
    }
  

@@ -95,14 +95,15 @@ TEMPLATE_VERSION = 3    # raise when the template's construction changes
 PD_REV = 'e7aa00a60f0b56ef35aa24252e81467787bf71ea'
 
 
-def base_image(kernel):
+def base_image(kernel, variant='minimal'):
     """Upstream's arm64-virt-minimal image with our kernel collection and loader
     (build-image.nix); built once by Nix. `release` has upstream's RELEASE kernel (several
     times faster under TCG), `debug` the DEBUG kernel."""
     override = os.environ.get('QD_BASE_IMAGE')
     if override:
         return Path(override)
-    out = Path(nix('integrations/puredarwin/qemu-dev', 'build-image.nix', '--argstr', 'kernelConfig', kernel))
+    extra = [] if variant == 'minimal' else ['--argstr', 'variant', variant]
+    out = Path(nix('integrations/puredarwin/qemu-dev', 'build-image.nix', '--argstr', 'kernelConfig', kernel, *extra))
     return next(out.glob('*.img'))
 
 
@@ -159,6 +160,11 @@ def stable_payload(mesa):
     for f in ('CoreAudio', 'AudioToolbox', 'AudioUnit'):
         rel = 'System/Library/Frameworks/%s.framework/Versions/A/%s' % (f, f)
         files['/' + rel] = (a / rel, True)
+    # Network: the lab's DHCP client (m1-bwfm/dhcp) and this directory's qemu-net-up.
+    dhcp = LAB / 'runs/m1-desktop-010/pd-netd-build-001/result/usr/bin/pd-dhcp'
+    if dhcp.exists():
+        files['/usr/bin/pd-dhcp'] = (dhcp, True)
+    files['/usr/bin/qemu-net-up'] = (HERE / 'guest/qemu-net-up', True)
     if mesa:
         t = Path(nix('integrations/puredarwin/m1-mesa-asahi', 'agx-offscreen-test.nix'))
         for l in ('libEGL.1.dylib', 'libGLESv2.2.dylib', 'libgallium-26.3.0-devel.dylib', 'libdrm.2.dylib'):
@@ -172,8 +178,16 @@ def quote(value):
     return '"' + value + '"'
 
 
-def write_root(image, files):
-    """Add or replace regular files in the image's ext4 root with debugfs (no mount)."""
+def read_root(image, path):
+    """A file of the image's ext4 root, as bytes."""
+    offset, _ = partitions(image)[1]
+    return subprocess.run(['debugfs', '-R', 'cat ' + quote(path), '%s?offset=%d' % (image, offset)],
+                          capture_output=True, check=True).stdout
+
+
+def write_root(image, files, dirs=(), remove=()):
+    """Add or replace regular files in the image's ext4 root with debugfs (no mount).
+    dirs: (path, uid, gid) directories to make; remove: paths to delete."""
     offset, _ = partitions(image)[1]
     target = '%s?offset=%d' % (image, offset)
     existing_dirs, commands = set(), []
@@ -188,6 +202,15 @@ def write_root(image, files):
                 if not exists(p):
                     commands.append('mkdir ' + quote(p))
                 existing_dirs.add(p)
+    for path in remove:
+        commands.append('rm ' + quote(path))
+    for path, uid, gid in dirs:
+        for parent in list(reversed(PurePosixPath(path).parents)) + [PurePosixPath(path)]:
+            if str(parent) != '/' and str(parent) not in existing_dirs:
+                if not exists(str(parent)):
+                    commands.append('mkdir ' + quote(parent))
+                existing_dirs.add(str(parent))
+        commands += ['sif %s uid %d' % (quote(path), uid), 'sif %s gid %d' % (quote(path), gid)]
     for dest, (source, executable) in sorted(files.items()):
         commands += ['rm ' + quote(dest), 'write %s %s' % (quote(source), quote(dest)),
                      'sif %s mode 0%o' % (quote(dest), 0o100000 | (0o755 if executable else 0o644))]
@@ -199,14 +222,41 @@ def write_root(image, files):
         raise SystemExit('debugfs: ' + '\n'.join(bad[:10]))
 
 
+def fsck_root(image):
+    """Repair the image's ext4 root after a guest that was stopped without unmounting.
+    e2fsck cannot reopen a filesystem at an offset after replaying its journal, so the
+    partition is copied out (a reflink where the host filesystem has them) and back."""
+    image = Path(image)
+    offset, size = partitions(image)[1]
+    part = image.with_suffix('.root.tmp')
+    def copy(src, src_off, dst, dst_off):
+        with open(src, 'rb') as a, open(dst, 'r+b' if Path(dst).exists() else 'w+b') as b:
+            done = 0
+            while done < size:
+                n = os.copy_file_range(a.fileno(), b.fileno(), min(size - done, 1 << 30), src_off + done, dst_off + done)
+                if n <= 0:
+                    raise OSError('short copy')
+                done += n
+    part.unlink(missing_ok=True)
+    copy(image, offset, part, 0)
+    r = subprocess.run(['e2fsck', '-fy', str(part)], capture_output=True, text=True)
+    if r.returncode > 3:
+        part.unlink()
+        raise SystemExit('e2fsck could not repair the root of %s:\n%s' % (image, (r.stdout + r.stderr)[-2000:]))
+    if r.returncode:
+        copy(part, 0, image, offset)
+    part.unlink()
+    return r.returncode
+
+
 def template(args):
-    up = base_image(args.kernel)
+    up = base_image(args.kernel, args.variant)
     files = stable_payload(args.mesa)
     bootargs = BOOTARGS[args.kernel] + ' pdgopmode=' + args.resolution + (' -v' if args.verbose_boot else '') + (' ' + args.bootargs if args.bootargs else '')
     key = hashlib.sha256(json.dumps([str(up), bootargs, args.time_waits, TEMPLATE_VERSION,
                                      sorted((d, str(s), s.stat().st_size, s.stat().st_mtime_ns, x)
                                             for d, (s, x) in files.items())]).encode()).hexdigest()[:16]
-    out = OUT / 'base' / ('template-%s-%s.img' % (args.kernel, key))
+    out = OUT / 'base' / ('template-%s-%s-%s.img' % (args.kernel, args.variant, key))
     if out.exists():
         return out
     (OUT / 'base').mkdir(parents=True, exist_ok=True)
@@ -230,7 +280,7 @@ def template(args):
     write_root(tmp, files)
     offset, _ = partitions(tmp)[1]
     subprocess.run(['e2fsck', '-fn', '%s?offset=%d' % (tmp, offset)], check=True, capture_output=True)
-    for old in (OUT / 'base').glob('template-%s-*.img' % args.kernel):
+    for old in (OUT / 'base').glob('template-%s-%s-*.img' % (args.kernel, args.variant)):
         old.unlink()
     tmp.rename(out)
     return out
@@ -238,12 +288,18 @@ def template(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--output', type=Path, required=True, help='run image to write (under runs/qemu-dev)')
+    p.add_argument('--output', type=Path, help='run image to write (under runs/qemu-dev)')
+    p.add_argument('--fsck', type=Path, metavar='IMAGE', help='only repair the ext4 root of an existing image, then exit')
     p.add_argument('--file', action='append', default=[], metavar='SOURCE=/DEST', help='file for the run layer (executable)')
+    p.add_argument('--data', action='append', default=[], metavar='SOURCE=/DEST', help='file for the run layer (mode 0644)')
+    p.add_argument('--dir', action='append', default=[], metavar='/PATH:UID:GID', help='directory to make in the run layer')
+    p.add_argument('--remove', action='append', default=[], metavar='/PATH', help='file to delete from the run layer')
+    p.add_argument('--variant', choices=('minimal', 'wayland'), default='minimal',
+                   help='upstream image the base is made from: minimal (default) or wayland (the full no-X userland)')
     p.add_argument('--mesa', action='store_true', help='also stage the M1 Mesa libraries (unused in QEMU)')
     p.add_argument('--verbose-boot', action='store_true', help='-v: launchd and kernel log on the serial console')
     p.add_argument('--bootargs', default='', help='extra kernel boot arguments')
-    p.add_argument('--resolution', default='1280x800', help='framebuffer size, one of the firmware\'s ramfb modes (default 1280x800, the M1 panel at 200%%)')
+    p.add_argument('--resolution', default='1024x768', help='framebuffer size: 640x480, 800x600 or 1024x768 (the firmware\'s ramfb modes; default 1024x768)')
     p.add_argument('--time-waits', type=lambda s: tuple(int(v) for v in s.split(',')), default=(1, 2),
                    help='rtc,quiet seconds for the two IOKitInitializeTime waits (default 1,2; a RELEASE kernel uses the larger for both)')
     p.add_argument('--kernel', choices=('release', 'debug'), default='release', help='upstream kernel configuration (default release)')
@@ -251,6 +307,10 @@ def main():
     args = p.parse_args()
     global REFRESH
     REFRESH = args.refresh
+    if args.fsck:
+        print(json.dumps(dict(image=str(args.fsck), e2fsck_exit=fsck_root(args.fsck))))
+        return
+    assert args.output, '--output is required'
     out = args.output.resolve()
     assert out.is_relative_to(OUT.resolve()), 'run image must be under runs/qemu-dev'
     base = template(args)
@@ -258,11 +318,13 @@ def main():
     out.unlink(missing_ok=True)
     sh(['cp', '--reflink=auto', base, out])
     files = {}
-    for item in args.file:
-        source, dest = item.split('=', 1)
-        files[dest] = (Path(source).resolve(strict=True), True)
-    if files:
-        write_root(out, files)
+    for items, executable in ((args.file, True), (args.data, False)):
+        for item in items:
+            source, dest = item.split('=', 1)
+            files[dest] = (Path(source).resolve(strict=True), executable)
+    dirs = [(d.split(':')[0], int(d.split(':')[1]), int(d.split(':')[2])) for d in args.dir]
+    if files or dirs or args.remove:
+        write_root(out, files, dirs, args.remove)
     print(json.dumps(dict(image=str(out), template=str(base), files={d: str(s) for d, (s, _) in files.items()})))
 
 

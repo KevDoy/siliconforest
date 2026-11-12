@@ -24,12 +24,7 @@ printf '\nQDDESK_BEGIN seconds=@SECONDS@ autopilot=@AUTOPILOT@ scale=%s theme=%s
 get() { sysctl -n "$1" 2>/dev/null; }
 # Network: QEMU's user network on the virtio interface (10.0.2.15, gateway 10.0.2.2), when the
 # tools are staged. There is no Wi-Fi interface: the Wi-Fi rows of the menu show that state.
-(
-    if command -v pd-dhcp >/dev/null 2>&1; then
-        pd-dhcp --up en0 >/dev/null 2>&1; printf 'QDDESK_DHCP_RC=%s\n' "$?"
-        command -v pd-net-up >/dev/null 2>&1 && { pd-net-up en0 >/dev/null 2>&1; printf 'QDDESK_NET_UP_RC=%s\n' "$?"; }
-    fi
-) &
+( [ -x /usr/bin/qemu-net-up ] && { /usr/bin/qemu-net-up en0 > /var/log/qemu-net-up.log 2>&1; printf 'QDDESK_NET_UP_RC=%s %s\n' "$?" "$(tail -1 /var/log/qemu-net-up.log)"; } ) &
 net_job=$!
 if [ "@SOUND@" = 1 ] && [ -x /usr/sbin/coreaudiod ]; then
     mkdir -p /var/log /var/run /Library/Preferences
@@ -51,6 +46,9 @@ if [ "@AUTOPILOT@" = 1 ]; then
     [ -n "@ONLY@" ] && export CHONKSTEP_DARWIN_AUTOPILOT_ONLY="@ONLY@"
 fi
 @ENV@
+# A persistent disk (tools/qemu_install.sh): what the session writes reaches the disk even
+# when the window is simply closed.
+[ "@PERSIST@" = 1 ] && ( while :; do sleep 5; sync; done ) &
 records=$runtime/session-$session
 rm -rf "$records"; mkdir -m 0700 "$records"
 rm -f "$runtime/desktop.rc"
@@ -70,4 +68,5 @@ printf 'QDDESK_STATE scale=%s theme=%s\n' "$(cat "$state/chonkstep/scale" 2>/dev
 [ -r /var/log/coreaudiod.log ] && printf 'QDDESK_COREAUDIOD_LOG %s\n' "$(tail -3 /var/log/coreaudiod.log | tr '\n' '|' | cut -c1-300)"
 wait "$net_job"
 [ "$rc" = 0 ] && printf 'QDDESK_PASS\n'
+[ "@PERSIST@" = 1 ] && sync
 printf 'QDDESK_END\n'
