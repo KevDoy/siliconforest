@@ -139,7 +139,9 @@ controls again. (a) is what is built.
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
 | Popup windows (menus, pop-up buttons, tool tips) | not handled: they are borderless toplevels placed by the compositor; needs xdg_popup in the WindowServer and in the compositor (which refuses popups today) |
-| Firefox on arm64 | official 160.0: binary loads, XUL initialises, AppKit runs, the browser window object is created and the process keeps running; nothing on screen yet, child processes fail (details below) |
+| Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). Not yet: network pages (checks written, running), sandbox on, GPU process |
+| Auto Layout | layout API on NSView and the controls, constraint activation, a Cassowary solver (patch 0011); three constraint layouts equal in structure to macOS |
+| Control geometry and drawing | macOS 26 numbers and look, measured (patch 0012); compared control by control with `conformance/sheet.py` |
 
 ## Firefox on arm64 (official 160.0, QEMU, executed)
 - Official Firefox 160.0 for macOS is universal (x86_64 + arm64), minimum macOS 11, LC_DYLD_INFO
@@ -211,6 +213,44 @@ controls again. (a) is what is built.
     patch 0009 the same crash at the same place, so that crash was not the sandbox. Not yet run
     again after 0009: it is the next run to make, since it takes the sandbox out of the way of
     the first visible window.
+- 12 November, the first visible window and page (sandboxes off, `checks/firefox-window.json`,
+  `firefox-page.json`; runs `ff-w2`, `ff-p3`, screenshots in their `shots/`):
+  - Why nothing was shown before was not sizing. Firefox maps its window 1 by 1, hides it, sizes
+    it, shows it. The WindowServer library answered a configure sent before the unmap; the
+    compositor resets a toplevel on unmap and closed the connection (`xdg_wm_base error 4: wrong
+    configure serial`). Now (patch 0004): configures that arrive before the compositor has
+    passed an unmap (a `wl_display.sync` barrier) are dropped unanswered; a remapped toplevel
+    does the empty commit and waits for its configure; a window is not mapped with a frame from
+    before it was resized; a connection the sandbox refuses is final (the process is headless,
+    no 60 s retry per call).
+  - Compositor (worktree commit 25ec50c and the one after): a new window larger than the work
+    area opens at the size that fits, frame included, and one that grows itself past it later
+    is held to it (a backend capability, on for wm-darwin only); a window remapped at another
+    size is placed afresh.
+  - `ff-w2`: window with frame, tab strip, address bar, toolbar, about:blank. `ff-p3`: the page
+    `guest/firefox-page/index.html` (heading, paragraph, a PNG, a coloured block, a field, a
+    button) drawn by Gecko through WebRender's software renderer; the page reports through the
+    window title: `SF page: loaded image=160x100 typed=abc clicks=1` after the driver typed
+    `abc` and clicked the button; the block is 160 pixels wide for 160 CSS pixels at 100%.
+  - Conditions: all six `MOZ_DISABLE_*_SANDBOX` switches; `guest/firefox-profile/user.js`
+    (documented preferences only: `gfx.webrender.software`, `layers.gpu-process.enabled=false`,
+    one content process, no first-run pages, no background traffic, and the first-run Terms of
+    Use sheet switched off as Mozilla's test harnesses do - a check does not accept terms for
+    anyone; whoever uses this Firefox for real starts it without the file). Firefox itself
+    shows "The security sandbox is disabled" in the window.
+  - Open: the GPU process (starts with sandboxes off, tries OpenGL on Mesa's software
+    rasteriser, is killed by Firefox for an IPC timeout under emulation); one run of five
+    (`ff-ns3`) died in the parent with `pthread_cond_wait` returning EINVAL (not reproduced,
+    cause not found); in `ff-p3` the window was first mapped at 921x691 and then grew itself
+    off the screen's right edge (fixed after that run in the compositor, not yet seen fixed).
+  - Sandbox on, design (not built): on macOS Firefox's content processes have no window server
+    connection at all (`HAS_WINDOW_SERVER` is FALSE in the content profile), so the content
+    process must simply be headless here, which the refused-connection change gives. For
+    processes whose profile does allow `com.apple.windowserver.active`, libsandbox should add
+    an outbound rule for the compositor's socket path when it compiles that permission: the
+    translation in the layer that knows the window server is a socket here, kernel enforcement
+    unchanged. A broker passing a connected descriptor needs the parent's cooperation, which
+    Firefox does not give.
 - Still ahead after the crash: layer-backed rendering through QuartzCore (software only in
   QEMU; on the M1 Firefox's WebRender would use OpenGL through Mesa/AGX, there is no Metal
   device), popup windows (its menus and panels are borderless child windows), fonts, HTTPS and
@@ -230,6 +270,11 @@ controls again. (a) is what is built.
 | 0009 | Security: SecItemCopyMatching defines its result, errSecItemNotFound for an empty search | ours | not checked (the file is unchanged at the tip) |
 | 0010 | libSystem: per-user local, temporary and cache directories | tip 1ebd97cb (part) | already there: drop |
 | (recipe) | libSystem: `proc_name` exported | tip 7f10e1a1 (one line) | already there: drop |
+| 0011 | AppKit: layout API, constraint activation, Cassowary solver (`PDLayoutSolver`, written here from the Badros/Borning/Stuckey paper), whole-tree layout in y-down coordinates, `-layout` called on resize | ours | not checked; the tip's AppKit has none of it (it adds NSStackView only) |
+| 0012 | AppKit: control geometry and drawing of macOS 26 as measured (push, checkbox, radio, pop-up, field, slider, progress, segmented); the macOS 15 look kept behind the default `PDControlLook` = `15`; a string is drawn in a rect lower than its line | ours | not checked |
+| 0013 | Onyx2D: PNG encoder writes straight alpha and reads "default" byte order as RGBA (pictures of bitmap contexts had red and blue exchanged) | ours | not checked |
+0004 also carries the unmap/remap fixes and the headless rule; 0005 the scaling of
+`cacheDisplayInRect:` to its bitmap (was 1x in a corner of a 2x bitmap).
 Tip variants of 0004 to 0006 are not written yet (to go in `patches-tip/` when the rebase
 stream has a tip build).
 
@@ -253,9 +298,9 @@ reported as applied when they are not), `SecItemCopyMatching` (reports an empty 
 2. Popup windows (menus, pop-up buttons, tool tips, Firefox's panels): xdg_popup in the
    WindowServer and in the compositor, which refuses popups today.
 3. Menus: the owner's choice between the three proposals above.
-4. AppKit layout API (`intrinsicContentSize`, `fittingSize`, alignment and baseline): absent,
-   needed by every Auto Layout application; then control geometry and drawing to the macOS
-   reference, the font tracking table and the missing weights.
+4. Auto Layout beyond patch 0011: layout guides, NSStackView (tip only), constraints from nibs
+   exercised; the font tracking table and the missing weights; the rest of the control look
+   (see the second conformance pass).
 5. Scale: layer-backed content, NSOpenGLView and application-set pointer images are 1x;
    offscreen caches render at 1x.
 6. For Chromium applications (Codex, Claude): remote layers across processes in our
@@ -354,6 +399,31 @@ geometry to the reference, the tracking table and the missing weights (Inter has
 as static or variable fonts under the SIL Open Font License), then control drawing. The
 conformance suite so far is this one program; the areas the owner listed (tables, menus,
 toolbars, sheets, Auto Layout, dark appearance, ...) are not written yet.
+
+### Second pass (12 November): layout, control geometry, control look
+- Layout. At the pin and at the tip alike NSLayoutConstraint was data, AppKit relaxed required
+  equalities among a view's direct subviews, `setActive:` set a flag only (nothing made with
+  anchors was laid out), and "top + 20" went up in unflipped views. Patch 0011 replaces that.
+  Three constraint layouts are in the suite (`layout` in the JSON); against macOS their
+  structure is equal (label at x 18 on both, a field stretched 20..300 on both, fitting sizes
+  from the same sums), what differs is the width of text in Inter.
+- Values: 2077 compared, 1166 equal within 0.01 (first scorecard: 382 of 1548), 29 missing
+  (299). `runs/cocoa/conformance/scorecard-006.md`.
+- Control sheet: `metrics <path>` also renders every control at the three control sizes, once
+  in an ordinary unshown window (inactive look) and once in a window that says it is key
+  (active look, still never shown); `conformance/sheet.py` cuts each control out of both
+  pictures by its own frame and compares. Active sheet, 45 controls
+  (`sheet-active-002.md`, `sheet-active-002.png`): 19 frames the same size and the rest within
+  2 points (Inter's widths); mean difference 11.7 of 255; 14% of pixels off by more than 24.
+  What the picture shows is left: the accent as controls show it (macOS 3478f6/3275f0 where
+  `controlAccentColor` is 007aff on both; ours draws 007aff), text about a point lower, the
+  slider (value not shown, `sizeToFit` not applied: a bug of ours in `isVertical`), the
+  field's ring (macOS draws it one point outside the frame; a cell here cannot), heavier pop-up
+  arrows, and every glyph (Inter against the system font).
+- Two looks: the macOS 26 look is the default; `PDControlLook` = `15` (or `PD_CONTROL_LOOK=15`)
+  gives upstream's macOS 15 look in the same geometry. Dark appearance and pressed states of
+  the 26 look are not measured (noted in `PDControlDrawing.m`).
+- Not yet: tracking table, missing weights, dark appearance, tables, menus, toolbars, sheets.
 
 ## Claude and Codex desktop applications (static survey)
 - Codex: OpenAI's documented download (`persistent.oaistatic.com/codex-app-prod/Codex.dmg`,

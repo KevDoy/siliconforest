@@ -11,6 +11,12 @@
 #   0005  AppKit: no title bar inside a compositor-drawn frame, backing stores at the scale,
 #         zoomed and miniaturised state from the compositor's frame
 #   0006  Onyx2D: glyphs rasterised at the device scale (text was point-size bitmaps on a scaled surface)
+#   0011  AppKit: the layout API (intrinsic and fitting sizes, alignment rectangles, baselines,
+#         compression resistance, -layout/-updateConstraints), intrinsic sizes used by the solver
+#   0012  AppKit: control geometry and drawing as macOS 26 has them (measured), the macOS 15 look
+#         kept behind the PDControlLook default
+#   0013  Onyx2D: the PNG encoder writes straight alpha and reads "default" byte order as the
+#         rest of Onyx2D does (pictures of a bitmap context had red and blue exchanged)
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -35,6 +41,8 @@ let
     ./patches/0001-tip-appkit-font-weights-symbol-configuration.patch
     ./patches/0002-appkit-sharing-service-picker.patch
     ./patches/0005-appkit-server-decorations-and-scale.patch
+    ./patches/0011-appkit-layout-api.patch
+    ./patches/0012-appkit-controls-macos26.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -44,6 +52,7 @@ let
   ];
   onyx2dSrc = patchedDir "src/Frameworks/Onyx2D" [
     ./patches/0006-onyx2d-glyphs-at-device-scale.patch
+    ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
   ];
   onyx2d = pd."onyx2d-arm64".override { src = onyx2dSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";

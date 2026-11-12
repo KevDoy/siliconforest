@@ -18,6 +18,12 @@
 - (NSEdgeInsets)alignmentRectInsets;
 - (CGFloat)firstBaselineOffsetFromTop;
 - (CGFloat)baselineOffsetFromBottom;
+- (CGFloat)lastBaselineOffsetFromBottom;
+- (float)contentHuggingPriorityForOrientation:(NSInteger)orientation;
+- (float)contentCompressionResistancePriorityForOrientation:(NSInteger)orientation;
+- (void)setTranslatesAutoresizingMaskIntoConstraints:(BOOL)flag;
+- (void)addConstraint:(id)constraint;
+- (void)layoutSubtreeIfNeeded;
 - (void)displayRectIgnoringOpacity:(NSRect)rect inContext:(NSGraphicsContext *)context;
 @end
 @interface NSFont (ConformanceOptional)
@@ -111,6 +117,13 @@ static void control(const char *k, NSView *v)
     } else null("alignmentRectInsets");
     if ([v respondsToSelector:@selector(firstBaselineOffsetFromTop)]) num("firstBaselineOffsetFromTop", [v firstBaselineOffsetFromTop]); else null("firstBaselineOffsetFromTop");
     if ([v respondsToSelector:@selector(baselineOffsetFromBottom)]) num("baselineOffsetFromBottom", [v baselineOffsetFromBottom]); else null("baselineOffsetFromBottom");
+    if ([v respondsToSelector:@selector(lastBaselineOffsetFromBottom)]) num("lastBaselineOffsetFromBottom", [v lastBaselineOffsetFromBottom]); else null("lastBaselineOffsetFromBottom");
+    if ([v respondsToSelector:@selector(contentHuggingPriorityForOrientation:)]) {
+        open_obj("contentHugging"); num("horizontal", [v contentHuggingPriorityForOrientation:0]); num("vertical", [v contentHuggingPriorityForOrientation:1]); close_obj();
+    } else null("contentHugging");
+    if ([v respondsToSelector:@selector(contentCompressionResistancePriorityForOrientation:)]) {
+        open_obj("contentCompressionResistance"); num("horizontal", [v contentCompressionResistancePriorityForOrientation:0]); num("vertical", [v contentCompressionResistancePriorityForOrientation:1]); close_obj();
+    } else null("contentCompressionResistance");
     if ([v isKindOfClass:[NSControl class]] && [(NSControl *)v cell] != nil) {
         NSCell *cell = [(NSControl *)v cell];
         size("cellSize", [cell cellSize]);
@@ -155,6 +168,106 @@ static void controlsAt(const char *k, NSControlSize cs)
     NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(0, 0, 160, 20)];
     if ([bar respondsToSelector:@selector(setControlSize:)]) [bar setControlSize:cs];
     control("progressBar", bar);
+    close_obj();
+}
+
+// Auto Layout itself: small arrangements held together by required equalities only, the size they
+// fit in and the frames they get. Attribute numbers are AppKit's (NSLayoutAttribute).
+enum { A_LEFT = 1, A_RIGHT = 2, A_TOP = 3, A_BOTTOM = 4, A_WIDTH = 7, A_HEIGHT = 8, A_CENTERX = 9, A_CENTERY = 10 };
+
+static void pin(NSView *holder, id a, NSInteger aa, id b, NSInteger ab, CGFloat constant)
+{
+    Class c = NSClassFromString(@"NSLayoutConstraint");
+    id constraint = [c constraintWithItem:a attribute:aa relatedBy:0 toItem:b attribute:ab multiplier:1 constant:constant];
+
+    [holder addConstraint:constraint];
+}
+
+static NSTextField *plainLabel(NSString *text)
+{
+    NSTextField *label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+
+    [label setStringValue:text]; [label setBezeled:NO]; [label setDrawsBackground:NO]; [label setEditable:NO];
+    [label setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+    [label setTranslatesAutoresizingMaskIntoConstraints:NO];
+    return label;
+}
+
+static NSButton *plainButton(NSString *title)
+{
+    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+
+    [button setTitle:title]; [button setBezelStyle:NSRoundedBezelStyle]; [button setButtonType:NSMomentaryPushInButton];
+    [button setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+    [button setTranslatesAutoresizingMaskIntoConstraints:NO];
+    return button;
+}
+
+static void layoutCases(const char *k)
+{
+    open_obj(k);
+    if (NSClassFromString(@"NSLayoutConstraint") == Nil || ![NSView instancesRespondToSelector:@selector(fittingSize)] ||
+        ![NSView instancesRespondToSelector:@selector(layoutSubtreeIfNeeded)]) {
+        null("row"); null("form"); null("centered");
+        close_obj();
+        return;
+    }
+    {   // a label and a button side by side, 20 points from the sides, 8 apart, 12 above and below the label
+        NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 120)];
+        NSTextField *label = plainLabel(@"Name of the thing:");
+        NSButton *button = plainButton(@"Choose");
+
+        [box addSubview:label]; [box addSubview:button];
+        pin(box, label, A_LEFT, box, A_LEFT, 20);
+        pin(box, button, A_LEFT, label, A_RIGHT, 8);
+        pin(box, box, A_RIGHT, button, A_RIGHT, 20);
+        pin(box, label, A_TOP, box, A_TOP, 12);
+        pin(box, box, A_BOTTOM, label, A_BOTTOM, 12);
+        pin(box, button, A_CENTERY, label, A_CENTERY, 0);
+        open_obj("row");
+        size("fittingSize", [box fittingSize]);
+        [box setFrameSize:[box fittingSize]];
+        [box layoutSubtreeIfNeeded];
+        rect("label", [label frame]); rect("button", [button frame]);
+        close_obj();
+    }
+    {   // a label over a field that fills the width, a button under it at the right
+        NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 320, 200)];
+        NSTextField *label = plainLabel(@"Address");
+        NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+        NSButton *button = plainButton(@"OK");
+
+        [field setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+        [field setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [box addSubview:label]; [box addSubview:field]; [box addSubview:button];
+        pin(box, label, A_LEFT, box, A_LEFT, 20);
+        pin(box, label, A_TOP, box, A_TOP, 20);
+        pin(box, field, A_LEFT, box, A_LEFT, 20);
+        pin(box, box, A_RIGHT, field, A_RIGHT, 20);
+        pin(box, field, A_TOP, label, A_BOTTOM, 8);
+        pin(box, button, A_TOP, field, A_BOTTOM, 12);
+        pin(box, box, A_RIGHT, button, A_RIGHT, 20);
+        pin(box, box, A_BOTTOM, button, A_BOTTOM, 20);
+        open_obj("form");
+        size("fittingSize", [box fittingSize]);
+        [box setFrameSize:NSMakeSize(320, [box fittingSize].height)];
+        [box layoutSubtreeIfNeeded];
+        rect("label", [label frame]); rect("field", [field frame]); rect("button", [button frame]);
+        close_obj();
+    }
+    {   // one button in the middle of a box of a given size
+        NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 200, 100)];
+        NSButton *button = plainButton(@"Centered");
+
+        [box addSubview:button];
+        pin(box, button, A_CENTERX, box, A_CENTERX, 0);
+        pin(box, button, A_CENTERY, box, A_CENTERY, 0);
+        open_obj("centered");
+        size("fittingSize", [box fittingSize]);
+        [box layoutSubtreeIfNeeded];
+        rect("button", [button frame]);
+        close_obj();
+    }
     close_obj();
 }
 
@@ -213,6 +326,138 @@ static double render(NSString *path)
     return scale;
 }
 
+/* The control sheet: every control the suite knows, at its own size (-sizeToFit), in the three
+ * control sizes side by side, drawn like render() above into <path>-controls.png. Where each one
+ * was put is written to the JSON ("sheet"), so the picture can be cut up and compared control by
+ * control without guessing. Rows are 36 points apart from the top, columns 220. */
+/* A window that says it is the key and main window without being shown: controls ask their
+ * window whether to draw in the active (accent coloured) or the inactive (grey) state, and a
+ * window that is never on screen is otherwise never active. Nothing on the screen is touched. */
+@interface ActiveWindow : NSWindow
+@end
+
+@implementation ActiveWindow
+- (BOOL)isKeyWindow { return YES; }
+- (BOOL)isMainWindow { return YES; }
+- (BOOL)hasKeyAppearance { return YES; }
+- (BOOL)hasMainAppearance { return YES; }
+- (BOOL)_hasKeyAppearance { return YES; }
+- (BOOL)_hasMainAppearance { return YES; }
+- (BOOL)_hasActiveAppearance { return YES; }
+- (BOOL)_hasActiveControls { return YES; }
+@end
+
+static NSView *sheetRoot;
+static int sheetRow;
+static NSControlSize sheetSize;
+static int sheetColumn;
+
+static void place(const char *name, NSView *v, CGFloat width)
+{
+    char key[64];
+    NSRect frame;
+
+    if ([v respondsToSelector:@selector(cell)] && [[(NSControl *)v cell] respondsToSelector:@selector(setControlSize:)])
+        [[(NSControl *)v cell] setControlSize:sheetSize];
+    else if ([v respondsToSelector:@selector(setControlSize:)]) [(NSProgressIndicator *)v setControlSize:sheetSize];
+    if ([v respondsToSelector:@selector(setFont:)])
+        [(NSControl *)v setFont:[NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:sheetSize]]];
+    if ([v respondsToSelector:@selector(sizeToFit)]) [(NSControl *)v sizeToFit];
+    frame = [v frame];
+    if (width > 0) frame.size.width = width;
+    frame.origin.x = 20 + sheetColumn * 220;
+    frame.origin.y = [sheetRoot bounds].size.height - 16 - sheetRow * 36 - 28 + floor((28 - frame.size.height) / 2);
+    [v setFrame:frame];
+    [sheetRoot addSubview:v];
+    snprintf(key, sizeof(key), "%s.%s", sheetSize == NSRegularControlSize ? "regular" : sheetSize == NSSmallControlSize ? "small" : "mini", name);
+    rect(key, frame);
+    sheetRow++;
+}
+
+static NSButton *sheetButton(NSString *title, NSButtonType type)
+{
+    NSButton *b = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 100, 32)];
+
+    [b setTitle:title]; [b setButtonType:type];
+    if (type == NSMomentaryPushInButton) [b setBezelStyle:NSRoundedBezelStyle];
+    return b;
+}
+
+static double renderSheet(NSString *path, BOOL active)
+{
+    static const NSControlSize sizes[3] = { NSRegularControlSize, NSSmallControlSize, NSMiniControlSize };
+    NSWindow *window = [[(active ? [ActiveWindow class] : [NSWindow class]) alloc] initWithContentRect:NSMakeRect(0, 0, 680, 560)
+                                                   styleMask:NSTitledWindowMask
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:YES];
+
+    sheetRoot = [window contentView];
+    open_obj(active ? "sheetActive" : "sheet");
+    size("size", [sheetRoot bounds].size);
+    for (sheetColumn = 0; sheetColumn < 3; sheetColumn++) {
+        NSButton *b;
+        NSTextField *f;
+
+        sheetSize = sizes[sheetColumn];
+        sheetRow = 0;
+        place("push", sheetButton(@"Button", NSMomentaryPushInButton), 0);
+        b = sheetButton(@"Disabled", NSMomentaryPushInButton); [b setEnabled:NO];
+        place("pushDisabled", b, 0);
+        b = sheetButton(@"Default", NSMomentaryPushInButton); [b setKeyEquivalent:@"\r"];
+        place("pushDefault", b, 0);
+        b = sheetButton(@"Checked box", NSSwitchButton); [b setState:NSOnState];
+        place("checkOn", b, 0);
+        place("checkOff", sheetButton(@"Empty box", NSSwitchButton), 0);
+        b = sheetButton(@"Disabled box", NSSwitchButton); [b setState:NSOnState]; [b setEnabled:NO];
+        place("checkDisabled", b, 0);
+        b = sheetButton(@"Chosen", NSRadioButton); [b setState:NSOnState];
+        place("radioOn", b, 0);
+        place("radioOff", sheetButton(@"Not chosen", NSRadioButton), 0);
+        {
+            NSPopUpButton *popup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 100, 26) pullsDown:NO];
+
+            [popup addItemWithTitle:@"First choice"]; [popup addItemWithTitle:@"Second"];
+            place("popUp", popup, 0);
+        }
+        f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 160, 22)]; [f setStringValue:@"Some text"];
+        place("field", f, 160);
+        f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 160, 22)]; [f setStringValue:@"Disabled"]; [f setEnabled:NO];
+        place("fieldDisabled", f, 160);
+        {
+            NSSlider *slider = [[NSSlider alloc] initWithFrame:NSMakeRect(0, 0, 160, 21)];
+
+            [slider setDoubleValue:0.4];
+            place("slider", slider, 160);
+        }
+        {
+            NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(0, 0, 160, 20)];
+
+            [bar setIndeterminate:NO]; [bar setMinValue:0]; [bar setMaxValue:100]; [bar setDoubleValue:60];
+            place("progress", bar, 160);
+        }
+        {
+            NSSegmentedControl *seg = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(0, 0, 160, 24)];
+
+            [seg setSegmentCount:3]; [seg setLabel:@"One" forSegment:0]; [seg setLabel:@"Two" forSegment:1]; [seg setLabel:@"Three" forSegment:2];
+            [seg setSelectedSegment:1];
+            place("segmented", seg, 0);
+        }
+        f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 160, 17)];
+        [f setStringValue:@"A label, 0123456789"]; [f setBezeled:NO]; [f setDrawsBackground:NO]; [f setEditable:NO];
+        place("label", f, 0);
+    }
+    close_obj();
+
+    NSBitmapImageRep *rep = [sheetRoot bitmapImageRepForCachingDisplayInRect:[sheetRoot bounds]];
+    if (rep == nil) { fprintf(stderr, "metrics: no bitmap for the control sheet\n"); return 0; }
+    [sheetRoot cacheDisplayInRect:[sheetRoot bounds] toBitmapImageRep:rep];
+    NSData *png = [rep representationUsingType:NSPNGFileType properties:@{}];
+    NSString *file = [NSString stringWithFormat:@"%@-controls%s.png", path, active ? "-active" : ""];
+    if (![png writeToFile:file atomically:YES]) fprintf(stderr, "metrics: could not write %s\n", [file UTF8String]);
+    else fprintf(stderr, "metrics: wrote %s (%ldx%ld pixels)\n", [file UTF8String], (long)[rep pixelsWide], (long)[rep pixelsHigh]);
+    return (double)[rep pixelsWide] / 680.0;
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
@@ -260,6 +505,7 @@ int main(int argc, const char *argv[])
         controlsAt("mini", NSMiniControlSize);
         close_obj();
         colors("colors");
+        layoutCases("layout");
         open_obj("scroller");
         if ([NSScroller respondsToSelector:@selector(scrollerWidthForControlSize:scrollerStyle:)]) {
             num("legacyWidth", [NSScroller scrollerWidthForControlSize:NSRegularControlSize scrollerStyle:0]);
@@ -270,8 +516,11 @@ int main(int argc, const char *argv[])
         rect("frameForContent400x300Titled", [NSWindow frameRectForContentRect:NSMakeRect(0, 0, 400, 300)
             styleMask:NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask | NSResizableWindowMask]);
         close_obj();
-        if (argc > 1)
+        if (argc > 1) {
             num("renderScale", render([NSString stringWithUTF8String:argv[1]]));
+            renderSheet([NSString stringWithUTF8String:argv[1]], NO);
+            renderSheet([NSString stringWithUTF8String:argv[1]], YES);
+        }
         close_obj();
         printf("\n");
         fflush(stdout);

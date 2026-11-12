@@ -403,7 +403,28 @@
  - (NSPoint)convertPointToBacking:(NSPoint)point;
 --- a/src/Frameworks/AppKit/NSView.m
 +++ b/src/Frameworks/AppKit/NSView.m
-@@ -1616,6 +1616,12 @@
+@@ -530,7 +530,19 @@
+ 
+    if(context==nil)
+     return;
+-   [self displayRectIgnoringOpacity:rect inContext:context];
++   /* The rep made by -bitmapImageRepForCachingDisplayInRect: has the window's pixels, not its
++    * points: drawn into as it was, the view came out at 1x in a corner of a 2x bitmap. */
++   {
++    CGContextRef port=[context graphicsPort];
++    CGFloat sx=rect.size.width>0 ? [imageRep pixelsWide]/rect.size.width : 1;
++    CGFloat sy=rect.size.height>0 ? [imageRep pixelsHigh]/rect.size.height : 1;
++
++    CGContextSaveGState(port);
++    if(sx!=1 || sy!=1)
++     CGContextScaleCTM(port,sx,sy);
++    [self displayRectIgnoringOpacity:rect inContext:context];
++    CGContextRestoreGState(port);
++   }
+ }
+ 
+ -(BOOL)isHidden {
+@@ -1616,6 +1628,12 @@
     return window!=nil ? [window backingScaleFactor] : 1.0;
  }
  
