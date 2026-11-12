@@ -5,5 +5,7 @@
 let
   p = import ./patched.nix;
 in import ./build-cocoa-root.nix {
+  # upstream's own desktop session job belongs to its compositor, not ours
+  remove = [ "System/Library/LaunchDaemons/org.puredarwin.wayland-session.plist" ];
   extra = [ p.onyx2d p.windowserver p.appkit (import ./build-hello.nix) ];
 }

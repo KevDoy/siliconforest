@@ -45,7 +45,7 @@
    ],
    "until": "COCOAHELLO zoom-state zoomed=1",
    "tries": 4,
-   "wait": 25,
+   "each": 25,
    "name": "maximize from our title bar: resized and isZoomed"
   },
   {
@@ -76,7 +76,7 @@
    ],
    "until": "COCOAHELLO zoom-state zoomed=0",
    "tries": 4,
-   "wait": 25,
+   "each": 25,
    "name": "restore from our title bar"
   },
   {

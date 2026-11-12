@@ -10,9 +10,10 @@
 #           WindowServer, Terminal, Calculator, fonts) and the libraries below it that the
 #           upstream bundle expects its target to have already.
 #   extra   further derivations laid over it (our patched frameworks, test applications).
+#   remove  paths taken out again (a launchd job whose daemon cannot run here).
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' build-cocoa-root.nix --no-out-link
-{ extra ? [ ] }:
+{ extra ? [ ], remove ? [ ] }:
 let
   pd = import ./pin.nix;
   pkgs = import (builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea").inputs.nixpkgs { system = "x86_64-linux"; };
@@ -61,6 +62,7 @@ in pkgs.runCommand "siliconforest-cocoa-root-arm64" { } ''
   for l in $out/lib/*.dylib; do
     [ -e "$out/usr/lib/$(basename "$l")" ] || ln -s "../../lib/$(basename "$l")" "$out/usr/lib/$(basename "$l")"
   done
+  for r in ${toString remove}; do rm -rf "$out/$r"; done
   # what only a build needs
   rm -rf $out/usr/include $out/include $out/nix-support $out/usr/lib/pkgconfig $out/lib/pkgconfig $out/usr/share/man \
          $out/share/man $out/share/doc $out/usr/share/doc $out/lib/cmake $out/usr/lib/cmake $out/usr/share/aclocal

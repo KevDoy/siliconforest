@@ -311,7 +311,7 @@ def main():
                     rec['at_pixel'] = [round(x), round(y)]
                     # "hold": keys kept down around the click; "count": 2 for a double click
                     # "until": a console line the click must produce; the click is repeated ("tries",
-                    # each waiting "wait" seconds) because a double click's timing does not always
+                    # each waiting "each" seconds) because a double click's timing does not always
                     # survive emulation. The attempts used are recorded.
                     for attempt in range(1, int(step.get('tries', 1)) + 1):
                         for key in step.get('hold', []):
@@ -322,7 +322,7 @@ def main():
                         for key in reversed(step.get('hold', [])):
                             qmp.cmd('input-send-event', events=[{'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': key}}}])
                         rec['attempts'] = attempt
-                        hit = 'until' not in step or bool(drv.wait(step['until'], step.get('wait', 30)))
+                        hit = 'until' not in step or bool(drv.wait(step['until'], step.get('each', 30)))
                         if hit:
                             break
                     if 'until' in step and 'name' in step:
