@@ -112,6 +112,11 @@ class StageLauncher(unittest.TestCase):
         for forbidden in ('hv_init', 'hv_start', 'smp_start_secondaries', 'write32', 'write64', 'nvme_init', 'pcie_init'):
             self.assertNotIn(forbidden, names)
         self.assertTrue(fakes.saved['capture-core.json']['console_capture_finalized'])
+        # the record the controller's verdict binds the console to: the kernel in the image
+        import hashlib
+        self.assertEqual(fakes.saved['before-start.json']['image_sha256'],
+                         hashlib.sha256(fakes.inputs.contents['kernel']).hexdigest())
+        self.assertLess(list(fakes.saved).index('before-start.json'), list(fakes.saved).index('native-start.json'))
 
         image = self.uploaded(fakes, record['image_bytes'])
         self.assertTrue(image.startswith(self.m1n1))
@@ -134,6 +139,11 @@ class StageLauncher(unittest.TestCase):
         self.assertEqual(entered[:32] + entered[40:len(raw)], raw[:32] + raw[40:])
         self.assertEqual(struct.unpack_from('<Q', entered, 32)[0], BASE + size + 0x4000)
         self.assertEqual(entered[len(raw):], bytes(0x4000 - len(raw)))
+
+    def test_boot_argument_addresses_wrap_as_64_bit(self):
+        # the collected boot arguments of sfb05b and of sfb05c (virt_base above the address)
+        self.assertEqual(native_stage.physical(0x3ec4000, 0xfffffffffe078000, 0x802078000), 0x807ec4000)
+        self.assertEqual(native_stage.physical(0xfffffe0016520000, 0xfffffe0011c30000, 0x851c30000), 0x856520000)
 
     def test_words_reach_the_configuration(self):
         fakes = Fakes(usb=0)

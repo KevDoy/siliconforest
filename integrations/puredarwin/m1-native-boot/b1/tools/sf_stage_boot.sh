@@ -13,6 +13,9 @@
 #   SF_WORDS      further words for native_mode.txt (default "vdm-serial noiolog"); stage words:
 #                 usbkeep (keep the debug USB port's device-tree nodes), hostseed (boot seed
 #                 from the controller instead of the SEP), wdt=<s>, nosprr, noamx
+#   SF_SESSION=launchd  multi-user boot, the guest script started by launchd
+#                 (../../guest/org.siliconforest.desktop.plist) instead of typed; no challenge,
+#                 the result is NO_COMMAND_LINE by design (as NB_SESSION of ../../tools/nb_boot.sh)
 #   SF_BOOTARGS   further boot arguments
 #   SF_STAGE      the stage image (default ../out/m1n1-sf-stage.bin, built by ../build.sh)
 # The whole script is one function, read completely before anything runs.
@@ -33,6 +36,7 @@ PROFILE=${SF_PROFILE:-shell}
 STAGE=${SF_STAGE:-$B1/out/m1n1-sf-stage.bin}
 [ -f "$STAGE" ] || { echo "no stage image at $STAGE: run $B1/build.sh" >&2; exit 2; }
 WORDS="native stage vdm-return ${SF_WORDS-vdm-serial noiolog}"
+[ "${SF_SESSION:-}" = launchd ] && WORDS="$WORDS multiuser"
 KC=${SF_KC:-$("$ROOT/tools/default_kc.sh" native)}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 B=integrations/puredarwin/m1-bringup
@@ -68,6 +72,7 @@ else
   cp "$HERE/guest-shell.in" "$S"
   ARGS="cpus=${SF_CPUS:-1} $WAITS ${SF_BOOTARGS:-}"
 fi
+[ "${SF_SESSION:-}" = launchd ] && X="${X:+$X;}$HERE/guest/org.siliconforest.desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.desktop.plist"
 # More than one processor: the stage starts the secondary cores and parks them in the EL2
 # page; the kernel releases them only with pdcpuheld=1.
 case "$ARGS" in cpus=1\ *) ;; *) ARGS="$ARGS pdcpuheld=1";; esac

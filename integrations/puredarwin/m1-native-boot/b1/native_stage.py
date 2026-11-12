@@ -105,6 +105,13 @@ def rechain(backend, inputs, raw_bootargs, device, directory, write_private):
     reconnect(backend, device)
 
 
+def physical(address, virt_base, phys_base):
+    """A boot-arguments virtual address as a physical one, in 64-bit arithmetic as m1n1 and
+    XNU do it. iBoot's virt_base differs from boot to boot and can lie above the address
+    (sfb05c: virt_base 0xfffffffffe078000, devtree 0x3ec4000), so the difference wraps."""
+    return (int(address) - int(virt_base) + int(phys_base)) & 0xffffffffffffffff
+
+
 def readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs_text, layout):
     """Diagnostic (word stagestop): the stage placed everything and returned to its proxy
     instead of entering XNU. Read back what it placed and compare it with what the launcher
@@ -187,12 +194,12 @@ def readback(backend, inputs, raw_bootargs, console, directory, write_private, b
     # device trees: the one the stage built, and the original it built it from, as they are now
     built = iface.readmem(adt, int(ba.devtree_size))
     write_private(directory, 'stage-adt.bin', built)
-    original_at = int(old.devtree) - int(old.virt_base) + int(old.phys_base)
+    original_at = physical(old.devtree, old.virt_base, old.phys_base)
     original = iface.readmem(original_at, int(old.devtree_size))
     write_private(directory, 'stage-original-adt.bin', original)
     print('STAGE_READBACK ' + json.dumps(dict(
         adt=dict(bytes=len(built), sha256=hashlib.sha256(built).hexdigest(),
-                 devtree_field_points_at=hex(int(ba.devtree) - int(ba.virt_base) + int(ba.phys_base))),
+                 devtree_field_points_at=hex(physical(ba.devtree, ba.virt_base, ba.phys_base))),
         original_adt=dict(at=hex(original_at), bytes=len(original), sha256=hashlib.sha256(original).hexdigest(),
                           equal_to_collected=original == backend.u.adt_data if hasattr(backend, 'u') and
                           getattr(backend.u, 'adt_data', None) is not None else None))), flush=True)
@@ -290,6 +297,14 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     console = console_factory(native_boot.UART_DEVICE)
     console.dev = native_boot.PacedSerial(console.dev)
     try:
+        # What the controller's verdict binds the console to (tools/m1_bringup_cycle.py
+        # console_observation): the kernel this boot launches. Here it travels in the image's
+        # kernel record, which the stage checks (CRC) before it loads it. Without this record
+        # a stage boot that answers the challenge is still recorded NO_COMMAND_LINE (sfb06).
+        write_private(directory, 'before-start.json', dict(
+            stage=True, bootargs=bootargs, image_sha256=hashlib.sha256(inputs.contents['kernel']).hexdigest(),
+            loaded_by='the stage, from the kernel record of the uploaded image', stage_image_sha256=record['image_sha256'],
+            hardware_boot_observed=False))
         write_private(directory, 'native-start.json', record)
         print('NATIVE_STAGE_START ' + json.dumps(record, default=hex), flush=True)
         mark('native_vector')
