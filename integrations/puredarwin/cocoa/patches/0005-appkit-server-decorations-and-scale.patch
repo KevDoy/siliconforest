@@ -118,6 +118,19 @@
  }
  
  -(void)setContentMaxSize:(NSSize)value {
+@@ -1583,9 +1606,9 @@
+ 
+ // device pixels per point: the screen's, or 1 off screen
+ -(CGFloat)backingScaleFactor {
+-   NSScreen *screen=[self screen];
+-
+-   return screen!=nil ? [screen backingScaleFactor] : 1.0;
++   // the scale of this window's own backing store; it has one whether or not its frame lies on
++   // a screen (AppKit's frame is not where the compositor put the window)
++   return (_backingScale120 > 0 ? _backingScale120 : _windowServerBackingScale120())/120.0;
+ }
+ 
+ -(NSResponder *)firstResponder {
 @@ -1676,6 +1699,9 @@
  }
  
