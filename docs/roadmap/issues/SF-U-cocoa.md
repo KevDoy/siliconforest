@@ -407,19 +407,20 @@ toolbars, sheets, Auto Layout, dark appearance, ...) are not written yet.
   Three constraint layouts are in the suite (`layout` in the JSON); against macOS their
   structure is equal (label at x 18 on both, a field stretched 20..300 on both, fitting sizes
   from the same sums), what differs is the width of text in Inter.
-- Values: 2077 compared, 1166 equal within 0.01 (first scorecard: 382 of 1548), 29 missing
-  (299). `runs/cocoa/conformance/scorecard-006.md`.
+- Values: 2077 compared, 1214 equal within 0.01 (first scorecard: 382 of 1548), 29 missing
+  (299). `runs/cocoa/conformance/scorecard-007.md`.
 - Control sheet: `metrics <path>` also renders every control at the three control sizes, once
   in an ordinary unshown window (inactive look) and once in a window that says it is key
   (active look, still never shown); `conformance/sheet.py` cuts each control out of both
-  pictures by its own frame and compares. Active sheet, 45 controls
-  (`sheet-active-002.md`, `sheet-active-002.png`): 19 frames the same size and the rest within
-  2 points (Inter's widths); mean difference 11.7 of 255; 14% of pixels off by more than 24.
-  What the picture shows is left: the accent as controls show it (macOS 3478f6/3275f0 where
-  `controlAccentColor` is 007aff on both; ours draws 007aff), text about a point lower, the
-  slider (value not shown, `sizeToFit` not applied: a bug of ours in `isVertical`), the
-  field's ring (macOS draws it one point outside the frame; a cell here cannot), heavier pop-up
-  arrows, and every glyph (Inter against the system font).
+  pictures by its own frame and compares. 45 controls on each sheet
+  (`sheet-sheetActive-003.md`/`.png`, `sheet-sheet-003.md`/`.png`): 22 frames the same size and
+  the rest within 2 points (Inter's widths); mean difference 9.9 of 255 (active) and 10.0
+  (inactive); 7.7% and 7.6% of pixels off by more than 24 (the run before the slider and
+  accent fixes: 14.4%). Sliders 0.4% off, progress bars and disabled buttons a few percent;
+  the worst are the labels and titles (14 to 17%), which is the glyphs: Inter against the
+  system font, drawn about a point lower. Also left: the field's ring (macOS draws it one
+  point outside the frame; a cell here cannot), the slider knob's halo outside the frame
+  (same reason), heavier pop-up arrows.
 - Two looks: the macOS 26 look is the default; `PDControlLook` = `15` (or `PD_CONTROL_LOOK=15`)
   gives upstream's macOS 15 look in the same geometry. Dark appearance and pressed states of
   the 26 look are not measured (noted in `PDControlDrawing.m`).

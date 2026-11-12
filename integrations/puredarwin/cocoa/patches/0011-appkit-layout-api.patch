@@ -46,7 +46,7 @@
 +@end
 --- a/src/Frameworks/AppKit/NSViewLayout.m
 +++ b/src/Frameworks/AppKit/NSViewLayout.m
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,248 @@
 +// NSViewLayout.m - what a view tells Auto Layout about itself
 +// Copyright (c) 2026 The SiliconForest contributors, SPDX-License-Identifier: MPL-2.0 OR BSD-2-Clause
 +//
@@ -267,18 +267,11 @@
 +
 +// the track runs as far as it is given: only the thickness is the slider's own
 +- (NSSize)intrinsicContentSize {
-+    NSSize size = [self frame].size;
-+    CGFloat thickness = [self isVertical] ? size.width : size.height;
-+    NSSize cell = [[self cell] cellSize];
++    NSSize frame = [self frame].size, cell = [[self cell] cellSize];
++    CGFloat thickness = MIN(cell.width, cell.height);
 +
-+    // a cell that answers "as large as you like" has no thickness of its own to give
-+    if ([self isVertical]) {
-+        if (cell.width > 0 && cell.width < 1000)
-+            thickness = cell.width;
++    if (frame.height > frame.width)
 +        return NSMakeSize(raised(self, thickness), NSViewNoIntrinsicMetric);
-+    }
-+    if (cell.height > 0 && cell.height < 1000)
-+        thickness = cell.height;
 +    return NSMakeSize(NSViewNoIntrinsicMetric, raised(self, thickness));
 +}
 +

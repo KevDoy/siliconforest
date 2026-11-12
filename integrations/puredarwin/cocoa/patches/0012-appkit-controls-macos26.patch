@@ -261,6 +261,24 @@
      {
 --- a/src/Frameworks/AppKit/NSSliderCell.m
 +++ b/src/Frameworks/AppKit/NSSliderCell.m
+@@ -60,7 +60,7 @@
+    _isContinuous=YES; // NSCell defaults to NO, NSSliderCell defaults to YES
+    _type=NSLinearSlider;
+    _minValue=0;
+-   _maxValue=0;
++   _maxValue=1;   // as on macOS: a new slider runs from 0 to 1
+    _altIncrementValue=0;
+    _isVertical=-1;
+    _lastRect=NSZeroRect;
+@@ -75,7 +75,7 @@
+    _isContinuous=YES; // NSCell defaults to NO, NSSliderCell defaults to YES
+    _type=NSLinearSlider;
+    _minValue=0;
+-   _maxValue=0;
++   _maxValue=1;   // as on macOS: a new slider runs from 0 to 1
+    _altIncrementValue=0;
+    _isVertical=-1;
+    _lastRect=NSZeroRect;
 @@ -118,7 +118,7 @@
  }
  
@@ -270,7 +288,7 @@
  }
  
  -(void)setSliderType:(NSSliderType)value {
-@@ -250,7 +250,23 @@
+@@ -250,7 +250,24 @@
     return result;
  }
  
@@ -289,13 +307,14 @@
 +-(NSSize)cellSize {
 +   CGFloat thick=sliderThickness([self controlSize]);
 +
-+   return [self isVertical] ? NSMakeSize(thick,40000) : NSMakeSize(40000,thick);
++   // -isVertical is -1 until the cell has been drawn: only a known vertical slider is one
++   return [self isVertical]==1 ? NSMakeSize(thick,40000) : NSMakeSize(40000,thick);
 +}
 +
  -(NSRect)knobRectFlipped:(BOOL)flipped {
     double value=[self doubleValue];
     double percent=(_maxValue>_minValue) ? (value-_minValue)/(_maxValue-_minValue) : 0;
-@@ -258,39 +274,27 @@
+@@ -258,39 +275,27 @@
     NSRect knobRect;
  
     percent=MAX(0,MIN(1,percent));
@@ -345,7 +364,7 @@
  }
  
  -(void)drawKnob {
-@@ -313,15 +317,15 @@
+@@ -313,15 +318,15 @@
  {
      PDDrawContext c=PDCurrentDrawContext(controlView);
      NSRect knob,disc,track;
@@ -366,7 +385,7 @@
      [self drawTickMarks];
 --- a/src/Frameworks/AppKit/NSSlider.m
 +++ b/src/Frameworks/AppKit/NSSlider.m
-@@ -95,6 +95,17 @@
+@@ -95,6 +95,18 @@
     return [[self selectedCell] isVertical];
  }
  
@@ -374,10 +393,11 @@
 +-(void)sizeToFit {
 +   NSSize cell=[[self cell] cellSize],size=[self frame].size;
 +
-+   if([self isVertical])
-+    size.width=cell.width;
++   // by its shape: the cell does not know which way it runs before it is drawn
++   if(size.height>size.width)
++    size.width=MIN(cell.width,cell.height);
 +   else
-+    size.height=cell.height;
++    size.height=MIN(cell.width,cell.height);
 +   [self setFrameSize:size];
 +}
 +
@@ -529,7 +549,7 @@
  // Copyright (c) 2026 The PureDarwin Project, SPDX-License-Identifier: MPL-2.0 OR BSD-2-Clause
  
  // the colours and offsets are measured from macOS 15 renderings of the same cells (src/Tools/uigallery)
-@@ -107,6 +109,52 @@
+@@ -107,6 +109,60 @@
     return r;
  }
  
@@ -570,19 +590,27 @@
 +   fillGrey(r,radius,c.dark ? 1 : 0,c.dark ? MIN(1,alpha*1.6) : alpha);
 +}
 +
-+// the accent as the standard controls show it: a little darker than the accent colour itself
-+// (3275f0 where the accent is 3478f6), in grey when the window is not active
-+static void fillAccent26(PDDrawContext c, CGRect r, CGFloat radius, BOOL darker, CGFloat alpha, BOOL pressed) {
++/* The accent as the standard controls show it. For the standard blue macOS fills a default button
++ * and a progress bar with 3478f6 and a checkbox, radio button, slider and selected segment with
++ * 3275f0, where +controlAccentColor is 007aff (measured; the colour is defined in a wider space
++ * than the bitmap's). Other accents have not been measured and are used as they are. */
++static void fillAccent26(PDDrawContext c, CGRect r, CGFloat radius, BOOL toggle, CGFloat alpha, BOOL pressed) {
 +   NSColor *accent=[[NSColor controlAccentColor] colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
-+   CGFloat k=(darker ? 0.975 : 1.0)*(pressed ? 0.85 : 1.0);
++   CGFloat red=[accent redComponent],green=[accent greenComponent],blue=[accent blueComponent];
++   CGFloat k=pressed ? 0.85 : 1.0;
 +
-+   fillRounded(r,radius,[accent redComponent]*k,[accent greenComponent]*k,[accent blueComponent]*k,alpha);
++   if(fabs(red)<0.01 && fabs(green-122/255.0)<0.01 && fabs(blue-1)<0.01){
++    red=(toggle ? 50 : 52)/255.0;
++    green=(toggle ? 117 : 120)/255.0;
++    blue=(toggle ? 240 : 246)/255.0;
++   }
++   fillRounded(r,radius,red*k,green*k,blue*k,alpha);
 +}
 +
  static void accentGradient(PDDrawContext c, CGFloat top[3], CGFloat bottom[3]) {
     NSColor *accent=PDAccentColor(c);
     CGFloat r=[accent redComponent],g=[accent greenComponent],b=[accent blueComponent];
-@@ -117,6 +165,15 @@
+@@ -117,6 +173,15 @@
  }
  
  void PDDrawPushBezel(PDDrawContext c, NSRect bezel, BOOL defaulted, BOOL pressed, BOOL enabled) {
@@ -598,7 +626,7 @@
     CGRect outer=PDRectFromTop(bezel,c.flipped,0,bezel.size.height-1);
     CGRect shadow=down(c,NSInsetRect(outer,1,0),1);
     CGRect body=PDRectFromTop(NSInsetRect(outer,1,0),c.flipped,1,outer.size.height-1);
-@@ -217,8 +274,47 @@
+@@ -217,8 +282,47 @@
     fillRoundedGradient(c,box,radius,top,bottom);
  }
  
@@ -646,7 +674,7 @@
     CGFloat s=box.size.width/14;
     CGFloat radius=3.5*s;
     CGFloat mark=enabled ? 1 : (c.dark ? 0.45 : 0.72);
-@@ -251,6 +347,14 @@
+@@ -251,6 +355,14 @@
  }
  
  void PDDrawRadioButton(PDDrawContext c, NSRect box, BOOL on, BOOL enabled, BOOL pressed) {
@@ -661,7 +689,7 @@
     CGFloat radius=box.size.width/2;
     CGFloat dot=box.size.width*6/14;
     CGFloat mark=enabled ? 1 : (c.dark ? 0.45 : 0.72);
-@@ -284,6 +388,21 @@
+@@ -284,6 +396,21 @@
  void PDDrawArrowBox(PDDrawContext c, NSRect box, BOOL upAndDown, BOOL enabled) {
     CGFloat top[3],bottom[3];
     CGFloat cx=NSMidX(box),cy=NSMidY(box);
@@ -683,7 +711,7 @@
     BOOL tinted=c.active && enabled;
     CGFloat ink=tinted ? 1 : (c.dark ? 0.85 : 0.2);
  
-@@ -311,6 +430,28 @@
+@@ -311,6 +438,28 @@
     CGRect inner=NSInsetRect(frame,1,1);
     CGRect top=frame,bottom=frame;
  
@@ -712,7 +740,7 @@
     top.size.height=1;
     bottom.size.height=1;
     if(c.flipped)
-@@ -376,6 +517,33 @@
+@@ -376,6 +525,33 @@
  // the track is six rows tall, seven rows below the top of a 20 row frame
  void PDDrawProgressBar(PDDrawContext c, NSRect frame, double fraction, BOOL indeterminate, double phase) {
     CGFloat h=6;
@@ -746,7 +774,7 @@
     NSRect track=PDRectFromTop(frame,c.flipped,floor((frame.size.height-h)/2),h);
     NSColor *accent=PDAccentColor(c);
  
-@@ -419,6 +587,28 @@
+@@ -419,6 +595,28 @@
     NSColor *accent=c.active ? PDAccentColor(c) : [NSColor colorWithCalibratedWhite:c.dark ? 0.36 : 0.835 alpha:1];
     NSRect fill=track;
  
@@ -775,7 +803,7 @@
     if(c.dark)
      fillGrey(track,thick/2,1,0.10);
     else {
-@@ -452,6 +642,17 @@
+@@ -452,6 +650,17 @@
     CGFloat d=MIN(knob.size.width,knob.size.height);
     NSRect disc=NSMakeRect(NSMidX(knob)-d/2,NSMidY(knob)-d/2,d,d);
  
@@ -793,7 +821,7 @@
     if(c.dark){
      fillGrey(down(c,disc,0.5),d/2,0,0.3);
      fillGrey(disc,d/2,pressed ? 0.7 : 0.6,enabled ? 1 : 0.5);
-@@ -491,6 +692,10 @@
+@@ -491,6 +700,10 @@
  }
  
  void PDDrawSegmentTrack(PDDrawContext c, NSRect track) {
@@ -804,7 +832,7 @@
     if(c.dark)
      fillGrey(track,6,1,0.10);
     else {
-@@ -500,6 +705,16 @@
+@@ -500,6 +713,16 @@
  }
  
  void PDDrawSegmentSelection(PDDrawContext c, NSRect segment) {
@@ -821,7 +849,7 @@
     if(c.dark){
      fillGrey(segment,5,1,0.28);
      return;
-@@ -510,6 +725,9 @@
+@@ -510,6 +733,9 @@
  }
  
  void PDDrawSegmentDivider(PDDrawContext c, NSRect track, CGFloat x) {
