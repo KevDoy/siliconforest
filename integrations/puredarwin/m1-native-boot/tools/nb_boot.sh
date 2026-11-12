@@ -26,6 +26,7 @@
 #   NB_SESSION=launchd  native: multi-user boot, the guest script started by launchd
 #                    (../guest/org.siliconforest.desktop.plist) instead of typed; no challenge
 #   NB_GUEST         shell profile: another guest script template (default ../guest-shell.in)
+#   NB_EXTRA         further files for the RAM root, "source=/destination;..."
 #   NB_BOOTARGS      further boot arguments;  NB_WORDS  further words for native_mode.txt
 # The whole script is one function, read completely before anything runs.
 main() {
@@ -116,6 +117,7 @@ if [ "${NB_REBOOT:-}" = 1 ]; then
   sed -i '$ d' "$S"
   printf '%s\n' "printf '\\nPD_BENCH_REBOOT\\n'; reboot; printf 'PDNB_REBOOT_RC=%s\\n' \"\$?\"; sleep 60" >> "$S"
 fi
+[ -n "${NB_EXTRA:-}" ] && X="${X:+$X;}$NB_EXTRA"
 # More than one processor natively: m1n1 starts the secondary cores and the EL2 page holds
 # them; the kernel releases them only with pdcpuheld=1 (./build-kc.nix has the platform kext
 # that knows it).
