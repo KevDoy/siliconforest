@@ -76,7 +76,7 @@ From m1n1's sources and the worker logs of `df02` and `nb02` (every access the P
 
 | `nb03` | native | not booted: the controller was off the network when the packet was to be delivered |
 | `nb03b` | as `nb02`, after the controller was moved | same as `nb02` (1714 bytes, marker seen) |
-| `nb04` | **native**, shell profile, `cpus=1`, `vdm-return vdm-serial` | stub lines, banner, root mounted, launchd, shell prompt 7.27 s after the vector; 44 KB of console; thermal lines at uptime 107 and 167 s; challenge typed but received mangled (`NO_COMMAND_LINE`). Reset sent once against the running kernel, Linux back within 30 s. Controller result `RECOVERY_INCOMPLETE_NO_RETRY`: a defect of this stream's controller patch (the 45 s wait and the wait after the reset both recorded a neighbour refresh; the second record failed), fixed. |
+| `nb04` | **native**, shell profile, `cpus=1`, `vdm-return vdm-serial` | stub lines, banner, root mounted, launchd, shell prompt 7.27 s after the vector; 44 KB of console; thermal lines at uptime 107 and 167 s; challenge typed but received mangled (`NO_COMMAND_LINE`). Reset sent once against the running kernel, Linux answering 47 s later at the latest. Controller result `RECOVERY_INCOMPLETE_NO_RETRY`: a defect of this stream's controller patch (the 45 s wait and the wait after the reset both recorded a neighbour refresh; the second record failed), fixed. |
 
 `nb01`, `nb02`, `nb03b` ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. Linux after `nb04`: `macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)`, as after a hypervisor boot.
 

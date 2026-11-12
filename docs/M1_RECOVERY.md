@@ -123,9 +123,9 @@ configured loader hash is the one actually installed.
 One `macvdmtool reboot serial`, sent by the per-boot controller copy of the native-boot
 stream (`integrations/puredarwin/m1-native-boot/launcher-native.patch`, word `vdm-return`),
 against the M1 running XNU without m1n1: kernel alive at an idle single-user shell, about
-4.5 minutes after it started, no proxy USB device, no Linux. The tool returned 0
+3.7 minutes after it started, no proxy USB device, no Linux. The tool returned 0
 (`Rebooting target into normal mode... OK`), and a new Linux boot with the known kernel
-answered within 30 s. This is one cycle against a **running** kernel. Against a panicked
+answered 47 s later at the latest (between 29 and 47 s). This is one cycle against a **running** kernel. Against a panicked
 or hung XNU the reset has not been run; the limit "not recovery from an arbitrary hang"
 above still stands for those states.
 
