@@ -66,3 +66,7 @@ mutants that skip the close sweep or verification must be rejected by the real
 positive/leak fixtures respectively. Existing host `/proc` checks remain separate
 Linux-only supporting evidence. Host tests establish none of Darwin execution,
 hardware input, a full sandbox or final DS4 admission.
+
+Build-007 note: SHM pool descriptors (POSIX shared memory, or the fallback file) are opened
+after the PTY child was forked, and are close-on-exec: the terminal checks FD_CLOEXEC on the
+`shm_open` descriptor and sets it if the platform did not. The child boundary above is unchanged.

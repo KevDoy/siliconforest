@@ -10,6 +10,7 @@ mod protocol;
 mod pty;
 mod render;
 mod scale;
+mod shm;
 mod status;
 use protocol::{FrameState, MAX_RX};
 use std::{
@@ -131,6 +132,9 @@ struct State {
     /// the last one acknowledged (`None`: the compositor left it to us), and
     /// what is committed.
     pending_size: Option<(usize, usize)>,
+    /// A configure was acknowledged and no commit has carried the
+    /// acknowledgement to the compositor yet.
+    ack_uncommitted: bool,
     configured: Option<(usize, usize)>,
     logical: (usize, usize),
     dirty: bool,
@@ -181,6 +185,7 @@ impl State {
             base_px,
             metrics,
             pending_size: None,
+            ack_uncommitted: false,
             configured: None,
             logical: scale::layout(&metrics, None, (80, 24), false).logical,
             dirty: true,
@@ -534,6 +539,9 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for State {
     ) {
         if let xdg_surface::Event::Configure { serial } = e {
             p.ack_configure(serial);
+            // An acknowledgement takes effect with the next commit.
+            s.ack_uncommitted = true;
+            s.dirty = true;
             s.ssd.surface_configured(serial);
             if let Some(size) = s.pending_size.take() {
                 s.configured = Some(size);
@@ -687,7 +695,10 @@ delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1);
 
 struct Buffer {
-    file: File,
+    /// The pool's memory: POSIX shared memory, or the unlinked file (`src/shm.rs`).
+    /// `drop` destroys the wl_buffer and the pool; this field is released
+    /// after that (unmap, close).
+    backing: shm::Backing,
     pool: wl_shm_pool::WlShmPool,
     buffer: wl_buffer::WlBuffer,
     size: (usize, usize),
@@ -700,6 +711,7 @@ impl Buffer {
         size: (usize, usize),
         seq: u32,
         scale120: u32,
+        policy: shm::Policy,
     ) -> Result<Self> {
         let bytes = size
             .0
@@ -711,17 +723,8 @@ impl Buffer {
         if bytes > 64 * 1024 * 1024 * (scale120 as usize).div_ceil(unit).pow(2) {
             return Err("buffer exceeds bound".into());
         }
-        let path = dir.join(format!("shm-{seq}"));
-        let f = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)?;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        std::fs::remove_file(path)?;
-        f.set_len(bytes as u64)?;
-        let pool = shm.create_pool(f.as_fd(), bytes as i32, q, ());
+        let backing = shm::Backing::new(dir, seq, size, bytes, policy)?;
+        let pool = shm.create_pool(backing.fd(), bytes as i32, q, ());
         let buffer = pool.create_buffer(
             0,
             size.0 as i32,
@@ -732,7 +735,7 @@ impl Buffer {
             (),
         );
         Ok(Self {
-            file: f,
+            backing,
             pool,
             buffer,
             size,
@@ -981,6 +984,12 @@ fn session(
     // The metrics and sizes of what is committed (`None` before the first buffer).
     let mut shown: Option<(scale::Metrics, scale::Layout)> = None;
     let mut seq = 0;
+    // SHM backing: what may be used, what the buffer on screen uses, why
+    // POSIX shared memory was not used (if it was tried), and buffers made.
+    let shm_policy = shm::policy();
+    let mut shm_kind: Option<shm::Kind> = None;
+    let mut shm_fallback: Option<String> = None;
+    let (mut shm_posix, mut shm_file) = (0u32, 0u32);
     let mut grid = term::Term::new(80, 24)?;
     let mut renderer = render::Renderer::new()?;
     // The window's pixels, kept between frames: only changed rows are redrawn.
@@ -1150,8 +1159,9 @@ fn session(
                     selected.as_ref().map_or(0, |t| t.len()),
                     if s.data_device.is_some() { "available" } else { "absent" },
                     shown.as_ref().map_or(String::new(), |(m, l)| format!(
-                        " scale120={} cell={}x{} buffer={}x{} logical={}x{}",
-                        m.scale120, m.cw, m.ch, l.buffer.0, l.buffer.1, l.logical.0, l.logical.1
+                        " scale120={} cell={}x{} buffer={}x{} logical={}x{}{}",
+                        m.scale120, m.cw, m.ch, l.buffer.0, l.buffer.1, l.logical.0, l.logical.1,
+                        shm_kind.map_or(String::new(), |kind| format!(" shm={}", kind.name()))
                     )),
                     grid.text()
                 );
@@ -1173,14 +1183,27 @@ fn session(
                     if buffer.as_ref().is_none_or(|b| b.size != layout.buffer) {
                         buffer.take();
                         seq += 1;
-                        buffer = Some(Buffer::new(
+                        let new = Buffer::new(
                             s.shm.as_ref().ok_or("no shm")?,
                             &q,
                             dir,
                             layout.buffer,
                             seq,
                             metrics.scale120,
-                        )?);
+                            shm_policy,
+                        )?;
+                        let kind = new.backing.kind();
+                        match kind {
+                            shm::Kind::Posix => shm_posix += 1,
+                            shm::Kind::File => shm_file += 1,
+                        }
+                        shm_kind = Some(kind);
+                        if let Some(why) = new.backing.fallback() {
+                            // Said once per buffer; a closed stderr must not stop the terminal.
+                            let _ = writeln!(io::stderr(), "TERMSHM {}: {why}; using a file in the records directory", new.backing.what());
+                            shm_fallback = Some(format!("{}: {why}", new.backing.what()));
+                        }
+                        buffer = Some(new);
                         pixels = vec![0u8; layout.buffer.0 * layout.buffer.1 * 4];
                     }
                     grid.resize(layout.cols, layout.rows)?;
@@ -1208,15 +1231,19 @@ fn session(
                     shown = Some((metrics, layout));
                     // One line per change, for unattended checks of the scale.
                     // A closed or full stderr must not stop the terminal.
-                    let _ = writeln!(io::stderr(), "{}", scale::status_line(&metrics, &layout));
+                    let _ = writeln!(
+                        io::stderr(),
+                        "{}{}",
+                        scale::status_line(&metrics, &layout),
+                        shm_kind.map_or(String::new(), |kind| format!(" shm={}", kind.name()))
+                    );
                 }
                 let b = buffer.as_mut().unwrap();
                 let size = b.size;
                 // Only rows that changed are drawn, written and damaged.
                 if let Some((y0, y1)) = renderer.draw(&grid, &mut pixels, size.0, size.1) {
                     let row = size.0 * 4;
-                    b.file.seek(SeekFrom::Start((y0 * row) as u64))?;
-                    b.file.write_all(&pixels[y0 * row..y1 * row])?;
+                    b.backing.write(y0 * row, &pixels[y0 * row..y1 * row])?;
                     let w = window.as_ref().ok_or("no configured window")?;
                     // Window geometry is in logical units; damage in buffer pixels.
                     w.xdg
@@ -1227,6 +1254,16 @@ fn session(
                     w.surface
                         .damage_buffer(0, y0 as i32, size.0 as i32, (y1 - y0) as i32);
                     w.surface.commit();
+                    s.ack_uncommitted = false;
+                } else if s.ack_uncommitted {
+                    // A configure that changes nothing here (the same grid
+                    // fits the new size) still has to be answered: without a
+                    // commit the compositor waits for one, and the window's
+                    // frame stays at the size it asked for, not ours.
+                    if let Some(w) = window.as_ref() {
+                        w.surface.commit();
+                    }
+                    s.ack_uncommitted = false;
                 }
                 s.dirty = false;
             }
@@ -1300,7 +1337,7 @@ fn session(
     } else {
         "deadline"
     };
-    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"clipboard_copies":copies,"clipboard_pastes":pastes,"clipboard_pasted_bytes":pasted_bytes,"alternate_screen":grid.alternate_screen(),"scale":shown.as_ref().map(|(m, l)| serde_json::json!({"scale120":m.scale120,"font_px":m.font_px(),"cell":[m.cw,m.ch],"grid":[l.cols,l.rows],"buffer":[l.buffer.0,l.buffer.1],"logical":[l.logical.0,l.logical.1],"buffer_scale":l.buffer_scale,"fractional_protocol":s.fractional_mode})),"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
+    *audit = serde_json::json!({"configure_serial":s.ssd.serial(),"ready":s.ready,"keymap":s.input.keys.ready(),"pty_exec_checked":pty.exec_checked(),"exec_boundary":child_exec_facts(pty),"ssd":s.ssd.ready(),"frames":s.frames.callbacks,"commits":s.frames.commits,"pty_rx_bytes":received,"pty_tx_bytes":s.input.written,"input_accepted_bytes":s.input.accepted,"input_unsent_bytes":s.input.pending_len(),"unsupported_terminal_sequences":grid.unsupported(),"scrollback_lines":grid.scrollback_len(),"clipboard_copies":copies,"clipboard_pastes":pastes,"clipboard_pasted_bytes":pasted_bytes,"alternate_screen":grid.alternate_screen(),"scale":shown.as_ref().map(|(m, l)| serde_json::json!({"scale120":m.scale120,"font_px":m.font_px(),"cell":[m.cw,m.ch],"grid":[l.cols,l.rows],"buffer":[l.buffer.0,l.buffer.1],"logical":[l.logical.0,l.logical.1],"buffer_scale":l.buffer_scale,"fractional_protocol":s.fractional_mode})),"shm":{"backing":shm_kind.map(shm::Kind::name),"fallback":shm_fallback,"posix_buffers":shm_posix,"file_buffers":shm_file},"stop_cause":stop_cause,"term_signal":STOP.load(Ordering::Relaxed),"window_closed":s.closed,"pty_eof":pty.eof});
     // Preserve a protocol failure even if writing the final grid also fails.
     let grid_result = (|| -> Result<()> {
         let mut final_grid = log(dir, "grid-final.txt")?;

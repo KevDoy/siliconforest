@@ -51,6 +51,8 @@ struct Server {
     /// What the client said: buffer sizes, pending surface state, and the
     /// state of every commit that carried a buffer.
     sizes: Vec<(sb::WlBuffer, (i32, i32))>,
+    /// Every pool the client created: its descriptor and size.
+    pools: Vec<(std::os::fd::OwnedFd, i32)>,
     buffer_scale: i32,
     buffer_scale_requests: Vec<i32>,
     destination: Option<(i32, i32)>,
@@ -283,7 +285,7 @@ impl wayland_server::Dispatch<ss::WlSurface, ()> for Server {
 }
 impl wayland_server::Dispatch<shm::WlShm, ()> for Server {
     fn request(
-        _: &mut Self,
+        s: &mut Self,
         _: &Client,
         _: &shm::WlShm,
         r: shm::Request,
@@ -291,8 +293,9 @@ impl wayland_server::Dispatch<shm::WlShm, ()> for Server {
         _: &DisplayHandle,
         i: &mut DataInit<'_, Self>,
     ) {
-        if let shm::Request::CreatePool { id, .. } = r {
+        if let shm::Request::CreatePool { id, fd, size } = r {
             i.init(id, ());
+            s.pools.push((fd, size));
         }
     }
 }
@@ -479,6 +482,7 @@ fn run(mode: Mode) -> (serde_json::Value, Vec<u8>, String) {
             fractional: None,
             pointer: None,
             sizes: Vec::new(),
+            pools: Vec::new(),
             buffer_scale: 1,
             buffer_scale_requests: Vec::new(),
             destination: None,
@@ -630,6 +634,14 @@ struct Seen {
     /// TIOCGWINSZ of the PTY at the end: columns, rows.
     winsize: (u16, u16),
     audit: serde_json::Value,
+    /// How the session ended (`run_scale` requires success).
+    result: std::result::Result<(), String>,
+    /// The last pool the compositor was given, as its own mapping of the
+    /// descriptor shows it after the client has gone; the PTY output; and
+    /// the fields of the last `TERMSTATE` line.
+    pool: Vec<u8>,
+    rx: Vec<u8>,
+    state: std::collections::HashMap<String, String>,
 }
 /// The live state file: its `key=value` fields and the screen's lines.
 fn live(dir: &Path) -> Option<(std::collections::HashMap<String, String>, Vec<String>)> {
@@ -643,6 +655,14 @@ fn live(dir: &Path) -> Option<(std::collections::HashMap<String, String>, Vec<St
 /// other text, and the wheel scrolls back. Pointer positions are sent in
 /// logical surface units, as a compositor does.
 fn run_scale(case: Case) -> Seen {
+    let seen = run_scale_any(case);
+    assert!(seen.result.is_ok(), "{:?} audit={}", seen.result, seen.audit);
+    assert_eq!(seen.audit["ready"], true);
+    assert_eq!(seen.audit["stop_cause"], "window_close", "the scenario ran to its end: {}", seen.audit);
+    seen
+}
+/// The same, whatever the outcome of the session.
+fn run_scale_any(case: Case) -> Seen {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -707,6 +727,7 @@ fn run_scale(case: Case) -> Seen {
             fractional: None,
             pointer: None,
             sizes: Vec::new(),
+            pools: Vec::new(),
             buffer_scale: 1,
             buffer_scale_requests: Vec::new(),
             destination: None,
@@ -828,21 +849,23 @@ fn run_scale(case: Case) -> Seen {
             std::thread::sleep(Duration::from_millis(1));
         }
         drop(status_peer);
-        (s.frames, s.buffer_scale_requests, s.limits, s.damage, selected, scrolled)
+        (s.frames, s.buffer_scale_requests, s.limits, s.damage, selected, scrolled, s.pools)
     });
     let mut audit = serde_json::Value::Null;
     let result = session(client, &"a".repeat(48), Instant::now() + Duration::from_secs(7), &dir, &mut pty, &mut rx, &mut tx, &mut status, &mut audit);
     done.store(true, Ordering::Relaxed);
-    let (frames, buffer_scale_requests, limits, damage, selected, scrolled) = worker.join().unwrap();
+    let (frames, buffer_scale_requests, limits, damage, selected, scrolled, pools) = worker.join().unwrap();
     let mut size: libc::winsize = unsafe { std::mem::zeroed() };
     assert_eq!(unsafe { libc::ioctl(pty.fd(), libc::TIOCGWINSZ, &mut size) }, 0);
     let cleanup = pty.cleanup();
     assert!(cleanup.complete, "{cleanup:?}");
-    assert!(result.is_ok(), "{result:?} audit={audit}");
-    assert_eq!(audit["ready"], true);
-    assert_eq!(audit["stop_cause"], "window_close", "the scenario ran to its end: {audit}");
+    // The client has destroyed its buffer and closed its descriptor: what
+    // the compositor's descriptor still maps is what it would show.
+    let pool = pools.last().map_or(Vec::new(), |(fd, size)| crate::shm::tests::mapped(fd.as_fd(), *size as usize));
+    let rx = std::fs::read(dir.join("pty-rx.bin")).unwrap();
+    let state = live(&dir).map(|(fields, _)| fields).unwrap_or_default();
     std::fs::remove_dir_all(dir).unwrap();
-    Seen { frames, buffer_scale_requests, limits, damage, selected, scrolled, winsize: (size.ws_col, size.ws_row), audit }
+    Seen { frames, buffer_scale_requests, limits, damage, selected, scrolled, winsize: (size.ws_col, size.ws_row), audit, result: result.map_err(|e| e.to_string()), pool, rx, state }
 }
 /// The frames before and after the scale change: (first, last), and every
 /// frame is one of the two (nothing was ever committed at another size).
@@ -923,4 +946,68 @@ fn host_real_wayland_whole_scale_without_fractional_protocol() {
     let seen = run_scale(Case { compositor: 4, fractional: Some(150), viewporter: false, preferred: None, output: Some(2), configure: (0, 0), then: None });
     assert!(seen.frames.iter().all(|f| *f == Frame { buffer: (1792, 1088), buffer_scale: 2, destination: None, geometry: Some((0, 0, 896, 544)) }), "{:?}", seen.frames);
     assert_eq!(seen.audit["scale"]["fractional_protocol"], false);
+}
+
+/// Runs `run_scale_any` on the plain compositor with one SHM policy.
+fn run_shm(policy: crate::shm::Policy) -> Seen {
+    crate::shm::TEST_POLICY.with(|p| p.set(Some(policy)));
+    let seen = run_scale_any(Case { compositor: 4, fractional: None, viewporter: false, preferred: None, output: None, configure: (0, 0), then: None });
+    crate::shm::TEST_POLICY.with(|p| p.set(None));
+    seen
+}
+#[test]
+fn host_real_wayland_pool_is_posix_shared_memory_and_shows_the_same_pixels() {
+    let posix = run_shm(crate::shm::Policy::default());
+    assert_eq!(posix.result, Ok(()), "{}", posix.audit);
+    assert_eq!(posix.audit["stop_cause"], "window_close");
+    assert_eq!(posix.audit["shm"], serde_json::json!({"backing":"posix","fallback":null,"posix_buffers":1,"file_buffers":0}));
+    assert_eq!(posix.state.get("shm").map(String::as_str), Some("posix"), "{:?}", posix.state);
+    assert_eq!(posix.state.get("buffer").map(String::as_str), Some("896x544"));
+    // The compositor's mapping of the descriptor it was sent shows what the
+    // renderer draws for the same PTY output, scrolled back the same six lines.
+    let (w, h) = (896usize, 544usize);
+    let mut term = term::Term::new(80, 24).unwrap();
+    term.feed(&posix.rx);
+    assert!(term.scroll_view(posix.scrolled.unwrap() as isize));
+    let mut renderer = render::Renderer::new().unwrap();
+    renderer.set_metrics(scale::Metrics::new(scale::BASE_FONT_PX, scale::UNIT));
+    let mut expected = vec![0u8; w * h * 4];
+    assert!(renderer.draw(&term, &mut expected, w, h).is_some());
+    assert_eq!(posix.pool.len(), expected.len());
+    assert!(posix.pool == expected, "the pool differs from the rendered screen");
+    let colours: std::collections::HashSet<&[u8]> = posix.pool.chunks(4).collect();
+    assert!(colours.len() > 2, "text was drawn, not one flat colour: {}", colours.len());
+    // The earlier backing, asked for as the environment override does: the same pixels.
+    let file = run_shm(crate::shm::Policy::from_env(Some("file")));
+    assert_eq!(file.result, Ok(()), "{}", file.audit);
+    assert_eq!(file.audit["shm"], serde_json::json!({"backing":"file","fallback":null,"posix_buffers":0,"file_buffers":1}));
+    assert_eq!(file.state.get("shm").map(String::as_str), Some("file"));
+    assert!(file.pool == posix.pool, "file and POSIX backings show different pixels");
+    // (How many frames were committed depends on timing; what they were does not.)
+    assert_eq!((file.frames.last(), file.selected, file.scrolled, file.winsize), (posix.frames.last(), posix.selected, posix.scrolled, posix.winsize));
+    // Nothing of this process is left in /dev/shm.
+    assert_eq!(crate::shm::tests::leftover_names(), Vec::<String>::new());
+}
+#[test]
+fn host_real_wayland_falls_back_to_the_file_when_shared_memory_fails() {
+    let seen = run_shm(crate::shm::Policy { fail_posix: Some("ftruncate"), ..crate::shm::Policy::default() });
+    assert_eq!(seen.result, Ok(()), "{}", seen.audit);
+    assert_eq!(seen.audit["ready"], true);
+    assert_eq!(seen.audit["stop_cause"], "window_close");
+    assert_eq!(seen.audit["shm"], serde_json::json!({"backing":"file","fallback":"shm buffer 896x544 (1949696 bytes): posix ftruncate: errno 28","posix_buffers":0,"file_buffers":1}));
+    assert_eq!(seen.state.get("shm").map(String::as_str), Some("file"));
+    assert_eq!((seen.selected.0, seen.scrolled, seen.winsize), (Some(4), Some(6), (80, 24)));
+    assert_eq!(seen.pool.len(), 896 * 544 * 4);
+    assert!(seen.pool.chunks(4).collect::<std::collections::HashSet<_>>().len() > 2);
+    assert_eq!(crate::shm::tests::leftover_names(), Vec::<String>::new());
+}
+#[test]
+fn host_real_wayland_buffer_allocation_failure_ends_the_session_with_its_cause() {
+    let seen = run_shm(crate::shm::Policy { fail_posix: Some("ftruncate"), fail_file: Some("set_len"), ..crate::shm::Policy::default() });
+    // The text `run` puts into result.json's `errors` and prints on stderr.
+    assert_eq!(seen.result, Err("shm buffer 896x544 (1949696 bytes): file set_len: errno 28 (after posix ftruncate: errno 28)".to_string()));
+    assert_eq!(seen.audit["stop_cause"], "fault");
+    assert_eq!(seen.audit["ready"], false);
+    assert_eq!(seen.audit["shm"], serde_json::json!({"backing":null,"fallback":null,"posix_buffers":0,"file_buffers":0}));
+    assert!(seen.frames.is_empty() && seen.pool.is_empty(), "no pool was created and nothing was committed");
 }

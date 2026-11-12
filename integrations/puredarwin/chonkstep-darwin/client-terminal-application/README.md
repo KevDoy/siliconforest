@@ -98,8 +98,8 @@ the cargo registry cache like the other dependencies; no platform code in any of
   Shift+PageUp / Shift+PageDown (a page less one line) move the view; typing returns
   to the bottom. On the alternate screen wheel steps are sent to the program as
   Up/Down arrow keys instead.
-* Drawing: only rows whose content changed are redrawn, written to the shm file and
-  damaged.
+* Drawing: only rows whose content changed are redrawn, written to the shm pool (since
+  build-007 shared memory, see the last section) and damaged.
 * State for checks from outside: `<records>/term-live.txt`, rewritten (rename) at most
   every 200 ms when it changed: a `TERMSTATE cols= rows= alternate_screen= application_cursor=
   bracketed_paste= cursor= cursor_hidden= scrollback_offset= scrollback_lines= unsupported=`
@@ -177,3 +177,38 @@ window geometry, PTY size, a drag selection and the wheel; and
 `text_is_rasterised_at_device_pixels_at_every_scale_not_enlarged`, which with
 `CHONK_SCALE_PROOF_DIR=<dir>` also writes the rendered lines (PPM) and its numbers there.
 Not run on the M1 yet.
+
+## SHM buffers in memory (11 November, build-007)
+
+Each wl_shm pool used to be an unlinked file in the records directory, which is on the RAM
+root: 7.4 MiB for an 80 x 24 terminal at 200%, 16 to 18 MiB at 300%. `src/shm.rs` now owns
+the pool's memory:
+
+* First POSIX shared memory: `shm_open("/cht-<pid>-<n>", O_RDWR|O_CREAT|O_EXCL, 0600)` (n
+  counts the objects of the process; at most 26 bytes, Darwin allows 31), `shm_unlink` at
+  once, close-on-exec checked (and set if the platform had not), one `ftruncate`, one
+  `mmap(PROT_READ|PROT_WRITE, MAP_SHARED)`. Changed rows are copied into the mapping. On drop
+  the wl_buffer and the pool are destroyed, then the mapping and the descriptor go.
+* If any of those steps fails, what it made is released and the earlier unlinked file in the
+  records directory is used (seek + write, as before). There is no retry. One line on stderr
+  says why: `TERMSHM shm buffer 896x544 (1949696 bytes): posix ftruncate: errno 28; using a
+  file in the records directory`. `CHONK_TERMINAL_SHM=file` in the terminal's own environment
+  asks for the file directly (any other value: shared memory first). It is not passed to the
+  shell.
+* A failure of both, or of a later write, ends the terminal with the buffer, the backing, the
+  operation and the errno, e.g. `shm buffer 2610x1632 (17038080 bytes): file set_len: errno 28
+  (after posix ftruncate: errno 28)` or `...: file write 208800 bytes at 0: errno 28`. That
+  text is in `result.json` `errors` (with `session.stop_cause` `fault`) and on stderr.
+* Where to see the backing: the `TERMSCALE` line and the `TERMSTATE` line end with
+  `shm=posix` or `shm=file`; `result.json` has `session.shm` = `{"backing", "fallback" (why
+  shared memory was not used, or null), "posix_buffers", "file_buffers"}`.
+* Limits are unchanged (64 MiB x ceil(scale) squared per buffer, one buffer at a time, damage,
+  release handling).
+
+Host tests (`cargo test --offline --locked`, 75; run them with `TMPDIR` and `XDG_STATE_HOME`
+set to a scratch directory): `shm::tests::*` (name, unlink, close-on-exec, zeroed, a second
+mapping sees the rows, every failing step falls back, the error texts), three
+`host_real_wayland_*` cases in which the fixture compositor maps the pool descriptor it was
+sent and compares it with the rendered screen and with the file backing, and
+`host_shell_environment_is_the_fixed_list_not_the_terminals`. Not run on the M1 yet: that
+Darwin's `shm_open` objects behave as the kernel source reads is not established by these.

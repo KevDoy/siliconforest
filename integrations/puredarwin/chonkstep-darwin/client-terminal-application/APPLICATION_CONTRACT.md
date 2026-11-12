@@ -35,6 +35,14 @@ change writes one `TERMSCALE ...` line to stderr. Arguments, fd 3 frames and rec
 names are unchanged; `result.json` gains `session.scale` and the `TERMSTATE` line gains
 trailing `scale120= cell= buffer= logical=` fields.
 
+SHM buffer ownership (build-007, README last section): the terminal owns each wl_shm pool as
+POSIX shared memory (`/cht-<pid>-<n>`, unlinked at once, close-on-exec, mapped once), and
+falls back to the earlier unlinked file in the records directory if that fails. The optional
+environment variable `CHONK_TERMINAL_SHM=file`, read by the terminal itself and not passed to
+the shell, selects the file. A buffer allocation or write failure is a fault whose text names
+the operation, the size and the errno in `result.json` `errors`. The `TERMSCALE` and
+`TERMSTATE` lines gain a trailing `shm=posix|file` and `result.json` gains `session.shm`.
+
 The session's reviewed pinned-SDK C adapter supplies stdin/stdout/stderr and a
 private connected Unix stream at fd 3 through explicit `adddup2` actions under
 `POSIX_SPAWN_CLOEXEC_DEFAULT`. The terminal adopts only fd 3 as its status channel,

@@ -893,6 +893,22 @@ mod tests {
         assert!(!p.exec_checked());
         assert!(p.cleanup().complete);
     }
+    /// The shell's environment is the fixed list in `spawn` and nothing of
+    /// the terminal's own: in particular not `CHONK_TERMINAL_SHM` or
+    /// `CHONK_TERMINAL_FONT_PX`, whatever this process has.
+    #[test]
+    fn host_shell_environment_is_the_fixed_list_not_the_terminals() {
+        assert!(std::env::vars_os().count() > 0, "this process has an environment to leak");
+        let mut p = Pty::spawn("/usr/bin/env", &["env"], 80, 24, 0).unwrap();
+        let data = drive(&mut p).unwrap();
+        let text = String::from_utf8(data).unwrap();
+        let mut names: Vec<&str> = text.lines().filter_map(|line| line.split_once('=')).map(|(name, _)| name).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["COLORTERM", "ENV", "HISTFILE", "HOME", "LC_ALL", "PATH", "PS1", "PS2", "TERM", "ZDOTDIR"], "{text}");
+        assert!(!text.contains("CHONK_"), "{text}");
+        assert!(text.contains("HOME=/private/tmp"), "{text}");
+        assert!(p.cleanup().complete);
+    }
     #[test]
     fn host_actual_pty_bytes_and_exit_reaped_once() {
         let mut p = Pty::spawn("/bin/sh", &["sh", "-c", "printf 'aA-Pty\\n'"], 80, 24, 0).unwrap();
