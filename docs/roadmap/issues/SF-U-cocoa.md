@@ -242,15 +242,14 @@ application draws; "ink" is the pixel height of the first two text lines.
 | miniaturize: our button -> `windowDidMiniaturize:`, `isMiniaturized` | 100% | pass | |
 | zoom: Ctrl+Shift double click on our title bar -> resize and `isZoomed` | 200% graphite | works when the double click registers: seen in two runs (`zoom-evidence-s2-graphite`, `zoom-s2-graphite`: 510x351, `zoom-state zoomed=1`). Under emulation the compositor's 400 ms double-click window is met about one time in five, so the check itself is unreliable; restoring by a second double click has not been observed | |
 | apps: upstream Terminal (a typed command ran in its shell) and Calculator (the + key lights when clicked), both in our frames | 100% nextstep-classic, 150% teal-blueprint, 200% graphite | pass 9/9 each | Calculator 1.01 / 1.52 / 2.03 px/pt |
-| live scale change (the desktop steps 100 -> 125 -> ... -> 300 -> 100%, 25 s each) | | every step is followed: `windowDidChangeBackingProperties:` arrives at 125, 150, 175, 200, 250, 300 and 100%, the window re-renders at each scale (at 250% and 300% the compositor also shrinks it to fit the screen); the compositor counted 3 commits at a stale scale over the 7 changes (frames already under way when the scale changed). Two faults found and fixed on the way: the notification was skipped when a resize had rebuilt the backing first, and `NSWindow.backingScaleFactor` read 1 while AppKit's frame lay off the screen in points (it reported 1.000 at 200% and 250% while drawing at 2.0 and 2.5). The run with both fixes in the image is pending | |
+| live scale change (the desktop steps 100 -> 125 -> 150 -> 175 -> 200 -> 250 -> 300 -> 100%, 25 s each) | teal-blueprint | pass 10/11 (`live-scale-teal-blueprint`): `windowDidChangeBackingProperties:` with 1.250, 1.500, 1.750, 2.000, 2.500, 3.000, 1.000 in that order, a screenshot at each. The one failed check: the compositor counted 3 commits at a stale scale over the 7 changes (a frame already under way when the scale changed; at 250% one 2.0 buffer was shown resampled once). Two faults were found and fixed to get here: the notification was skipped when a resize had rebuilt the backing first, and `NSWindow.backingScaleFactor` read 1 while AppKit's frame lay off the screen in points | |
 | no resampled commit at a fixed scale | all of the above | pass | |
 
 Two faults of the test tooling were found and fixed, and the affected runs repeated: two
 checks had matched their own echoed command line on the console (false passes of the metrics
 run and of the Terminal step); and the image cache was keyed by file sizes and times only, so
 a rebuilt framework of the same size was taken for the old one (one live-scale rerun ran the
-old AppKit). The table has only results from after the first fix; results that depend on
-the second are marked pending.
+old AppKit). The table has only results from after both fixes where they matter.
 
 Seen and not fixed: upstream Terminal draws its text at about half the cell size at every scale
 (also at 100%, so not a scaling fault; not investigated); an application-set pointer image stays
