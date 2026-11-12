@@ -24,6 +24,10 @@ native_mode.txt is one line of words:
   nosprr       native only: do not enable SPRR and GXF before entering EL1 (the hypervisor
                boot enables both)
   noamx        native only: do not enable AMX for EL1 (the hypervisor boot does)
+  noiolog      native only: serial=0x13 instead of serial=3 (SERIALMODE_NO_IOLOG): driver
+               IOLog lines stay in the kernel log and off the UART. At 115200 baud the full
+               log holds the boot back by about 8 s (boot nb07); kernel printf, launchd and
+               the shell still print.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -64,13 +68,13 @@ def require(ok, message):
 
 class Mode:
     def __init__(self, text):
-        words = text.split()
+        words = self.words = text.split()
         self.probe = 'probe' in words
         self.native = 'native' in words
         self.sprr = 'nosprr' not in words
         self.amx = 'noamx' not in words
         self.wdt = None
-        known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial'}
+        known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog'}
         self.vdm_serial = 'vdm-serial' in words
         for word in words:
             match = re.fullmatch(r'wdt=(\d{2,3})', word)
@@ -88,6 +92,13 @@ class Mode:
 
     def __bool__(self):
         return self.probe or self.native
+
+
+def bootargs(native, text):
+    if 'noiolog' not in native.words:
+        return text
+    require(text.count(' serial=3 ') == 1, 'Boot arguments lack serial=3')
+    return text.replace(' serial=3 ', ' serial=0x13 ')
 
 
 def mode():

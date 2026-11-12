@@ -129,3 +129,9 @@ answered 47 s later at the latest (between 29 and 47 s). This is one cycle again
 or hung XNU the reset has not been run; the limit "not recovery from an arbitrary hang"
 above still stands for those states.
 
+Boots `nb05` to `nb08` repeated it four times through the controller's own path (45 s wait,
+one reset, Linux verified by the controller, no latch), each against a running kernel: an
+idle single-user shell on one and on eight processors, and twice after a desktop session
+had ended. Five of five. Linux logged `PMU logged 1 boot error(s) and 0 panic(s)` after
+each, as after a hypervisor boot. Still no cycle against a panicked or hung XNU.
+
