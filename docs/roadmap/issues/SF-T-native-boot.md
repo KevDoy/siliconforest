@@ -33,6 +33,8 @@ Collection: `/nix/store/k2w23az428jr3nmqlca19da00kn4wshn-puredarwin-kc-arm64-0.1
 
 The native kernel is not slower; its console is. Natively the console is a real 115200 baud UART (11.5 KB/s) that the kernel waits for: the 75 KB of a full boot log cost about 8 s (`nb07`). With driver `IOLog` lines kept off the UART (`serial=0x13`, word `noiolog`) the shell prompt is there 0.4 s earlier than under the hypervisor, and the remaining 1.4 s to the first frame are the harness: 1.2 s instead of 0.2 s from prompt to typed command (typing at 320 bytes/s) and 29 KB still printed. An installed system has neither. The ping 10 s after the join in `nb08` (5 s under the hypervisor, 4.6 s in `nb07`) is one sample and was not looked into.
 
+**Session started by launchd** (`nb12`): with a multi-user boot and `guest/org.siliconforest.desktop.plist` in `/System/Library/LaunchDaemons` running the same guest script, nothing is typed and nothing waits for a silent console: script begins 2.14 s, compositor starts 3.37 s, first frame 4.91 s, both terminals 5.05 s after the kernel starts (hypervisor with the typed command: 7.27 s to the first frame). `pd-netd`'s own launchd job runs beside the script's Wi-Fi join; the address took three attempts instead of one (`GPUDESK_NET_UP_RC=0 attempts=3`), the ping was answered at 12.6 s. The bench's console challenge cannot be answered in such a boot (there is no shell on the console), so the controller records `NO_COMMAND_LINE_OBSERVED`; the evidence is the script's own lines. The typed path is unchanged and remains the default (`NB_SESSION` unset).
+
 Not proven: see Open.
 
 ## Findings
@@ -113,6 +115,8 @@ From m1n1's sources and the worker logs of `df02` and `nb02` (every access the P
 | `nb08` | as `nb07`, `noiolog` | same result; first frame 8.67 s. PMU: 1 boot error, 0 panics. |
 | `nb09` | native desktop, 8 processors, `noiolog`, **300 s session** | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`; 299 s of desktop, 0 missed refreshes, clean end, `GPUDESK_DESKTOP_RC=0`. PMU: 1 boot error, 0 panics. |
 | `nb10` | native shell, 8 processors, **deliberate panic** (`sysctl debug.panic_test=4`, `m1-quiet-boot/darwin-quiet-panic.in`) | panic report on the UART, nested panics up to the limit, `MACH Reboot` / "machine will reset or spin": it spun. The controller's one reset brought Linux back (`..._LINUX_VERIFIED`, `reset_attempts` 1). PMU: 1 boot error, **0 panics** (a Darwin panic is not what that counter counts). |
+| `nb11` | native shell, 8 processors, **multi-user boot, guest script started by launchd** (`NB_SESSION=launchd`) | the job ran the script at boot (`PDNB_GUEST_BEGIN_launchd` … `PD_BENCH_DONE`); `NO_COMMAND_LINE_OBSERVED_LINUX_VERIFIED` by design (no shell on the console, nothing typed). The capture ran its whole 120 s: the end-marker match missed the console's `\r\r\n`; fixed. |
+| `nb12` | native **desktop started by launchd**, 8 processors, `noiolog` | desktop as in `nb08` (GL/KMS, 10 flips, 0 missed, Wi-Fi join and ping, Touch Bar, coreaudiod, both terminals, clean end); **first frame 4.91 s after the kernel starts**, terminals 5.05 s, Wi-Fi joined 9.2 s, ping 12.6 s; capture ended on the marker. `NO_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. PMU: 1 boot error, 0 panics. |
 
 `nb01`, `nb02`, `nb03b` ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. Linux after `nb04`: `macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)`, as after a hypervisor boot.
 
