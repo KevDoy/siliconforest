@@ -1,0 +1,53 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# One boot of the M1 with the PDAppleNVMe collection and a guest script, through
+# tools/pcie_iterate.sh, which queues for the bench itself: do not wrap it. The collection is
+# handed over with PCIE_KC; nothing shared is written.
+# Usage: nv_boot.sh <name, prefix nv> <level 1|2|3>
+#   level 1: observe only (guest/darwin-nvme-observe.in); 2: controller + /dev/pdnvme0;
+#   3: also the write-protected block device. Levels 2 and 3 START THE CONTROLLER: the
+#   first such boot needs the reviewer's go (docs/roadmap/issues/SF-R-storage.md).
+#   NV_KC        collection store path (default: build ../build-kc.nix)
+#   NV_RANGES    "<lba> <blocks>" lines for the hashes (levels 2, 3; from tools/linux_ranges.sh)
+#   NV_RUNTIME   upper bound of the guest's run in seconds, 120 to 600 (default 300)
+#   NV_TTL       seconds after which the driver shuts the controller down by itself
+#                (default runtime - 150, at least 60)
+#   NV_SEQ_LBA / NV_SEQ_MIB   start and size of the sequential read (default 262144 / 1024)
+#   NV_BOOTARGS  further kernel boot arguments
+#   NV_CPUS      guest processors (default 8)
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
+export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-storage}
+N=${1:?name}; LEVEL=${2:?level 1, 2 or 3}
+case "$N" in nv[0-9]*) ;; *) echo "boot names are nv01, nv02, ..." >&2; exit 2;; esac
+case "$LEVEL" in 1|2|3) ;; *) echo "level is 1, 2 or 3" >&2; exit 2;; esac
+[ ! -e "runs/m1-desktop-010/pcie-enum-attempt-$N" ] || { echo "boot name $N was used already" >&2; exit 2; }
+[ ! -e runs/bench.finisher.failed ] || { echo "runs/bench.finisher.failed exists: the M1 did not return to Linux; stop" >&2; exit 3; }
+[ ! -e runs/m1-storage/STOP ] || { echo "runs/m1-storage/STOP exists: $(cat runs/m1-storage/STOP)" >&2; exit 3; }
+NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
+KC=${NV_KC:-$(cd "$HERE" && $NIX build-kc.nix 2> "${TMPDIR:-/tmp}/nv-kc-build.$$.log" | tail -1)}
+[ -f "$KC/kernel" ] || { tail -30 "${TMPDIR:-/tmp}/nv-kc-build.$$.log" >&2; echo "no collection" >&2; exit 2; }
+rm -f "${TMPDIR:-/tmp}/nv-kc-build.$$.log"
+python3 "$ROOT/integrations/puredarwin/m1-rust-kext/tools/kc_overlap.py" "$KC/kernel" | tail -1
+"$HERE/host-test/run-host-tests.sh" > /dev/null || { echo "host tests of the read-only gate failed; not booting" >&2; exit 2; }
+TEST=$(cd "$HERE" && $NIX build-pdnvme-test.nix 2>/dev/null | tail -1)
+[ -x "$TEST/usr/bin/pdnvme-test" ] || { echo "pdnvme-test build failed" >&2; exit 2; }
+RUNTIME=${NV_RUNTIME:-300}
+[ "$RUNTIME" -ge 120 ] && [ "$RUNTIME" -le 600 ] || { echo "boots run 120 to 600 s" >&2; exit 2; }
+TTL=${NV_TTL:-$((RUNTIME - 150))}; [ "$TTL" -ge 60 ] || TTL=60
+W=$(mktemp -d)
+FILES="$TEST/usr/bin/pdnvme-test=/usr/bin/pdnvme-test"
+if [ "$LEVEL" = 1 ]; then
+  cp "$HERE/guest/darwin-nvme-observe.in" "$W/guest"
+else
+  [ -f "${NV_RANGES:-}" ] || { echo "NV_RANGES=<range file> is needed for levels 2 and 3" >&2; exit 2; }
+  sed -e "s/@SEQ_LBA@/${NV_SEQ_LBA:-262144}/g" -e "s/@SEQ_MIB@/${NV_SEQ_MIB:-1024}/g" "$HERE/guest/darwin-nvme-test.in" > "$W/guest"
+  FILES="$FILES;$NV_RANGES=/etc/pdnvme-ranges"
+fi
+PCIE_KC="$KC" PCIE_TIMEWAIT="${NV_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${NV_CPUS:-8} pdnvme=$LEVEL pdnvme_ttl=$TTL ${NV_BOOTARGS:-}" \
+  PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
+  tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
+  grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space\|BENCH_TIMES" | cut -c1-240 || true
+rm -rf "$W"
+grep -o '"status": *"[^"]*"' "runs/m1-desktop-010/pcie-enum-attempt-$N/result.json" 2>/dev/null || echo "no result.json"
+"$HERE/tools/nv_summary.sh" "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin"
