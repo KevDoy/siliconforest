@@ -892,7 +892,19 @@ static int gl_init(void)
 
     G.width = to_pixels(W.width);
     G.height = to_pixels(W.height);
-    G.display = eglGetDisplay((EGLNativeDisplayType)W.display);
+    {
+        /*
+         * The Wayland platform by name: eglGetDisplay() has to guess the platform from the
+         * pointer, and on Darwin Mesa's guess is not Wayland (boot av20: no window
+         * configuration at all). m1-mesa-asahi/test/agx-wl-demo.c opens it the same way.
+         */
+        typedef EGLDisplay (*get_platform_display)(EGLenum, void *, const EGLint *);
+        get_platform_display get = (get_platform_display)eglGetProcAddress("eglGetPlatformDisplayEXT");
+
+        G.display = get ? get(0x31D8 /* EGL_PLATFORM_WAYLAND_KHR */, W.display, NULL) : EGL_NO_DISPLAY;
+        if (G.display == EGL_NO_DISPLAY)
+            G.display = eglGetDisplay((EGLNativeDisplayType)W.display);
+    }
     if (G.display == EGL_NO_DISPLAY || !eglInitialize(G.display, &major, &minor)) {
         fprintf(stderr, "pdvideo: EGL does not start on this Wayland display (error 0x%x)\n", eglGetError());
         return -1;
