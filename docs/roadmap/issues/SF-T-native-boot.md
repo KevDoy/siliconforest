@@ -77,6 +77,7 @@ From m1n1's sources and the worker logs of `df02` and `nb02` (every access the P
 | `nb03` | native | not booted: the controller was off the network when the packet was to be delivered |
 | `nb03b` | as `nb02`, after the controller was moved | same as `nb02` (1714 bytes, marker seen) |
 | `nb04` | **native**, shell profile, `cpus=1`, `vdm-return vdm-serial` | stub lines, banner, root mounted, launchd, shell prompt 7.27 s after the vector; 44 KB of console; thermal lines at uptime 107 and 167 s; challenge typed but received mangled (`NO_COMMAND_LINE`). Reset sent once against the running kernel, Linux answering 47 s later at the latest. Controller result `RECOVERY_INCOMPLETE_NO_RETRY`: a defect of this stream's controller patch (the 45 s wait and the wait after the reset both recorded a neighbour refresh; the second record failed), fixed. |
+| `nb05` | native, shell profile, `cpus=1`, typing paced | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`: the challenge answered over the real UART, guest script run, `sleep 3` returned after 3.02 s of console time, prompt 7.14 s after the vector. The controller itself waited 45 s, sent the one reset, verified Linux; no latch. PMU: 1 boot error, 0 panics. |
 
 `nb01`, `nb02`, `nb03b` ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. Linux after `nb04`: `macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)`, as after a hypervisor boot.
 

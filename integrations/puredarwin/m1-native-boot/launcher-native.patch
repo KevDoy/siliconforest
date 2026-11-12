@@ -195,20 +195,19 @@
          reservation = check_reservation(backend, inputs, layout, carveouts)
          old.write_private(directory, 'original-observations.json',
                            dict(snapshot=snapshot, layout=layout, packet=inputs.report,
-@@ -1324,7 +1408,11 @@
+@@ -1324,7 +1408,10 @@
          smp = smp_enabled()
          if smp:
              enable_smp(hv)
 -        hv.init()
 +        if native and native.native:
-+            image.require(not smp, 'Native boot starts one processor so far: cpus=1')
 +            native_boot.native_init(hv, backend)
 +        else:
 +            hv.init()
          bq_mark('hv_init_done')
          # hv_init() runs m1n1's pcie_shutdown(), so PCIe is brought up after it:
          # pcie_init, SMC radio power, port-0 link sequence. XNU inherits the link.
-@@ -1378,6 +1466,17 @@
+@@ -1378,6 +1465,17 @@
                                 hardware_boot_observed=False, image_sha256=image.sha(inputs.contents['kernel']),
                                 prepared_image_sha256=image.sha(prepared), prepared_image_bytes=len(prepared)))
          bq_mark('hv_start')
@@ -226,7 +225,7 @@
          console = ConsoleSession(args.console_device, directory, desktop=desktop, keyboard=keyboard,
                                   virtual_input=virtual_input, terminal_input=terminal_input,
                                   native_keyboard_desktop=native_keyboard_desktop,
-@@ -1389,7 +1488,11 @@
+@@ -1389,7 +1487,11 @@
              if console is not None:
                  console.close()
          finally:

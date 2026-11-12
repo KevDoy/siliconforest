@@ -18,9 +18,13 @@
  * Layout (16 KiB, position independent, never mapped: EL2 runs with its MMU off):
  *   0x0000  reset entry of a secondary core (its RVBAR points at this page)
  *   0x0004  boot entry: x0 = XNU entry, x1 = boot-args, both physical
+ *   0x0008  hold entry of a secondary core that m1n1 started (P_SMP_CALL): x0 = address of
+ *           the core's reset vector register, x1 = the value it holds now, x2/x3 = address
+ *           and value of the acknowledgement
  *   0x0800  EL2 vectors
  *   0x1000  EL1 vectors, used until XNU sets VBAR_EL1
  *   0x3f00  parameters, written by the launcher
+ *   0x3f40  one acknowledgement word per held core
  */
 
 #define HCR_API         (1 << 41)
@@ -51,6 +55,7 @@
 _start:
         b       secondary_reset                 /* 0x0000 */
         b       boot_entry                      /* 0x0004 */
+        b       hold_entry                      /* 0x0008 */
 
 /* x0: character. Clobbers x9-x11. A UART that never empties is given up on. */
 putc:
@@ -204,6 +209,37 @@ secondary_reset:
 1:      wfe
         b       1b
 
+/*
+ * A secondary core, started and initialised by m1n1 (smp_start_secondaries: chicken bits,
+ * as for Linux) and sent here from m1n1's own idle loop, which it never returns to. It
+ * waits until the kernel writes its reset vector register (PDAppleBootCPUPMGR, pdcpuheld=1),
+ * then enters that vector at EL1, as m1n1's hypervisor did on the kernel's write to the
+ * CPU-start block.
+ */
+hold_entry:
+        msr     daifset, #0xf
+        mov     x21, x0
+        mov     x22, x1
+        str     x3, [x2]                        /* while m1n1's MMU and caches are still on */
+        dsb     sy
+        mrs     x4, sctlr_el2
+        mov     x5, #((1 << 0) | (1 << 2) | (1 << 12))
+        bic     x4, x4, x5
+        msr     sctlr_el2, x4
+        isb
+        ldr     x23, =0x00000ffffffff000        /* RVBAR_ADDR as PDAppleBootCPUPMGR has it */
+        and     x22, x22, x23
+1:      ldr     x4, [x21]
+        and     x4, x4, x23
+        cmp     x4, x22
+        b.ne    2f
+        wfe
+        b       1b
+2:      mov     x19, x4
+        mov     x20, xzr
+        bl      el2_setup
+        b       enter_el1
+
 /* x17: vector number, x18: 2 for EL2, 1 for EL1. Never returns. */
 report:
         adr     x0, msg_exc
@@ -289,4 +325,6 @@ param_magic:            .quad 0x31424e4450       /* "PDNB1" */
 param_uart:             .quad 0                 /* physical base of uart0, 0: silent */
 param_flags:            .quad 0
 param_secondary_entry:  .quad 0                 /* XNU's reset vector, physical; 0: none */
+        .org    0x3f40
+hold_acks:              .space 64
         .org    0x4000

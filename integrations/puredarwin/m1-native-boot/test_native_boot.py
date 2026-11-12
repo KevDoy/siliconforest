@@ -71,7 +71,7 @@ class NativeBoot(unittest.TestCase):
         self.assertEqual(hashlib.sha256(blob).hexdigest(), native_stub.STUB_SHA256)
         self.assertEqual(len(blob), 0x4000)
         # two branches at the two entries; every vector slot starts with mov x17,#n; mov x18,#level
-        for offset in (0, 4):
+        for offset in (0, 4, 8):
             self.assertEqual(struct.unpack_from('<I', blob, offset)[0] >> 26, 0b000101)
         for base, level in ((0x800, 2), (0x1000, 1)):
             for n in range(16):

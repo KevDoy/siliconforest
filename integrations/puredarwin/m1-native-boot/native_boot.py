@@ -49,7 +49,10 @@ VDMTOOL = Path('/Users/chriskearney/darwin-lab-firstboot-007/native-control-src/
 VDMTOOL_SHA = 'db6da3ff2f86d9663f748d975ce1ce988c82047014912018775b61f207b6ff4a'
 T8103_WDT = 0x23d2b0000         # /arm-io/wdt reg 0; m1n1 prints the same at start
 WDT_COUNT, WDT_ALARM, WDT_CTL, WDT_RESET_EN, WDT_HZ = 0x10, 0x14, 0x1c, 4, 24_000_000
-STUB_BOOT_ENTRY = 4
+STUB_BOOT_ENTRY, STUB_HOLD_ENTRY = 4, 8
+HOLD_ACKS = 0x3f40              # one word per held core
+RVBAR_ADDR = 0x00000ffffffff000
+SPIN_TABLE_ENTRY = 64           # m1n1 src/smp.c struct spin_table: mpidr, flag, target, args[4], retval
 PARAMS = 0x3f00                 # magic, uart, flags, secondary entry (stub/el2_drop.S)
 FLAG_SPRR_GXF, FLAG_AMX = 1, 2
 
@@ -240,6 +243,48 @@ def wdt_arm(p, base, seconds):
             'SoC watchdog did not take the alarm')
 
 
+def hold_secondaries(hv, backend, stub):
+    """The secondary cores for a native kernel. m1n1 starts each one as it does for Linux and
+    for its hypervisor (smp_start_secondaries: the core's chicken bits are applied), then
+    each is sent into the EL2 page (hold_entry), where it waits for the kernel to write its
+    reset vector register. m1n1 will not vector with a call outstanding, and these never
+    return, so each core's slot in m1n1's spin table is found (by the call's own arguments)
+    and its target cleared once the core has acknowledged."""
+    import struct
+    p, iface = backend.p, backend.iface
+    nodes = [node for node in hv.adt['cpus'] if node.state != 'running']
+    p.smp_start_secondaries()
+    p.smp_set_wfe_mode(True)
+    table, held = None, []
+    for node in nodes:
+        cpu, register = node.cpu_id, node.cpu_impl_reg[0]
+        require(0 < cpu < 8, 'Unexpected secondary cpu id')
+        p.write64(register, stub)
+        require(p.read64(register) & RVBAR_ADDR == stub, 'Reset vector register did not take the hold value')
+        ack, magic = stub + HOLD_ACKS + 8 * cpu, 0x50444e4200000000 | cpu
+        p.smp_call(cpu, stub + STUB_HOLD_ENTRY, register, stub, ack, magic)
+        deadline = time.monotonic() + 3
+        while p.read64(ack) != magic:
+            require(time.monotonic() < deadline, f'cpu {cpu} did not reach the EL2 page')
+            time.sleep(.01)
+        pattern = struct.pack('<5Q', stub + STUB_HOLD_ENTRY, register, stub, ack, magic)
+        if table is None:
+            base = p.get_base()
+            for offset in range(0, 96 << 20, 1 << 20):
+                block = iface.readmem(base + offset, (1 << 20) + len(pattern))
+                at = block.find(pattern)
+                if at >= 0:
+                    table = base + offset + at - SPIN_TABLE_ENTRY * cpu
+                    break
+            require(table is not None, "m1n1's spin table not found")
+        target = table + SPIN_TABLE_ENTRY * cpu
+        require(iface.readmem(target, len(pattern)) == pattern, f"cpu {cpu}: unexpected slot in m1n1's spin table")
+        p.write64(target, 0)
+        held.append(cpu)
+    print('NATIVE_HOLD ' + json.dumps(dict(cpus=held, spin_table=table and hex(table - 16))), flush=True)
+    return held
+
+
 def start(native, hv, backend, layout, directory, runtime, console_factory, write_private):
     """Enter XNU without the hypervisor and capture its real serial console for `runtime`
     seconds (or until the guest script's end marker). Returns after the capture is closed."""
@@ -258,12 +303,13 @@ def start(native, hv, backend, layout, directory, runtime, console_factory, writ
     p.dc_cvau(stub, len(blob))
     p.ic_ivau(stub, len(blob))
     require(iface.readmem(stub, len(blob)) == blob, 'EL2 page readback differs')
+    held = hold_secondaries(hv, backend, stub) if getattr(hv, 'smp', False) else []
     # As HV.start(): the panel is left to the kernel.
     p.fb_improve_logo()
     p.fb_shutdown(True)
     record = dict(stub=stub, entry=entry, bootargs=bootargs, uart=uart, flags=flags,
                   el='EL1h under an EL2 that traps nothing', console=UART_DEVICE,
-                  watchdog_seconds=native.wdt, hypervisor=False)
+                  watchdog_seconds=native.wdt, hypervisor=False, held_cpus=held)
     if native.vdm_serial:
         record['serial_mode_ok'] = serial_mode()
     console = console_factory(UART_DEVICE)
