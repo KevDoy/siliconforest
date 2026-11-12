@@ -60,7 +60,7 @@ else
     PARTARGS="pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS"; PARTS=${NV_PARTS:-8}
   fi
   sed -e "s/@SEQ_LBA@/${NV_SEQ_LBA:-262144}/g" -e "s/@SEQ_MIB@/${NV_SEQ_MIB:-512}/g" -e "s/@PARTS@/$PARTS/g" -e "s/@GUARDED@/$((PARTS - 1))/g" \
-    -e "s/@SECOND@/${NV_SECOND:-0}/g" -e "s/@PART_LBA@/$SF_PART_LBA/g" -e "s/@PART_BLOCKS@/$SF_PART_BLOCKS/g" "${NV_GUEST:-$HERE/guest/darwin-nvme-test.in}" > "$W/guest"
+    -e "s/@SECOND@/${NV_SECOND:-0}/g" -e "s/@PART_LBA@/$SF_PART_LBA/g" -e "s/@PART_BLOCKS@/$SF_PART_BLOCKS/g" -e "s/@NAME@/$N/g" -e "s/@WMODE@/${NV_WMODE:-}/g" "${NV_GUEST:-$HERE/guest/darwin-nvme-test.in}" > "$W/guest"
   FILES="$FILES;$NV_RANGES=/etc/pdnvme-ranges"
 fi
 PCIE_KC="$KC" PCIE_TIMEWAIT="${NV_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${NV_CPUS:-8} pdnvme=$LEVEL pdnvme_ttl=$TTL ${PARTARGS:-} ${NV_BOOTARGS:-}" \

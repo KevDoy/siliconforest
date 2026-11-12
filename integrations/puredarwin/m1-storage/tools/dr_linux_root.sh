@@ -8,6 +8,8 @@
 #   check                  identity, e2fsck -fn, usage
 #   transform <sf-roinit>  mount, tools/sf-root-transform.sh on it, unmount, e2fsck -fn
 #   tree                   mount read-only (noload), a listing digest, unmount
+#   untransform            mount, tools/sf-root-untransform.sh on it (the read-write root of
+#                          step 3d; the way back is transform), unmount, e2fsck -fn
 #   wcheck                 after a fenced-write boot: the superblock's state BEFORE anything else,
 #                          e2fsck -fn (nothing is repaired or replayed), then a read-only mount
 #                          without journal replay and the SHA-256 of everything under
@@ -18,7 +20,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 . private/disk-root/sf-part.env
-CMD=${1:?check|transform|tree|wcheck}; INIT=${2:-}
+CMD=${1:?check|transform|tree|wcheck|untransform}; INIT=${2:-}
 M1="ssh -o HostKeyAlias=10.1.1.127 -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 chrisk@10.1.1.211"
 OUT=${DR_OUT:-runs/m1-storage/linux-root-$CMD-$(date +%Y%m%d-%H%M%S).txt}
 for i in $(seq 1 36); do $M1 true 2>/dev/null && break; sleep 5; done
@@ -28,6 +30,7 @@ for i in $(seq 1 36); do $M1 true 2>/dev/null && break; sleep 5; done
     [ -f "$INIT" ] || { echo "transform needs the sf-roinit binary" >&2; exit 2; }
     echo "INIT_B64=$(base64 -w0 "$INIT")"; echo "TRANSFORM_B64=$(base64 -w0 "$HERE/sf-root-transform.sh")"
   fi
+  [ "$CMD" != untransform ] || echo "UNTRANSFORM_B64=$(base64 -w0 "$HERE/sf-root-untransform.sh")"
   cat <<'REMOTE'
 set -u
 P=/dev/nvme0n1p3; S=/sys/block/nvme0n1/nvme0n1p3; MNT=/run/sf-dst
@@ -59,9 +62,19 @@ wcheck)
   mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
   (cd $MNT/private/sf-wtest 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_WSHA /'
   (cd $MNT && sha256sum bin/sh usr/lib/libSystem.B.dylib) 2>&1 | sed 's/^/SFL_OLDSHA /'
+  (cd $MNT/private/var/sf-persist 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_PSHA /'
+  (cd $MNT/private/var/db/desktop-state 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_DSHA /'
   echo "SFL_TREE entries=$(cd $MNT && find . | wc -l)"
   df -k $MNT | tail -1 | sed 's/^/SFL_DF /'
   umount $MNT || fail "umount";;
+untransform)
+  T=$(mktemp -d); echo "$UNTRANSFORM_B64" | base64 -d > $T/untransform.sh
+  mkdir -p $MNT && mount -t ext4 $P $MNT || fail "mount"
+  sh $T/untransform.sh $MNT 2>&1 | sed 's/^/SFL_UNTRANSFORM /'; rc=${PIPESTATUS[0]}
+  ls -ld $MNT/var $MNT/private/var $MNT/private/tmp $MNT/etc/resolv.conf $MNT/var.rolink $MNT/private/var.rolink $MNT/private/sf-wtest 2>&1 | sed 's/^/SFL_LS /'
+  sync; umount $MNT || fail "umount"; rm -rf $T
+  echo "SFL_UNTRANSFORM_RC $rc"
+  e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}";;
 tree)
   mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
   echo "SFL_TREE entries=$(cd $MNT && find . | wc -l) listing=$(cd $MNT && find . -printf '%y %p %s %l\n' | grep -v '^d ' | LC_ALL=C sort | sha256sum | cut -c1-64)"
@@ -72,6 +85,6 @@ dumpe2fs -h $P 2>/dev/null | grep -iE 'state|Mount count|features' | sed 's/^/SF
 dmesg | grep -iE 'EXT4-fs.*nvme0n1p3' | tail -4 | sed 's/^/SFL_DMESG /'
 echo SFL_END
 REMOTE
-} | sed -e '1s/^/export /' -e 's/^\(INIT_B64\|TRANSFORM_B64\)=/export &/' | $M1 'sudo -n bash -s' > "$OUT" 2>&1 || echo "ssh session ended with $?" >&2
+} | sed -e '1s/^/export /' -e 's/^\(INIT_B64\|TRANSFORM_B64\|UNTRANSFORM_B64\)=/export &/' | $M1 'sudo -n bash -s' > "$OUT" 2>&1 || echo "ssh session ended with $?" >&2
 grep -a "^SFL_" "$OUT" | cut -c1-200
 grep -q "^SFL_END" "$OUT"

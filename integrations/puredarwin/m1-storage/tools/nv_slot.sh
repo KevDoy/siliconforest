@@ -13,6 +13,9 @@
 # NV_VERDICT_MODE=write: a boot of the WRITE-FENCED build (../build-kc-rw.nix; guest/darwin-disk-rw.in,
 # root on the memory disk): pdnvme_write=1, read fence on. After the boot Linux also checks our
 # partition (tools/dr_linux_root.sh wcheck: e2fsck -fn, the written files' hashes).
+#   NV_WMODE=unclean|downgrade  step 3c (guest/darwin-disk-rw2.in): how the boot ends; unset: dr11's boot
+#   DR_REPLAY=1                 (unclean) Linux replays the journal afterwards (e2fsck -fy); unset: left for Darwin
+#   NV_PREV_CONSOLE=<file>      the console of the boot whose files this one must find
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; LEVEL=${2:?level}; EXPECT=${3:?expected write_refused}
@@ -38,11 +41,13 @@ fi
 if [ "${NV_VERDICT_MODE:-}" = write ]; then
   . private/disk-root/sf-part.env || exit 2
   export PATH=$HOME/.nix-profile/bin:$PATH
-  export NV_PART=1 NV_PART_LBA=$SF_PART_LBA NV_PART_BLOCKS=$SF_PART_BLOCKS NV_GUEST=${NV_GUEST:-$HERE/guest/darwin-disk-rw.in} NV_VERDICT_MODE
+  export NV_PART=1 NV_PART_LBA=$SF_PART_LBA NV_PART_BLOCKS=$SF_PART_BLOCKS NV_GUEST=${NV_GUEST:-$HERE/guest/darwin-disk-rw${NV_WMODE:+2}.in} NV_VERDICT_MODE NV_WMODE=${NV_WMODE:-}
   export NV_KC=${NV_KC:-$(cd "$HERE" && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-kc-rw.nix 2>/dev/null | tail -1)}
   [ -f "$NV_KC/kernel" ] || { echo "no write-fenced collection" >&2; exit 2; }
   export NV_BOOTARGS="pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 ${NV_BOOTARGS:-}"
   export NV_WCHECK=$ROOT/runs/m1-storage/$N-wcheck.txt
+  # the write collection leaves six other-board kexts out; the launcher's required list is told so, for this boot only
+  export PCIE_LAB_PATCH=${PCIE_LAB_PATCH:-$HERE/launcher-m1-members.patch}
 fi
 "$HERE/tools/linux_m1.sh" all "$N-before" "$R" || exit 2
 [ "$(grep -c '^NVT_HASH [0-9]* [0-9]* [0-9a-f]\{64\}$' "runs/m1-storage/$N-before/hashes")" = "$(grep -c . "$R")" ] || { echo "the Linux baseline is incomplete; not booting" >&2; exit 2; }
