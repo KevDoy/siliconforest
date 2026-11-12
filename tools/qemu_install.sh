@@ -13,7 +13,8 @@
 #       boots that disk. Default: headless, the desktop for --seconds (default 120), then the
 #       disk is synced and QEMU ends. --window: a QEMU window for --seconds (default 14400).
 #       --command: no desktop; the command is typed at the serial root shell and the run ends
-#       when it prints QDINSTALL_DONE (e.g. --command 'ls /Users/sf; echo QDINSTALL_DONE')
+#       after it (and a sync); it passes when the command printed QDINSTALL_DONE
+#       (e.g. --command 'ls /Users/sf; echo QDINSTALL_DONE')
 #   tools/qemu_install.sh update [--bin FILE] [--terminal FILE]
 #       replaces the compositor/terminal/session files on the existing disk, keeps everything else
 #   tools/qemu_install.sh reset     deletes the disk (create makes a fresh one)
@@ -60,7 +61,7 @@ sys.path.insert(0, sys.argv[1])
 import qd_image
 from pathlib import Path
 d = Path(sys.argv[2])
-class A: kernel = 'release'; variant = sys.argv[3]; mesa = False; verbose_boot = False; bootargs = ''; resolution = '1024x768'; time_waits = (1, 2)
+class A: kernel = 'release'; variant = sys.argv[3]; mesa = False; libsystem = 'homebrew'; verbose_boot = False; bootargs = ''; resolution = '1024x768'; time_waits = (1, 2)
 base = qd_image.template(A)
 def plus(path, line, name):
     text = qd_image.read_root(base, path).decode()
@@ -72,7 +73,7 @@ plus('/etc/master.passwd', 'sf:*:501:20::0:0:SiliconForest User:/Users/sf:/bin/z
 (d / 'welcome.txt').write_text('SiliconForest in QEMU: this home directory is on the persistent disk.\n')
 E
   REMOVE=(); [ "$VARIANT" = wayland ] && REMOVE=(--remove /System/Library/LaunchDaemons/org.puredarwin.wayland-session.plist)
-  python3 -B "$Q/qd_image.py" --output "$DISK" --variant "$VARIANT" \
+  python3 -B "$Q/qd_image.py" --output "$DISK" --variant "$VARIANT" --libsystem homebrew \
     --file "$BIN=/usr/bin/chonkstep-darwin-desktop" --file "$TERMINAL=/usr/bin/chonk-terminal-darwin" \
     --file "$D/qemu-desktop-session=/usr/bin/qemu-desktop-session" \
     --data "$Q/guest/org.siliconforest.qemu-desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.qemu-desktop.plist" \
@@ -103,8 +104,8 @@ boot)
     printf '#!/bin/sh\nexit 0\n' > "$D/qemu-desktop-session"
     python3 -B -c "import sys; sys.path.insert(0, '$Q'); import qd_image; from pathlib import Path
 qd_image.write_root(Path('$DISK'), {'/usr/bin/qemu-desktop-session': (Path('$D/qemu-desktop-session').resolve(strict=True), True)})"
-    python3 -B "$Q/qd_run.py" --image "$DISK" --out "$OUT" --command "$COMMAND; sync" \
-      --begin 'root@' --up 'root@' --end 'QDINSTALL_DONE[\r\n]' --passed 'QDINSTALL_DONE[\r\n]' --shot-every 0 --timeout 900 "${RUN_ARGS[@]}"
+    python3 -B "$Q/qd_run.py" --image "$DISK" --out "$OUT" --command "$COMMAND; sync; printf 'QDINSTALL_%s\\n' SYNCED" \
+      --begin 'root@' --up 'root@' --end 'QDINSTALL_SYNCED' --passed 'QDINSTALL_DONE[\r\n]' --shot-every 0 --timeout 900 "${RUN_ARGS[@]}"
   else
     [ -n "$SECS" ] || { [ "$WINDOW" = 1 ] && SECS=14400 || SECS=120; }
     W=(); [ "$WINDOW" = 1 ] && W=(--window --pointer tablet)

@@ -42,8 +42,8 @@ the host stretch every number here.
 | Resolution | 1024x768 (the firmware's largest ramfb mode) |
 | Build from a source tree (`--src`) | works: 177 s for a first release build of the compositor with 6 jobs (incremental builds reuse `runs/qemu-dev/target`) |
 | Persistent install: create, boot, update, reset | works with the minimal userland; state and files survive reboots (shown) |
-| Full userland in the install (`--variant wayland`) | recipe written; upstream's full no-X image was still building when this was written; not booted |
-| Network in the guest | works: `virtio-net-name-interface.patch` names the interface (en0), `qemu-net-up` gets a DHCP lease from QEMU's user network and starts mdnsd; shown in the install (ping by name, `HTTP/1.1 200 OK` from example.com with netcat) and in the loop (`QDDESK_NET_UP_RC=0`, `QDDESK_HTTP`). HTTPS needs curl: full userland |
+| Full userland in the install (`--variant wayland`) | works: 6 GiB root (1.4 GiB used), boots to our desktop (70.8 s at host load 19, `--memory 2048`), files survive reboots. In it: `curl -sI https://example.com` gives `HTTP/1.1 200 OK` (CA bundle `/etc/ssl/cert.pem`), `git version 2.54.0`, `OpenSSH_10.4p1`, `Python 3.13.14`, `clang -c` compiles. Not working: clang cannot link (the image has no `ld`), and Python's `print`/`sys.stdout.write` produce no output (exit status 0; `os.write(1, ...)` does print) |
+| Network in the guest | works in both modes: `virtio-net-name-interface.patch` names the interface (en0), `qemu-net-up` takes a DHCP lease from QEMU's user network and starts mdnsd. Loop: `QDDESK_NET_UP_RC=0`, `QDDESK_HTTP HTTP/1.1 200 OK` (`runs/qemu-dev/clip2`). Install: ping by name, HTTP with netcat (minimal), HTTPS with curl (full) |
 
 ## Runs
 - `runs/qemu-dev/t3`, `t4`: autopilot `settle,pointer,drag,type` with the M1's current binaries
@@ -65,6 +65,23 @@ the host stretch every number here.
   without those two phases.
 - `runs/qemu-dev/win1`: window mode on Xvfb, by hand through xdotool (see State).
 
+- Clipboard and scale failures of the full autopilot, looked into (`clip1`..`clip4`, `full2`):
+  - **clipboard** passes whenever fewer phases run before it: `settle,type,clipboard`;
+    `settle,type,fullscreen,scrollback,clipboard` with the M1 RAM root's libSystem and with the
+    Homebrew stream's (issue 46); `settle,drag,type,clipboard`. It failed (3 of 10 bytes
+    selected) in both full-sequence runs, with the working-tree compositor and with the M1's
+    build-007, both on a host at load 26 or more. So it is not the libSystem fix, not the drag
+    phase and not fullscreen/scrollback by themselves. What is left is the full sequence or host
+    load; one full run on a quiet host would separate those. Not shown to be a compositor bug.
+  - **scale**: at 1024x768 the terminals do not fit from 150% up (`window_panel=1024x768`, grid
+    forced from 80x24 to 62x22 and 52x18), so the round trip cannot return the same grid, and
+    the phase recorded 4 or 5 of its 8 steps before the session's time ran out or the step's
+    wait ended. The M1 panel (2560x1600) holds 80x24 at every step. This is the small desk plus
+    emulation speed; it needs a larger framebuffer to run meaningfully here.
+- Full install (`runs/qemu-dev/install`, variant wayland): three command boots and one desktop
+  boot; see State. A file written just before the end of the first command boot was lost because
+  QEMU was stopped before `sync`; the command mode now syncs and waits for `QDINSTALL_SYNCED`.
+
 ## Found on the way
 - Upstream bug: with a generic USB HID keyboard (QEMU's `usb-kbd`), `/dev/usb_hid_kbd` is never
   published (the LED-handler registration sets up the queue, after which the lazy publish is
@@ -85,13 +102,13 @@ the host stretch every number here.
   autopilot's way of picking does not show it; by hand in a window is the next thing to try
   (`tools/qemu_desktop.sh --window`), then `--only settle,settings` in a loop.
 - Anything in the "no" rows of the README's coverage table.
-- Full-userland install, network, HTTPS, a desktop running as the user `sf`.
+- A desktop running as the user `sf`; sshd, configd's own DHCP, sway/netsurf and the other
+  programs of the full userland were not tried.
 
 ## Open items
-1. HTTPS with CA certificates: needs curl/openssl from the full userland (item 2).
-2. Full userland: finish the `image-arm64-virt-wayland` build, `qemu_install.sh create --variant
-   wayland`, boot it, remove what collides with our session (upstream's own
-   `org.puredarwin.wayland-session` job is already removed by `create`).
+1. In the full userland: a linker for clang (upstream ships none in the image; the lab's
+   `puredarwin-native-ld` is a host tool), and Python's lost stdout.
+2. A full autopilot run on a quiet host, to settle the clipboard failure.
 3. Larger framebuffer: needs a firmware whose ramfb driver has more modes (an edk2 build), or
    the virtio-gpu path (a QEMU with `virtio-gpu-pci` and a presenter that calls PDGOPPresent).
    2560x1600 would give the M1's real geometry at 200%.

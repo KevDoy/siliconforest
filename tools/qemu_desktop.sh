@@ -28,6 +28,7 @@
 #   --resolution WxH   framebuffer size: 640x480, 800x600 or 1024x768 (default), all this firmware's ramfb offers
 #   --kernel debug     upstream's DEBUG kernel instead of RELEASE (much slower)
 #   --bootargs 'A B'   further kernel boot arguments
+#   --libsystem homebrew   the Homebrew stream's libSystem (issue 46) instead of the M1 RAM root's
 #   --smp N, --memory MB, --timeout S, --verbose-boot, --refresh (ask Nix again for inputs)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
@@ -44,7 +45,7 @@ while [ $# -gt 0 ]; do
     --file) IMAGE_ARGS+=(--file "$2"); shift;;
     --verbose-boot|--refresh|--mesa) IMAGE_ARGS+=("$1");;
     --resolution) RES=$2; shift;;
-    --kernel|--bootargs) IMAGE_ARGS+=("$1" "$2"); shift;;
+    --kernel|--bootargs|--libsystem) IMAGE_ARGS+=("$1" "$2"); shift;;
     --shot-every|--smp|--memory|--pointer|--cpu) RUN_ARGS+=("$1" "$2"); shift;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | cut -c3-; exit 0;;
     *) echo "unknown option $1 (see --help)" >&2; exit 2;;

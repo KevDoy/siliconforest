@@ -137,7 +137,7 @@ def patch_time_waits(kernel, rtc, quiet):
     return kernel, False
 
 
-def stable_payload(mesa):
+def stable_payload(mesa, libsystem='spawnattr'):
     """Destination -> source for the slow-changing files. Mirrors tools/gpu_desktop.sh and the
     M1 RAM root's base mapping, without anything private (firmware) or M1-only (Wi-Fi join)."""
     files = {}
@@ -165,6 +165,11 @@ def stable_payload(mesa):
     if dhcp.exists():
         files['/usr/bin/pd-dhcp'] = (dhcp, True)
     files['/usr/bin/qemu-net-up'] = (HERE / 'guest/qemu-net-up', True)
+    if libsystem == 'homebrew':
+        # The libSystem of the Homebrew stream (GitHub issue 46: among other things, an arm64
+        # function with a stack frame over 4 KiB no longer loses its first argument).
+        lib = Path(nix('integrations/puredarwin/homebrew', 'build-libsystem.nix'))
+        files['/usr/lib/libSystem.B.dylib'] = (lib / 'usr/lib/libSystem.B.dylib', True)
     if mesa:
         t = Path(nix('integrations/puredarwin/m1-mesa-asahi', 'agx-offscreen-test.nix'))
         for l in ('libEGL.1.dylib', 'libGLESv2.2.dylib', 'libgallium-26.3.0-devel.dylib', 'libdrm.2.dylib'):
@@ -251,7 +256,7 @@ def fsck_root(image):
 
 def template(args):
     up = base_image(args.kernel, args.variant)
-    files = stable_payload(args.mesa)
+    files = stable_payload(args.mesa, getattr(args, 'libsystem', 'spawnattr'))
     bootargs = BOOTARGS[args.kernel] + ' pdgopmode=' + args.resolution + (' -v' if args.verbose_boot else '') + (' ' + args.bootargs if args.bootargs else '')
     key = hashlib.sha256(json.dumps([str(up), bootargs, args.time_waits, TEMPLATE_VERSION,
                                      sorted((d, str(s), s.stat().st_size, s.stat().st_mtime_ns, x)
@@ -296,6 +301,8 @@ def main():
     p.add_argument('--remove', action='append', default=[], metavar='/PATH', help='file to delete from the run layer')
     p.add_argument('--variant', choices=('minimal', 'wayland'), default='minimal',
                    help='upstream image the base is made from: minimal (default) or wayland (the full no-X userland)')
+    p.add_argument('--libsystem', choices=('spawnattr', 'homebrew'), default='spawnattr',
+                   help='libSystem in the root: spawnattr (what the M1 RAM root has; default) or homebrew (the Homebrew stream\'s, issue 46)')
     p.add_argument('--mesa', action='store_true', help='also stage the M1 Mesa libraries (unused in QEMU)')
     p.add_argument('--verbose-boot', action='store_true', help='-v: launchd and kernel log on the serial console')
     p.add_argument('--bootargs', default='', help='extra kernel boot arguments')

@@ -43,6 +43,7 @@ and a headless run has no `DISPLAY`/`WAYLAND_DISPLAY`.
 
 ```sh
 tools/qemu_install.sh create               # make the disk (minimal userland + our desktop + user sf)
+tools/qemu_install.sh create --variant wayland   # the full userland instead (6 GiB root; boot it with --memory 2048)
 tools/qemu_install.sh boot --window        # use it; close the window or wait for --seconds
 tools/qemu_install.sh boot                 # headless, 120 s of desktop, screenshots
 tools/qemu_install.sh boot --command 'ls -l /Users/sf; echo QDINSTALL_DONE'   # root shell, no desktop
@@ -109,7 +110,9 @@ compiler, package tool or man pages. The `wayland` variant (`qemu_install.sh cre
 wayland`, `build-image.nix --argstr variant wayland`) starts from upstream's
 `image-arm64-virt-wayland` instead: the full userland without X11 (clang/llvm, cmake, ninja,
 meson, make, autotools, python, git, curl, openssl, openssh, nano, gtk3, sway, netsurf, mesa,
-configd, ...). That base is a build of about a hundred derivations including an arm64 LLVM.
+configd, ...). That base is a build of about a hundred derivations including an arm64 LLVM
+(built here once; it is in the Nix store). The install carries the Homebrew stream's libSystem
+(`--libsystem homebrew`, issue 46); the throw-away loop keeps the M1 RAM root's unless asked.
 
 QEMU machine: `virt,gic-version=3`, `-cpu neoverse-n2` (`max` hangs in the firmware), 2 vCPUs,
 1 GiB (kernel start-up time grows with memory under TCG), virtio-blk disk, ramfb, virtio-net with
