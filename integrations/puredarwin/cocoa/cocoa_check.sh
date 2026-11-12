@@ -60,6 +60,7 @@ open(out + '/cocoa-apps', 'w').write('\n'.join(check.get('apps', [])) + '\n')
 open(out + '/session.env', 'w').write(check.get('env', '') + '\n')
 open(out + '/session.seconds', 'w').write(str(seconds or check.get('seconds', 600)) + '\n')
 open(out + '/session.terminals', 'w').write(str(check.get('terminals', 1)) + '\n')
+open(out + '/session.memory', 'w').write(str(check.get('memory', 2048)) + '\n')
 PY
 ENVLINE=$(cat "$OUT/session.env"); [ -n "$ENVLINE" ] && ENVLINE="export $ENVLINE"
 sed -e "s/@SECONDS@/$(cat "$OUT/session.seconds")/g" -e "s/@SCALE@/$SCALE/g" -e "s/@THEME@/$THEME/g" -e 's/@APPDELAY@/3/g' -e 's/@APPGAP@/4/g' \
@@ -71,7 +72,7 @@ python3 -B "$HERE/cocoa_image.py" --output "$OUT/disk.img" --tree "$ROOTDIR=/" -
   --data "$HERE/guest/org.siliconforest.cocoa-session.plist=/System/Library/LaunchDaemons/org.siliconforest.cocoa-session.plist" \
   --data "$OUT/cocoa-apps=/etc/cocoa-apps" > "$OUT/image.json"
 rc=0
-python3 -B "$HERE/cocoa_run.py" --image "$OUT/disk.img" --out "$OUT" --script "$OUT/steps.json" \
+python3 -B "$HERE/cocoa_run.py" --image "$OUT/disk.img" --out "$OUT" --script "$OUT/steps.json" --memory "$(cat "$OUT/session.memory")" \
   --timeout $(( $(cat "$OUT/session.seconds") + 900 )) || rc=$?
 [ "$KEEP" = 1 ] || rm -f "$OUT/disk.img"
 python3 - "$OUT" <<'PY'

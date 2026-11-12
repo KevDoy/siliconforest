@@ -1,0 +1,96 @@
+{
+ "apps": [
+  "/Applications/CocoaHello.app/Contents/MacOS/CocoaHello"
+ ],
+ "env": "PD_WS_TRACE=1",
+ "seconds": 700,
+ "steps": [
+  {
+   "wait": "COCOA_APP_START 1",
+   "timeout": 400
+  },
+  {
+   "expect": "COCOAHELLO window-shown",
+   "timeout": 600,
+   "name": "window shown"
+  },
+  {
+   "sleep": 6
+  },
+  {
+   "locate": "view",
+   "rgb": [
+    51,
+    115,
+    204
+   ],
+   "tolerance": 14,
+   "points_wide": 380,
+   "scale": @SCALE@,
+   "name": "backing scale on screen"
+  },
+  {
+   "shot": "01-window"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    190,
+    -121
+   ],
+   "count": 2,
+   "hold": [
+    "ctrl",
+    "shift"
+   ]
+  },
+  {
+   "expect": "COCOAHELLO zoom-state zoomed=1",
+   "timeout": 120,
+   "name": "maximize from our title bar: resized and isZoomed"
+  },
+  {
+   "shot": "03-maximized"
+  },
+  {
+   "locate": "view",
+   "rgb": [
+    51,
+    115,
+    204
+   ],
+   "tolerance": 14,
+   "points_wide": 380,
+   "scale": @SCALE@,
+   "name": "scale unchanged when maximized"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    190,
+    -121
+   ],
+   "count": 2,
+   "hold": [
+    "ctrl",
+    "shift"
+   ]
+  },
+  {
+   "expect": "COCOAHELLO zoom-state zoomed=0 size=420x300",
+   "timeout": 60,
+   "name": "restore from our title bar",
+   "optional": true
+  },
+  {
+   "sleep": 4
+  },
+  {
+   "shot": "03-after"
+  },
+  {
+   "absent": "Segmentation|Bus error|Abort trap",
+   "name": "no crash"
+  }
+ ]
+}

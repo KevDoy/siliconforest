@@ -8,12 +8,14 @@
  APPKIT_EXPORT NSString *const NSWindowDidResizeNotification;
  APPKIT_EXPORT NSString *const NSWindowDidUpdateNotification;
  APPKIT_EXPORT NSString *const NSWindowWillCloseNotification;
-@@ -180,6 +181,10 @@
+@@ -180,6 +181,12 @@
      NSString *shmPath;
      NSString *bundleID;
      void *buffer;
 +    // the scale the backing store and its context were made for, in 120ths
 +    int _backingScale120;
++    // the scale the window last told its delegate and views about
++    int _reportedScale120;
 +    // WS_STATE_* bits: what the compositor did with the window from its own frame
 +    int _serverState;
      int bufsize;
@@ -47,15 +49,16 @@
  @implementation NSWindow
  
  +(NSWindowDepth)defaultDepthLimit {
-@@ -318,6 +321,7 @@
+@@ -318,6 +321,8 @@
     _sharingType=NSWindowSharingReadOnly;
      // "The default maximum size of a window is {FLT_MAX, FLT_MAX}"
     _maxSize=NSMakeSize(FLT_MAX,FLT_MAX);
 +   [self _sendSizeLimits];
++   _reportedScale120=_windowServerBackingScale120();
  
     _title=@"";
     _miniwindowTitle=@"";
-@@ -454,8 +458,11 @@
+@@ -454,8 +459,11 @@
          int depth = [_display depth] / 8;
          int shmfd = shm_open([shmPath cString], O_RDWR, 0600);
          // whole pixels, truncated as the window server does, or a fractional width shears every row
@@ -68,7 +71,7 @@
  
          if(shmfd >= 0) {
              /* The window server sizes this object from its own idea of the
-@@ -484,6 +491,16 @@
+@@ -484,6 +492,16 @@
                  bitsPerComponent:8 bytesPerRow:4*pixelsWide colorSpace:colorSpace
                  bitmapInfo:kO2BitmapByteOrder32Little|kCGImageAlphaPremultipliedFirst];
          _context = [[O2Context_builtin_FT alloc] initWithSurface:surface flipped:NO];
@@ -85,7 +88,7 @@
  
          /* +currentContext is not owned by us; releasing it frees a context
           * that is still held by the autorelease pool, which then faults on a
-@@ -1046,6 +1063,8 @@
+@@ -1046,6 +1064,8 @@
          [_backgroundView setFrameSize:_frame.size];
          [_backgroundView resizeSubviewsWithOldSize:oldSize];
          [self invalidateContextsWithNewSize:_frame.size forceRebuild:YES];
@@ -94,7 +97,7 @@
          [self resetCursorRects];
          [self saveFrameUsingName:_autosaveFrameName];
          [self postNotificationName:NSWindowDidResizeNotification];
-@@ -1109,10 +1128,12 @@
+@@ -1109,10 +1129,12 @@
  
  -(void)setMinSize:(NSSize)size {
     _minSize=size;
@@ -107,7 +110,7 @@
  }
  
  -(void)setContentMinSize:(NSSize)value {
-@@ -1120,6 +1141,7 @@
+@@ -1120,6 +1142,7 @@
  
     _contentMinSize=value;
     _minSize=frame.size;
@@ -115,7 +118,7 @@
  }
  
  -(void)setContentMaxSize:(NSSize)value {
-@@ -1676,6 +1698,9 @@
+@@ -1676,6 +1699,9 @@
  }
  
  -(BOOL)isZoomed {
@@ -125,7 +128,7 @@
      NSRect zoomedFrame = [self zoomedFrame];
      return NSEqualRects( _frame, zoomedFrame );
  }
-@@ -1693,7 +1718,7 @@
+@@ -1693,7 +1719,7 @@
  }
  
  -(BOOL)isMiniaturized {
@@ -134,7 +137,7 @@
  }
  
  -(BOOL)isMovable {
-@@ -1947,6 +1972,68 @@
+@@ -1947,6 +1973,73 @@
  }
  
  // a tiling compositor picks the size, the top edge stays put in Cocoa's bottom-left coordinates
@@ -142,9 +145,14 @@
 + * points; its backing store is remade at the new density (the window server does that when it
 + * hears the window's state again) and everything is drawn again. */
 +-(void)_serverDidChangeScale:(NSNumber *)scale120 {
-+   if(_backingScale120 == [scale120 intValue] && _context != nil)
++   int scale=[scale120 intValue];
++
++   // a resize or a move that arrived with the new scale may have remade the backing store at it already
++   if(_backingScale120 != scale || _context == nil)
++    [self invalidateContextsWithNewSize:_frame.size forceRebuild:YES];
++   if(_reportedScale120 == scale)
 +    return;
-+   [self invalidateContextsWithNewSize:_frame.size forceRebuild:YES];
++   _reportedScale120 = scale;
 +   [_backgroundView setNeedsDisplay:YES];
 +   [self postNotificationName:NSWindowDidChangeBackingPropertiesNotification];
 +   if([_delegate respondsToSelector:@selector(windowDidChangeBackingProperties:)])
@@ -203,7 +211,7 @@
  -(void)_serverDidConfigureSize:(NSValue *)value {
     NSSize size=[value sizeValue];
     NSRect frame=[self frame];
-@@ -3605,6 +3692,9 @@
+@@ -3605,6 +3698,9 @@
  
      if(!(_styleMask & NSResizableWindowMask) || (_styleMask & NSFullScreenWindowMask) || _isZoomed || _sheetContext != nil)
          return 0;
@@ -213,7 +221,7 @@
      if(point.x < 0 || point.y < 0 || point.x > width || point.y > height)
          return 0;
  
-@@ -3754,6 +3844,13 @@
+@@ -3754,6 +3850,13 @@
  void CGNativeBorderFrameWidthsForStyle(unsigned styleMask,CGFloat *top,CGFloat *left,
                                         CGFloat *bottom,CGFloat *right);
  
@@ -227,7 +235,7 @@
  CGRect CGInsetRectForNativeWindowBorder(CGRect frame,unsigned styleMask) {
      CGFloat top, left, bottom, right;
      CGNativeBorderFrameWidthsForStyle(styleMask, &top, &left, &bottom, &right);
-@@ -3783,6 +3880,11 @@
+@@ -3783,6 +3886,11 @@
          *top=*left=*bottom=*right=0;
          return;
      }

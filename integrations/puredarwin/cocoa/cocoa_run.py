@@ -276,7 +276,7 @@ def main():
                     result['measured'][step.get('name', 'pixel in ' + step['pixel_in'])] = dict(at=[x, y], seen=seen, wanted=step['rgb'])
             elif 'watch_scale' in step:
                 # {"watch_scale": "view", "rgb": [...], "points_wide": 378, "seconds": 90, "until": "REGEX",
-                #  "expect": [1, 1.25, ...]}: measures pixels per point of the rectangle again and again
+                #  "scales": [1, 1.25, ...]}: measures pixels per point of the rectangle again and again
                 # while something else changes the display scale; every expected scale must be seen.
                 seen, end_at = [], time.time() + step.get('seconds', 60)
                 until = re.compile(step['until'].encode()) if 'until' in step else None
@@ -292,7 +292,7 @@ def main():
                         end_at = min(end_at, time.time() + step.get('after', 8))
                         until = None
                 tolerance = step.get('scale_tolerance', 0.02)
-                missing = [e for e in step.get('expect', []) if not any(abs(v - e) <= tolerance for _, v, _ in seen)]
+                missing = [e for e in step.get('scales', []) if not any(abs(v - e) <= tolerance for _, v, _ in seen)]
                 rec.update(seen=seen, missing=missing)
                 rec['result'] = 'ok'
                 name = step.get('name', 'scales seen live')
