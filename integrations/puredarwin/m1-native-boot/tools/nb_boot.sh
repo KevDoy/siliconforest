@@ -14,7 +14,8 @@
 #   NB_PROFILE=desktop  the default desktop as m1-boot-speed/tools/bs_boot.sh boots it
 #   NB_CPUS          processors (default 1 for shell, 8 for desktop)
 #   NB_SECONDS       desktop session length (default 30)
-#   NB_KC            kernel collection (default: the default desktop collection)
+#   NB_KC            kernel collection (default: the default desktop collection; more than one
+#                    processor natively needs ../build-kc.nix)
 #   NB_BOOTARGS      further boot arguments;  NB_WORDS  further words for native_mode.txt
 # The whole script is one function, read completely before anything runs.
 main() {
@@ -81,6 +82,10 @@ else
   cp "$HERE/guest-shell.in" "$S"
   ARGS="cpus=${NB_CPUS:-1} $WAITS ${NB_BOOTARGS:-}"
 fi
+# More than one processor natively: m1n1 starts the secondary cores and the EL2 page holds
+# them; the kernel releases them only with pdcpuheld=1 (./build-kc.nix has the platform kext
+# that knows it).
+case "$MODE:$ARGS" in native:cpus=1\ *) ;; native:*) ARGS="$ARGS pdcpuheld=1";; esac
 R=runs/m1-desktop-010/pcie-enum-attempt-$N
 env PCIE_LAB_PATCH="$HERE/launcher-native.patch" PCIE_LAB_FILES="$FILES" \
   PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" \
