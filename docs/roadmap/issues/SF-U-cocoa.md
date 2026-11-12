@@ -139,7 +139,7 @@ controls again. (a) is what is built.
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
 | Popup windows (menus, pop-up buttons, tool tips) | not handled: they are borderless toplevels placed by the compositor; needs xdg_popup in the WindowServer and in the compositor (which refuses popups today) |
-| Firefox on arm64 | official 160.0: binary loads, XUL initialises, AppKit runs, a first hidden window is created, then the main process dies with SIGSEGV before a browser window (details below) |
+| Firefox on arm64 | official 160.0: binary loads, XUL initialises, AppKit runs, the browser window object is created and the process keeps running; nothing on screen yet, child processes fail (details below) |
 
 ## Firefox on arm64 (official 160.0, QEMU, executed)
 - Official Firefox 160.0 for macOS is universal (x86_64 + arm64), minimum macOS 11, LC_DYLD_INFO
@@ -165,10 +165,25 @@ controls again. (a) is what is built.
      browser window. No page, no input, no network. About 3.5 minutes of emulation per attempt.
      Cause found with the Homebrew stream's `libhbcrash` (`runs/cocoa/ff-crash`): a background
      thread calls `SecItemCopyMatching` and then `CFArrayGetCount` on the result (XUL+0x154841c,
-     +0x1548430; fault address 0x20 in `objc_msgSend`). Our Security answers success without
-     writing the result when no keychain daemon runs, so Firefox uses an uninitialised
+     +0x1548430; fault address 0x20 in `objc_msgSend`). Our Security answered success without
+     writing the result when no keychain daemon runs, so Firefox used an uninitialised
      pointer. Patch 0009 defines the result on every path and answers `errSecItemNotFound`
-     for an empty search, as an empty keychain does on macOS; built, run pending.
+     for an empty search, as an empty keychain does on macOS.
+  6. With 0009 (`runs/cocoa/ff-trace`): the main process lives on, its GPU helper cannot start
+     (below), Firefox falls back by itself (`Fallback WR to SW-WR`, `Failed to launch GPU process
+     after 3 attempts`), then aborts on a lazily bound `proc_name` (in libproc at the pin, not
+     exported).
+  7. With `proc_name` exported and upstream's per-user directory helper (`runs/cocoa/ff-trace2`,
+     the last run): the main process runs to the end of the session (13 minutes), creates its
+     browser window object (`window ... level 0 frame {{0, 767}, {1, 1}}`) and never sizes or
+     shows it; nothing of Firefox is on the screen (`shots/05.png`). Its child processes die or
+     hang: 289 child starts stop before `sandbox_init` with an empty `Sandbox error:` (a silent
+     `return false` in Mozilla's set-up; `confstr(_CS_DARWIN_USER_CACHE_DIR)` was one cause and
+     is fixed for the content process, the cause for the others is not found yet), and the
+     content process that does get its sandbox is denied the compositor's socket by it (967
+     `deny network-outbound .../wayland-0`).
+  So today: binary loads, XUL initialises, AppKit and the menu come up, the browser window
+  object exists; no window on screen, no page, no input, no network.
 - The sandbox, both paths:
   - Default (sandbox on). A child's `sandbox_init_with_parameters` is refused by the profile
     compiler: at the pin `define expects a name and a value` (seen on x86_64 with 158); with
@@ -182,30 +197,84 @@ controls again. (a) is what is built.
     rule broader and leaves an allow rule out). On the build host, against Mozilla's own
     sources for 160 (`security/sandbox/mac/SandboxPolicy*.h`), all six profiles now compile:
     content 1993 bytes, socket 1494, GPU 656, RDD 651, GMP 497, utility 387; with the tip's
-    compiler alone none of the six did. In the guest (`runs/cocoa/ff-sandbox2`) the kernel
-    then really enforces the compiled profile on Firefox's child: 16 lines of
-    `Sandbox: plugin-container(59) deny file-read-data /etc/master.passwd` (our libc reads the
-    password file where macOS asks a daemon, and Mozilla's profile allows only
-    `/private/etc/passwd`). Firefox still prints one `Sandbox error:` line with an empty
-    message in that run; not yet understood. Whether its processes work inside the (stricter
-    than Apple's) profiles is not yet seen.
+    compiler alone none of the six did. In the guest the kernel then really enforces the
+    compiled profiles on Firefox's children: the socket process (`deny file-read-data
+    /etc/master.passwd`: our libc reads the password file where macOS asks a daemon) and the
+    content process (`deny network-outbound /private/var/run/qemu-desktop/wayland-0`: on macOS a
+    content process reaches the window server through a Mach service that Mozilla's profile
+    allows; our window server connection is a Unix socket the profile knows nothing of). The
+    honest fix for the second is in the system, not in Mozilla's profile: treat the profile's
+    permission for `com.apple.windowserver.active` as permission for the compositor socket. Not
+    built.
   - Disabled (`MOZ_DISABLE_CONTENT_SANDBOX=1`, `..._GMP_`, `..._RDD_`, `..._SOCKET_PROCESS_`,
-    `..._UTILITY_`, `..._GPU_SANDBOX=1`, Mozilla's documented switches): no sandbox error, same
-    crash at the same place. So the crash is not the sandbox.
+    `..._UTILITY_`, `..._GPU_SANDBOX=1`, Mozilla's documented switches): no sandbox error; before
+    patch 0009 the same crash at the same place, so that crash was not the sandbox. Not yet run
+    again after 0009: it is the next run to make, since it takes the sandbox out of the way of
+    the first visible window.
 - Still ahead after the crash: layer-backed rendering through QuartzCore (software only in
   QEMU; on the M1 Firefox's WebRender would use OpenGL through Mesa/AGX, there is no Metal
   device), popup windows (its menus and panels are borderless child windows), fonts, HTTPS and
   the trust store (tip work, not in the pin), the content process model.
+
+## Patches and their state (`integrations/puredarwin/cocoa/patches`, against the pinned tree)
+| Patch | What | From | At upstream's tip (rebase stream's inventory) |
+|---|---|---|---|
+| 0001 | AppKit: NSFontWeight constants, NSImageSymbolConfiguration | tip 71a9d0b0 (part) | already there: drop |
+| 0002 | AppKit: NSSharingServicePicker | ours | applies |
+| 0003 | AuthenticationServices: browser side of ASWebAuthenticationSession | ours | applies |
+| 0004 | WindowServer: xdg-decoration, scale (wp_fractional_scale + wp_viewporter), size limits, toplevel states | ours | needs porting |
+| 0005 | AppKit: no title bar in a compositor frame, scaled backing stores, backing-change notifications, zoomed/miniaturised from the compositor | ours | needs porting |
+| 0006 | Onyx2D: glyphs rasterised at the device scale | ours | needs porting |
+| 0007 | libsandbox: SBPL functions, imports, named profiles | tip 1ebd97cb (part) | already there: drop |
+| 0008 | libsandbox: the rest of the profile language Firefox uses, strict-side handling of what cannot be checked | ours | not checked |
+| 0009 | Security: SecItemCopyMatching defines its result, errSecItemNotFound for an empty search | ours | not checked (the file is unchanged at the tip) |
+| 0010 | libSystem: per-user local, temporary and cache directories | tip 1ebd97cb (part) | already there: drop |
+| (recipe) | libSystem: `proc_name` exported | tip 7f10e1a1 (one line) | already there: drop |
+Tip variants of 0004 to 0006 are not written yet (to go in `patches-tip/` when the rebase
+stream has a tip build).
 
 ## Implementations added that answer "nothing here" (complete list)
 | Symbol | What it does |
 |---|---|
 | `MTLCreateSystemDefaultDevice`, `MTLCopyAllDevices`, `MTLCopyAllDevicesWithObserver` | nil / empty array / empty array and nil observer: there is no Metal device |
 | `MTLCaptureManager` | `supportsDestination:` NO, `startCaptureWithDescriptor:error:` NO with MTLCaptureErrorNotSupported, no scopes |
+| MetalKit.framework | a library with no symbols: Firefox's libmozinference names it as a dependency and imports nothing from it |
 | `ASWebAuthenticationSessionWebBrowserSessionManager` | keeps the handler; `wasLaunchedByAuthenticationServices` NO; nothing starts sessions on this system |
 | `NSSharingServicePicker` | menu of the services the delegate proposes (the system has none); with none, shows nothing and tells the delegate nil was chosen |
-Not stubs: the Metal descriptor classes, `ASWebAuthenticationSessionRequest`, the vDSP routines
-(real behaviour).
+| `xdg_toplevel` configure_bounds and wm_capabilities in the WindowServer | received and ignored |
+Not stubs: the Metal descriptor classes, `ASWebAuthenticationSessionRequest`, the ten vDSP
+routines, the sandbox compiler additions (rules it cannot express are made stricter, never
+reported as applied when they are not), `SecItemCopyMatching` (reports an empty keychain).
+
+## Missing, in the order it blocks things
+1. Firefox: why most child processes stop before `sandbox_init`; the compositor socket for
+   sandboxed content processes; then the first visible window (run with Mozilla's sandbox
+   switches after patch 0009 to separate the two), layer-backed rendering, HTTPS and trust.
+2. Popup windows (menus, pop-up buttons, tool tips, Firefox's panels): xdg_popup in the
+   WindowServer and in the compositor, which refuses popups today.
+3. Menus: the owner's choice between the three proposals above.
+4. AppKit layout API (`intrinsicContentSize`, `fittingSize`, alignment and baseline): absent,
+   needed by every Auto Layout application; then control geometry and drawing to the macOS
+   reference, the font tracking table and the missing weights.
+5. Scale: layer-backed content, NSOpenGLView and application-set pointer images are 1x;
+   offscreen caches render at 1x.
+6. For Chromium applications (Codex, Claude): remote layers across processes in our
+   compositor (subsurfaces, `pd_surface_host`), about 50 libraries of missing imports that
+   must all resolve at load, a GPU path without Metal.
+7. Not conveyed to our frame: document-edited state, absent close button.
+8. Seen, not investigated: upstream Terminal's text at about half the cell size.
+
+## Plan for the M1
+Nothing here has run on the M1. The pieces are arm64 binaries built for the same userland, so
+the first M1 boot is: the root of `build-desktop-root.nix` and the libSystem of
+`build-libsystem-cocoa.nix` in the RAM root, the compositor from branch `wm-darwin-cocoa`,
+`cocoa_check.sh`'s hello and apps checks by hand at 200% on the panel (2560x1600, so a
+1280x800 point desk; QEMU could only show 512x384 points at 200%). To look for there and not
+visible in QEMU: glyph and frame sharpness on the real panel, redraw speed of AppKit's
+software path at 2560x1600, the GL compositor path with shm clients that carry a viewport,
+trackpad scrolling into AppKit (scroll events were not tested here at all), the SPI keyboard's
+modifier keys as key equivalents. Mesa/AGX OpenGL for Firefox's WebRender comes after Firefox
+shows a window in QEMU.
 
 ## How to run
 ```sh
@@ -225,8 +294,10 @@ from the framebuffer). The compositor is `runs/cocoa/target/...` when built from
 - Patches 0004 to 0006 with the root of `build-desktop-root.nix` (about 180 MB: frameworks,
   fonts, Mesa, LLVM for Mesa's software rasteriser, Swift runtime for Foundation's compat
   framework).
-- Compositor commit a447cef (branch `wm-darwin-cocoa`).
-- The Homebrew stream's libSystem, which this stream uses unchanged.
+- Compositor commits a447cef and 06d0ea9 (branch `wm-darwin-cocoa`): toplevel states for
+  maximise/minimise; a test option for the autopilot's scale phase.
+- The default libSystem (`../libsystem-default`); for Firefox additionally patches 0007, 0008,
+  0010 and the `proc_name` export (`build-libsystem-cocoa.nix`), and patch 0009 in Security.
 
 ## Results (QEMU arm64, 1024x768 framebuffer; every row executed, run directory under `runs/cocoa/`)
 Checks are `cocoa_check.sh <check>`; "px/pt" is measured on the framebuffer from a marker the
