@@ -129,40 +129,114 @@ finds no standard buttons and leaves no gap for them); (b) the same with Firefox
 content windows, i.e. Firefox's look with AppKit's traffic lights, which is the forced AppKit
 controls again. (a) is what is built.
 
-## Popups (12 November, in progress)
-- WindowServer (patch 0004): a borderless window at the pop-up menu level becomes an `xdg_popup`
-  of the popup opened last (a submenu), else of the window under the pointer, else of the one
-  with the keyboard. Its place is the difference of the two frames as AppKit has them, so it
-  is right wherever the compositor put the parent; kept on the panel by the positioner's slide
-  rule; a grab unless the window ignores the mouse (a tool tip); `xdg_popup.reposition` when
-  AppKit gives a shown popup another frame (a list is made at the button's size and then sized
-  to its items); a hidden popup is destroyed and made anew at the next show; `popup_done`
-  reaches AppKit as the event its tracking loops already end on (`WS_EVENT_POPUP_DONE`, 0005).
-- Compositor (worktree, `popups.rs`): popups are drawn through the scene's shell surfaces above
-  every window, at parent origin plus the positioner's geometry at the parent's density; the
-  pointer goes to the topmost popup under it; a press that is not on a surface of the popup's
-  own client dismisses the popups that hold a grab; a press on the client's own window reaches
-  that window (the client closes its list itself). Before: `unsupported: Darwin popup`.
-- Upstream bugs found on the way (patch 0015; both also at the tip): `NSPopUpView` built its
-  item array with `[[NSMutableArray init] alloc]`, so every pop-up button crashed when
-  clicked; the graphics style asked the list's view for margins only menu views have
-  (unrecognised selector, abort); the tracking loop compared a location in the control's
-  window with locations on the screen.
-- Executed (`checks/popup.json`: a pop-up button added to the hello application): at 100%,
-  run `popup6`, every step passes - the list is an `xdg_popup`, the compositor shows it
-  (`popup6/shots/01-list-open.png`), an item is chosen with the pointer, a second opening is
-  placed so that the chosen item lies over the button, a press on the bare desk dismisses it,
-  the window works afterwards. At 200% the list is placed and drawn sharp
-  (`popup6-s200/shots/01-list-open.png`).
-- Not reliable yet: at 200% and 150% the choice with the pointer worked in some runs and not
-  in others (`popup8-s200` chose, `popup9-s2` did not; the events reach AppKit in both), and
-  three runs after the last tracking change each failed at a different step (`popup9-*`): the
-  tracking loop under emulation timing is not understood. A list closed by a press on the
-  application's own window fires the button's action with no selection
-  (`popup selected=(null) index=-1`), which macOS does not.
-- Not done: menus and context menus (NSMenu's windows), combo boxes, tool tips, submenus,
-  keyboard in popups, Firefox's menus and panels, popups of popups in the compositor beyond
-  placement, the look of the list.
+## Popups
+Every popup AppKit shows is an `xdg_popup` of the window (or menu) it belongs to, placed and kept
+on the panel by the compositor. One tracking loop serves them all. Pass rates: see "Popup results".
+
+### Why choosing an item was flaky at 150% and 200% (found 12 November)
+Not scaling. `-[NSDisplay discardEventsMatchingMask:beforeEvent:]` tested the type of the event it
+was handed instead of each queued event, so it removed every event queued before that one. A
+tracking loop's periodic timer calls it every 20 ms (to drop older periodic events), so a mouse-up
+or key still waiting in the queue was thrown away. At higher scales one loop pass (a repaint)
+takes longer than 20 ms under emulation, so the release was lost more often; at 100% rarely.
+Upstream's bug, at the pin and at the tip. Patch 0016 (one condition). Evidence: baseline
+`pb0-s1` pass, `pb0-s1.5`, `pb0-s2` fail at the choice; trace `pb1-s2` (the opening click's
+release never reached the loop); with only 0016 the old check at 200% passes 5 of 5
+(`pa-s2-r1..r5`).
+
+### What is built (patches 0017 AppKit, 0018 WindowServer; compositor worktree)
+- AppKit. Menus, context menus, submenus (any depth), pop-up buttons, pull-down buttons and combo
+  box lists are all an `NSMenuView` in a borderless window at the pop-up menu level, run by one
+  loop (`-[NSMenuView _trackFromEvent:]`). The older `NSPopUpView`/`NSComboBoxWindow` loops are no
+  longer used by the controls.
+  - Pointer: opened by a press, the menu follows the pointer and the release picks - unless the
+    release comes within 0.4 s and within 3 points of the press (a click: the menu stays open for
+    a second click). A release on a disabled item, a separator or a submenu title picks nothing.
+    A submenu opens under the pointer and stays 0.25 s after the pointer went on to another item
+    (a slanted move into it arrives). A press outside every menu dismisses and is not passed on.
+  - Keyboard: Up/Down over the items that can be chosen (no wrap), Right opens a submenu, Left
+    closes one, Return/Enter/Space choose or open, Escape and Command-period dismiss everything,
+    Home/End/Page Up/Page Down; typing selects by title prefix (1 s pause starts a new prefix).
+    Auto-repeat is honoured for Up and Down only.
+  - A dismissed menu sends nothing. (macOS: Apple documents that a pop-up button sends its action
+    when the user chooses an item; this is taken from the documentation, not measured: tracking a
+    menu on the reference Mac would put it on that Mac's screen, which the harness does not allow.)
+  - The menu's delegate hears `menuNeedsUpdate:`, `menuWillOpen:`, `menuDidClose:` and
+    `menu:willHighlightItem:`; `cancelTracking` ends the loop. A column for check marks appears
+    when an item of the menu is checked; hidden items take no room.
+  - Pop-up button: the selected item lies over the button with its title where the button's is,
+    checked; at least as wide as the button. Pull-down: under the button, without its title item.
+    Combo box: under the field, the current value lit; a choice sets the value and sends the
+    action also when the field is not being edited (upstream did neither then).
+  - Tool tips take no pointer events, so they are popups without a grab.
+- WindowServer. `kWSWindowSetPopupAnchor` gives a popup its parent, an anchor rectangle and a kind
+  before it is shown: at its frame (slides along both axes), beside the anchor (a submenu: flips
+  to the other side, slides vertically; a submenu of a flipped menu goes on in the same direction),
+  below the anchor (a list: flips above). The xdg_positioner is built so that an unconstrained
+  popup lies exactly at AppKit's frame; no horizontal offset is used for submenus because a
+  positioner's offset is not mirrored by a flip. Where the compositor put the popup comes back
+  (`WS_EVENT_POPUP_PLACED`) and becomes the NSWindow's frame, so a menu and its submenus are
+  hit-tested as they lie. A held button is kept when the pointer crosses from the window onto the
+  menu (press-drag-release). A popup that was flushed before it was ordered in is presented (tool
+  tips never appeared), and never with the picture of the popup that had the same number before.
+  `_windowServerPlacesPopups()` tells AppKit to leave all clamping to the compositor.
+- Compositor (worktree, see commits there): the pointer is delivered again where it is when a popup
+  appears, moves or goes under it; a repositioned popup keeps its picture.
+- Upstream faults fixed on the way, besides 0016: `NSPopUpView` array init, list margins, screen
+  against window coordinates (0015, first agent); combo box index held in a 32-bit `unsigned`
+  compared with `NSNotFound` (crash on dismissal); combo box ignored a choice while not editing.
+
+### Popup results (QEMU arm64, executed 12 November)
+`cocoa_check.sh popups --scale S`: the test application `popups/` (pop-up button, pull-down
+button, combo box, a view with a context menu two submenus deep, a button with a tool tip) driven
+through `checks/popups.json` (207 steps, 60 named checks; generated by `checks/popups.gen.py`).
+What it proves per run: press-drag-release; click-click; a second opening placed on the selected
+item; a disabled item cannot be chosen; Escape, a press on the application's own window (which
+does not reach the view) and a press on another application's window all dismiss without an
+action; Down to the end over a disabled item, Up to the start, type-select, Return and Space;
+pull-down; combo box by pointer and keyboard; context menu; More > Deeper > Second Leaf with the
+pointer; the same with the keyboard including Left; Escape inside a submenu; the submenu on the
+side that has room with a two point overlap; every popup on the screen; the tool tip as a popup
+without a grab that goes when the pointer leaves; the window works afterwards; every menu that
+began tracking ended; every popup the compositor was given is gone; no crash.
+
+| Scale | Final code | Runs |
+|---|---|---|
+| 100% | 5 of 5 pass | `pt-s1-r1..r5` |
+| 150% | 5 of 5 pass | `pt-s1.5-r1..r5` |
+| 200% | 5 of 5 pass | `pt-s2-r1..r5` |
+| 250% | 5 of 5 pass | `pu-s2.5-r1..r5` |
+
+Screenshots: `runs/cocoa/pt-s2-r1/shots/` (01-popup, 02-popup-typed-g, 03-pulldown, 04-combo,
+05-context, 06-submenus, 07-tooltip). At 100% the window sits in the screen's bottom right corner,
+so the context menu is slid up and the submenu flipped to the left there; at 150% it sits at the
+top, so the pop-up list is slid down.
+
+How it got there, kept because each step was a real fault:
+- Batch `pq` (0 of 20): a combo box choice sent no action (my change), and the check raised the
+  terminal over the application. Batch `pr` (0 of 20): the application crashed in `-[NSWindow
+  dealloc]`: the window kept its shared memory path as an autoreleased string and read it after
+  it was gone (upstream; found with `libhbcrash`, run `pcr1`). Batch `ps` (19 of 20): at 250% one
+  opening click was taken for a press-and-hold because its release reached the application more
+  than 0.4 s after the press; the limit is now the double-click interval (the classic Mac rule for
+  sticky menus; 1 s in this AppKit), not a number of mine.
+- Batch `pt` at 250% is void (1 of 5): the workstation's load was 38 to 45 from other work, the
+  guest took 97 s instead of 25 s to reach the session and in three runs the desktop itself gave up
+  before the application had a window. Repeated as `pu` under a load of 10 to 15.
+- Timing that is the emulation's, and how the check stays honest about it: a key release that
+  reaches the guest more than half a second late makes the key repeat. The menu loop takes
+  repeats of Up and Down only, and the check uses keys whose repetition changes nothing (Down to
+  the end, Up to the start, letters, Space); it has no retries.
+
+### Not done
+- A list taller than the screen does not scroll (macOS scrolls menus and limits a combo box to
+  `numberOfVisibleItems` rows). Menu item images, attributed titles, custom item views,
+  alternates, indentation and tool tips of items are not drawn. The menu look (Inter 13, 22 point
+  rows, 8 point corners, shadow) is upstream's and not measured against macOS: a menu cannot be
+  rendered on the reference Mac without showing it.
+- Keyboard focus stays with the application's window while a menu is up (keys reach the loop
+  through it); a compositor that gives the grabbing popup the keyboard has not been tried.
+- `NSEvent.timestamp` counts from the reference date, not from system start as on macOS.
 
 ## State
 | Item | State |
@@ -173,7 +247,7 @@ controls again. (a) is what is built.
 | Scale 100% to 200% including fractional steps, live change | see Results |
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
-| Popup windows (menus, pop-up buttons, tool tips) | first step done (12 November): windows at the pop-up menu level are `xdg_popup`s placed against the window they belong to, shown and dismissed by the compositor; proven with a pop-up button's list at 100% (`popup6`), not yet reliable at 150%/200% and not yet tried with menus, context menus, combo boxes, tool tips or Firefox (see "Popups") |
+| Popup windows (menus, context menus, submenus, pop-up and pull-down buttons, combo boxes, tool tips) | `xdg_popup`s with one tracking loop, pointer and keyboard; see "Popups" and "Popup results". Firefox's menus and panels: see there |
 | Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). a page over HTTP, https://example.com. Not yet: sandbox on, GPU process, system trust store |
 | Auto Layout | layout API on NSView and the controls, constraint activation, a Cassowary solver (patch 0011); three constraint layouts equal in structure to macOS |
 | Control geometry and drawing | macOS 26 numbers and look, measured (patch 0012); compared control by control with `conformance/sheet.py` |
@@ -368,6 +442,10 @@ controls again. (a) is what is built.
 | 0011 | AppKit: layout API, constraint activation, Cassowary solver (`PDLayoutSolver`, written here from the Badros/Borning/Stuckey paper), whole-tree layout in y-down coordinates, `-layout` called on resize | ours | not checked; the tip's AppKit has none of it (it adds NSStackView only) |
 | 0012 | AppKit: control geometry and drawing of macOS 26 as measured (push, checkbox, radio, pop-up, field, slider, progress, segmented); the macOS 15 look kept behind the default `PDControlLook` = `15`; a string is drawn in a rect lower than its line | ours | not checked |
 | 0013 | Onyx2D: PNG encoder writes straight alpha and reads "default" byte order as RGBA (pictures of bitmap contexts had red and blue exchanged) | ours | not checked |
+| 0015 | AppKit: `NSPopUpView` array, list margins, coordinates of the old list loop | ours | not checked |
+| 0016 | AppKit: `discardEventsMatchingMask:beforeEvent:` removed every earlier event | ours | not checked (same code at the tip) |
+| 0017 | AppKit: popups (one tracking loop, keyboard, placement by the compositor, combo box fixes) | ours | not checked |
+| 0018 | WindowServer: popup anchor and kind, placement reported back, held button across an open menu's surfaces, popups presented on order-in | ours | needs porting with 0004 |
 0004 also carries the unmap/remap fixes and the headless rule; 0005 the scaling of
 `cacheDisplayInRect:` to its bitmap (was 1x in a corner of a 2x bitmap).
 Tip variants of 0004 to 0006 are not written yet (to go in `patches-tip/` when the rebase

@@ -21,12 +21,25 @@ the run (later steps are reported as not run):
   {"key": ["ctrl", "q"]}                        one chord (QMP qcodes)
   {"type": "text"}                              letters, digits, space, a few punctuation keys
   {"expect": "REGEX", "timeout": 20, "name": "button"}   as wait, and recorded as a named check
+      with "assert": "PYTHON EXPRESSION" the check also needs the expression to hold; g is the list
+      of the match's groups (numbers where they are numbers), W and H the framebuffer size
+      with "save": "NAME" the groups are kept under that name for later expressions
+  {"count": "REGEX", "equals": 2, "name": "..."}  how often the pattern has appeared so far: a check
+  {"check": "EXPRESSION", "name": "..."}        an expression over saved groups and n('REGEX') (how
+                                                often a pattern has appeared so far): a check
+  {"all": "REGEX", "assert": "EXPRESSION", "name": "..."}   the expression must hold for the groups (g)
+                                                of every appearance of the pattern so far: a check
+  {"click_px": ["X EXPR", "Y EXPR"], "button": "left"}   a click at a framebuffer pixel worked out from
+  {"move_px": ["X EXPR", "Y EXPR"]}             saved groups: names from "save", S (pixels per point of
+                                                the last located rectangle), W, H
   {"absent": "REGEX", "name": "no crash"}       the pattern must not have appeared so far
   {"locate": "view", "rgb": [r, g, b], "points_wide": 380, "scale": 2.0}
                                                 finds a rectangle of that colour on the screen (the
                                                 application draws it), measures pixels per point
                                                 and the ink height of the text lines inside it
   {"click_in": "view", "points": [dx, dy]}      a click placed from that rectangle's top left corner, in points
+  {"move_in": "view", "points": [dx, dy]}       the pointer placed the same way, no button
+  {"drag_in": "view", "from": [dx, dy], "to": [dx, dy], "hold": 0.8}   press at from, hold, move to to, release
 Exit 0: every step done and every check passed. 1: a check failed. 2: could not run.
 result.json: status, times, per-step results, screenshots.
 """
@@ -165,6 +178,18 @@ class Driver:
                 return None
 
 
+def numbers(match):
+    """The groups of a match, as numbers where they are numbers."""
+    groups = []
+    for g in match.groups():
+        text = (g or b'').decode(errors='replace')
+        try:
+            groups.append(float(text) if '.' in text else int(text))
+        except ValueError:
+            groups.append(text)
+    return groups
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--image', type=Path, required=True)
@@ -192,6 +217,16 @@ def main():
                             stderr=subprocess.STDOUT, env=env, cwd=out)
     result = dict(status='ERROR', times={}, steps=[], checks={}, measured={}, host_load=os.getloadavg()[0])
     places = {}
+    saved = {}
+
+    def evaluate(expression, **more):
+        scope = dict(saved, W=size[0], H=size[1], abs=abs, min=min, max=max, len=len,
+                     S=next(reversed(places.values()))['per_point'] if places else 1.0)
+        scope.update(more)
+        # n('REGEX'): how often a pattern has appeared on the console so far
+        scope['n'] = lambda pattern: len(re.findall(pattern.encode(), drv.ser.text()))
+        return eval(expression, {'__builtins__': {}}, scope)
+
     drv = None
     try:
         qmp = qd_run.Qmp(out / 'qmp.sock', t0 + 20)
@@ -223,13 +258,66 @@ def main():
                 rec['result'] = 'ok' if m else 'TIMEOUT'
                 if m:
                     rec['line'] = m.group(0).decode(errors='replace')[:200]
+                good = bool(m)
+                if m and 'save' in step:
+                    saved[step['save']] = numbers(m)
+                    rec['saved'] = saved[step['save']]
+                if m and 'assert' in step:
+                    try:
+                        good = bool(evaluate(step['assert'], g=numbers(m)))
+                    except Exception as e:                    # noqa: BLE001 - a broken expression is a failed check
+                        good = False
+                        rec['assert_error'] = str(e)
+                    rec['groups'] = numbers(m)
+                    if not good:
+                        rec['result'] = 'ASSERT FAILED'
                 if 'expect' in step:
-                    result['checks'][step.get('name', pattern)] = bool(m)
-                ok = bool(m) or step.get('optional', False)
+                    result['checks'][step.get('name', pattern)] = good
+                ok = good or step.get('optional', False)
             elif 'absent' in step:
                 found = re.search(step['absent'].encode(), ser.text())
                 rec['result'] = 'ok' if not found else 'PRESENT'
                 result['checks'][step.get('name', 'absent ' + step['absent'])] = not found
+            elif 'count' in step:
+                seen = len(re.findall(step['count'].encode(), ser.text()))
+                rec.update(seen=seen, result='ok')
+                result['checks'][step.get('name', 'count ' + step['count'])] = seen == step['equals']
+                result['measured'][step.get('name', 'count ' + step['count'])] = dict(seen=seen, wanted=step['equals'])
+            elif 'check' in step:
+                try:
+                    good = bool(evaluate(step['check']))
+                except Exception as e:                        # noqa: BLE001
+                    good = False
+                    rec['error'] = str(e)
+                rec['result'] = 'ok'
+                rec['holds'] = good
+                result['checks'][step.get('name', step['check'])] = good
+            elif 'all' in step:
+                bad, total = [], 0
+                for m in re.finditer(step['all'].encode(), ser.text()):
+                    total += 1
+                    try:
+                        if not evaluate(step['assert'], g=numbers(m)):
+                            bad.append(numbers(m))
+                    except Exception as e:                    # noqa: BLE001
+                        bad.append(str(e))
+                rec.update(matches=total, failing=bad[:8], result='ok')
+                result['checks'][step.get('name', 'all ' + step['all'])] = total > 0 and not bad
+                result['measured'][step.get('name', 'all ' + step['all'])] = dict(matches=total, failing=bad[:8])
+            elif 'click_px' in step or 'move_px' in step:
+                try:
+                    x, y = (evaluate(e) for e in (step.get('click_px') or step['move_px']))
+                except Exception as e:                        # noqa: BLE001
+                    rec['result'] = 'bad expression: %s' % e
+                    ok = False
+                else:
+                    rec['at_pixel'] = [round(x), round(y)]
+                    if 'click_px' in step:
+                        drv.click(x, y, button=step.get('button', 'left'))
+                    else:
+                        drv.move(x, y)
+                        drv.move(x, y)
+                    rec['result'] = 'ok'
             elif 'sleep' in step:
                 time.sleep(step['sleep'])
                 rec['result'] = 'ok'
@@ -328,6 +416,31 @@ def main():
                     if 'until' in step and 'name' in step:
                         result['checks'][step['name']] = hit
                         result['measured'][step['name']] = dict(attempts=rec['attempts'])
+                    rec['result'] = 'ok'
+            elif 'move_in' in step or 'drag_in' in step:
+                # {"move_in": "view", "points": [dx, dy]}: the pointer placed like click_in, no button.
+                # {"drag_in": "view", "from": [dx, dy], "to": [dx, dy], "button": "left", "hold": 0.8}: the
+                # button goes down at `from`, is held, the pointer goes to `to` in steps, the button comes up
+                place = places.get(step.get('move_in') or step['drag_in'])
+                if place is None:
+                    rec['result'] = 'not located'
+                    ok = False
+                else:
+                    at = lambda pt: (place['box'][0] + pt[0] * place['per_point'], place['box'][1] + pt[1] * place['per_point'])
+                    if 'move_in' in step:
+                        drv.move(*at(step['points']))
+                        drv.move(*at(step['points']))
+                    else:
+                        (x0, y0), (x1, y1) = at(step['from']), at(step['to'])
+                        drv.move(x0, y0)
+                        drv.move(x0, y0)
+                        qmp.button(step.get('button', 'left'), True)
+                        time.sleep(step.get('hold', 0.8))
+                        for i in range(1, 9):
+                            drv.move(x0 + (x1 - x0) * i / 8, y0 + (y1 - y0) * i / 8)
+                        time.sleep(step.get('settle', 1.0))
+                        qmp.button(step.get('button', 'left'), False)
+                        time.sleep(0.15)
                     rec['result'] = 'ok'
             elif 'move' in step:
                 drv.move(*step['move'])

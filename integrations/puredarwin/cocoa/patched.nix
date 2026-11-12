@@ -18,6 +18,12 @@
 #   0013  Onyx2D: the PNG encoder writes straight alpha and reads "default" byte order as the
 #         rest of Onyx2D does (pictures of a bitmap context had red and blue exchanged)
 #   0015  AppKit: NSPopUpView built its array with +init then +alloc (every pop-up button crashed)
+#   0016  AppKit: discarding the events before one event tested that event's own type and removed
+#         every earlier event (a tracking loop's periodic timer threw away mouse and key events)
+#   0017  AppKit: popups (menus, lists, tool tips) for a compositor that places them: one tracking loop
+#         for menus, submenus, pop-up and pull-down buttons and combo boxes, with the keyboard
+#   0018  WindowServer: a popup's anchor and kind in its positioner (flip, slide), where the compositor
+#         put it reported back, a held button kept across the surfaces of an open menu
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -45,9 +51,12 @@ let
     ./patches/0011-appkit-layout-api.patch
     ./patches/0012-appkit-controls-macos26.patch
     ./patches/0015-appkit-popup-view-array.patch
+    ./patches/0016-appkit-event-queue-discard.patch
+    ./patches/0017-appkit-popups.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
+    ./patches/0018-windowserver-popup-placement.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
