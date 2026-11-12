@@ -8,7 +8,7 @@
  	/* per-group metadata locations (block bitmap, inode bitmap, inode
  	 * table start), cached on first use: ext4_block_is_metadata() used to
  	 * re-read every group descriptor from disk for EVERY allocated block */
-@@ -462,6 +463,11 @@
+@@ -462,6 +463,30 @@
  
  /* ext4_jbd.c - JBD2 journal (replay on mount, write-ahead commit per vnop) */
  int  ext4_jnl_mount(struct ext4mount *emp);   /* locate + replay if needed */
@@ -16,6 +16,25 @@
 + * unmount leaves it (txn committed and checkpointed, journal marked empty, RECOVER cleared,
 + * device cache flushed) and writes nothing until it is thawed by an upgrade. */
 +int  ext4_jnl_freeze(struct ext4mount *emp);
++/*
++ * SiliconForest: the deletion time of a freed inode. e2fsck reads an i_dtime below the inode
++ * count as a pointer of the orphan list and calls the filesystem damaged ("was part of the
++ * orphaned inode list"). This machine has no clock at boot: until one is set the time is the
++ * seconds since the kernel started, so every file deleted then got such a value (boot dr17).
++ * A deletion is never dated before the filesystem was made (or written last).
++ */
++static inline uint32_t
++ext4_dtime(const struct ext4mount *emp, uint32_t sec)
++{
++	uint32_t floor = OSSwapLittleToHostInt32(emp->em_sb.s_mkfs_time), wtime = OSSwapLittleToHostInt32(emp->em_sb.s_wtime);
++	uint32_t count = OSSwapLittleToHostInt32(emp->em_sb.s_inodes_count);
++
++	if (wtime > floor)
++		floor = wtime;
++	if (floor <= count)
++		floor = count + 1;
++	return sec < floor ? floor : sec;
++}
 +int  ext4_jnl_thaw(struct ext4mount *emp);
  void ext4_jnl_unmount(struct ext4mount *emp);
  /* Record a metadata block write in the currently open transaction (no-op
@@ -182,6 +201,33 @@
  	if (devvp == NULLVP) {
 --- a/src/Kernel/Extensions/ext4/ext4_vnops.c
 +++ b/src/Kernel/Extensions/ext4/ext4_vnops.c
+@@ -910,7 +910,7 @@
+ 				error = ext4_inode_free_extents(emp, &raw);
+ 			if (error)
+ 				break;
+-			raw.i_dtime = le32((uint32_t)tv.tv_sec);
++			raw.i_dtime = le32(ext4_dtime(emp, (uint32_t)tv.tv_sec));
+ 			error = ext4_write_inode(emp, ino, &raw);
+ 			if (!error)
+ 				error = ext4_free_inode(emp, ino, vtype);
+@@ -963,7 +963,7 @@
+ 	if (error)
+ 		return error;
+ 	ep->e_raw.i_links_count = 0;
+-	ep->e_raw.i_dtime = ep->e_raw.i_ctime;
++	ep->e_raw.i_dtime = le32(ext4_dtime(ep->e_mount, le32(ep->e_raw.i_ctime)));
+ 	error = ext4_write_inode(ep->e_mount, ep->e_ino, &ep->e_raw);
+ 	if (error)
+ 		return error;
+@@ -1079,7 +1079,7 @@
+ 	if (error)
+ 		return error;
+ 	microtime(&tv);
+-	raw.i_dtime = le32((uint32_t)tv.tv_sec);
++	raw.i_dtime = le32(ext4_dtime(emp, (uint32_t)tv.tv_sec));
+ 	raw.i_ctime = le32((uint32_t)tv.tv_sec);
+ 	error = ext4_write_inode(emp, ino, &raw);
+ 	if (error)
 @@ -1236,6 +1236,8 @@
  	uint32_t lblk, last_lblk;
  	int error = 0;

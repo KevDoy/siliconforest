@@ -427,7 +427,9 @@ static int cmd_tree(const char *root, int nfiles, char **files)
  */
 static void report(const char *when)
 {
-	static const char *const names[] = { "kern.pd_nvme.state", "kern.pd_nvme.stats", "kern.pd_nvme.fence", "kern.pd_nvme.part", "kern.pd_nvme.media" };
+	static const char *const names[] = { "kern.pd_nvme.state", "kern.pd_nvme.stats", "kern.pd_nvme.fence", "kern.pd_nvme.part", "kern.pd_nvme.media",
+	    /* the write-fenced build only; the read-only driver has neither and the line then says so */
+	    "kern.pd_nvme.wstats", "kern.pd_nvme.wgate_selftest" };
 	for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		char text[1200] = ""; size_t len = sizeof(text) - 1;
 		if (sysctlbyname(names[i], text, &len, NULL, 0) != 0) snprintf(text, sizeof(text), "(%s)", strerror(errno));

@@ -33,6 +33,9 @@ m)
     cp /usr/lib/libSystem.B.dylib /tmp/sf/dr-d2.bin
     mkdir /tmp/sf/dr-ddir; cp /bin/sh /tmp/sf/dr-ddir/sh.bin
     echo "unsynced line" >> /tmp/sf/dr-d3.txt
+    # a machine without a clock: files deleted with the time near 1970 must not look like orphan-list pointers to e2fsck
+    date -u 010100011970 > /dev/null 2>&1; echo "DRD clock $(date -u +%Y)"
+    echo "to be deleted" > /tmp/sf/dr-del1.txt; cp /bin/sh /tmp/sf/dr-del2.bin; sync; rm /tmp/sf/dr-del1.txt /tmp/sf/dr-del2.bin; echo "DRD delete rc=$?"
     ( exec 3>> /tmp/sf/dr-open.txt; echo "held open" >&3; sleep 300 ) &
     sleep 1
     sha256sum /tmp/sf/dr-d1.txt /tmp/sf/dr-d2.bin /tmp/sf/dr-ddir/sh.bin /tmp/sf/dr-d3.txt /tmp/sf/dr-open.txt | sed 's/^/DRD_SHA /'

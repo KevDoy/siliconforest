@@ -5,7 +5,7 @@ The SiliconForest partition exists (64 GiB ext4, Linux `nvme0n1p3`, first block 
 |---|---|
 | 1 Read-only driver at the tip, our partition visible | **Proven on the M1: boots dr01, dr02** (below) |
 | 2 Root on the partition, read-only | **Proven on the M1**: shell (dr05) and the desktop (dr06) under the hypervisor, the desktop natively (dr08); see "Step 2". Open: a session started by launchd from the disk root; the timeline without the upload (step 4) |
-| 3 Write-fenced driver | **3a, 3b, 3c proven on the M1 (boots dr11 to dr16)**: the separate build `PDAppleNVMeRW` wrote files through ext4 on a second, fenced block device; Linux found the filesystem clean and the files hash-equal; everything outside the partition unchanged; an unclean end is recovered by Linux and by Darwin; a downgrade to read-only leaves the filesystem clean while still mounted. 3d (root read-write) is next: see "Step 3" |
+| 3 Write-fenced driver | **3a to 3d proven on the M1 (boots dr11 to dr21)**: the separate build `PDAppleNVMeRW` wrote files through ext4 on a second, fenced block device; Linux found the filesystem clean and the files hash-equal; everything outside the partition unchanged; an unclean end is recovered by Linux and by Darwin; a downgrade to read-only leaves the filesystem clean while still mounted; the desktop runs with its root read-write on the partition under the hypervisor and natively, and files and a desktop setting persist across boots. See "Step 3" |
 | 4 Boot chain (B1 stage without the RAM root record) | not started |
 
 Commands (all from the lab root; the bench is taken by `tools/bench.sh`, `BENCH_WHO=disk`, one boot at a time, names `drNN`):
@@ -93,8 +93,41 @@ Known and open: the ext4 driver writes the superblock at every mount, read-only 
 
 Every one of them: LINUX_VERIFIED, 21/21 stable ranges and 6/6 untouched Linux ranges unchanged, `unsafe_shutdowns` 107, `gate_rejected=0 fence_rejected=0`, controller stopped cleanly. Never edit a script while a slot that uses it runs (bash reads it as it goes).
 
-**To do next**
-- 3d: root read-write on p3 (the fenced media must be published as `boot-uuid-media`: the whole-disk view is guarded in this build, so compare the superblock UUID with `boot-uuid` in the driver or let `Ext4FileSystemDriver` match the fenced whole media), undo the read-only arrangement from Linux, persistence, timings.
+**Root read-write on the partition (3d, boots dr17 to dr21)**
+- How it is put together: `rd=uuid boot-uuid=<filesystem UUID> wdt=-1 pdnvme=3 <three partition arguments> pdnvme_write=1 pdnvme_readfence=1`, no `launchdsuffix` (process 1 is launchd). The whole-disk view of our partition is guarded in write mode, so the driver itself publishes the fenced media as `boot-uuid-media` when the ext4 superblock in the fence's first block carries the `boot-uuid` (`fenced_root_thread` in `rw.patch`); the root is then `disk1`, read-write from the start.
+- The partition was rearranged from Linux with `tools/dr_linux_root.sh untransform` (`tools/sf-root-untransform.sh`): the `*.disk` originals are back in place, the links kept as `*.rolink` (the way back is `transform`), `/private/sf-wtest` removed, `/usr/bin/darwin-desktop-test` now mounts the RAM root image (`/dev/md0`) read-only on `/private/ram` itself and runs the boot's script from there. The RAM root is still uploaded in these boots (script, `pdnvme-test`, range list).
+- Boot: `BENCH_WHO=disk DR_RW=1 [NV_PREV_CONSOLE=<previous console.bin>] tools/bench.sh run integrations/puredarwin/m1-storage/tools/dr_desk_slot.sh drNN hv|native 240` (collection `build-kc-native-rw.nix`; guests `guest/diskroot-rw-prelude.sh`, `guest/darwin-diskroot-rw.in`; verdict `NV_WMODE=root`). End of the boot: sync; `mount -t ext4 -o update,rdonly /dev/disk1 /`; `seal`; `pdnvme-test stopreport` from memory.
+- **No clock (found by dr17):** this machine has no time source at boot, so the time is seconds since the kernel started (1970). e2fsck reads a deletion time below the inode count as an orphan-list pointer and reports the filesystem damaged (`Inode 29 was part of the orphaned inode list`, rc 4; nothing else was wrong). `ext4-downgrade.patch` now never dates a deletion before the filesystem's own `s_mkfs_time`/`s_wtime` (QEMU: clock set to 1970, files deleted, downgrade, host `e2fsck -fn` clean, five files hash-equal). File timestamps are still 1970 until something sets the clock: **step 4 needs a time source** (NTP once Wi-Fi is up, or an RTC driver).
+- The desktop keeps its Theme/Display choices in `/private/var/db/desktop-state` (`XDG_STATE_HOME`); an unattended session writes nothing there and did not take a request left in `appearance-request`. The persistence test therefore writes `appearance=dark` where the Theme menu writes it.
+- `/private/var/run/gpu-desktop` is removed by the prelude before the session: a real boot needs that cleanup (stale sockets and locks of the previous boot are on disk now).
+
+| Boot | What | Result |
+|---|---|---|
+| dr17 | desktop, hypervisor, root read-write | desktop up from the disk (GL on KMS 2560x1600, Wi-Fi, ping, Touch Bar, audio, input); 69 ok, 1 FAIL: `e2fsck -fn` rc 4, the clock trap above. Repaired from Linux (`e2fsck -fy`, one inode's deletion time). STOP kept as `dr17-STOP-e2fsck-low-dtime-no-clock.txt` |
+| dr18 | the same with the dated-deletion fix | **passed 72/72**; dr17's file found hash-equal |
+| dr19 | native (`noiolog`, `vdm-serial`) | **passed 72/72**; GL on KMS, 10 flips; files of dr17 and dr18 found |
+| dr20 | hypervisor; `appearance=dark` stored | **passed 72/72** |
+| dr21 | native, `pdnvme_delay=0` | **passed 72/72**; `appearance=dark` and four files of earlier boots found hash-equal |
+
+Every one: root on `disk1` read-write; writes to `/var/run`, `/tmp`, `/private/var/tmp`, `/etc`, `/usr` succeed; downgrade rc 0, `sealed_refused=0`, no write command after the downgrade; Linux: `e2fsck -fn` clean, no `needs_recovery`, journal empty, persistence files and the desktop state hash-equal, the in-use libSystem not written back; 21/21 stable ranges and 6/6 untouched Linux ranges unchanged, `unsafe_shutdowns` 107, `gate_rejected=0 fence_rejected=0`, LINUX_VERIFIED. A desktop boot issues about 1,700 write commands (7 MB) and 290 flushes.
+
+Seconds from the kernel's start (`nb_times.py`; typed sessions; the RAM root is still uploaded, so the saving of the upload shows only in step 4):
+
+| | dr09 native, read-only root, no delay | dr17 hv, read-write | dr19 native, read-write | dr21 native, read-write, no delay |
+|---|---|---|---|---|
+| launchd | 2.04 | 4.90 | 5.06 | 2.13 |
+| shell | 2.35 | 5.61 | 5.37 | 2.54 |
+| script | 7.33 | 9.04 | 11.60 | 8.66 |
+| first frame | 9.69 | 11.10 | 14.07 | 11.12 |
+| Wi-Fi joined | 12.60 | 14.22 | 16.77 | 13.84 |
+
+The read-write root costs about 1.4 s to the first frame against the read-only one (the journal: 290 flushes of about 8 ms are a good part of it; Linux's driver rate-limits flushes on this controller, ours does not yet).
+
+**To do next (step 4; nothing of it is started)**
+- The stage (`m1-native-boot/b1/`) has never booted a kernel to a shell (`sfb06` was not run; see the hand-over at the top of `SF-T-native-boot.md`: review the regenerated patches, rebuild the stage at the tip, a `stagestop` read-back boot, then `sfb06`). Only then the disk-root variant: no RAM root record (the collection `build-kc-native-rw.nix` is 33.8 MB: it fits the 60 MiB limit), `rd=uuid boot-uuid=…` with the storage arguments above, the launchd-started session (`multiuser` word and the plist as `nb_boot.sh` does).
+- The stage's guard: `b1/src/pdsf_boot.c` lines 233-236 and 461-470 require `rd=md0`. Replace with an explicit check that the command line read back from the boot-args page contains `rd=uuid` and `boot-uuid=` followed by exactly our filesystem UUID (configured into the stage, compared as text), or `rd=md0` when a RAM root record is present; tell the coordinator exactly what it accepts.
+- Without the RAM root there is no `/private/ram`: the bench script, `pdnvme-test` (for `stopreport`) and the range list must be on the disk root (install them from Linux), and `/usr/bin/darwin-desktop-test` must run the script from the disk. The end of a boot needs the downgrade, the seal and the stop wherever the session ends (a shutdown path of the system, not only the bench script); the time to live remains the backstop (Flush, stop; the filesystem is then recovered at the next mount).
+- Needed before a daily-use root: a time source; boot-time cleanup of `/private/var/run` and `/private/tmp`; flush rate-limiting if the 290 flushes matter.
 - 4, changed by the owner (12 November): the install target is its own entry in Apple's startup picker (a stub APFS volume "SiliconForest" with our icon, our own first-stage m1n1 build with our logo, his one-time approval in recovery), not the shared `m1n1/boot.bin` selector. Design and document only at the end of step 4: read `runs/m1-storage/ref/asahi-installer/src/stub.py`, `osinstall.py`, `step2/`, `build.sh`, `installer_data.json` and how m1n1 embeds its logo; say what is created, where the space comes from (our partition's tail), which Apple components the stub needs, what he runs in macOS and in recovery, how Linux stays the default, removal, failure modes, artwork files. Nothing outside p3 is written by us.
 
 ## Goal

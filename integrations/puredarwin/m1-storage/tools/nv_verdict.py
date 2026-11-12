@@ -30,7 +30,8 @@ root_mode = os.environ.get('NV_VERDICT_MODE') == 'root'     # the root filesyste
 # NV_VERDICT_MODE=write: the write-fenced build wrote files through ext4 on the fenced device (guest/darwin-disk-rw.in);
 # NV_WCHECK is the output of tools/dr_linux_root.sh wcheck, made from Linux after the boot.
 write_mode = os.environ.get('NV_VERDICT_MODE') == 'write'
-wmode = os.environ.get('NV_WMODE', '') if write_mode else ''     # '', 'unclean' or 'downgrade' (step 3c, guest/darwin-disk-rw2.in)
+wmode = os.environ.get('NV_WMODE', '') if write_mode else ''     # '', 'unclean' or 'downgrade' (step 3c, guest/darwin-disk-rw2.in), 'root' (3d, guest/darwin-diskroot-rw.in)
+rootw = wmode == 'root'     # the ROOT was the fenced device, read-write; driver log lines may be absent from the console (noiolog)
 ours_lba = int(os.environ.get('NV_PART_LBA', '0'))
 level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
 bad = []
@@ -83,7 +84,7 @@ for (lba, blocks), h in sorted(ha.items()):
 check(static_n > 0 and static_ok == static_n, 'ranges Linux never writes (GPTs, APFS partitions%s): ' % (', the SiliconForest partition' if ours_lba else '') + '%d of %d unchanged before/after AND equal under Darwin' % (static_ok, static_n))
 check(stable_ok == stable_n, 'ranges in Linux-mounted filesystems that Linux left alone: %d of %d equal under Darwin' % (stable_ok, stable_n))
 if write_mode:
-    check(globals().get('ours_n', 0) > 0 and globals().get('ours_pre') == globals().get('ours_n'), 'ranges inside the SiliconForest partition: %s of %s read by Darwin before its first write equal Linux before the boot' % (globals().get('ours_pre'), globals().get('ours_n')))
+    if not rootw: check(globals().get('ours_n', 0) > 0 and globals().get('ours_pre') == globals().get('ours_n'), 'ranges inside the SiliconForest partition: %s of %s read by Darwin before its first write equal Linux before the boot' % (globals().get('ours_pre'), globals().get('ours_n')))
     haw = hashes(con, 'NVT_AFTER_WRITE_HASH')
     outside = [k for k in hd if not (k[0] >= ours_lba and k[0] + k[1] <= ours_lba + int(os.environ['NV_PART_BLOCKS']))]
     same = sum(1 for k in outside if haw.get(k) == hd[k])
@@ -194,12 +195,12 @@ if write_mode:
     for tag, text in re.findall(r'^NV_WSTATS (\S+) (.*)$', con, re.M):
         if re.search(r'flush_max_us=\d+$', text) or tag not in ws: ws[tag] = text
     check(re.search(r'^NV_PART verified first=%d ' % ours_lba, con, re.M) is not None, 'the driver identified our partition in both GPT copies')
-    check('WRITE-FENCED build' in con and 'the write fence is OPEN over the SiliconForest partition' in con, 'the write-fenced build ran and opened the fence after the verification')
+    if not rootw: check('WRITE-FENCED build' in con and 'the write fence is OPEN over the SiliconForest partition' in con, 'the write-fenced build ran and opened the fence after the verification')
     st = ws.get('start', '')
     check(kv(st, 'fence') == 'open' and kv(st, 'first') == str(first) and kv(st, 'last') == str(last) and (kv(st, 'device') or '').startswith('disk'), 'fence open over exactly [%d, %d], fenced device %s' % (first, last, kv(st, 'device')))
-    check(kv(st, 'writes') == '0' and kv(st, 'flushes') == '0', 'no write and no flush before the write phase')
+    if not rootw: check(kv(st, 'writes') == '0' and kv(st, 'flushes') == '0', 'no write and no flush before the write phase')
     check(re.search(r'^NV_WGATE_SELFTEST start fence=open admitted=4 refused=13 wrong=0', con, re.M) is not None, 'write-gate self-test on the live fence: 4/13/0')
-    check(re.search(r'^NV_WGATE_SELFTEST final fence=closed admitted=0 refused=17 wrong=0', con, re.M) is not None, 'after the stop the fence is closed: 0/17/0')
+    check(re.search(r'^NV_(WGATE_SELFTEST final|AFTER_STOP wgate_selftest) fence=closed admitted=0 refused=17 wrong=0', con, re.M) is not None, 'after the stop the fence is closed: 0/17/0')
     check(not re.search(r'^NV_FENCED_CHILD', con, re.M), 'the fenced device has no partitions of its own')
     if not wmode:
         ft = dict(re.findall(r'^NV_FENCETEST (\S+) (.*)$', con, re.M))
@@ -217,33 +218,51 @@ if write_mode:
         rf = ws.get('refuse', '')
         check(kv(rf, 'writes') == '0' and kv(rf, 'flushes') == '0' and kv(rf, 'io_ops[00,01]') == '0,0', 'after all deliberate attempts: no write or flush command was built (writes=0 flushes=0 io_ops[00,01]=0,0; range_refused=%s)' % kv(rf, 'range_refused'))
     mrw = re.findall(r'^NV_MOUNT_RW (.*)$', con, re.M)
-    check(len(mrw) == 1 and re.match(r'/dev/%s on /private/tmp/sf \(ext4' % kv(st, 'device'), mrw[0]) is not None and 'read-only' not in mrw[0], 'ext4 mounted read-write from the fenced device: %s' % ' | '.join(mrw))
-    check(re.search(r'^NV_STOP_WHILE_MOUNTED rc=[1-9]\d* state=ready', con, re.M) is not None and 'stop refused: the fenced device is open' in con, 'a stop request while the filesystem was mounted read-write was refused')
+    if rootw:
+        check(re.search(r'^NV_ROOT disk read-write: root_device on / \(ext4(?!.*read-only).*\) on %s$' % re.escape(kv(st, 'device') or '?'), con, re.M) is not None, 'the root filesystem is the fenced device, ext4, read-write: %s' % ' | '.join(re.findall(r'^NV_ROOT (.*)$', con, re.M)))
+        ba = ' '.join(re.findall(r'^NV_BOOTARGS (.*)$', con, re.M))
+        check('rd=uuid boot-uuid=GUID' in ba and 'rd=md0' not in ba and 'pdnvme_write=1' in ba and 'launchdsuffix' not in ba, 'booted with rd=uuid boot-uuid=<filesystem UUID> pdnvme_write=1, no rd=md0, process 1 is launchd itself')
+        sw = re.findall(r'^NV_STATEWRITE (\S+) rc=(\d+)', con, re.M)
+        check(len(sw) == 5 and all(rc == '0' for _, rc in sw), 'writes to /var/run, /tmp, /private/var/tmp, /etc, /usr succeed on the disk root: %s' % ' '.join('%s=%s' % x for x in sw))
+        check('PD_BENCH_DONE' in con.split('NV_AFTER_STOP')[-1], 'the report after the stop came out complete (from memory)')
+        for l in re.findall(r'^(?:GPUDESK|WMSTAT|NV_DESKSET).*$', con, re.M)[:18]: print('NV_RESULT ' + l[:200])
+    else: check(len(mrw) == 1 and re.match(r'/dev/%s on /private/tmp/sf \(ext4' % kv(st, 'device'), mrw[0]) is not None and 'read-only' not in mrw[0], 'ext4 mounted read-write from the fenced device: %s' % ' | '.join(mrw))
+    check(re.search(r'^NV_STOP_WHILE_MOUNTED rc=[1-9]\d* state=ready', con, re.M) is not None and (rootw or 'stop refused: the fenced device is open' in con), 'a stop request while the filesystem was mounted read-write was refused')
     wsha = lambda tag, text=con: dict((f, h) for h, f in re.findall(r'^NV_WSHA %s ([0-9a-f]{64})\s+(\S+)' % tag, text, re.M))
     w1, w2 = wsha('written'), wsha('reread')
     um = ws.get('sealed' if wmode else 'unmounted', ''); fin = ws.get('final', '')
+    psha = lambda kind, tag, text=con: dict((f, h) for h, f in re.findall(r'^NV_%s %s ([0-9a-f]{64})\s+(\S+)' % (kind, tag), text, re.M))
+    if rootw:
+        w1 = psha('PSHA', 'written')
+        fin = (re.findall(r'^NV_AFTER_STOP wstats (.*)$', con, re.M) or [''])[-1]; ws['final'] = fin
     if not wmode:
         check(re.search(r'^NV_UMOUNT1 rc=0', con, re.M) is not None and re.search(r'^NV_UMOUNT2 rc=0', con, re.M) is not None, 'both unmounts succeeded')
         check(len(w1) == 4 and w1 == w2, 'four files written; after unmount and a new mount they read back with the same SHA-256')
         check(int(kv(um, 'writes') or 0) > 0 and int(kv(um, 'written_bytes') or 0) >= 34000000, 'writes went through the driver: %s commands, %s bytes by the first unmount, %s flushes' % (kv(um, 'writes'), kv(um, 'written_bytes'), kv(um, 'flushes')))
     else:
-        check(len(w1) >= 3 and int(kv(um, 'writes') or 0) > 0, '%d files written and synced (%s write commands, %s flushes by the seal)' % (len(w1), kv(um, 'writes'), kv(um, 'flushes')))
-        check(re.search(r'^NV_SEAL rc=0 seal=1', con, re.M) is not None and 'sealed: flush 0x0' in con, 'sealed: Flush, then the fence closed, with the filesystem still mounted')
+        check(len(w1) >= (1 if rootw else 3) and int(kv(um, 'writes') or 0) > 0, '%d files written and synced (%s write commands, %s flushes by the seal)' % (len(w1), kv(um, 'writes'), kv(um, 'flushes')))
+        check(re.search(r'^NV_SEAL rc=0 seal=1', con, re.M) is not None and (rootw or 'sealed: flush 0x0' in con), 'sealed: Flush, then the fence closed, with the filesystem still mounted')
         me = re.findall(r'^NV_MOUNT_END (.*)$', con, re.M)
         check(len(me) == 1, 'the filesystem was still mounted when the controller stopped: %s' % ' | '.join(me))
         prev = os.environ.get('NV_PREV_CONSOLE')
         found = wsha('found')
         print('NV_VERDICT note files found at the mount: %d' % len(found))
-        if prev:
+        if prev and rootw:
+            pcon = subprocess.run(['strings', '-n', '6', prev], capture_output=True, text=True, errors='replace').stdout
+            pp, pd_ = psha('PSHA', 'written', pcon), psha('DSHA', 'written', pcon)
+            fp, fd = psha('PSHA', 'found'), psha('DSHA', 'found')
+            check(len(pp) >= 1 and all(fp.get(f) == h for f, h in pp.items()), 'persistence: the %d file(s) the previous boot wrote under /private/var/sf-persist are there, hash-equal: %s' % (len(pp), ' '.join(sorted(pp))))
+            check(all(fd.get(f) == h for f, h in pd_.items()), 'persistence: the %d file(s) of the desktop\'s own state directory as the previous boot left them are there, hash-equal: %s' % (len(pd_), ' '.join(sorted(pd_)) or '(the desktop wrote none)'))
+        elif prev:
             pw = wsha('written', subprocess.run(['strings', '-n', '6', prev], capture_output=True, text=True, errors='replace').stdout)
             check(len(pw) >= 3 and all(found.get(f) == h for f, h in pw.items()), 'the %d synced files of the previous boot (ended unclean) are there after Darwin\'s own mount, hash-equal' % len(pw))
             rp = sorted(set(re.findall(r'^NV_DMESG .*ext4: (journal dirty.*|.*replay.*)$', con, re.M)))
             check(any(r.startswith('journal dirty') for r in rp), 'Darwin found the journal dirty at its mount and recovered it: %s' % (' | '.join(r[:100] for r in rp) or 'no such line'))
-    if wmode == 'downgrade':
+    if wmode in ('downgrade', 'root'):
         check(re.search(r'^NV_DOWNGRADE rc=0', con, re.M) is not None and 'ext4: downgraded to read-only: journal empty' in con, 'mount -o update,rdonly succeeded and the driver reported the journal empty and RECOVER cleared')
         md = re.findall(r'^NV_MOUNT_DOWN (.*)$', con, re.M); fw = re.findall(r'^NV_FSWRITE (\S+) rc=(\d+)', con, re.M)
         check(len(md) == 1 and 'read-only' in md[0] and len(fw) == 2 and all(rc != '0' for _, rc in fw), 'mounted read-only afterwards; create and append refused')
-        check(all(w2.get(f) == w1.get(f) for f in w2) and len(w2) == 2, 'files read the same after the downgrade')
+        if not rootw: check(all(w2.get(f) == w1.get(f) for f in w2) and len(w2) == 2, 'files read the same after the downgrade')
         for tag in ('sealed', 'after', 'final'):
             check(kv(ws.get(tag, ''), 'sealed_refused') == '0', 'wstats %s: sealed_refused=0: nothing tried to write after the downgrade and the seal' % tag)
         check(kv(ws.get('sealed', ''), 'writes') == kv(ws.get('before-seal', ''), 'writes') and kv(fin, 'writes') == kv(ws.get('before-seal', ''), 'writes'), 'no write command after the downgrade (%s before the seal, %s at the end)' % (kv(ws.get('before-seal', ''), 'writes'), kv(fin, 'writes')))
@@ -273,7 +292,14 @@ if write_mode:
             check(re.search(r'^SFL_REPLAY_RC [01]$', wc, re.M) is not None and re.search(r'^SFL_FSCK2_RC 0$', wc, re.M) is not None, 'Linux replayed the journal (e2fsck -fy rc %s) and the filesystem is clean afterwards (e2fsck -fn rc 0): %s' % (' '.join(re.findall(r'^SFL_REPLAY_RC (\d+)', wc, re.M)), ' | '.join(l[:90] for l in re.findall(r'^SFL_REPLAY (.*)$', wc, re.M)[:3])))
         else:
             print('NV_VERDICT note the journal is left for Darwin\'s next mount (no replay from Linux)')
-    if wmode:
+    if rootw:
+        lp = dict((f, h) for h, f in re.findall(r'^SFL_PSHA ([0-9a-f]{64})\s+(\S+)', wc, re.M)); ld = dict((f, h) for h, f in re.findall(r'^SFL_DSHA ([0-9a-f]{64})\s+(\S+)', wc, re.M))
+        check(len(w1) >= 1 and lp == w1, 'Linux reads the %d file(s) under /private/var/sf-persist with the SHA-256 Darwin reported at the end of the boot' % len(w1))
+        dd = psha('DSHA', 'written')
+        check(ld == dd, 'Linux reads the desktop\'s state directory as Darwin reported it (%d file(s): %s)' % (len(dd), ' '.join(sorted(dd)) or 'none'))
+        lib = re.search(r'^NV_LIBSYSTEM in use ([0-9a-f]{64}); memory-disk copy ([0-9a-f]{64})', con, re.M); ol = re.search(r'^SFL_OLDSHA ([0-9a-f]{64})\s+usr/lib/libSystem.B.dylib', wc, re.M)
+        check(bool(lib and ol) and ol.group(1) == lib.group(2), 'the libSystem in use was not written back: on disk it has the digest of the untouched copy (%s)' % ('in use it reads differently, as known' if lib and lib.group(1) != lib.group(2) else 'and reads the same in use'))
+    elif wmode:
         check(len(w1) >= 3 and all(lsha.get(f) == h for f, h in w1.items()), 'Linux reads the %d files Darwin wrote and synced with the SHA-256 Darwin reported' % len(w1))
         print('NV_VERDICT note files under /private/sf-wtest as Linux sees them: %s' % ' '.join(sorted(lsha)))
     else:
