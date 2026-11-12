@@ -20,12 +20,12 @@ BOOT=140                                   # seconds from hypervisor start to th
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
 # The default collection: the desktop collection with sound and the Touch Bar
 # (m1-touchbar/build-kc.nix: the quiet-boot kernel, PDAppleSound, PDAppleTouchBar; boots tb05, tb06).
-KC=${GPU_DESKTOP_KC:-/nix/store/mp7x0sgmn22zvaxlbx81dm5hvnrw887v-puredarwin-kc-arm64-0.1}
+KC=${GPU_DESKTOP_KC:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1}
 [ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-touchbar && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-# The compositor with the volume keys and the Touch Bar phase (wm-darwin 3944e53).
-D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+# The compositor with the volume keys and the Touch Bar phase (wm-darwin, Touch Bar phase without Escape).
+D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-002/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
