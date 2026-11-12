@@ -162,7 +162,7 @@ def pour(root, name, rec, tag, steps, stats, notes):
     post_install(root, name, version, steps, notes)
 
 
-def make_image(root, image, extra_mb):
+def make_image(root, image, extra_mb, owner='0:0'):
     """GPT disk, one ext4 partition holding the tree. Files are owned by root in the image."""
     used = int(subprocess.run(['du', '-sm', str(root)], capture_output=True, text=True, check=True).stdout.split()[0])
     size_mb = int(used * 1.25) + extra_mb
@@ -171,8 +171,8 @@ def make_image(root, image, extra_mb):
     subprocess.run(['truncate', '-s', '%dM' % size_mb, str(fs)], check=True)
     # Features as the storage stream's working image had them (extents, 64bit, flex_bg,
     # metadata_csum): the defaults of mke2fs, 4096-byte blocks.
-    subprocess.run(['fakeroot', 'mke2fs', '-q', '-t', 'ext4', '-b', '4096', '-L', 'homebrew', '-E', 'root_owner=0:0',
-                    '-d', str(root), str(fs)], check=True)
+    subprocess.run(['fakeroot', 'sh', '-c', 'chown -R "$1" "$2" && mke2fs -q -t ext4 -b 4096 -L homebrew -E root_owner="$1" -d "$2" "$3"',
+                    'sh', owner, str(root), str(fs)], check=True)
     image.unlink(missing_ok=True)
     subprocess.run(['truncate', '-s', '%dM' % (size_mb + 2), str(image)], check=True)
     subprocess.run(['sfdisk', '-q', str(image)], input='label: gpt\nstart=2048, size=%d, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name=homebrew\n' % (size_mb * 2048),
@@ -192,6 +192,10 @@ def main():
     p.add_argument('--extra', type=Path, action='append', default=[], metavar='DIR', help='directory copied to <prefix>/.sf/ (tests, scripts)')
     p.add_argument('--free-mb', type=int, default=256, help='free space in the image for the guest to write')
     p.add_argument('--no-image', action='store_true')
+    p.add_argument('--owner', default='0:0', help='uid:gid that owns the prefix in the image (brew refuses to run as root: give it a user)')
+    p.add_argument('--brew', type=Path, metavar='CHECKOUT', help='also install the Homebrew client itself: this checkout of github.com/Homebrew/brew '
+                   'becomes the prefix (bin/brew, Library/; on Apple Silicon the repository is the prefix), and the portable-ruby bottle '
+                   '(hb_fetch.py portable-ruby) is unpacked where `brew vendor-install ruby` would put it')
     a = p.parse_args()
     import collections
     closure = {r['name']: r for r in json.loads((RUNS / ('closure-%s.json' % a.tag)).read_text())}
@@ -225,6 +229,23 @@ def main():
     notes = []
     for n in order:
         pour(root, n, closure[n], a.tag, index[n].get('post_install_steps'), stats, notes)
+    if a.brew:
+        for item in ('bin/brew', 'Library', 'completions', 'LICENSE.txt', '.git'):
+            src = a.brew / item
+            if src.is_dir():
+                subprocess.run(['cp', '-a', '--reflink=auto', str(src), str(root / item)], check=True)
+            else:
+                (root / item).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, root / item)
+        want = (a.brew / 'Library/Homebrew/vendor/portable-ruby-version').read_text().strip()
+        ruby = RUNS / 'kegs' / a.tag / 'portable-ruby' / want
+        if not ruby.is_dir():
+            raise SystemExit('portable-ruby %s is not fetched (hb_fetch.py portable-ruby)' % want)
+        vendor = root / 'Library/Homebrew/vendor/portable-ruby'
+        vendor.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['cp', '-a', '--reflink=auto', str(ruby), str(vendor / want)], check=True)
+        os.symlink(want, vendor / 'current')
+        notes.append('brew client staged with portable-ruby ' + want)
     for d in ('etc', 'var', 'bin', 'lib', 'share'):
         (root / d).mkdir(exist_ok=True)
     for extra in a.extra:
@@ -232,7 +253,7 @@ def main():
     summary = dict(formulae=order, stats=stats, notes=notes)
     if not a.no_image:
         summary['image'] = str(RUNS / 'prefix' / (a.name + '.img'))
-        summary['image_mb'] = make_image(root, RUNS / 'prefix' / (a.name + '.img'), a.free_mb)
+        summary['image_mb'] = make_image(root, RUNS / 'prefix' / (a.name + '.img'), a.free_mb, a.owner)
     (RUNS / 'prefix' / (a.name + '.json')).write_text(json.dumps(summary, indent=1) + '\n')
     print(json.dumps(dict(summary, formulae=len(order)), indent=1))
     return 1 if stats['errors'] else 0

@@ -90,6 +90,7 @@ class MachO:
         magic, self.cputype, self.cpusubtype, self.filetype, self.ncmds, self.sizeofcmds, self.flags, _ = struct.unpack_from('<IiiIIIII', data)
         if magic != MH_MAGIC_64:
             raise ValueError('not a 64-bit Mach-O')
+        self.twolevel = bool(self.flags & 0x80)     # MH_TWOLEVEL; Go links flat: a symbol may come from any linked library
         self.commands = []          # (cmd, offset, size)
         self.dylibs = []            # dict(kind, name, compat, current) in ordinal order
         self.id = None

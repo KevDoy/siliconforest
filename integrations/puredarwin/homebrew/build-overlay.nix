@@ -10,8 +10,11 @@
 #   usr/lib/libedit.3.dylib            ./build-libedit.nix (upstream libedit)
 #   usr/lib/libIOKitCF.dylib           ./build-iokit.nix (the tree's IOKit + kIOMainPortDefault)
 #   usr/lib/libz.1.dylib, libcurl.4.dylib                    the tree's own dylib packages
+#   usr/bin/curl                       the tree's curl (macOS has one here; `brew` calls it)
+#   usr/share/locale                   the tree's locale data (nix/pkgs/base/locale-data.nix)
 #   System/Library/Frameworks/{CoreServices,Security,SystemConfiguration}.framework
-#                                      the tree's arm64 frameworks, binaries only
+#                                      the tree's arm64 frameworks, binaries only; Security from
+#                                      ./build-security.nix (+ SecTrustCopyCertificateChain)
 #   System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
 #                                      a link to the image's /usr/lib/libFoundation.dylib, as its
 #                                      Versions/A is (macOS's Foundation is version C). The tree's
@@ -28,17 +31,27 @@ let
   tools = import ./build-guest-tools.nix;
   libedit = import ./build-libedit.nix;
   iokit = import ./build-iokit.nix;
+  security = import ./build-security.nix;
+  # The tree's /usr/share/locale (Apple libc format: en_US.UTF-8 and C.UTF-8 among them);
+  # upstream's full images carry it, the minimal image does not. Without it setlocale()
+  # refuses every UTF-8 locale and tmux, among others, will not start.
+  localeData = pkgs.callPackage (pd.outPath + "/nix/pkgs/base/locale-data.nix") { };
   F = "System/Library/Frameworks";
 in pkgs.runCommand "darwin-lab-homebrew-overlay-arm64" { } ''
   mkdir -p $out/usr/lib $out/${F}
   cp ${libSystem}/usr/lib/libSystem.B.dylib $out/usr/lib/
   cp ${tools}/usr/lib/libhbcrash.dylib $out/usr/lib/
+  mkdir -p $out/usr/bin
+  cp ${tools}/usr/bin/hb-runas $out/usr/bin/
   cp -P ${syslibs}/usr/lib/* $out/usr/lib/
   cp -P ${libedit}/usr/lib/* $out/usr/lib/
   cp ${iokit}/usr/lib/libIOKitCF.dylib $out/usr/lib/
   cp -P ${p.libzDylib-arm64}/usr/lib/libz* $out/usr/lib/
+  cp ${p.curl-arm64}/bin/curl $out/usr/bin/curl
+  mkdir -p $out/usr/share
+  cp -r ${localeData}/usr/share/locale $out/usr/share/locale
   cp -P ${p.libcurlDylib-arm64}/usr/lib/libcurl* $out/usr/lib/
-  cp ${p.security-arm64}/usr/lib/libSecurity.dylib $out/usr/lib/
+  cp ${security}/usr/lib/libSecurity.dylib $out/usr/lib/
   cp ${p.systemConfiguration-arm64}/usr/lib/libSystemConfiguration.dylib $out/usr/lib/
   framework() {   # package, name: Versions/A/<name> and the two links, no headers
     mkdir -p $out/${F}/$2.framework/Versions/A
@@ -47,7 +60,7 @@ in pkgs.runCommand "darwin-lab-homebrew-overlay-arm64" { } ''
     ln -s Versions/Current/$2 $out/${F}/$2.framework/$2
   }
   framework ${p.coreServices-arm64} CoreServices
-  framework ${p.security-arm64} Security
+  framework ${security} Security
   framework ${p.systemConfiguration-arm64} SystemConfiguration
   mkdir -p $out/${F}/Foundation.framework/Versions/C
   ln -s ../../../../../../usr/lib/libFoundation.dylib $out/${F}/Foundation.framework/Versions/C/Foundation

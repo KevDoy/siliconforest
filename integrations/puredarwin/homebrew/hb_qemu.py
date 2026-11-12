@@ -48,6 +48,8 @@ for d in /dev/disk0s1 /dev/disk1s1 /dev/disk2s1; do
 done
 echo "HB prefix disk: $mounted"
 mount | sed 's/^/HB mount: /'
+# Network: the qemu-dev image's own bring-up (DHCP on QEMU's user network), when it has one.
+if [ -x /usr/bin/qemu-net-up ]; then echo "HB net: $(qemu-net-up en0 2>&1 | tail -2 | tr '\n' ' ')"; fi
 echo "HB sw_vers: $(sw_vers 2>&1 | tr '\n' ' ')"
 echo "HB uname: $(uname -a)"
 [ "$mounted" = no ] || sh /usr/share/hb/run.sh

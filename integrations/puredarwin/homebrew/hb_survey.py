@@ -85,6 +85,8 @@ def short(lib):
     """/usr/lib/libz.1.dylib -> libz.1; a framework binary -> Name.framework."""
     if '.framework/' in lib:
         return lib.split('.framework/')[0].rsplit('/', 1)[1] + '.framework'
+    if '/' not in lib:
+        return lib
     return lib.rsplit('/', 1)[1].replace('.dylib', '')
 
 
@@ -174,6 +176,9 @@ def survey(tag, sysroot):
                     by_lib[ordinal - 1].append((sym, weak))
                 elif ordinal == 254:
                     f['flat'] += 1
+            flat = flat_missing(m, sysroot)
+            if flat:
+                f['missing_syms'].setdefault(FLAT, set()).update(flat)
             for i, d in enumerate(m.dylibs):
                 lib = d['name']
                 if not lib.startswith(SYSTEM_PREFIXES):
@@ -286,6 +291,7 @@ def launch(kegs, sysroot, exe_logical, exe_host):
         for sym, ordinal, weak in m.imports():
             if 0 < ordinal <= len(m.dylibs):
                 by_lib[ordinal - 1].append((sym, weak))
+        out['missing_syms'] |= {'%s:%s' % (FLAT, sym) for sym in flat_missing(m, sysroot)}
         search = list(rpaths) + [r for r in m.rpaths if r not in rpaths]
         for i, d in enumerate(m.dylibs):
             lib = d['name']
@@ -314,6 +320,24 @@ def launch(kegs, sysroot, exe_logical, exe_host):
                 seen.add(str(found[1]))
                 todo.append((found[0], found[1], search))
     return out
+
+
+FLAT = 'any linked library (flat namespace)'
+
+
+def flat_missing(m, sysroot):
+    """Imports of an image linked without two-level namespace (Go programs): dyld takes each
+    from whichever linked library has it. Checked when every linked library is a system
+    library that exists; returns the symbols none of them exports."""
+    if m.twolevel or not m.dylibs or m.filetype != 2:      # a flat plugin takes symbols from its host program
+        return set()
+    have = set()
+    for d in m.dylibs:
+        e = sysroot.exports(d['name']) if d['name'].startswith(SYSTEM_PREFIXES) else None
+        if e is None:
+            return set()
+        have |= e
+    return {s for s, _o, w in m.imports() if s not in have and not w}
 
 
 def closure_of(name, formulae, seen=None):
