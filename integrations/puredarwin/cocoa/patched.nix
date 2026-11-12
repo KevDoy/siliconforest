@@ -17,6 +17,7 @@
 #         kept behind the PDControlLook default
 #   0013  Onyx2D: the PNG encoder writes straight alpha and reads "default" byte order as the
 #         rest of Onyx2D does (pictures of a bitmap context had red and blue exchanged)
+#   0015  AppKit: NSPopUpView built its array with +init then +alloc (every pop-up button crashed)
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -43,6 +44,7 @@ let
     ./patches/0005-appkit-server-decorations-and-scale.patch
     ./patches/0011-appkit-layout-api.patch
     ./patches/0012-appkit-controls-macos26.patch
+    ./patches/0015-appkit-popup-view-array.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

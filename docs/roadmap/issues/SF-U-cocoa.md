@@ -129,6 +129,41 @@ finds no standard buttons and leaves no gap for them); (b) the same with Firefox
 content windows, i.e. Firefox's look with AppKit's traffic lights, which is the forced AppKit
 controls again. (a) is what is built.
 
+## Popups (12 November, in progress)
+- WindowServer (patch 0004): a borderless window at the pop-up menu level becomes an `xdg_popup`
+  of the popup opened last (a submenu), else of the window under the pointer, else of the one
+  with the keyboard. Its place is the difference of the two frames as AppKit has them, so it
+  is right wherever the compositor put the parent; kept on the panel by the positioner's slide
+  rule; a grab unless the window ignores the mouse (a tool tip); `xdg_popup.reposition` when
+  AppKit gives a shown popup another frame (a list is made at the button's size and then sized
+  to its items); a hidden popup is destroyed and made anew at the next show; `popup_done`
+  reaches AppKit as the event its tracking loops already end on (`WS_EVENT_POPUP_DONE`, 0005).
+- Compositor (worktree, `popups.rs`): popups are drawn through the scene's shell surfaces above
+  every window, at parent origin plus the positioner's geometry at the parent's density; the
+  pointer goes to the topmost popup under it; a press that is not on a surface of the popup's
+  own client dismisses the popups that hold a grab; a press on the client's own window reaches
+  that window (the client closes its list itself). Before: `unsupported: Darwin popup`.
+- Upstream bugs found on the way (patch 0015; both also at the tip): `NSPopUpView` built its
+  item array with `[[NSMutableArray init] alloc]`, so every pop-up button crashed when
+  clicked; the graphics style asked the list's view for margins only menu views have
+  (unrecognised selector, abort); the tracking loop compared a location in the control's
+  window with locations on the screen.
+- Executed (`checks/popup.json`: a pop-up button added to the hello application): at 100%,
+  run `popup6`, every step passes - the list is an `xdg_popup`, the compositor shows it
+  (`popup6/shots/01-list-open.png`), an item is chosen with the pointer, a second opening is
+  placed so that the chosen item lies over the button, a press on the bare desk dismisses it,
+  the window works afterwards. At 200% the list is placed and drawn sharp
+  (`popup6-s200/shots/01-list-open.png`).
+- Not reliable yet: at 200% and 150% the choice with the pointer worked in some runs and not
+  in others (`popup8-s200` chose, `popup9-s2` did not; the events reach AppKit in both), and
+  three runs after the last tracking change each failed at a different step (`popup9-*`): the
+  tracking loop under emulation timing is not understood. A list closed by a press on the
+  application's own window fires the button's action with no selection
+  (`popup selected=(null) index=-1`), which macOS does not.
+- Not done: menus and context menus (NSMenu's windows), combo boxes, tool tips, submenus,
+  keyboard in popups, Firefox's menus and panels, popups of popups in the compositor beyond
+  placement, the look of the list.
+
 ## State
 | Item | State |
 |---|---|
@@ -138,7 +173,7 @@ controls again. (a) is what is built.
 | Scale 100% to 200% including fractional steps, live change | see Results |
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
-| Popup windows (menus, pop-up buttons, tool tips) | not handled: they are borderless toplevels placed by the compositor; needs xdg_popup in the WindowServer and in the compositor (which refuses popups today) |
+| Popup windows (menus, pop-up buttons, tool tips) | first step done (12 November): windows at the pop-up menu level are `xdg_popup`s placed against the window they belong to, shown and dismissed by the compositor; proven with a pop-up button's list at 100% (`popup6`), not yet reliable at 150%/200% and not yet tried with menus, context menus, combo boxes, tool tips or Firefox (see "Popups") |
 | Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). a page over HTTP, https://example.com. Not yet: sandbox on, GPU process, system trust store |
 | Auto Layout | layout API on NSView and the controls, constraint activation, a Cassowary solver (patch 0011); three constraint layouts equal in structure to macOS |
 | Control geometry and drawing | macOS 26 numbers and look, measured (patch 0012); compared control by control with `conformance/sheet.py` |

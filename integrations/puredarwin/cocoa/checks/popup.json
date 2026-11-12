@@ -1,0 +1,127 @@
+{
+ "apps": [
+  "/Applications/CocoaHello.app/Contents/MacOS/CocoaHello"
+ ],
+ "env": "PD_WS_TRACE=1",
+ "seconds": 500,
+ "steps": [
+  {
+   "wait": "COCOA_APP_START 1",
+   "timeout": 400
+  },
+  {
+   "expect": "COCOAHELLO window-shown",
+   "timeout": 600,
+   "name": "window shown"
+  },
+  {
+   "sleep": 6
+  },
+  {
+   "locate": "view",
+   "rgb": [
+    51,
+    115,
+    204
+   ],
+   "tolerance": 14,
+   "points_wide": 380,
+   "scale": @SCALE@,
+   "name": "backing scale on screen"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    337,
+    -29
+   ]
+  },
+  {
+   "expect": "WindowServer: popup \\d+ at -?\\d+,-?\\d+ of window \\d+",
+   "timeout": 90,
+   "name": "the list is an xdg_popup of the window"
+  },
+  {
+   "expect": "WMPOPUP mapped",
+   "timeout": 90,
+   "name": "the compositor shows the popup"
+  },
+  {
+   "sleep": 4
+  },
+  {
+   "shot": "01-list-open"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    337,
+    -5
+   ]
+  },
+  {
+   "expect": "COCOAHELLO popup selected=(Beta|Gamma)",
+   "timeout": 90,
+   "name": "an item chosen with the pointer"
+  },
+  {
+   "sleep": 3
+  },
+  {
+   "shot": "02-chosen"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    337,
+    -29
+   ]
+  },
+  {
+   "expect": "WMPOPUP mapped",
+   "timeout": 90,
+   "name": "the list opens a second time"
+  },
+  {
+   "sleep": 3
+  },
+  {
+   "click": [
+    1016,
+    40
+   ]
+  },
+  {
+   "expect": "WMPOPUP dismissed by a press outside",
+   "timeout": 60,
+   "name": "a press outside the application dismisses it"
+  },
+  {
+   "expect": "WMPOPUP gone remaining=0",
+   "timeout": 60,
+   "name": "the application closed its list"
+  },
+  {
+   "sleep": 3
+  },
+  {
+   "shot": "03-dismissed"
+  },
+  {
+   "click_in": "view",
+   "points": [
+    70,
+    -31
+   ]
+  },
+  {
+   "expect": "COCOAHELLO button presses=1",
+   "timeout": 90,
+   "name": "the window works after the popups"
+  },
+  {
+   "absent": "Segmentation|Bus error|Abort trap|protocol error|wrong configure",
+   "name": "no crash, no protocol error"
+  }
+ ]
+}

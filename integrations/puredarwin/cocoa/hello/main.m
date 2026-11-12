@@ -93,6 +93,11 @@ static void say(const char *format, ...)
 
 @implementation HelloDelegate
 
+- (void)choiceMade:(id)sender
+{
+    say("COCOAHELLO popup selected=%s index=%d", [[sender titleOfSelectedItem] UTF8String], (int)[sender indexOfSelectedItem]);
+}
+
 - (void)buttonPressed:(id)sender
 {
     _presses++;
@@ -168,9 +173,21 @@ static void say(const char *format, ...)
     [button setAction:@selector(buttonPressed:)];
     [content addSubview:button];
 
-    field = [[NSTextField alloc] initWithFrame:NSMakeRect(180, 208, 220, 24)];
+    field = [[NSTextField alloc] initWithFrame:NSMakeRect(180, 208, 120, 24)];
     [field setStringValue:@"editable"];
     [content addSubview:field];
+
+    // a pop-up button: its list is a popup window the compositor places (checks/popup.json)
+    {
+        NSPopUpButton *choice = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(310, 207, 95, 26) pullsDown:NO];
+
+        [choice addItemWithTitle:@"Alpha"];
+        [choice addItemWithTitle:@"Beta"];
+        [choice addItemWithTitle:@"Gamma"];
+        [choice setTarget:self];
+        [choice setAction:@selector(choiceMade:)];
+        [content addSubview:choice];
+    }
 
     view = [[HelloView alloc] initWithFrame:NSMakeRect(20, 20, 380, 170)];
     [content addSubview:view];
