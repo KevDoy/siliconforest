@@ -2,7 +2,9 @@
 The SiliconForest kernel on the M1 without the m1n1 hypervisor: m1n1 hands the machine to XNU and is gone (GitHub issue #44). Still loaded into RAM over USB from the controller, still the same desktop, the M1 back in Linux afterwards. No disk, boot chain or boot policy in this stream.
 
 ## State
-Phase 1 (no native boot yet). The launcher change exists and passes its host tests; the console and the return path are settled as far as they can be without a native boot. **No native boot has been made.** Boots so far: `nb01`, `nb02`, both under the hypervisor.
+**The kernel runs without the hypervisor.** Boot `nb04` (one processor, shell profile, default collection, unchanged kernel): m1n1 vectored into the EL2 page, the page entered XNU at EL1, and XNU reached the single-user shell prompt 7.3 s later on the real UART, with Wi-Fi firmware up (its MSI delivered), launchd started and the thermal driver's once-a-minute line at uptime 107 s and 167 s (timer FIQs arrive at EL1). The console challenge was typed and arrived mangled (UART input loses bytes when written in one piece; typing is now paced, not yet booted). The controller's single reset brought the M1 back to Linux from the running kernel. No kernel or device-tree change was needed for this.
+
+Not yet: an answered challenge, more than one processor, the display/GPU arguments, the desktop.
 
 ## Findings
 
@@ -72,8 +74,13 @@ From m1n1's sources and the worker logs of `df02` and `nb02` (every access the P
 | `nb01` | hypervisor, shell profile, listener on the debug console | shell and challenge as always; 0 bytes on the real UART |
 | `nb02` | same, `macvdmtool serial` first | shell and challenge as always; marker and 1714 bytes of m1n1 output on the real UART |
 
-Both ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`.
+| `nb03` | native | not booted: the controller was off the network when the packet was to be delivered |
+| `nb03b` | as `nb02`, after the controller was moved | same as `nb02` (1714 bytes, marker seen) |
+| `nb04` | **native**, shell profile, `cpus=1`, `vdm-return vdm-serial` | stub lines, banner, root mounted, launchd, shell prompt 7.27 s after the vector; 44 KB of console; thermal lines at uptime 107 and 167 s; challenge typed but received mangled (`NO_COMMAND_LINE`). Reset sent once against the running kernel, Linux back within 30 s. Controller result `RECOVERY_INCOMPLETE_NO_RETRY`: a defect of this stream's controller patch (the 45 s wait and the wait after the reset both recorded a neighbour refresh; the second record failed), fixed. |
+
+`nb01`, `nb02`, `nb03b` ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. Linux after `nb04`: `macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)`, as after a hypervisor boot.
 
 ## Open
-- The first native boot waits for the owner's decision on the return path (`vdm-return`, `wdt=`, or both).
+- Return path in use: `vdm-return` (owner's decision). `wdt=` has not been used.
+- UART input under XNU: bytes are lost above 16 per 16 ms; the launcher now types 8 bytes every 25 ms (not yet booted).
 - Everything in the table marked unproven or open.

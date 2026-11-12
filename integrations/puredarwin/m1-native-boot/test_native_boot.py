@@ -45,6 +45,7 @@ class Console:
     def __init__(self, port, log):
         log.append(('console', port))
         self.done_seen, self.proof = True, SimpleNamespace(output=b'x')
+        self.dev = SimpleNamespace(write=lambda data: len(data), flush=lambda: None)
         self.thread = threading.Thread(target=lambda: None)
         self.log = log
 
@@ -127,6 +128,15 @@ class NativeBoot(unittest.TestCase):
         self.assertEqual(writes, [(base + 0x1c, 0), (base + 0x10, 0), (base + 0x14, 130 * 24_000_000), (base + 0x1c, 4)])
         self.assertLess(max(i for i, n in enumerate(names) if n == 'write32'), names.index('request'))
         self.assertEqual(saved['native-start.json']['watchdog_seconds'], 130)
+
+    def test_typing_is_paced(self):
+        chunks = []
+        dev = SimpleNamespace(write=lambda data: chunks.append(bytes(data)) or len(data), flush=lambda: None, timeout=.1)
+        paced = native_boot.PacedSerial(dev)
+        paced.GAP = 0
+        self.assertEqual(paced.write(b'x' * 20), 20)
+        self.assertEqual([len(c) for c in chunks], [8, 8, 4])
+        self.assertEqual(paced.timeout, .1)
 
     def test_stub_must_be_below_xnu_memory(self):
         with self.assertRaises(ValueError):

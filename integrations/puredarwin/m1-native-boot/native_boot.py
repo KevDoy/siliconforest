@@ -188,6 +188,28 @@ def uart_marker(backend, text):
         print('UART_MARKER ' + json.dumps(dict(sent=False, error=f'{type(error).__name__}: {error}')), flush=True)
 
 
+class PacedSerial:
+    """The real UART for typing. XNU reads its 16-byte receive FIFO every 16 ms
+    (osfmk/console/serial_general.c, serial_keyboard_poll) and there is no flow control: a
+    command written in one piece loses most of its bytes (boot nb04). Eight bytes every
+    25 ms."""
+    CHUNK, GAP = 8, .025
+
+    def __init__(self, dev):
+        self._dev = dev
+
+    def write(self, data):
+        sent = 0
+        for offset in range(0, len(data), self.CHUNK):
+            sent += self._dev.write(data[offset:offset + self.CHUNK])
+            self._dev.flush()
+            time.sleep(self.GAP)
+        return sent
+
+    def __getattr__(self, name):
+        return getattr(self._dev, name)
+
+
 def native_init(hv, backend):
     """HV.init() without the hypervisor: the part that only prepares the device tree and the
     boot arguments. No p.hv_init() (stage 2, secondary cores started in m1n1, PCIe shutdown),
@@ -245,6 +267,7 @@ def start(native, hv, backend, layout, directory, runtime, console_factory, writ
     if native.vdm_serial:
         record['serial_mode_ok'] = serial_mode()
     console = console_factory(UART_DEVICE)
+    console.dev = PacedSerial(console.dev)
     try:
         if native.wdt is not None:
             wdt = hv.adt['/arm-io/wdt'].get_reg(0)[0]
