@@ -11,6 +11,9 @@
 #   0005  AppKit: no title bar inside a compositor-drawn frame, backing stores at the scale,
 #         zoomed and miniaturised state from the compositor's frame
 #   0006  Onyx2D: glyphs rasterised at the device scale (text was point-size bitmaps on a scaled surface)
+#   0009  Security: SecItemCopyMatching writes its result on every path and answers
+#         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
+#   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' patched.nix -A appkit --no-out-link
 let
@@ -65,10 +68,14 @@ let
         old.buildPhase);
   });
   appkit = pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver; };
+  # Security for arm64 (upstream's build) with SecItemCopyMatching's result defined on every path
+  security = pd."security-arm64".overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./patches/0009-security-secitemcopymatching-defined-result.patch ];
+  });
   appFrameworks = a.appFrameworks.override (old: {
     inherit appkit windowserver;
     srcs = old.srcs // { AuthenticationServices = authenticationServicesSrc; };
   });
 in {
-  inherit appkitSrc windowserverSrc authenticationServicesSrc onyx2dSrc windowserver appkit appFrameworks onyx2d;
+  inherit appkitSrc windowserverSrc authenticationServicesSrc onyx2dSrc windowserver appkit appFrameworks onyx2d security;
 }

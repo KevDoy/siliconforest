@@ -14,7 +14,7 @@ in import ./build-cocoa-root.nix {
   remove = [ "System/Library/LaunchDaemons/com.apple.configd.plist" "System/Library/LaunchDaemons/org.puredarwin.wayland-session.plist" ];
   extra = [
     p.appFrameworks
-    a.pd."security-arm64"
+    p.security
     a.pd."systemConfiguration-arm64"
     (import ./build-own-frameworks.nix)
     p.onyx2d p.windowserver p.appkit

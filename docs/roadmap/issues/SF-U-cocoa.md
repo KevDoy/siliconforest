@@ -163,6 +163,12 @@ controls again. (a) is what is built.
      (`NSApplication: waiting for the menu bar server`).
   5. About two minutes after start the main process dies with SIGSEGV (exit 139), before any
      browser window. No page, no input, no network. About 3.5 minutes of emulation per attempt.
+     Cause found with the Homebrew stream's `libhbcrash` (`runs/cocoa/ff-crash`): a background
+     thread calls `SecItemCopyMatching` and then `CFArrayGetCount` on the result (XUL+0x154841c,
+     +0x1548430; fault address 0x20 in `objc_msgSend`). Our Security answers success without
+     writing the result when no keychain daemon runs, so Firefox uses an uninitialised
+     pointer. Patch 0009 defines the result on every path and answers `errSecItemNotFound`
+     for an empty search, as an empty keychain does on macOS; built, run pending.
 - The sandbox, both paths:
   - Default (sandbox on). A child's `sandbox_init_with_parameters` is refused by the profile
     compiler: at the pin `define expects a name and a value` (seen on x86_64 with 158); with
@@ -176,8 +182,13 @@ controls again. (a) is what is built.
     rule broader and leaves an allow rule out). On the build host, against Mozilla's own
     sources for 160 (`security/sandbox/mac/SandboxPolicy*.h`), all six profiles now compile:
     content 1993 bytes, socket 1494, GPU 656, RDD 651, GMP 497, utility 387; with the tip's
-    compiler alone none of the six did. Whether Firefox's processes work inside the resulting
-    (stricter than Apple's) profiles is not yet seen: the run is behind the crash above.
+    compiler alone none of the six did. In the guest (`runs/cocoa/ff-sandbox2`) the kernel
+    then really enforces the compiled profile on Firefox's child: 16 lines of
+    `Sandbox: plugin-container(59) deny file-read-data /etc/master.passwd` (our libc reads the
+    password file where macOS asks a daemon, and Mozilla's profile allows only
+    `/private/etc/passwd`). Firefox still prints one `Sandbox error:` line with an empty
+    message in that run; not yet understood. Whether its processes work inside the (stricter
+    than Apple's) profiles is not yet seen.
   - Disabled (`MOZ_DISABLE_CONTENT_SANDBOX=1`, `..._GMP_`, `..._RDD_`, `..._SOCKET_PROCESS_`,
     `..._UTILITY_`, `..._GPU_SANDBOX=1`, Mozilla's documented switches): no sandbox error, same
     crash at the same place. So the crash is not the sandbox.
@@ -229,14 +240,17 @@ application draws; "ink" is the pixel height of the first two text lines.
 | hello | 200%, graphite | pass 9/9 | 2.000 px/pt, ink 25/24 |
 | frame: our close button asks the application (refused once, then allowed, application ends) | 200% graphite; 100% nextstep-classic | pass 8/8 both | |
 | miniaturize: our button -> `windowDidMiniaturize:`, `isMiniaturized` | 100% | pass | |
-| zoom: Ctrl+Shift double click on our title bar -> resize and `isZoomed` | 200% graphite | shown once (`zoom-evidence-s2-graphite`: 510x351, zoomed=1); the restore and a second run at 100% did not register the double click (its 400 ms window does not always survive emulation); the check now repeats the click, rerun pending | |
+| zoom: Ctrl+Shift double click on our title bar -> resize and `isZoomed` | 200% graphite | works when the double click registers: seen in two runs (`zoom-evidence-s2-graphite`, `zoom-s2-graphite`: 510x351, `zoom-state zoomed=1`). Under emulation the compositor's 400 ms double-click window is met about one time in five, so the check itself is unreliable; restoring by a second double click has not been observed | |
 | apps: upstream Terminal (a typed command ran in its shell) and Calculator (the + key lights when clicked), both in our frames | 100% nextstep-classic, 150% teal-blueprint, 200% graphite | pass 9/9 each | Calculator 1.01 / 1.52 / 2.03 px/pt |
-| live scale change (the desktop steps 100 -> 125 -> ... -> 300 -> 100%) | | 125, 150, 175% followed with `windowDidChangeBackingProperties:`; at 200% the window rendered at 2.0; at 250% and 300% the compositor also shrank the window to fit and the notification was skipped (fixed: `_reportedScale120`); the compositor counted 3 commits at a stale scale during the 7 changes (frames already under way). Rerun with the fix pending | |
+| live scale change (the desktop steps 100 -> 125 -> ... -> 300 -> 100%, 25 s each) | | every step is followed: `windowDidChangeBackingProperties:` arrives at 125, 150, 175, 200, 250, 300 and 100%, the window re-renders at each scale (at 250% and 300% the compositor also shrinks it to fit the screen); the compositor counted 3 commits at a stale scale over the 7 changes (frames already under way when the scale changed). Two faults found and fixed on the way: the notification was skipped when a resize had rebuilt the backing first, and `NSWindow.backingScaleFactor` read 1 while AppKit's frame lay off the screen in points (it reported 1.000 at 200% and 250% while drawing at 2.0 and 2.5). The run with both fixes in the image is pending | |
 | no resampled commit at a fixed scale | all of the above | pass | |
 
-Two checks had matched their own echoed command line on the console (false passes of the
-metrics run and of the Terminal step); the markers were changed and those runs repeated; the
-table has only the repeated results.
+Two faults of the test tooling were found and fixed, and the affected runs repeated: two
+checks had matched their own echoed command line on the console (false passes of the metrics
+run and of the Terminal step); and the image cache was keyed by file sizes and times only, so
+a rebuilt framework of the same size was taken for the old one (one live-scale rerun ran the
+old AppKit). The table has only results from after the first fix; results that depend on
+the second are marked pending.
 
 Seen and not fixed: upstream Terminal draws its text at about half the cell size at every scale
 (also at 100%, so not a scaling fault; not investigated); an application-set pointer image stays
