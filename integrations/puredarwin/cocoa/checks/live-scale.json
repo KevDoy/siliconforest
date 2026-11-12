@@ -1,0 +1,14 @@
+{
+ "apps": ["/Applications/CocoaHello.app/Contents/MacOS/CocoaHello"],
+ "env": "PD_WS_TRACE=1 CHONKSTEP_DARWIN_AUTOPILOT=1 CHONKSTEP_DARWIN_AUTOPILOT_ONLY=settle,scale CHONKSTEP_DARWIN_MAX_TERMINALS=3 CHONKSTEP_DARWIN_AUTOPILOT_WIFI_TOGGLE=0",
+ "seconds": 600,
+ "steps": [
+  {"wait": "COCOA_APP_START 1", "timeout": 400},
+  {"expect": "COCOAHELLO window-shown", "timeout": 600, "name": "window shown"},
+  {"watch_scale": "view", "rgb": [51, 115, 204], "tolerance": 14, "points_wide": 378, "seconds": 420, "until": "WMAUTO scale steps=", "after": 25,
+   "expect": [1, 1.25, 1.5, 1.75, 2], "name": "scales seen live while the desktop steps through them"},
+  {"expect": "COCOAHELLO backing-scale", "timeout": 5, "name": "windowDidChangeBackingProperties delivered"},
+  {"shot": "99-after"},
+  {"absent": "Segmentation|Bus error|Abort trap", "name": "no crash"}
+ ]
+}

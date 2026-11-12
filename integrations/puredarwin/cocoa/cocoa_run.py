@@ -22,6 +22,11 @@ the run (later steps are reported as not run):
   {"type": "text"}                              letters, digits, space, a few punctuation keys
   {"expect": "REGEX", "timeout": 20, "name": "button"}   as wait, and recorded as a named check
   {"absent": "REGEX", "name": "no crash"}       the pattern must not have appeared so far
+  {"locate": "view", "rgb": [r, g, b], "points_wide": 380, "scale": 2.0}
+                                                finds a rectangle of that colour on the screen (the
+                                                application draws it), measures pixels per point
+                                                and the ink height of the text lines inside it
+  {"click_in": "view", "points": [dx, dy]}      a click placed from that rectangle's top left corner, in points
 Exit 0: every step done and every check passed. 1: a check failed. 2: could not run.
 result.json: status, times, per-step results, screenshots.
 """
@@ -93,6 +98,61 @@ class Driver:
             return True
         return False
 
+    def pixels(self):
+        """The framebuffer now: (width, height, RGB bytes), through a PPM screendump."""
+        path = self.out / 'shots' / '.probe.ppm'
+        r = self.qmp.cmd('screendump', filename=str(path))
+        if 'return' not in r or not path.exists():
+            return None
+        data = path.read_bytes()
+        path.unlink()
+        fields, pos = [], 0
+        while len(fields) < 4:                              # P6, width, height, maxval
+            end = pos
+            while data[end:end + 1] not in (b' ', b'\n', b'\t', b'\r'):
+                end += 1
+            if end > pos:
+                fields.append(data[pos:end])
+            pos = end + 1
+        return int(fields[1]), int(fields[2]), data[pos:]
+
+    def locate(self, rgb, tolerance=10):
+        """Bounding box (x0, y0, x1, y1, inclusive) of the pixels within `tolerance` of a colour."""
+        got = self.pixels()
+        if got is None:
+            return None
+        w, h, px = got
+        x0, y0, x1, y1 = w, h, -1, -1
+        for y in range(h):
+            row = px[y * w * 3:(y + 1) * w * 3]
+            for x in range(w):
+                if abs(row[x * 3] - rgb[0]) <= tolerance and abs(row[x * 3 + 1] - rgb[1]) <= tolerance and abs(row[x * 3 + 2] - rgb[2]) <= tolerance:
+                    x0, x1 = min(x0, x), max(x1, x)
+                    y0, y1 = min(y0, y), max(y1, y)
+        return None if x1 < 0 else (x0, y0, x1, y1)
+
+    def text_rows(self, box, dark=110):
+        """Heights in pixels of the runs of rows that hold dark (text) pixels strictly inside a
+        box, top to bottom: the first is the first line of text's ink height."""
+        got = self.pixels()
+        if got is None:
+            return []
+        w, h, px = got
+        x0, y0, x1, y1 = box
+        inset = max(3, (x1 - x0) // 60)
+        runs, run = [], 0
+        for y in range(y0 + inset, y1 - inset + 1):
+            row = px[y * w * 3:(y + 1) * w * 3]
+            ink = any(row[x * 3] < dark and row[x * 3 + 1] < dark and row[x * 3 + 2] < dark for x in range(x0 + inset, x1 - inset + 1))
+            if ink:
+                run += 1
+            elif run:
+                runs.append(run)
+                run = 0
+        if run:
+            runs.append(run)
+        return runs
+
     def wait(self, pattern, timeout):
         # In slices, so that a session that has ended is noticed instead of waited out.
         deadline = time.time() + timeout
@@ -130,7 +190,8 @@ def main():
     env = {k: v for k, v in os.environ.items() if k not in ('DISPLAY', 'WAYLAND_DISPLAY')}
     proc = subprocess.Popen(qd_run.qemu_command(a, out), stdin=subprocess.DEVNULL, stdout=open(out / 'qemu.log', 'wb'),
                             stderr=subprocess.STDOUT, env=env, cwd=out)
-    result = dict(status='ERROR', times={}, steps=[], checks={}, host_load=os.getloadavg()[0])
+    result = dict(status='ERROR', times={}, steps=[], checks={}, measured={}, host_load=os.getloadavg()[0])
+    places = {}
     drv = None
     try:
         qmp = qd_run.Qmp(out / 'qmp.sock', t0 + 20)
@@ -174,6 +235,73 @@ def main():
                 rec['result'] = 'ok'
             elif 'shot' in step:
                 rec['result'] = 'ok' if drv.shot(step['shot']) else 'no screenshot'
+            elif 'locate' in step:
+                # {"locate": "view", "rgb": [r, g, b], "points_wide": 380[, "scale": 2.0]}: finds a
+                # coloured rectangle the application draws, remembers where it is and how many
+                # pixels a point takes there; with "scale" the measured value must match it.
+                box = None
+                for _ in range(int(step.get('tries', 20))):
+                    box = drv.locate(step['rgb'], step.get('tolerance', 10))
+                    if box and box[2] - box[0] > 8:
+                        break
+                    time.sleep(1.5)
+                if box:
+                    per_point = (box[2] - box[0] + 1) / step.get('points_wide', box[2] - box[0] + 1)
+                    places[step['locate']] = dict(box=box, per_point=per_point)
+                    rec.update(box=box, pixels_per_point=round(per_point, 4), text_rows=drv.text_rows(box)[:4])
+                    rec['result'] = 'ok'
+                    if 'scale' in step:
+                        good = abs(per_point - step['scale']) <= step.get('scale_tolerance', 0.02)
+                        result['checks'][step.get('name', 'scale of ' + step['locate'])] = good
+                        result['measured'][step.get('name', 'scale of ' + step['locate'])] = dict(
+                            pixels_per_point=round(per_point, 4), box=box, text_rows=rec['text_rows'])
+                else:
+                    rec['result'] = 'NOT FOUND'
+                    ok = step.get('optional', False)
+            elif 'watch_scale' in step:
+                # {"watch_scale": "view", "rgb": [...], "points_wide": 378, "seconds": 90, "until": "REGEX",
+                #  "expect": [1, 1.25, ...]}: measures pixels per point of the rectangle again and again
+                # while something else changes the display scale; every expected scale must be seen.
+                seen, end_at = [], time.time() + step.get('seconds', 60)
+                until = re.compile(step['until'].encode()) if 'until' in step else None
+                while time.time() < end_at and proc.poll() is None:
+                    box = drv.locate(step['rgb'], step.get('tolerance', 10))
+                    if box and box[2] - box[0] > 8:
+                        per_point = round((box[2] - box[0] + 1) / step['points_wide'], 3)
+                        if not seen or seen[-1][1] != per_point:
+                            seen.append((round(time.time() - t0, 1), per_point, drv.text_rows(box)[:2]))
+                            drv.shot('%s-%s' % (step.get('shots', 'scale'), str(per_point).replace('.', '_')))
+                        places[step['watch_scale']] = dict(box=box, per_point=per_point)
+                    if until is not None and until.search(ser.text()):
+                        end_at = min(end_at, time.time() + step.get('after', 8))
+                        until = None
+                tolerance = step.get('scale_tolerance', 0.02)
+                missing = [e for e in step.get('expect', []) if not any(abs(v - e) <= tolerance for _, v, _ in seen)]
+                rec.update(seen=seen, missing=missing)
+                rec['result'] = 'ok'
+                name = step.get('name', 'scales seen live')
+                result['checks'][name] = not missing
+                result['measured'][name] = dict(seen=seen, missing=missing)
+            elif 'click_in' in step:
+                # {"click_in": "view", "points": [dx, dy]}: dx right of and dy below the located
+                # rectangle's top left corner, in points (negative dy is above it)
+                place = places.get(step['click_in'])
+                if place is None:
+                    rec['result'] = 'not located'
+                    ok = False
+                else:
+                    x = place['box'][0] + step['points'][0] * place['per_point']
+                    y = place['box'][1] + step['points'][1] * place['per_point']
+                    rec['at_pixel'] = [round(x), round(y)]
+                    # "hold": keys kept down around the click; "count": 2 for a double click
+                    for key in step.get('hold', []):
+                        qmp.cmd('input-send-event', events=[{'type': 'key', 'data': {'down': True, 'key': {'type': 'qcode', 'data': key}}}])
+                    time.sleep(0.2 if step.get('hold') else 0)
+                    for n in range(step.get('count', 1)):
+                        drv.click(x, y, button=step.get('button', 'left'), hold=0.05 if step.get('count', 1) > 1 else 0.12)
+                    for key in reversed(step.get('hold', [])):
+                        qmp.cmd('input-send-event', events=[{'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': key}}}])
+                    rec['result'] = 'ok'
             elif 'move' in step:
                 drv.move(*step['move'])
                 rec['result'] = 'ok'

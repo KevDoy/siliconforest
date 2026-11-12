@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 static void say(const char *format, ...)
 {
@@ -84,6 +85,7 @@ static void say(const char *format, ...)
     NSWindow *_window;
     NSTextField *_label;
     int _presses;
+    BOOL _refusedClose;
 }
 @end
 
@@ -178,11 +180,34 @@ static void say(const char *format, ...)
         [_window frame].size.width, [_window frame].size.height, (int)[_window isVisible], (int)[_window isKeyWindow]);
 }
 
+// COCOAHELLO_REFUSE_CLOSE=1: the first request to close is refused, as a document with unsaved
+// changes would; the second closes. Shows that a close button outside the application (the
+// compositor's frame) asks the application instead of destroying its window.
+- (BOOL)windowShouldClose:(id)sender
+{
+    if (getenv("COCOAHELLO_REFUSE_CLOSE") != NULL && !_refusedClose) {
+        _refusedClose = YES;
+        [_label setStringValue:@"Close refused once; ask again"];
+        say("COCOAHELLO close-refused");
+        return NO;
+    }
+    say("COCOAHELLO close-allowed");
+    return YES;
+}
+
+- (void)windowDidChangeBackingProperties:(NSNotification *)note
+{
+    say("COCOAHELLO backing-scale %.3f", (double)[_window backingScaleFactor]);
+}
+
 - (void)windowDidBecomeKey:(NSNotification *)note { say("COCOAHELLO window-key"); }
 - (void)windowDidResize:(NSNotification *)note
 {
-    say("COCOAHELLO window-resized %.0fx%.0f", [_window frame].size.width, [_window frame].size.height);
+    say("COCOAHELLO window-resized %.0fx%.0f zoomed=%d", [_window frame].size.width, [_window frame].size.height,
+        (int)[_window isZoomed]);
 }
+- (void)windowDidMiniaturize:(NSNotification *)note { say("COCOAHELLO window-miniaturized is=%d", (int)[_window isMiniaturized]); }
+- (void)windowDidDeminiaturize:(NSNotification *)note { say("COCOAHELLO window-deminiaturized is=%d", (int)[_window isMiniaturized]); }
 - (void)windowDidMove:(NSNotification *)note
 {
     say("COCOAHELLO window-moved %.0f,%.0f", [_window frame].origin.x, [_window frame].origin.y);

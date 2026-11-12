@@ -45,6 +45,11 @@ in pkgs.runCommand "siliconforest-cocoa-root-arm64" { } ''
   for d in ${toString parts}; do
     # symbolic links are kept (a framework's Versions/Current, a library's version links);
     # a link that points into the store is replaced by what it points to
+    # (upstream's bundle was copied with links resolved: where a later part has the link, the
+    # directory copy gives way to it)
+    (cd $d && find . -type l) | while read -r l; do
+      if [ -d "$out/$l" ] && [ ! -L "$out/$l" ]; then rm -rf "$out/$l"; fi
+    done
     cp -a --no-preserve=mode,ownership $d/. $out/
   done
   find $out -type l | while read -r l; do

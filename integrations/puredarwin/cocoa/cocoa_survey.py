@@ -31,17 +31,75 @@ import hb_survey  # noqa: E402
 SYSTEM_PREFIXES = ('/usr/lib/', '/System/Library/', '/Library/')
 
 
-class Roots:
-    """Several system roots searched in order."""
+class Roots(hb_survey.Sysroot):
+    """Several system roots searched in order, as one root: a library in the first root may
+    re-export one that only a later root has (the Cocoa root over the base image)."""
     def __init__(self, roots):
-        self.roots = [hb_survey.Sysroot(r) for r in roots]
+        super().__init__(roots[0])
+        self.all = [hb_survey.Sysroot(r) for r in roots]
 
-    def exports(self, name):
-        for r in self.roots:
-            e = r.exports(name)
-            if e is not None:
-                return e
+    def resolve(self, name, depth=0):
+        for r in self.all:
+            p = r.resolve(name, depth)
+            if p is not None:
+                return p
         return None
+
+
+def bind_classes(m):
+    """{(ordinal, symbol): 'load' | 'lazy'} from LC_DYLD_INFO's bind opcodes: a symbol in the
+    non-lazy (or weak) bind stream must resolve when the image is loaded, or dyld refuses the
+    image; one that is only in the lazy stream is bound at its first call. Empty for images
+    with chained fixups (every import binds at load there)."""
+    import struct
+    info = None
+    for cmd, off, size in m.commands:
+        if cmd in (hb_macho.LC_DYLD_INFO, hb_macho.LC_DYLD_INFO_ONLY):
+            info = struct.unpack_from('<10I', m.data, off + 8)
+    out = {}
+    if info is None:
+        return out
+    for kind, (start, size) in (('load', (info[2], info[3])), ('lazy', (info[6], info[7]))):
+        data = m.data[start:start + size]
+        i, ordinal, symbol = 0, 0, ''
+        while i < len(data):
+            op, imm = data[i] & 0xf0, data[i] & 0x0f
+            i += 1
+            if op == 0x00:                                   # DONE (separates lazy entries)
+                continue
+            elif op == 0x10:
+                ordinal = imm
+            elif op == 0x20:
+                ordinal, i = hb_macho.uleb(data, i)
+            elif op == 0x30:
+                ordinal = 0 if imm == 0 else (imm | 0xf0) - 256
+            elif op == 0x40:
+                end = data.index(b'\0', i)
+                symbol = data[i:end].decode('utf-8', 'replace')
+                i = end + 1
+            elif op == 0x50:
+                pass
+            elif op == 0x60:
+                _, i = hb_macho.uleb(data, i)                # addend (sleb, same length)
+            elif op == 0x70:
+                _, i = hb_macho.uleb(data, i)
+            elif op == 0x80:
+                _, i = hb_macho.uleb(data, i)
+            elif op in (0x90, 0xb0):
+                if kind == 'load' or (ordinal, symbol) not in out:
+                    out[(ordinal, symbol)] = kind
+            elif op == 0xa0:
+                if kind == 'load' or (ordinal, symbol) not in out:
+                    out[(ordinal, symbol)] = kind
+                _, i = hb_macho.uleb(data, i)
+            elif op == 0xc0:
+                if kind == 'load' or (ordinal, symbol) not in out:
+                    out[(ordinal, symbol)] = kind
+                _, i = hb_macho.uleb(data, i)
+                _, i = hb_macho.uleb(data, i)
+            else:
+                break
+    return out
 
 
 def machos(app):
@@ -74,7 +132,8 @@ def main():
                                                            hash_types=[d['hash_type'] for d in sig.get('directories', [])],
                                                            page_shift=[d['page_shift'] for d in sig.get('directories', [])]),
                    libraries=[dict(name=d['name'], kind=d['kind']) for d in m.dylibs], missing_libraries=[],
-                   missing_symbols={}, weak_missing_symbols={}, imports=0)
+                   missing_symbols={}, weak_missing_symbols={}, load_blocking={}, imports=0)
+        binds = bind_classes(m)
         for d in m.dylibs:
             if d['name'].startswith(SYSTEM_PREFIXES):
                 lib = by_lib[d['name']]
@@ -96,6 +155,10 @@ def main():
             if exports is None or sym not in exports:
                 (lib['weak_missing'] if weak else lib['missing']).add(sym)
                 (rec['weak_missing_symbols'] if weak else rec['missing_symbols']).setdefault(name, []).append(sym)
+                # Refused at load: any missing non-weak import of an image with chained fixups,
+                # or one bound by the non-lazy stream of LC_DYLD_INFO.
+                if not weak and (m.chained or binds.get((ordinal, sym), 'load') == 'load'):
+                    rec['load_blocking'].setdefault(name, []).append(sym)
         images.append(rec)
     libs = {n: dict(present=bool(v['present']), users=sorted(v['users']), imported=len(v['symbols']),
                     missing=sorted(v['missing']), weak_missing=sorted(v['weak_missing'])) for n, v in sorted(by_lib.items())}
@@ -104,7 +167,8 @@ def main():
     weak = sum(len(v['weak_missing']) for v in libs.values())
     summary = dict(app=str(a.app), sysroots=[str(s) for s in a.sysroot], images=len(images), system_libraries=len(libs),
                    libraries_absent=sorted(n for n, v in libs.items() if not v['present']),
-                   imported_symbols=total, missing_symbols=miss, weak_missing_symbols=weak)
+                   imported_symbols=total, missing_symbols=miss, weak_missing_symbols=weak,
+                   load_blocking={r['path']: r['load_blocking'] for r in images if r.get('load_blocking')})
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.with_suffix('.json').write_text(json.dumps(dict(summary=summary, libraries=libs, images=images), indent=1) + '\n')
     lines = ['# Import survey: %s' % a.app.name, '',

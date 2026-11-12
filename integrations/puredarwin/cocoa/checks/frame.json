@@ -1,0 +1,33 @@
+{
+ "apps": ["COCOAHELLO_REFUSE_CLOSE=1 /Applications/CocoaHello.app/Contents/MacOS/CocoaHello"],
+ "env": "PD_WS_TRACE=1",
+ "seconds": 600,
+ "steps": [
+  {"wait": "COCOA_APP_START 1", "timeout": 400},
+  {"expect": "COCOAHELLO window-shown", "timeout": 600, "name": "window shown"},
+  {"sleep": 6},
+  {"locate": "view", "rgb": [51, 115, 204], "tolerance": 14, "points_wide": 378, "scale": @SCALE@, "name": "backing scale on screen"},
+  {"shot": "01-window"},
+  {"click_in": "view", "points": [189, -121], "count": 2, "hold": ["ctrl", "shift"]},
+  {"expect": "COCOAHELLO window-resized \\d+x\\d+ zoomed=1", "timeout": 120, "name": "maximize from our title bar: resized and isZoomed"},
+  {"sleep": 6},
+  {"shot": "02-maximized"},
+  {"locate": "view", "rgb": [51, 115, 204], "tolerance": 14, "points_wide": 378, "scale": @SCALE@, "name": "scale unchanged when maximized"},
+  {"click_in": "view", "points": [189, -121], "count": 2, "hold": ["ctrl", "shift"]},
+  {"expect": "COCOAHELLO window-resized 420x300 zoomed=0", "timeout": 120, "name": "restore from our title bar"},
+  {"sleep": 6},
+  {"locate": "view", "rgb": [51, 115, 204], "tolerance": 14, "points_wide": 378},
+  {"click_in": "view", "points": [388, -121]},
+  {"expect": "COCOAHELLO close-refused", "timeout": 90, "name": "our close button asks the application (refused)"},
+  {"sleep": 4},
+  {"shot": "03-close-refused"},
+  {"locate": "view", "rgb": [51, 115, 204], "tolerance": 14, "points_wide": 378, "name": "window still there after the refusal", "scale": @SCALE@},
+  {"click_in": "view", "points": [388, -121]},
+  {"expect": "COCOAHELLO close-allowed", "timeout": 90, "name": "our close button asks again (allowed)"},
+  {"expect": "COCOAHELLO window-closed", "timeout": 60, "name": "window closes"},
+  {"expect": "COCOA_APP_EXIT 1 rc=0", "timeout": 60, "name": "application ends"},
+  {"sleep": 3},
+  {"shot": "04-closed"},
+  {"absent": "Segmentation|Bus error|Abort trap", "name": "no crash"}
+ ]
+}
