@@ -167,7 +167,7 @@
                      self.check_done(tail)
                      self.advance_virtual(data)
          except BaseException as error:
-@@ -1307,15 +1379,27 @@
+@@ -1307,24 +1379,53 @@
      bootargs = guest_bootargs(inputs)
      backend = ContinuingBackend(inputs, directory)
      console = None
@@ -195,7 +195,21 @@
          reservation = check_reservation(backend, inputs, layout, carveouts)
          old.write_private(directory, 'original-observations.json',
                            dict(snapshot=snapshot, layout=layout, packet=inputs.report,
-@@ -1324,7 +1408,11 @@
+                                inventory_sha256=inputs.inventory_sha256, reservation=reservation))
++        if native and native.native and getattr(native, 'stage', False):
++            # One image, one vector (m1-native-boot/b1): the stage m1n1 loads the collection,
++            # rewrites the device tree, builds the boot arguments and enters XNU by itself.
++            import native_stage
++            native_stage.start(native, backend, inputs, native_boot.bootargs(native, bootargs), ba, layout,
++                               directory, args.runtime,
++                               lambda port: ConsoleSession(
++                                   port, directory, desktop=desktop, keyboard=keyboard,
++                                   virtual_input=virtual_input, terminal_input=terminal_input,
++                                   native_keyboard_desktop=native_keyboard_desktop,
++                                   native_trackpad_child=native_trackpad_child),
++                               old.write_private)
++            return
+         hv = backend.new_hv()
          smp = smp_enabled()
          if smp:
              enable_smp(hv)
@@ -208,7 +222,7 @@
          bq_mark('hv_init_done')
          # hv_init() runs m1n1's pcie_shutdown(), so PCIe is brought up after it:
          # pcie_init, SMC radio power, port-0 link sequence. XNU inherits the link.
-@@ -1378,6 +1466,17 @@
+@@ -1378,6 +1479,17 @@
                                 hardware_boot_observed=False, image_sha256=image.sha(inputs.contents['kernel']),
                                 prepared_image_sha256=image.sha(prepared), prepared_image_bytes=len(prepared)))
          bq_mark('hv_start')
@@ -226,7 +240,7 @@
          console = ConsoleSession(args.console_device, directory, desktop=desktop, keyboard=keyboard,
                                   virtual_input=virtual_input, terminal_input=terminal_input,
                                   native_keyboard_desktop=native_keyboard_desktop,
-@@ -1389,7 +1488,11 @@
+@@ -1389,7 +1501,11 @@
              if console is not None:
                  console.close()
          finally:

@@ -32,6 +32,17 @@ native_mode.txt is one line of words:
                session that launchd starts (guest/org.siliconforest.desktop.plist). There is
                no shell on the console then: the challenge is never typed, the result is
                NO_COMMAND_LINE, and the capture ends on the guest script's PD_BENCH_DONE line.
+  stage        with native: the launcher loads one image and nothing else, b1/'s stage m1n1
+               followed by its payload records (configuration, the collection, the RAM root
+               gzipped), vectors m1n1 into it and from then on only listens on the UART; the
+               stage boots the kernel by itself (b1/native_stage.py, b1/DESIGN.md). nosprr,
+               noamx, wdt= and noiolog apply as for native; wdt= is armed by the stage.
+               usbkeep: the device-tree nodes of the USB port the proxy used stay in the tree
+               (removed otherwise, as in every boot so far). hostseed: the kernel's boot seed
+               comes from the controller instead of the M1's SEP (bench fallback). lowmem:
+               the stage chooses where XNU's memory begins (just above its own, about 0.8 GB
+               lower); without it the stage is told the launcher's own phys_base, so that
+               every address is the one of the native boots so far.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -80,6 +91,9 @@ class Mode:
         self.wdt = None
         known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
+        known |= {'stage', 'usbkeep', 'hostseed', 'lowmem'}
+        self.stage, self.usb_keep, self.host_seed = ('stage' in words, 'usbkeep' in words, 'hostseed' in words)
+        self.low_mem = 'lowmem' in words
         for word in words:
             match = re.fullmatch(r'wdt=(\d{2,3})', word)
             if match:
@@ -88,6 +102,9 @@ class Mode:
             else:
                 require(word in known, 'Unknown word in native_mode.txt: ' + word)
         require(not (self.probe and self.native), 'native_mode.txt: probe or native, not both')
+        require(not self.stage or self.native, 'stage needs native')
+        require(self.stage or not (self.usb_keep or self.host_seed or self.low_mem),
+                'usbkeep, hostseed and lowmem need stage')
         self.vdm_return = 'vdm-return' in words
         require(self.wdt is None or self.native, 'wdt= needs native')
         require(not self.vdm_return or self.native, 'vdm-return needs native')
