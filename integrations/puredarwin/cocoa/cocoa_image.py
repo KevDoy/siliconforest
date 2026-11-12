@@ -11,7 +11,7 @@ top of that template and without changing it:
   base    runs/cocoa/base/cocoa-<hash>.img: a copy of the template with the root partition
           and its ext4 grown to --root-mib, plus every --tree (a directory copied to a guest
           path with its symbolic links and executable bits). Cached by a hash of the
-          template's name and the trees' file lists (path, size, mtime).
+          template's name, the trees' source directories and their file lists.
   run     --output: a reflink copy of the base plus the --file / --data items.
 
 qd_image.py is called for the template (its command line) and imported for the partition
@@ -202,7 +202,10 @@ def main():
     for item in a.tree:
         source, dest = item.split('=', 1)
         trees.append((source, dest, tree_manifest(source)))
-    key = hashlib.sha256(json.dumps([BASE_VERSION, tpl.name, a.root_mib, [(d, m) for _, d, m in trees]]).encode()).hexdigest()[:16]
+    # The source directory is part of the key: files in the Nix store all carry the same
+    # modification time, so a rebuilt library of the same size would otherwise look unchanged.
+    key = hashlib.sha256(json.dumps([BASE_VERSION, tpl.name, a.root_mib,
+                                     [(str(Path(s).resolve()), d, m) for s, d, m in trees]]).encode()).hexdigest()[:16]
     base = OUT / 'base' / ('cocoa-%s.img' % key)
     staged = None
     if not base.exists():

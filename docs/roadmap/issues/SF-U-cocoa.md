@@ -139,31 +139,52 @@ controls again. (a) is what is built.
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
 | Popup windows (menus, pop-up buttons, tool tips) | not handled: they are borderless toplevels placed by the compositor; needs xdg_popup in the WindowServer and in the compositor (which refuses popups today) |
-| Firefox on arm64 | official 160.0: `firefox` starts, XUL is refused by dyld (`runs/cocoa/f1`); the link gaps are known from the survey and partly closed in source (below), not yet rebuilt and rerun |
+| Firefox on arm64 | official 160.0: binary loads, XUL initialises, AppKit runs, a first hidden window is created, then the main process dies with SIGSEGV before a browser window (details below) |
 
-## Firefox on arm64: what is known
+## Firefox on arm64 (official 160.0, QEMU, executed)
 - Official Firefox 160.0 for macOS is universal (x86_64 + arm64), minimum macOS 11, LC_DYLD_INFO
-  fixups, Developer ID signatures. Fetched at test time from Mozilla's CDN, checksum checked
-  against Mozilla's SHA256SUMS, unpacked with 7-Zip from nixpkgs; never committed.
-- Executed (`runs/cocoa/f1`): `/Applications/Firefox.app/Contents/MacOS/firefox` starts on our
-  kernel (the signed main executable and libmozglue load and run; no code-signing refusal),
-  then `dlopen(XUL): image not loaded`, `Couldn't load XPCOM`.
-- Static survey (`cocoa_survey.py`, `runs/cocoa/firefox/survey-root1.md`): 27 Mach-O images,
-  45 system libraries, 2413 imported symbols. Against our root plus upstream's small frameworks
-  for arm64 (`arm64.nix`), Security and SystemConfiguration: 52 symbols missing, of which these
-  stop XUL at load: Metal.framework (absent on arm64), `ASWebAuthenticationSessionErrorDomain`,
-  `ASWebAuthenticationSessionRequest`, `ASWebAuthenticationSessionWebBrowserSessionManager`,
-  `NSFontWeightRegular`, `NSImageSymbolConfiguration`, `NSSharingServicePicker`. The rest are
-  lazily bound functions (printing, PDF, `proc_name`, `CFBundleIsArchitectureLoadable`) that fail
-  only if called.
-- Written, not yet built into a root: patches 0001 to 0003 (the AppKit and
-  AuthenticationServices symbols), `frameworks/Metal` (a Metal.framework that truthfully reports
-  no device: `MTLCreateSystemDefaultDevice()` nil, `MTLCopyAllDevices()` empty, descriptor
-  classes as value objects), `frameworks/Accelerate` (the ten vDSP routines libmozinference
-  imports, real loops).
-- Expected next obstacles, from upstream's x86_64 run of 158: the content-process sandbox
-  profile that libsandbox cannot parse, NSStackView for the crash reporter, then rendering
-  (layer-backed content through QuartzCore; software only in QEMU).
+  fixups (lazy binding), Developer ID signatures. Fetched at test time from Mozilla's CDN,
+  checksum checked against Mozilla's SHA256SUMS, unpacked with 7-Zip from nixpkgs; never committed.
+- Static survey (`cocoa_survey.py`, `runs/cocoa/firefox/survey-root2.md`): 27 Mach-O images, 45
+  system libraries, 2413 imported symbols. Against `build-firefox-root.nix` (our root, upstream's
+  small frameworks built for arm64, Security, SystemConfiguration, our Metal/MetalKit/Accelerate,
+  patches 0001 to 0003): no library absent, 19 symbols missing, none of them stops XUL at load
+  (the load-time gaps left are in the updater and installer helpers).
+- How far it gets, same result with the default sandbox and with Mozilla's switches
+  (`runs/cocoa/ff-sandbox`, `runs/cocoa/ff-nosandbox`):
+  1. `firefox` starts: the Developer ID signed executable and libmozglue load and run on our
+     kernel without any code-signing refusal.
+  2. XUL loads (before the additions: `dlopen(XUL): image not loaded`, `runs/cocoa/f1`) and
+     initialises: the process connects to the compositor (`WindowServer: scale 120/120 ...
+     frames by the compositor`), AppKit starts (`firefox[64] *** Unknown color catalog Basic`).
+  3. A child process is started and reaches its sandbox set-up (default sandbox run only).
+  4. NSApplication runs: Firefox creates its first window, a hidden 100x100 borderless helper
+     (`window ... level 2 frame {{0, 668}, {100, 100}}`), and its menu is installed
+     (`NSApplication: waiting for the menu bar server`).
+  5. About two minutes after start the main process dies with SIGSEGV (exit 139), before any
+     browser window. No page, no input, no network. About 3.5 minutes of emulation per attempt.
+- The sandbox, both paths:
+  - Default (sandbox on). A child's `sandbox_init_with_parameters` is refused by the profile
+    compiler: at the pin `define expects a name and a value` (seen on x86_64 with 158); with
+    upstream's tip compiler (patch 0007) `line 22: unbound variable 'default'` (Mozilla passes
+    an operation name to its own function). Firefox prints the profile and the error; the
+    child then ends (Mozilla treats a failed sandbox as fatal for that process) and the parent
+    carries on. Nothing here pretends the sandbox succeeded.
+  - Patch 0008 extends the compiler (operation names as values, string functions, numbers and
+    comparisons, when/unless, defined?, a profile's own function as a filter; require-all,
+    require-not and with-filter compiled to the strict side: what cannot be checked makes a deny
+    rule broader and leaves an allow rule out). On the build host, against Mozilla's own
+    sources for 160 (`security/sandbox/mac/SandboxPolicy*.h`), all six profiles now compile:
+    content 1993 bytes, socket 1494, GPU 656, RDD 651, GMP 497, utility 387; with the tip's
+    compiler alone none of the six did. Whether Firefox's processes work inside the resulting
+    (stricter than Apple's) profiles is not yet seen: the run is behind the crash above.
+  - Disabled (`MOZ_DISABLE_CONTENT_SANDBOX=1`, `..._GMP_`, `..._RDD_`, `..._SOCKET_PROCESS_`,
+    `..._UTILITY_`, `..._GPU_SANDBOX=1`, Mozilla's documented switches): no sandbox error, same
+    crash at the same place. So the crash is not the sandbox.
+- Still ahead after the crash: layer-backed rendering through QuartzCore (software only in
+  QEMU; on the M1 Firefox's WebRender would use OpenGL through Mesa/AGX, there is no Metal
+  device), popup windows (its menus and panels are borderless child windows), fonts, HTTPS and
+  the trust store (tip work, not in the pin), the content process model.
 
 ## Implementations added that answer "nothing here" (complete list)
 | Symbol | What it does |
@@ -265,7 +286,7 @@ toolbars, sheets, Auto Layout, dark appearance, ...) are not written yet.
   `pd_surface_host_v1`; our compositor has neither that nor subsurface compositing: missing),
   the sandbox (kernel extension present; newer profile compiler carried as patch 0007;
   `--no-sandbox` is Chromium's switch), a GPU path without Metal (ANGLE on OpenGL through
-  Mesa, or SwiftShader), IOSurface (framework present, daemon not started, untested),
+  Mesa, or SwiftShader), IOSurface (framework and a launchd job for upstream's iosurfaced are in the root; untested),
   Mach bootstrap/XPC (present, untested), Keychain and trust (Security present, trustd
   missing at the pin), LaunchServices URL schemes (untested), audio (lab coreaudiod; AVFAudio
   absent), accessibility and screen capture (missing).
