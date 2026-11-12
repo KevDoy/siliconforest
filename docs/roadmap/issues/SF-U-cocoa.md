@@ -1,5 +1,69 @@
 # SF-U: Cocoa stack (Mac GUI applications on the SiliconForest desktop)
 
+## Hand-over (12 November, stream parked by the owner; read this first)
+The Cocoa stream is parked until the system boots from disk. Everything proven is committed:
+lab repo `e829293fc` and the commit that adds this section (branch `pcie-wifi`); compositor
+worktree `runs/cocoa/chonkstep-worktree`, branch `wm-darwin-cocoa`, `f0955fb` (local only: never
+push that repository). Nothing of this stream is running.
+
+State, all in QEMU arm64 on the pin (`e7aa00a6`), nothing on the M1:
+- Popups: done for AppKit applications, 5 of 5 at 100, 150, 200 and 250% (section "Popups",
+  "Popup results"). After that change: `hello` at 200%, `frame` at 100%, `apps` at 150% pass
+  (`reg1-hello-s2`, `reg1-frame-s1`, `reg1-apps-s1.5`). The Firefox checks, `live-scale`,
+  `miniaturize`, `zoom` and the scorecard were NOT re-run on patches 0016 to 0018.
+- Everything else is as the sections below say (Firefox 160 with its sandbox on, Auto Layout,
+  macOS 26 controls, scorecard 1214 of 2077).
+
+Commands:
+```sh
+integrations/puredarwin/cocoa/cocoa_check.sh popups --scale 2      # one run, exit 0 = pass; 1, 1.5, 2, 2.5
+python3 integrations/puredarwin/cocoa/checks/popups.gen.py         # regenerates checks/popups.json
+runs/cocoa/rep.sh popups NAME 2 5                                  # scratch: 5 runs (first alone, then 3 at a time)
+bash runs/cocoa/build-compositor.sh                                # compositor from the worktree into runs/cocoa/target
+runs/cocoa/run-ff.sh firefox-sandbox-page NAME $(nix-build ... build-firefox-root.nix)   # a Firefox check
+```
+Patches are made from three trees under `runs/cocoa/patchwork/` (not committed): `a/` the pin,
+`c/` the state after patches 0001 to 0015 (frozen), `b/` now. Edit `b/`, then
+`bash runs/cocoa/patchwork/mkpatches.sh`; a file belongs to one patch of 0016 and later. If that
+directory is lost, `b/` is the pin with every patch of `patched.nix` applied.
+
+Traps met (keep the checks honest):
+- Never run a batch while the workstation is loaded: at a load of 40 the desktop itself fails
+  (`result.json` has `host_load` and `times.session`: about 25 s is normal).
+- Parallel runs race on the image base: the first run of a new root must run alone.
+- A check that stops early never reaches its "no crash" step: look for `COCOA_APP_EXIT 1 rc=`.
+  `DYLD_INSERT_LIBRARIES=/usr/lib/libhbcrash.dylib` (Homebrew stream's guest tools as a `--tree`)
+  gives a backtrace.
+- Do not edit `cocoa_check.sh` or a check's JSON while a batch runs.
+- The reference Mac shows nothing on its screen: menus cannot be measured there.
+
+Next, in this order:
+1. Firefox's own popups: context menu (native `NSMenu`: XUL uses `popUpMenuPositioningItem:`,
+   `menuWillOpen:`, `menuDidClose:`, `menu:willHighlightItem:`, `cancelTracking`, all present),
+   hamburger panel and other XUL panels (borderless windows at the pop-up level: they become
+   grabbing `xdg_popup`s; what a compositor dismissal must turn into for Firefox to roll them up
+   is not worked out), `<select>`. `checks/firefox-popups.json` is written and has NEVER been run;
+   `build-firefox-root.nix` has not been built with 0016 to 0018.
+2. Port to upstream's tip, now the lab default (`docs/roadmap/issues/SF-V-rebase.md`). Per the
+   rebase stream: apply as they are 0002, 0003, 0008, 0009, 0013, 0014, 0015, 0016; already
+   upstream 0001, 0007, 0010 (except one CMakeLists hunk); fail 0004, 0005, 0006, 0011 (passes with
+   fuzz), 0012, 0017, 0018. Then every check and the scorecard again, differences from the pin
+   reported.
+3. Menu presentation proposal with mock-ups (section "Menus"). Notes for it: AppKit already
+   serialises the main menu (`pdSerializeMenu`, `activateMenuItemAtPath:forWindow:` in
+   NSApplication.m); a strip can be drawn by `wm-darwin` as the top of the area `wm-core` takes for
+   the client (no theme engine change), titles from `wm-theme`; a title's menu can be the
+   application's own popup (`-[NSMenu _pdTrackAtScreenPoint:...]` with the window as parent), so
+   it is the same menu as every other; the transport is a small private Wayland protocol
+   (tree as JSON through a descriptor, `activate(path)`, `show(path, x, y)`). Nothing built.
+4. Fonts (CoreText enumeration and matching, open fonts by recipe, `/System/Library/Fonts`,
+   tracking table, weights).
+5. Video in Firefox through the software path of `m1-avd/videotoolbox`.
+6. Quality items (dark, pressed, disabled states; focus ring; layout guides; rest of the suite;
+   the menu look; lists taller than the screen).
+7. Electron blank window (remote layers; the WindowServer already has
+   `_windowServerExportSurface`/`_windowServerImportSubsurface` over `pd_surface_host_v1`).
+
 ## Goal
 Mac GUI applications run on the SiliconForest desktop (Chonkstep) using PureDarwin's open
 reimplementation of Apple's application frameworks: first a trivial AppKit application, then
