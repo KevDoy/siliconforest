@@ -77,12 +77,28 @@ From the wrapper's start to the first frame, bench queue excluded: 56.6 s (`bs03
 
 Root to launchd grew by a second: launchd now starts while the display, GPU and Touch Bar drivers are still starting (display driver registered 2.2 s after the kernel starts instead of 1.2 s). The total is what counts: the shell is up 2.3 s after the kernel starts.
 
+### Two further settings, measured, not in the default patch (boots `bs04`, `bs05`)
+`pdsound_delay=500` in the boot-args (the sound driver waits 2 s before it touches hardware; its jack-detection lines at 4.0 to 4.3 s were the last thing the launcher waited out) and `BS_RAMDISK_MIB=320` (45 MB free in the RAM root, as before this work, instead of 108 MB).
+
+| | `bs02` | `bs03` | `bs04` | `bs05` |
+|---|---|---|---|---|
+| Shell up to the challenge typed | 3.02 | 3.02 | 1.88 | 1.66 |
+| First frame after the hypervisor starts the guest | 7.32 | 7.23 | 6.25 | 6.14 |
+| Both terminals ready after the hypervisor starts the guest | 7.46 | 7.37 | 6.35 | 6.27 |
+| RAM root decompressed on the M1 | 6.89 | 6.89 | 6.35 | 6.34 |
+| Linux shuts down, m1n1 appears on USB | 13.3 | 12.9 | 16.9 | 17.1 |
+| First frame after the cycle starts | 48.6 | 48.2 | 50.2 | 50.2 |
+
+The sound driver's own lines and its state at the audio server's start are the same in all four boots. The cycle total did not improve because the Linux shutdown happened to take 4 s longer in `bs04` and `bs05`; that segment varies from 12.9 to 17.5 s and is now the largest source of variance.
+
 `bs01` is the kernel alone (stock script, launcher and RAM root, no boot-args): root mounted at 60.4 s as before, shell 1.4 s after root instead of 6, no desktop (console proof failed, see Changes 2).
 
 ## Open
 - **Console silence is a heuristic.** 3.0 s of the 7.2 s goes to waiting until drivers stop logging (last line: sound jack detection, 4.25 s after the kernel starts, because `PDAppleSound` waits 2 s before it touches hardware) plus the 1 s of silence. A kernel line that arrives in the 0.2 s the challenge takes still fails the boot. The durable fixes are a session started by a launchd job instead of a typed command (SF-D D4), or drivers that stay busy until their background bring-up is done.
 - **Harness, not this stream's to change** (measured, for the owner): Linux `systemctl reboot` until m1n1 answers on USB 12.9 to 17.5 s; m1n1 bootstrap 1.9 s; wait for the new USB enumeration and worker start 4.4 s; return to Linux after the session 40 s.
 - **RAM root upload is still the largest item (16.7 s).** USB runs at 11 MB/s, the single-core inflate at 58 MB/s of output. 24 MB of the 92 MB sent is the compositor binary (19 MB of `__const` that barely compresses) and 14 MB is `libicudata`. Decompressing on a second core while the next part uploads would save about 6 s; not tried.
+- **Drivers are slower while BSD starts beside them.** The display coprocessor took 0.3 s to boot when the kernel sat in its 60 s wait and takes 1.3 s now (display driver registered 2.2 to 2.3 s after the kernel starts instead of 1.2 s); launchd's exec takes 1.3 s instead of 0.4 s. Not explained. The shell cannot come up before the drivers are done, so this is about a second of the 6 to 7 s.
+- **Wi-Fi bring-up is 2.3 s after the root mounts** in every boot, old and new; of that, 0.5 s is a 500 ms poll for the interface name in `PDBwfm::bringUp`. Its last log line is what the launcher's silence gate waits for once the sound delay is shortened.
 - **Compositor start, 1.45 s** (0.93 s to renderer selection, 0.52 s to the first flip): not this stream's tree; numbers only.
 - **Kernel defaults.** The collection needs `pd_quiet_wait=0 pd_rtc_wait=0`; without them it boots as before. Whether PureDarwin's registry wait in `IOKitInitializeTime` should exist at all, and what should publish `IORTC` (the SMC has the clock), are tree decisions.
 - **Real install.** None of the harness time exists there. Darwin's own segments add up to 3.9 s (kernel to root 0.8, launchd 1.3, script 0.2, compositor 1.45, terminals 0.15); reading the kernel and the root from storage instead of USB is not measured. A 115200 baud serial console would add about 3 s for the 32 KB logged before the root mounts.
