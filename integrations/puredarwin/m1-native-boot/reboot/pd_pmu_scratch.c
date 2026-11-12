@@ -48,6 +48,10 @@ raw_cmd(const struct pd_spmi_io *io, uint8_t opc, uint8_t sid, uint16_t param,
 
 	if (io == 0 || sid > 0xf || len_wr > 8 || len_rd > 8)
 		return PD_SPMI_BAD_ARGUMENT;
+	/* Two command shapes exist here: read long of 1..8 bytes, write long of one byte. */
+	if (!((opc & 0xf8) == SPMI_CMD_EXT_READL && len_wr == 0 && len_rd == (unsigned)(opc & 7) + 1) &&
+	    !(opc == SPMI_CMD_EXT_WRITEL && len_wr == 1 && len_rd == 0))
+		return PD_SPMI_BAD_ARGUMENT;
 
 	/* m1n1: never take a word that was already in the reply FIFO for this command's reply */
 	for (i = 0; !rx_empty(io); i++) {
@@ -97,36 +101,67 @@ pd_spmi_ext_readl(const struct pd_spmi_io *io, uint8_t sid, uint16_t addr, uint8
 	return raw_cmd(io, (uint8_t)(SPMI_CMD_EXT_READL | (len - 1)), sid, addr, 0, 0, buf, len);
 }
 
-int
-pd_spmi_ext_writel(const struct pd_spmi_io *io, uint8_t sid, uint16_t addr, const uint8_t *buf, unsigned len)
-{
-	if (buf == 0 || len < 1 || len > 8)
-		return PD_SPMI_BAD_ARGUMENT;
-	return raw_cmd(io, (uint8_t)(SPMI_CMD_EXT_WRITEL | (len - 1)), sid, addr, buf, len, 0, 0);
-}
-
 static int
 read8(const struct pd_pmu *pmu, uint16_t addr, uint8_t *value)
 {
 	return pd_spmi_ext_readl(pmu->io, pmu->sid, addr, value, 1);
 }
 
-static int
-write8(const struct pd_pmu *pmu, uint16_t addr, uint8_t value)
+int
+pd_pmu_write_gate(unsigned level, uint8_t sid, uint16_t addr, uint8_t old, uint8_t value)
 {
-	return pd_spmi_ext_writel(pmu->io, pmu->sid, addr, &value, 1);
+	uint8_t changed = (uint8_t)(old ^ value);
+
+	if (level != PD_PMU_WRITES_AS_LINUX)
+		return PD_PMU_GATE_LEVEL;
+	if (sid != PD_T8103_PMU_SID)
+		return PD_PMU_GATE_SLAVE;
+	switch (addr) {
+	case PD_T8103_LEG_SCRPAD + PD_PMU_BOOT_STAGE:
+		if (value != PD_BOOT_STAGE_SHUTDOWN && value != PD_BOOT_STAGE_KERNEL_STARTED)
+			return PD_PMU_GATE_VALUE;
+		return PD_PMU_GATE_OK;
+	case PD_T8103_LEG_SCRPAD + PD_PMU_ERROR_COUNTS:
+		/* the counts are only ever zeroed: no bit may be set */
+		if (value & ~old)
+			return PD_PMU_GATE_BITS;
+		return PD_PMU_GATE_OK;
+	case PD_T8103_LEG_SCRPAD + PD_PMU_SHUTDOWN_FLAG:
+		if (changed & ~PD_PMU_SHUTDOWN_BIT)
+			return PD_PMU_GATE_BITS;
+		return PD_PMU_GATE_OK;
+	default:
+		return PD_PMU_GATE_ADDRESS;
+	}
 }
 
-/* An NVMEM cell narrower than its byte: the other bits are read back and kept. */
+/*
+ * The only place in this file (and in the kext: nothing else includes an SPMI write) that
+ * issues a write command: one byte, read back first, through the gate. With any level but
+ * PD_PMU_WRITES_AS_LINUX it returns before the controller is touched at all.
+ */
 static int
-update8(const struct pd_pmu *pmu, uint16_t addr, uint8_t mask, uint8_t value)
+gated_write8(struct pd_pmu *pmu, uint16_t addr, uint8_t mask, uint8_t value)
 {
-	uint8_t old;
-	int ret = read8(pmu, addr, &old);
+	uint8_t old = 0, next;
+	int ret, verdict;
 
+	verdict = pd_pmu_write_gate(pmu->level, pmu->sid, addr, 0, 0);
+	if (verdict == PD_PMU_GATE_LEVEL || verdict == PD_PMU_GATE_SLAVE || verdict == PD_PMU_GATE_ADDRESS)
+		goto refused;
+	ret = read8(pmu, addr, &old);
 	if (ret != PD_SPMI_OK)
 		return ret;
-	return write8(pmu, addr, (uint8_t)((old & ~mask) | (value & mask)));
+	next = (uint8_t)((old & ~mask) | (value & mask));
+	verdict = pd_pmu_write_gate(pmu->level, pmu->sid, addr, old, next);
+	if (verdict != PD_PMU_GATE_OK)
+		goto refused;
+	pmu->writes_sent++;
+	return raw_cmd(pmu->io, (uint8_t)(SPMI_CMD_EXT_WRITEL | 0), pmu->sid, addr, &next, 1, 0, 0);
+refused:
+	pmu->writes_refused++;
+	pmu->last_refusal = (uint32_t)verdict << 16 | addr;
+	return PD_SPMI_WRITE_REFUSED;
 }
 
 int
@@ -153,34 +188,34 @@ pd_pmu_read_state(const struct pd_pmu *pmu, struct pd_pmu_state *state)
 }
 
 int
-pd_pmu_kernel_started(const struct pd_pmu *pmu, const struct pd_pmu_state *state)
+pd_pmu_kernel_started(struct pd_pmu *pmu, const struct pd_pmu_state *state)
 {
 	int first, ret;
 
 	if (pmu == 0 || state == 0)
 		return PD_SPMI_BAD_ARGUMENT;
-	first = write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_BOOT_STAGE), PD_BOOT_STAGE_KERNEL_STARTED);
+	first = gated_write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_BOOT_STAGE), 0xff, PD_BOOT_STAGE_KERNEL_STARTED);
 	if (state->boot_error_count == 0 && state->panic_count == 0)
 		return first;
 	/* macsmc_power_init_error_counts(): the panic count first, then the boot errors */
-	ret = update8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_ERROR_COUNTS), 0xf0, 0);
+	ret = gated_write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_ERROR_COUNTS), 0xf0, 0);
 	if (first == PD_SPMI_OK)
 		first = ret;
-	ret = update8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_ERROR_COUNTS), 0x0f, 0);
+	ret = gated_write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_ERROR_COUNTS), 0x0f, 0);
 	if (first == PD_SPMI_OK)
 		first = ret;
 	return first;
 }
 
 int
-pd_pmu_prepare_halt(const struct pd_pmu *pmu, int poweroff)
+pd_pmu_prepare_halt(struct pd_pmu *pmu, int poweroff)
 {
 	int first, ret;
 
 	if (pmu == 0)
 		return PD_SPMI_BAD_ARGUMENT;
-	first = write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_BOOT_STAGE), PD_BOOT_STAGE_SHUTDOWN);
-	ret = update8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_SHUTDOWN_FLAG), PD_PMU_SHUTDOWN_BIT,
+	first = gated_write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_BOOT_STAGE), 0xff, PD_BOOT_STAGE_SHUTDOWN);
+	ret = gated_write8(pmu, (uint16_t)(pmu->scrpad + PD_PMU_SHUTDOWN_FLAG), PD_PMU_SHUTDOWN_BIT,
 	    poweroff ? PD_PMU_SHUTDOWN_BIT : 0);
 	if (first == PD_SPMI_OK)
 		first = ret;

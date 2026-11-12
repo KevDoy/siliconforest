@@ -54,6 +54,7 @@
 #include <libkern/c++/OSData.h>
 #include <pexpert/pexpert.h>
 
+#include <sys/sysctl.h>
 #include "PDSmcSession.h"
 #include "pd_pmu_scratch.h"
 
@@ -183,6 +184,8 @@ pmu_find(void)
 	gPmu.scrpad = (uint16_t)scrpad;
 	/* Linux t8103.dtsi pm_setting@d001; read for the log only */
 	gPmu.pm_setting = pm_setting == 0xd001 ? 0xd001 : 0;
+	/* The write gate's level (pd_pmu_scratch.h): only pdpmu=2 lets any SPMI write out. */
+	gPmu.level = gPmuMode == 2 ? PD_PMU_WRITES_AS_LINUX : PD_PMU_READ_ONLY;
 	return true;
 }
 
@@ -204,7 +207,7 @@ pmu_start(void)
 		return;
 	}
 	gPmuUsable = true;
-	if (gPmuMode >= 2) {
+	if (gPmuMode == 2) {
 		ret = pd_pmu_kernel_started(&gPmu, &state);
 		struct pd_pmu_state after = state;
 		int again = pd_pmu_read_state(&gPmu, &after);
@@ -292,7 +295,7 @@ pd_apple_halt_restart(unsigned int type)
 	value = off ? PD_SMC_KEY('o', 'f', 'f', 'w') : PD_SMC_KEY('r', 'e', 's', 't');
 	LOG("preparing for %s (MBSE = %s)", off ? "power-off" : "restart", off ? "offw" : "rest");
 	smc_write(smc, PD_SMC_KEY('M', 'B', 'S', 'E'), &value, sizeof(value), off ? "MBSE = offw" : "MBSE = rest");
-	if (gPmuUsable && gPmuMode >= 2) {
+	if (gPmuUsable && gPmuMode == 2) {
 		int ret = pd_pmu_prepare_halt(&gPmu, off);
 		if (ret != PD_SPMI_OK)
 			LOG("failed to write boot_stage and shutdown_flag (SPMI error %d)", ret);
@@ -313,10 +316,28 @@ pd_apple_halt_restart(unsigned int type)
 	return -1;
 }
 
+/* kern.pd_pmu_writes: the write gate's level and counters (pd_pmu_scratch.h). */
+static int
+pd_pmu_writes_sysctl SYSCTL_HANDLER_ARGS
+{
+#pragma unused(oidp, arg1, arg2)
+	char text[112];
+
+	snprintf(text, sizeof(text), "pdpmu=%u level=%u usable=%u sent=%u refused=%u last_refusal=0x%x",
+	    gPmuMode, gPmu.level, gPmuUsable ? 1 : 0, gPmu.writes_sent, gPmu.writes_refused, gPmu.last_refusal);
+	return SYSCTL_OUT(req, text, strlen(text) + 1);
+}
+
+SYSCTL_DECL(_kern);
+SYSCTL_PROC(_kern, OID_AUTO, pd_pmu_writes, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0,
+    pd_pmu_writes_sysctl, "A", "PMU boot-state bytes: SPMI writes sent and refused by the gate");
+
 void
 PDAppleRebootStart(void)
 {
 	uint32_t hook = 1;
+
+	sysctl_register_oid(&sysctl__kern_pd_pmu_writes);
 
 	PE_parse_boot_argn("pdpmu", &gPmuMode, sizeof(gPmuMode));
 	PE_parse_boot_argn("pdreboot", &hook, sizeof(hook));

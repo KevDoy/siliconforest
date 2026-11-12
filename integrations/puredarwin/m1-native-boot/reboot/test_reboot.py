@@ -82,8 +82,14 @@ class PmuScratch(unittest.TestCase):
         # no PMU write without pdpmu=2: both writers sit behind the mode
         self.assertEqual(glue.count('pd_pmu_kernel_started('), 1)
         self.assertEqual(glue.count('pd_pmu_prepare_halt('), 1)
-        self.assertIn('if (gPmuMode >= 2) {\n\t\tret = pd_pmu_kernel_started(', glue)
-        self.assertIn('if (gPmuUsable && gPmuMode >= 2) {\n\t\tint ret = pd_pmu_prepare_halt(', glue)
+        self.assertIn('if (gPmuMode == 2) {\n\t\tret = pd_pmu_kernel_started(', glue)
+        self.assertIn('if (gPmuUsable && gPmuMode == 2) {\n\t\tint ret = pd_pmu_prepare_halt(', glue)
+        # and, whatever the glue does, the core has one write command behind one gate
+        core = (HERE/'pd_pmu_scratch.c').read_text()
+        self.assertEqual(core.count('SPMI_CMD_EXT_WRITEL |'), 1)
+        self.assertNotIn('pd_spmi_ext_writel', core + header + glue)
+        self.assertIn('gPmu.level = gPmuMode == 2 ? PD_PMU_WRITES_AS_LINUX : PD_PMU_READ_ONLY;', glue)
+        self.assertIn('sysctl_register_oid(&sysctl__kern_pd_pmu_writes);', glue)
         self.assertIn('static uint32_t gPmuMode = 1;', glue)
         # power-off is refused before anything is sent unless pdpoweroff=1
         refusal = glue.index('if (off && !gPowerOffAllowed) {')

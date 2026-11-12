@@ -111,12 +111,18 @@ model_delay(void *ctx, unsigned us)
 
 static struct model M;
 static const struct pd_spmi_io IO = { &M, model_read32, model_write32, model_delay };
-static const struct pd_pmu PMU = { &IO, PD_T8103_PMU_SID, PD_T8103_LEG_SCRPAD, 0xd001 };
+static struct pd_pmu PMU;
 
 static void
 fresh(void)
 {
 	memset(&M, 0, sizeof(M));
+	memset(&PMU, 0, sizeof(PMU));
+	PMU.io = &IO;
+	PMU.sid = PD_T8103_PMU_SID;
+	PMU.scrpad = PD_T8103_LEG_SCRPAD;
+	PMU.pm_setting = 0xd001;
+	PMU.level = PD_PMU_WRITES_AS_LINUX;
 	memset(M.reg, 0xa5, sizeof(M.reg));
 	M.answer_sid = 0xf;
 	M.reg[0x9f01] = 0x2f;
@@ -149,8 +155,10 @@ main(void)
 	assert(M.writes[1].addr == 0x9f02 && M.writes[1].value == 0x01);
 	assert(M.writes[2].addr == 0x9f02 && M.writes[2].value == 0x00);
 	assert(M.reg[0x9f03] == 0x30 && M.reg[0x9f0f] == 0xf7 && M.reg[0x9f00] == 0xa5 && M.reg[0x9f04] == 0xa5);
-	/* extended register write long, one byte: opcode 0x30 */
-	assert(M.commands[5] == 0x9f018f30);
+	/* every write is preceded by a read of the same byte; extended register write long,
+	 * one byte: opcode 0x30 */
+	assert(M.commands[5] == 0x9f018f38 && M.commands[6] == 0x9f018f30);
+	assert(PMU.writes_sent == 3 && PMU.writes_refused == 0);
 
 	/* nothing to clear: the boot stage alone */
 	fresh();
@@ -177,8 +185,6 @@ main(void)
 		M.reg[0xd100 + i] = (uint8_t)(0x11 * (i + 1));
 	assert(pd_spmi_ext_readl(&IO, 0xf, 0xd100, buf, 6) == PD_SPMI_OK);
 	assert(memcmp(buf, "\x11\x22\x33\x44\x55\x66", 6) == 0 && M.commands[0] == 0xd1008f3d);
-	assert(pd_spmi_ext_writel(&IO, 0xf, 0x1234, (const uint8_t *)"\1\2\3\4\5", 5) == PD_SPMI_OK);
-	assert(memcmp(&M.reg[0x1234], "\1\2\3\4\5", 5) == 0 && M.reg[0x1239] == 0xa5);
 
 	/* faults */
 	fresh();
@@ -198,7 +204,63 @@ main(void)
 	fresh();
 	M.bad_parity = 1;
 	assert(pd_pmu_prepare_halt(&PMU, 1) == PD_SPMI_PARITY);
-	assert(M.nwrites == 1 && M.writes[0].addr == 0x9f01);
+	assert(M.nwrites == 0 && PMU.writes_sent == 0);
+
+	/*
+	 * The write gate. Levels 0 and 1 (pdpmu=0, pdpmu=1): no write command and, for a
+	 * refused write, no command at all reaches the controller.
+	 */
+	for (unsigned level = 0; level < 2; level++) {
+		fresh();
+		PMU.level = level;
+		assert(pd_pmu_read_state(&PMU, &s) == PD_SPMI_OK);
+		unsigned before = M.ncommands;
+		assert(pd_pmu_kernel_started(&PMU, &s) == PD_SPMI_WRITE_REFUSED);
+		assert(pd_pmu_prepare_halt(&PMU, 0) == PD_SPMI_WRITE_REFUSED);
+		assert(pd_pmu_prepare_halt(&PMU, 1) == PD_SPMI_WRITE_REFUSED);
+		assert(M.nwrites == 0 && M.ncommands == before);
+		assert(PMU.writes_sent == 0 && PMU.writes_refused == 7);
+		assert(PMU.last_refusal == ((uint32_t)PD_PMU_GATE_LEVEL << 16 | 0x9f0f));
+		for (unsigned i = 0; i < M.ncommands; i++)
+			assert((M.commands[i] & 0xf8) == 0x38);         /* reads only */
+		assert(M.reg[0x9f01] == 0x2f && M.reg[0x9f02] == 0x21 && M.reg[0x9f0f] == 0xf7);
+	}
+	/* Level 2: every slave and every register but the three bytes is refused, whatever
+	 * the value; so is every level but 2 for those three. */
+	for (unsigned sid = 0; sid < 16; sid++) {
+		for (unsigned addr = 0; addr < 0x10000; addr++) {
+			int allowed = sid == 0xf && (addr == 0x9f01 || addr == 0x9f02 || addr == 0x9f0f);
+			int verdict = pd_pmu_write_gate(PD_PMU_WRITES_AS_LINUX, (uint8_t)sid, (uint16_t)addr, 0, 0);
+			assert(allowed ? verdict == PD_PMU_GATE_OK
+			               : verdict == (sid == 0xf ? PD_PMU_GATE_ADDRESS : PD_PMU_GATE_SLAVE));
+			for (unsigned level = 0; level < 8; level++)
+				if (level != PD_PMU_WRITES_AS_LINUX)
+					assert(pd_pmu_write_gate(level, (uint8_t)sid, (uint16_t)addr, 0, 0) == PD_PMU_GATE_LEVEL);
+		}
+	}
+	/* Within the three bytes: boot_stage takes 0x00 or 0x30 only; the counts can only lose
+	 * bits; only bit 3 of the flag byte may change. */
+	for (unsigned old = 0; old < 256; old++) {
+		for (unsigned value = 0; value < 256; value++) {
+			assert((pd_pmu_write_gate(2, 0xf, 0x9f01, (uint8_t)old, (uint8_t)value) == PD_PMU_GATE_OK) ==
+			    (value == 0x00 || value == 0x30));
+			assert((pd_pmu_write_gate(2, 0xf, 0x9f02, (uint8_t)old, (uint8_t)value) == PD_PMU_GATE_OK) ==
+			    ((value & ~old) == 0));
+			assert((pd_pmu_write_gate(2, 0xf, 0x9f0f, (uint8_t)old, (uint8_t)value) == PD_PMU_GATE_OK) ==
+			    (((old ^ value) & ~0x08u) == 0));
+		}
+	}
+	/* A device tree that puts the scratchpad elsewhere, or another slave: refused at the
+	 * gate even at level 2, nothing sent. */
+	fresh();
+	PMU.scrpad = 0x9e00;
+	assert(pd_pmu_prepare_halt(&PMU, 0) == PD_SPMI_WRITE_REFUSED && M.ncommands == 0 && PMU.writes_refused == 2);
+	assert((PMU.last_refusal >> 16) == PD_PMU_GATE_ADDRESS);
+	fresh();
+	PMU.sid = 0xe;
+	M.answer_sid = 0xe;
+	assert(pd_pmu_prepare_halt(&PMU, 0) == PD_SPMI_WRITE_REFUSED && M.ncommands == 0);
+	assert((PMU.last_refusal >> 16) == PD_PMU_GATE_SLAVE);
 	/* words left in the reply FIFO by someone else are dropped, not taken as the reply */
 	fresh();
 	M.rx[0] = 0xdeadbeef;

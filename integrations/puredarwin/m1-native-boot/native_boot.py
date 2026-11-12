@@ -368,7 +368,7 @@ def start(native, hv, backend, layout, directory, runtime, console_factory, writ
             # A session started by launchd: no command was typed, so the console session
             # does not look for the end marker itself.
             done = console.done_seen or (untyped and re.search(
-                rb'(?:^|\n)PD_BENCH_DONE\r?\n', bytes(console.proof.output[-4096:])) is not None)
+                rb'(?:^|\n)PD_BENCH_DONE\n', bytes(console.proof.output[-4096:]).replace(b'\r', b'')) is not None)
         if done:
             time.sleep(1.0)
         mark('native_capture_end', done=done, console_bytes=len(console.proof.output))
