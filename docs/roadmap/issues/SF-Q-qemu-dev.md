@@ -37,7 +37,7 @@ the host stretch every number here.
 | Item | State |
 |---|---|
 | Desktop in QEMU from one command, headless, autopilot, screenshots, pass/fail | works: `tools/qemu_desktop.sh` |
-| Time from command to desktop | 45 s (load 12) to 60 s (load 24); image staging 0.7-1.7 s of it. Under 60 s only on a host that is not busy |
+| Time from command to desktop | depends on what else the host is doing (8 cores, 16 threads, shared with other builds; QEMU is CPU-bound): 45 s at host load 12 (800x600), 60 s at load 24, 102 s at load 26 with this stream's own LLVM build on the sibling threads (1024x768), 232 s at load 30-58, one run at load 55 did not show a desktop within its 310 s limit. Image staging is 0.4-3.8 s of it. The under-60 s target is met only on a host that is not busy; not measured on an idle host |
 | Window mode | works on a private X server (Xvfb): the QEMU window shows the desktop, a click and typed text sent to that window with xdotool arrive in the terminal (`runs/qemu-dev/win1/x-screen.png`). Not opened on the owner's screen |
 | Resolution | 1024x768 (the firmware's largest ramfb mode) |
 | Build from a source tree (`--src`) | works: 177 s for a first release build of the compositor with 6 jobs (incremental builds reuse `runs/qemu-dev/target`) |

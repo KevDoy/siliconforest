@@ -23,8 +23,10 @@ exec < /dev/null
 printf '\nQDDESK_BEGIN seconds=@SECONDS@ autopilot=@AUTOPILOT@ scale=%s theme=%s only=%s\n' "@SCALE@" "@THEME@" "@ONLY@"
 get() { sysctl -n "$1" 2>/dev/null; }
 # Network: QEMU's user network on the virtio interface (10.0.2.15, gateway 10.0.2.2), when the
-# tools are staged. There is no Wi-Fi interface: the Wi-Fi rows of the menu show that state.
-( [ -x /usr/bin/qemu-net-up ] && { /usr/bin/qemu-net-up en0 > /var/log/qemu-net-up.log 2>&1; printf 'QDDESK_NET_UP_RC=%s %s\n' "$?" "$(tail -1 /var/log/qemu-net-up.log)"; } ) &
+# tools are staged; started a minute in, so that it does not compete with the desktop coming up
+# (every process start is expensive under emulation). There is no Wi-Fi interface: the Wi-Fi rows
+# of the menu show that state.
+( [ -x /usr/bin/qemu-net-up ] && { sleep 60; /usr/bin/qemu-net-up en0 > /var/log/qemu-net-up.log 2>&1; printf 'QDDESK_NET_UP_RC=%s %s\n' "$?" "$(tail -1 /var/log/qemu-net-up.log)"; } ) &
 net_job=$!
 if [ "@SOUND@" = 1 ] && [ -x /usr/sbin/coreaudiod ]; then
     mkdir -p /var/log /var/run /Library/Preferences

@@ -9,8 +9,8 @@ ifname=${1:-en0}
 # daemon this root does not have before it names interfaces itself.
 i=0
 while pd-dhcp --up "$ifname" 2>&1 | grep -q "cannot mark"; do
-    i=$((i+1)); [ $i -lt 60 ] || { echo "qemu-net-up: no interface $ifname"; exit 1; }
-    sleep 3
+    i=$((i+1)); [ $i -lt 18 ] || { echo "qemu-net-up: no interface $ifname"; exit 1; }
+    sleep 10
 done
 pd-dhcp "$ifname" || { echo "qemu-net-up: no DHCP lease on $ifname"; exit 1; }
 if [ ! -S /var/run/mDNSResponder ]; then
