@@ -10,6 +10,10 @@ case "$nonce" in *[!0-9a-f]*|'') session=000000000000000000000000000000000000000
 [ "${#session}" -eq 48 ] || session=000000000000000000000000000000000000000000000001
 runtime=/private/var/run/gpu-desktop
 mkdir -p "$runtime" && chmod 0700 "$runtime"
+# The menu's Theme and Display choices are kept here for the rest of the boot (the RAM root).
+state=/private/var/db/desktop-state
+mkdir -p "$state"
+export XDG_STATE_HOME="$state"
 export XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-0
 export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
 export CHONKSTEP_DARWIN_FRAME_STATS=3600

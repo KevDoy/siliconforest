@@ -24,8 +24,8 @@ KC=${GPU_DESKTOP_KC:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-a
 [ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-touchbar && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-# The compositor with the volume keys and the Touch Bar phase (wm-darwin, Touch Bar phase without Escape).
-D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-002/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+# The compositor with display scaling, the settings menu, volume keys and the Touch Bar phase (wm-darwin merge, boot ds06).
+D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-scale-desktop-build-007/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
@@ -33,7 +33,7 @@ X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # remaining time, which the RAM root's older terminal refuses.
 # build-004 added the xterm emulation (full-screen programs, scrollback, TERM=xterm-256color),
 # build-005 selection by dragging and copy/paste.
-TERM_BIN=runs/m1-desktop-010/terminal-application-build-005/target/aarch64-apple-darwin/release/chonk-terminal-darwin
+TERM_BIN=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for that TERM; the RAM root has none.
