@@ -1,0 +1,6 @@
+The default libSystem of the M1 RAM root and the QEMU images is selected by the entry for
+/usr/lib/libSystem.B.dylib in artifacts/m1-desktop-010/apcie-port-candidate-003/mapping.json
+(not in git). Since 2026-11-11 it points at this recipe's output:
+/nix/store/wk4zidyvpi1xadhq6jabxxnidbp5a5fm-puredarwin-libsystem-default-0.1 (boot ls02).
+Before: /nix/store/9i1vaph8rfh102h1x4v7gj7fl7q4x7rm-puredarwin-libsystem-spawnattr-0.1
+(copy of the old mapping: mapping.json.before-libsystem-default-20261111).
