@@ -782,6 +782,16 @@ static struct {
 
 static int vo_window(void) { return strcmp(opt.vo, "null") != 0; }
 static int vo_gl(void) { return !strcmp(opt.vo, "gl"); }
+/* 1 when a wl_shm buffer can be had now (the compositor has released one, or a slot is empty) */
+static int buffer_available(void)
+{
+    for (int i = 0; i < MAX_SHM_BUFFERS; i++) {
+        if (!W.buffers[i].buffer || !W.buffers[i].busy)
+            return 1;
+    }
+    return 0;
+}
+
 /* surface units to device pixels, rounding as wp_fractional_scale_v1 prescribes */
 static int to_pixels(int v) { return (v * W.scale120 + 60) / 120; }
 static void frame_request(void);
@@ -1641,6 +1651,11 @@ static void video_refresh(double *remaining)
         if (count == 0)
             return;
         if (opt.untimed) {
+            /* nothing is dropped here: wait for the compositor to give a buffer back */
+            if (vo_window() && !vo_gl() && !buffer_available()) {
+                *remaining = 0.002;
+                return;
+            }
             present(vf.frame, vf.pts, vf.duration);
             fq_next();
             *remaining = 0;
