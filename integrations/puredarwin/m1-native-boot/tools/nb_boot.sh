@@ -5,6 +5,13 @@
 # Usage: nb_boot.sh <name, prefix nb> [upper bound in seconds, 120..600, default 175]
 #   NB_MODE=probe    the hypervisor boot, with the controller listening on the M1's real UART
 #   NB_MODE=native   no hypervisor (../native_boot.py); needs NB_RETURN
+#   NB_MODE=hv       the hypervisor boot with nothing added (for NB_REBOOT=1 and the reboot/
+#                    collection: ../reboot/build-kc.nix)
+#   NB_REBOOT=1      the guest script ends by restarting the M1 itself (`reboot`, through the
+#                    SMC; needs the collection of ../reboot/build-kc.nix as NB_KC). The
+#                    launcher gets ../reboot/launcher-self-reboot.diff on top of its patch
+#                    and self_reboot_mode.txt: no controller reset when the M1's Linux comes
+#                    back by itself. Never for power-off: a powered-off M1 needs a person.
 #   NB_RETURN=vdm    native: the controller resets the M1 with its usual `macvdmtool reboot
 #                    serial` when the capture is over (launcher-native.patch, word vdm-return)
 #   NB_WDT=<s>       native: also arm the SoC watchdog for <s> seconds (30..170) before the
@@ -33,6 +40,7 @@ case "$N" in nb*) ;; *) echo "boot names are prefixed nb" >&2; exit 2;; esac
 MODE=${NB_MODE:?NB_MODE=probe or native}; PROFILE=${NB_PROFILE:-shell}; DONE=marker
 case "$MODE" in
   probe) WORDS=probe;;
+  hv) WORDS=;;
   native)
     WORDS=native
     [ "${NB_RETURN:-}" = vdm ] && WORDS="$WORDS vdm-return"
@@ -44,9 +52,14 @@ case "$MODE" in
       fi
     fi
     [ "${NB_RETURN:-}" = vdm ] || [ -n "${NB_WDT:-}" ] || { echo "a native boot needs NB_RETURN=vdm, NB_WDT=<s>, or both" >&2; exit 2; };;
-  *) echo "NB_MODE is probe or native" >&2; exit 2;;
+  *) echo "NB_MODE is probe, hv or native" >&2; exit 2;;
 esac
 WORDS="$WORDS ${NB_WORDS:-}"
+PATCH="$HERE/launcher-native.patch"
+if [ "${NB_REBOOT:-}" = 1 ]; then
+  [ -n "${NB_KC:-}" ] || { echo "NB_REBOOT=1 needs NB_KC (the collection of reboot/build-kc.nix)" >&2; exit 2; }
+  case " ${NB_BOOTARGS:-} " in *" pdreboot=0 "*) echo "NB_REBOOT=1 with pdreboot=0 cannot restart" >&2; exit 2;; esac
+fi
 [ "${NB_SESSION:-}" = launchd ] && { [ "$MODE" = native ] || { echo "NB_SESSION=launchd is for native boots" >&2; exit 2; }; WORDS="$WORDS multiuser"; }
 KC=${NB_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
@@ -55,6 +68,12 @@ QD=$(mktemp -d); S=$(mktemp); trap 'rm -rf "$QD" "$S"' EXIT
 echo "$WORDS" > "$QD/native_mode.txt"
 python3 -B -c "import sys; sys.path.insert(0, '$HERE'); import native_boot; native_boot.Mode(open('$QD/native_mode.txt').read())"
 FILES="$HERE/native_boot.py=$B/native_boot.py;$HERE/native_stub.py=$B/native_stub.py;$QD/native_mode.txt=$B/native_mode.txt"
+if [ "${NB_REBOOT:-}" = 1 ]; then
+  PATCH="$QD/launcher-native-self-reboot.patch"
+  "$HERE/reboot/combine_patch.sh" "$PATCH"
+  echo "the guest of boot $N restarts the M1 itself" > "$QD/self_reboot_mode.txt"
+  FILES="$FILES;$QD/self_reboot_mode.txt=$B/self_reboot_mode.txt"
+fi
 WAITS="pd_quiet_wait=0 pd_rtc_wait=0"; X=
 if [ "$PROFILE" = desktop ]; then
   NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
@@ -87,12 +106,21 @@ else
   ARGS="cpus=${NB_CPUS:-1} $WAITS ${NB_BOOTARGS:-}"
 fi
 [ "${NB_SESSION:-}" = launchd ] && X="${X:+$X;}$HERE/guest/org.siliconforest.desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.desktop.plist"
+# NB_REBOOT=1: announce on the console, then restart. The script's own end marker goes:
+# stopping the capture there would, under the hypervisor, stop the guest before it restarts.
+# The capture ends when the M1 resets (hypervisor: m1n1's USB device disappears) or ten
+# seconds after the announcement (native), and at the upper bound if nothing happens.
+if [ "${NB_REBOOT:-}" = 1 ]; then
+  [ "$(tail -n 1 "$S")" = "printf '\\nPD_BENCH_DONE\\n'" ] || { echo "the guest script does not end with the end marker" >&2; exit 2; }
+  sed -i '$ d' "$S"
+  printf '%s\n' "printf '\\nPD_BENCH_REBOOT\\n'; reboot; printf 'PDNB_REBOOT_RC=%s\\n' \"\$?\"; sleep 60" >> "$S"
+fi
 # More than one processor natively: m1n1 starts the secondary cores and the EL2 page holds
 # them; the kernel releases them only with pdcpuheld=1 (./build-kc.nix has the platform kext
 # that knows it).
 case "$MODE:$ARGS" in native:cpus=1\ *) ;; native:*) ARGS="$ARGS pdcpuheld=1";; esac
 R=runs/m1-desktop-010/pcie-enum-attempt-$N
-env PCIE_LAB_PATCH="$HERE/launcher-native.patch" PCIE_LAB_FILES="$FILES" \
+env PCIE_LAB_PATCH="$PATCH" PCIE_LAB_FILES="$FILES" \
   PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" \
   PCIE_KC="$KC" PCIE_BOOTARGS="$ARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" PCIE_DONE=$DONE \
   PCIE_USB_CHUNK=1048576 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 \
@@ -102,6 +130,6 @@ printf 'mode=%s\nprofile=%s\nkc=%s\nbootargs=%s\nlimit=%s\n' "$WORDS" "$PROFILE"
 cat "$R/result.json" 2>/dev/null || true
 grep -a 'NATIVE\|UART_TAP\|UART_MARKER\|GUEST_CPUS' "$R/guest/worker.log" | cut -c1-400 || true
 grep -a -c '^UART> ' "$R/guest/worker.log" | sed 's/^/UART lines in worker.log: /' || true
-strings -n 4 "$R/guest/console.bin" | grep -a 'PDNB\|panic\|Darwin Kernel\|DL9_\|GPUDESK\|WMSTAT' | cut -c1-240 | head -60 || true
+strings -n 4 "$R/guest/console.bin" | grep -a 'PDNB\|panic\|Darwin Kernel\|DL9_\|GPUDESK\|WMSTAT\|PDReboot\|PD_BENCH_REBOOT\|MACH Reboot' | cut -c1-240 | head -60 || true
 }
 main "$@"; exit $?
