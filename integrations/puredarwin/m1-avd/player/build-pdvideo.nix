@@ -13,7 +13,13 @@
 # `ffmpeg` is the FFmpeg build to link: pass the one with the pdavd hwaccel to get hardware
 # decoding (pdvideo itself does not change):
 #   import ./build-pdvideo.nix { ffmpeg = import ./build-ffmpeg.nix { extraPatches = [ ... ]; ... }; extraLibs = [ "-lpdavd" ]; }
-{ ffmpeg ? import ./build-ffmpeg.nix {}, extraLdFlags ? [], extraLibs ? [], nameSuffix ? "" }:
+#
+# gl = true builds usr/bin/pdvideo-gl instead: the same program with the EGL/GLES 2 output
+# (--vo=gl), linked against the Wayland Mesa bundle of ../../m1-mesa-asahi/agx-wl-demo.nix under
+# /usr/local/lib/mesa-asahi-wl (libEGL, libGLESv2, libgallium, libdrm, libwayland-client,
+# libwayland-egl; copied into this output for staging). It uses that bundle's libwayland-client,
+# the one Mesa itself uses, instead of a static copy, so it does not start without the bundle.
+{ ffmpeg ? import ./build-ffmpeg.nix {}, extraLdFlags ? [], extraLibs ? [], nameSuffix ? "", gl ? false }:
 let
   r = import ../../rebase/pd.nix;
   inherit (r) pd pkgs;
@@ -28,8 +34,14 @@ let
   ffi = p.libffi-arm64;
   proto = "${p.wayland-protocols}/share/wayland-protocols";
   fw = "System/Library/Frameworks";
+  mesa = import ../../m1-mesa-asahi/mesa-darwin-wayland.nix;
+  bundle = "${import ../../m1-mesa-asahi/agx-wl-demo.nix}/usr/local/lib/mesa-asahi-wl";
+  program = if gl then "pdvideo-gl" else "pdvideo";
+  wlLibs = if gl
+    then "${bundle}/libwayland-client.0.dylib ${bundle}/libwayland-egl.1.dylib ${bundle}/libEGL.1.dylib ${bundle}/libGLESv2.2.dylib"
+    else "${wl}/lib/libwayland-client.a ${ffi}/lib/libffi.a";
 in pkgs.stdenv.mkDerivation {
-  name = "darwin-lab-pdvideo-arm64-darwin${nameSuffix}";
+  name = "darwin-lab-${program}-arm64-darwin${nameSuffix}";
   src = ./src;
   nativeBuildInputs = [ pkgs.wayland-scanner ];
   buildPhase = ''
@@ -44,7 +56,7 @@ in pkgs.stdenv.mkDerivation {
     ${tc}/bin/${triple}-clang -std=gnu11 -O2 -Wall -Wextra -Wno-deprecated-declarations \
       -isysroot ${sdk} -mmacosx-version-min=26.5 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector \
       -I${libSystem}/usr/include -I. -Icf-headers -I${audiotoolbox}/usr/include \
-      -I${ffmpeg}/usr/include -I${wl}/include \
+      -I${ffmpeg}/usr/include -I${wl}/include ${lib.optionalString gl "-DPDVIDEO_GL -I${mesa}/usr/include"} \
       pdvideo.c ao_audioqueue.c *-protocol.c \
       --ld-path=${p.native-ld}/bin/ld -nostdlib -L${libSystem}/usr/lib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib \
@@ -52,18 +64,19 @@ in pkgs.stdenv.mkDerivation {
       -Wl,-platform_version,macos,26.5,26.5 -Wl,-fixup_chains -L${p.coreFoundation-arm64}/usr/lib \
       ${ffmpeg}/usr/lib/libavformat.a ${ffmpeg}/usr/lib/libavcodec.a ${ffmpeg}/usr/lib/libswresample.a \
       ${ffmpeg}/usr/lib/libswscale.a ${ffmpeg}/usr/lib/libavutil.a \
-      ${wl}/lib/libwayland-client.a ${ffi}/lib/libffi.a \
+      ${wlLibs} \
       -Wl,-weak_library,${audiotoolbox}/${fw}/AudioToolbox.framework/Versions/A/AudioToolbox \
       -Wl,-weak_library,${audiotoolbox}/${fw}/CoreAudio.framework/Versions/A/CoreAudio \
-      ${lib.concatStringsSep " " (extraLdFlags ++ extraLibs)} -lSystem -o pdvideo
+      ${lib.concatStringsSep " " (extraLdFlags ++ extraLibs)} -lSystem -o ${program}
   '';
   installPhase = ''
-    install -Dm755 pdvideo $out/usr/bin/pdvideo
+    install -Dm755 ${program} $out/usr/bin/${program}
+    ${lib.optionalString gl "mkdir -p $out/usr/local/lib/mesa-asahi-wl && cp ${bundle}/*.dylib $out/usr/local/lib/mesa-asahi-wl/"}
     install -Dm755 ${ffmpeg}/usr/bin/ffmpeg $out/usr/bin/ffmpeg
     install -Dm755 ${ffmpeg}/usr/bin/ffprobe $out/usr/bin/ffprobe
-    ${tc}/bin/${triple}-otool -L $out/usr/bin/pdvideo > $out/LINKAGE.txt
+    ${tc}/bin/${triple}-otool -L $out/usr/bin/${program} > $out/LINKAGE.txt
     cat $out/LINKAGE.txt
-    if grep -v ':$' $out/LINKAGE.txt | grep -v '/usr/lib/libSystem.B.dylib\|AudioToolbox.framework\|CoreAudio.framework'; then
+    if grep -v ':$' $out/LINKAGE.txt | grep -v '/usr/lib/libSystem.B.dylib\|AudioToolbox.framework\|CoreAudio.framework\|/usr/local/lib/mesa-asahi-wl/'; then
       echo "unexpected library reference" >&2; exit 1
     fi
   '';

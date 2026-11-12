@@ -50,6 +50,12 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 
+#ifdef PDVIDEO_GL
+#include <wayland-egl.h>
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+#endif
+
 #include "ao.h"
 #include "ffsync.h"
 
@@ -764,6 +770,7 @@ static struct {
     int configured, closed;
     int pending_w, pending_h;   /* the last xdg_toplevel.configure, surface units, 0 = our choice */
     int bounds_w, bounds_h;
+    int output_w, output_h;     /* the output's current mode, device pixels */
     int width, height;          /* surface units */
     int video_w, video_h;       /* display size of the picture in video pixels (SAR applied) */
     int need_redraw;
@@ -774,6 +781,327 @@ static struct {
 } W = { .scale120 = 120, .output_scale = 1 };
 
 static int vo_window(void) { return strcmp(opt.vo, "null") != 0; }
+static int vo_gl(void) { return !strcmp(opt.vo, "gl"); }
+/* surface units to device pixels, rounding as wp_fractional_scale_v1 prescribes */
+static int to_pixels(int v) { return (v * W.scale120 + 60) / 120; }
+static void frame_request(void);
+
+/* the rectangle of the picture in a bw x bh buffer: the largest one of the picture's shape */
+static void picture_rect(int bw, int bh, int *dx, int *dy, int *dw, int *dh)
+{
+    if ((int64_t)bw * W.video_h <= (int64_t)bh * W.video_w) {
+        *dw = bw;
+        *dh = FFMAX(1, (int)((int64_t)bw * W.video_h / W.video_w));
+    } else {
+        *dh = bh;
+        *dw = FFMAX(1, (int)((int64_t)bh * W.video_w / W.video_h));
+    }
+    /* a pixel or two of rounding (a fractional scale) is filled, not letterboxed */
+    if (bw - *dw <= 2 && bh - *dh <= 2) {
+        *dw = bw;
+        *dh = bh;
+    }
+    *dx = (bw - *dw) / 2;
+    *dy = (bh - *dh) / 2;
+}
+
+static void announce(const char *what, int bw, int bh, int dx, int dy, int dw, int dh)
+{
+    if (W.announced_w == bw && W.announced_h == bh && W.announced_scale == W.scale120)
+        return;
+    fprintf(stderr, "pdvideo: window %dx%d surface units, scale %.4g, buffer %dx%d %s, picture %dx%d at %d,%d%s\n",
+            W.width, W.height, W.scale120 / 120.0, bw, bh, what, dw, dh, dx, dy,
+            W.viewport ? " (wp_viewport destination)" : " (integer buffer scale)");
+    W.announced_w = bw;
+    W.announced_h = bh;
+    W.announced_scale = W.scale120;
+}
+
+#ifdef PDVIDEO_GL
+/* ---------------------------------------------------------------- GL output
+ * The decoded planes go into textures as they are (NV12: Y and interleaved CbCr; planar 4:2:0:
+ * Y, Cb, Cr) and a fragment shader converts to RGB with the stream's matrix and range. Anything
+ * else is first converted to NV12 by libswscale. GLES 2 only: luminance textures, and a row
+ * longer than the picture (linesize) is uploaded whole and cut off by the texture coordinates. */
+static struct {
+    struct wl_egl_window *window;
+    EGLDisplay display;
+    EGLContext context;
+    EGLSurface surface;
+    GLuint program, tex[3];
+    GLint u_tex[3], u_matrix, u_offset, u_nv12, u_scale_y, u_scale_c, u_max_y, u_max_c, a_pos, a_uv;
+    int tex_w[3], tex_h[3];
+    int width, height;
+    struct SwsContext *to_nv12;
+    AVFrame *converted;
+} G;
+
+static GLuint gl_shader(GLenum type, const char *src)
+{
+    GLuint sh = glCreateShader(type);
+    GLint ok = 0;
+
+    glShaderSource(sh, 1, &src, NULL);
+    glCompileShader(sh);
+    glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512] = "";
+
+        glGetShaderInfoLog(sh, sizeof(log), NULL, log);
+        fprintf(stderr, "pdvideo: shader: %s\n", log);
+        return 0;
+    }
+    return sh;
+}
+
+static int gl_init(void)
+{
+    static const EGLint config_attrs[] = { EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                                           EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 0, EGL_NONE };
+    static const EGLint context_attrs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+    static const char *vs =
+        "attribute vec2 a_pos; attribute vec2 a_uv; varying vec2 v_y; varying vec2 v_c;\n"
+        "uniform vec2 u_scale_y, u_scale_c;\n"
+        "void main() { v_y = a_uv * u_scale_y; v_c = a_uv * u_scale_c; gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+    static const char *fs =
+        "precision highp float; varying vec2 v_y; varying vec2 v_c;\n"
+        "uniform sampler2D u_y, u_c0, u_c1; uniform mat3 u_matrix; uniform vec3 u_offset; uniform float u_nv12;\n"
+        "uniform vec2 u_max_y, u_max_c;\n"
+        "void main() {\n"
+        "  vec3 yuv;\n"
+        "  vec2 pc = min(v_c, u_max_c);\n"      /* never a filtered sample of the row padding */
+        "  yuv.x = texture2D(u_y, min(v_y, u_max_y)).r;\n"
+        "  vec4 c = texture2D(u_c0, pc);\n"
+        "  yuv.yz = mix(vec2(c.r, texture2D(u_c1, pc).r), c.ra, u_nv12);\n"
+        "  gl_FragColor = vec4(clamp(u_matrix * (yuv + u_offset), 0.0, 1.0), 1.0);\n"
+        "}\n";
+    EGLConfig config;
+    EGLint n = 0, major, minor;
+    GLuint v, f;
+    GLint ok = 0;
+
+    G.width = to_pixels(W.width);
+    G.height = to_pixels(W.height);
+    G.display = eglGetDisplay((EGLNativeDisplayType)W.display);
+    if (G.display == EGL_NO_DISPLAY || !eglInitialize(G.display, &major, &minor)) {
+        fprintf(stderr, "pdvideo: EGL does not start on this Wayland display (error 0x%x)\n", eglGetError());
+        return -1;
+    }
+    eglBindAPI(EGL_OPENGL_ES_API);
+    if (!eglChooseConfig(G.display, config_attrs, &config, 1, &n) || n < 1) {
+        fprintf(stderr, "pdvideo: no EGL window configuration (error 0x%x)\n", eglGetError());
+        return -1;
+    }
+    G.context = eglCreateContext(G.display, config, EGL_NO_CONTEXT, context_attrs);
+    G.window = wl_egl_window_create(W.surface, G.width, G.height);
+    G.surface = G.window ? eglCreateWindowSurface(G.display, config, (EGLNativeWindowType)G.window, NULL) : EGL_NO_SURFACE;
+    if (G.context == EGL_NO_CONTEXT || G.surface == EGL_NO_SURFACE || !eglMakeCurrent(G.display, G.surface, G.surface, G.context)) {
+        fprintf(stderr, "pdvideo: no EGL window surface or context (error 0x%x)\n", eglGetError());
+        return -1;
+    }
+    eglSwapInterval(G.display, 0);      /* the player times its frames itself */
+    v = gl_shader(GL_VERTEX_SHADER, vs);
+    f = gl_shader(GL_FRAGMENT_SHADER, fs);
+    if (!v || !f)
+        return -1;
+    G.program = glCreateProgram();
+    glAttachShader(G.program, v);
+    glAttachShader(G.program, f);
+    glLinkProgram(G.program);
+    glGetProgramiv(G.program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        fprintf(stderr, "pdvideo: the shader program does not link\n");
+        return -1;
+    }
+    glUseProgram(G.program);
+    G.u_tex[0] = glGetUniformLocation(G.program, "u_y");
+    G.u_tex[1] = glGetUniformLocation(G.program, "u_c0");
+    G.u_tex[2] = glGetUniformLocation(G.program, "u_c1");
+    G.u_matrix = glGetUniformLocation(G.program, "u_matrix");
+    G.u_offset = glGetUniformLocation(G.program, "u_offset");
+    G.u_nv12 = glGetUniformLocation(G.program, "u_nv12");
+    G.u_scale_y = glGetUniformLocation(G.program, "u_scale_y");
+    G.u_scale_c = glGetUniformLocation(G.program, "u_scale_c");
+    G.u_max_y = glGetUniformLocation(G.program, "u_max_y");
+    G.u_max_c = glGetUniformLocation(G.program, "u_max_c");
+    G.a_pos = glGetAttribLocation(G.program, "a_pos");
+    G.a_uv = glGetAttribLocation(G.program, "a_uv");
+    glGenTextures(3, G.tex);
+    for (int i = 0; i < 3; i++) {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, G.tex[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glUniform1i(G.u_tex[i], i);
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    fprintf(stderr, "pdvideo: GL: EGL %d.%d, %s, %s\n", major, minor, (const char *)glGetString(GL_RENDERER),
+            (const char *)glGetString(GL_VERSION));
+    return 0;
+}
+
+static void gl_upload(int unit, GLenum format, const uint8_t *data, int texels_per_row, int rows)
+{
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, G.tex[unit]);
+    if (G.tex_w[unit] != texels_per_row || G.tex_h[unit] != rows) {
+        glTexImage2D(GL_TEXTURE_2D, 0, (GLint)format, texels_per_row, rows, 0, format, GL_UNSIGNED_BYTE, data);
+        G.tex_w[unit] = texels_per_row;
+        G.tex_h[unit] = rows;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texels_per_row, rows, format, GL_UNSIGNED_BYTE, data);
+    }
+}
+
+/* YCbCr (as sampled, 0..1) to RGB for the frame's matrix and range: rgb = M * (yuv + offset) */
+static void gl_colour(const AVFrame *f, float m[9], float off[3])
+{
+    int hd = f->height >= 720 || f->width >= 1280;
+    int cs = f->colorspace == AVCOL_SPC_UNSPECIFIED ? (hd ? AVCOL_SPC_BT709 : AVCOL_SPC_SMPTE170M) : f->colorspace;
+    double kr = 0.299, kb = 0.114;
+    double ys = 1.0, cscale = 1.0;
+
+    if (cs == AVCOL_SPC_BT709) {
+        kr = 0.2126;
+        kb = 0.0722;
+    } else if (cs == AVCOL_SPC_BT2020_NCL || cs == AVCOL_SPC_BT2020_CL) {
+        kr = 0.2627;
+        kb = 0.0593;
+    }
+    double kg = 1.0 - kr - kb;
+    if (f->color_range != AVCOL_RANGE_JPEG) {
+        ys = 255.0 / 219.0;
+        cscale = 255.0 / 224.0;
+        off[0] = (float)(-16.0 / 255.0);
+    } else {
+        off[0] = 0;
+    }
+    off[1] = off[2] = (float)(-128.0 / 255.0);
+    /* column-major: columns are the Y, Cb and Cr contributions */
+    m[0] = (float)ys;  m[1] = (float)ys;                                   m[2] = (float)ys;
+    m[3] = 0;          m[4] = (float)(-2.0 * kb * (1.0 - kb) / kg * cscale); m[5] = (float)(2.0 * (1.0 - kb) * cscale);
+    m[6] = (float)(2.0 * (1.0 - kr) * cscale); m[7] = (float)(-2.0 * kr * (1.0 - kr) / kg * cscale); m[8] = 0;
+}
+
+/* draws the frame into the back buffer (black when there is none); 0 when drawn */
+static int gl_draw(AVFrame *f, int *bw_out, int *bh_out)
+{
+    int bw = to_pixels(W.width), bh = to_pixels(W.height);
+    int dx, dy, dw, dh;
+
+    if (bw != G.width || bh != G.height) {
+        wl_egl_window_resize(G.window, bw, bh, 0, 0);
+        G.width = bw;
+        G.height = bh;
+    }
+    picture_rect(bw, bh, &dx, &dy, &dw, &dh);
+    glViewport(0, 0, bw, bh);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (f && f->format != AV_PIX_FMT_NV12 && f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P) {
+        /* other layouts and depths: NV12 through libswscale */
+        if (!G.converted || G.converted->width != f->width || G.converted->height != f->height) {
+            av_frame_free(&G.converted);
+            G.converted = av_frame_alloc();
+            if (!G.converted)
+                return -1;
+            G.converted->format = AV_PIX_FMT_NV12;
+            G.converted->width = f->width;
+            G.converted->height = f->height;
+            if (av_frame_get_buffer(G.converted, 0) < 0)
+                return -1;
+        }
+        G.to_nv12 = sws_getCachedContext(G.to_nv12, f->width, f->height, f->format, f->width, f->height, AV_PIX_FMT_NV12,
+                                         SWS_POINT, NULL, NULL, NULL);
+        if (!G.to_nv12)
+            return -1;
+        sws_scale(G.to_nv12, (const uint8_t *const *)f->data, f->linesize, 0, f->height, G.converted->data, G.converted->linesize);
+        G.converted->colorspace = f->colorspace;
+        G.converted->color_range = f->color_range;
+        f = G.converted;
+    }
+    if (f) {
+        int nv12 = f->format == AV_PIX_FMT_NV12;
+        int cw = (f->width + 1) / 2, ch = (f->height + 1) / 2;
+        float m[9], off[3];
+        /* rows are uploaded with their padding: the picture is the left part of each texture */
+        float row_y = (float)f->linesize[0], row_c = nv12 ? f->linesize[1] / 2.0f : (float)f->linesize[1];
+        static const float quad[] = { -1, -1, 0, 1,   1, -1, 1, 1,   -1, 1, 0, 0,   1, 1, 1, 0 };
+
+        glUniform2f(G.u_scale_y, f->width / row_y, 1.0f);
+        glUniform2f(G.u_scale_c, cw / row_c, 1.0f);
+        glUniform2f(G.u_max_y, (f->width - 0.5f) / row_y, 1.0f);
+        glUniform2f(G.u_max_c, (cw - 0.5f) / row_c, 1.0f);
+
+        gl_upload(0, GL_LUMINANCE, f->data[0], f->linesize[0], f->height);
+        if (nv12) {
+            gl_upload(1, GL_LUMINANCE_ALPHA, f->data[1], f->linesize[1] / 2, ch);
+        } else {
+            gl_upload(1, GL_LUMINANCE, f->data[1], f->linesize[1], ch);
+            gl_upload(2, GL_LUMINANCE, f->data[2], f->linesize[2], ch);
+        }
+        gl_colour(f, m, off);
+        glUniformMatrix3fv(G.u_matrix, 1, GL_FALSE, m);
+        glUniform3fv(G.u_offset, 1, off);
+        glUniform1f(G.u_nv12, nv12 ? 1.0f : 0.0f);
+        glViewport(dx, bh - dy - dh, dw, dh);
+        glVertexAttribPointer((GLuint)G.a_pos, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), quad);
+        glVertexAttribPointer((GLuint)G.a_uv, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), quad + 2);
+        glEnableVertexAttribArray((GLuint)G.a_pos);
+        glEnableVertexAttribArray((GLuint)G.a_uv);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+    announce("GL (EGL window)", bw, bh, dx, dy, dw, dh);
+    *bw_out = bw;
+    *bh_out = bh;
+    return 0;
+}
+
+static int gl_show(AVFrame *f)
+{
+    int bw, bh;
+
+    if (gl_draw(f, &bw, &bh) < 0)
+        return -1;
+    if (W.viewport) {
+        wl_surface_set_buffer_scale(W.surface, 1);
+        wp_viewport_set_destination(W.viewport, W.width, W.height);
+    } else {
+        wl_surface_set_buffer_scale(W.surface, W.scale120 / 120);
+    }
+    frame_request();
+    /* attaches the rendered buffer and commits the surface */
+    if (!eglSwapBuffers(G.display, G.surface)) {
+        fprintf(stderr, "pdvideo: eglSwapBuffers failed (error 0x%x)\n", eglGetError());
+        return -1;
+    }
+    wl_display_flush(W.display);
+    return 0;
+}
+
+/* the last picture drawn once more and read back: what the GL path produces, as a PPM */
+static void gl_snapshot(const char *path, AVFrame *last)
+{
+    int bw, bh;
+    uint8_t *px;
+    FILE *out;
+
+    if (gl_draw(last, &bw, &bh) < 0 || !(px = malloc((size_t)bw * bh * 4)))
+        return;
+    glReadPixels(0, 0, bw, bh, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    if ((out = fopen(path, "wb"))) {
+        fprintf(out, "P6\n%d %d\n255\n", bw, bh);
+        for (int y = bh - 1; y >= 0; y--) {
+            for (int x = 0; x < bw; x++)
+                fwrite(px + ((size_t)y * bw + x) * 4, 1, 3, out);
+        }
+        fclose(out);
+    }
+    free(px);
+}
+#endif /* PDVIDEO_GL */
 
 static int shm_file(size_t size)
 {
@@ -888,8 +1216,6 @@ static void window_snapshot(const char *path)
     fclose(f);
 }
 
-/* surface units to device pixels, rounding as wp_fractional_scale_v1 prescribes */
-static int to_pixels(int v) { return (v * W.scale120 + 60) / 120; }
 
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time)
 {
@@ -902,6 +1228,16 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t time)
 }
 static const struct wl_callback_listener frame_listener = { frame_done };
 
+/* asks for the compositor's frame callback of the next commit, when none is outstanding */
+static void frame_request(void)
+{
+    if (!W.frame_callback) {
+        W.frame_callback = wl_surface_frame(W.surface);
+        wl_callback_add_listener(W.frame_callback, &frame_listener, NULL);
+        W.frame_callback_at = now();
+    }
+}
+
 /* Converts the picture into a buffer of the window's size in device pixels (letterboxed) and
  * commits it. Returns 0 when it was shown. */
 static int window_show(AVFrame *f)
@@ -912,18 +1248,13 @@ static int window_show(AVFrame *f)
 
     if (!W.configured || bw <= 0 || bh <= 0)
         return -1;
+#ifdef PDVIDEO_GL
+    if (vo_gl())
+        return gl_show(f);
+#endif
     if (!(sb = buffer_get(bw, bh)))
         return -1;
-    /* the largest rectangle of the picture's shape */
-    if ((int64_t)bw * W.video_h <= (int64_t)bh * W.video_w) {
-        dw = bw;
-        dh = FFMAX(1, (int)((int64_t)bw * W.video_h / W.video_w));
-    } else {
-        dh = bh;
-        dw = FFMAX(1, (int)((int64_t)bh * W.video_w / W.video_h));
-    }
-    dx = (bw - dw) / 2;
-    dy = (bh - dh) / 2;
+    picture_rect(bw, bh, &dx, &dy, &dw, &dh);
     if (dw != bw || dh != bh)
         memset(sb->map, 0, sb->size);
     if (f) {
@@ -955,31 +1286,29 @@ static int window_show(AVFrame *f)
         wl_surface_damage_buffer(W.surface, 0, 0, bw, bh);
     else
         wl_surface_damage(W.surface, 0, 0, W.width, W.height);
-    if (!W.frame_callback) {
-        W.frame_callback = wl_surface_frame(W.surface);
-        wl_callback_add_listener(W.frame_callback, &frame_listener, NULL);
-        W.frame_callback_at = now();
-    }
+    frame_request();
     wl_surface_commit(W.surface);
     sb->busy = 1;
     W.last_buffer = sb;
     wl_display_flush(W.display);
-    if (W.announced_w != bw || W.announced_h != bh || W.announced_scale != W.scale120) {
-        fprintf(stderr, "pdvideo: window %dx%d surface units, scale %.4g, buffer %dx%d XRGB8888, picture %dx%d at %d,%d%s\n",
-                W.width, W.height, W.scale120 / 120.0, bw, bh, dw, dh, dx, dy,
-                W.viewport ? " (wp_viewport destination)" : " (integer buffer scale)");
-        W.announced_w = bw;
-        W.announced_h = bh;
-        W.announced_scale = W.scale120;
-    }
+    announce("XRGB8888 (wl_shm)", bw, bh, dx, dy, dw, dh);
     return 0;
 }
 
 /* the window's size when the compositor leaves it to us: one video pixel per device pixel,
- * shrunk to the bounds the compositor gave (or 1280x720 surface units) */
+ * shrunk to the bounds the compositor gave, else to the output (less room for a title bar),
+ * else to 1280x720 surface units */
 static void window_default_size(int *w, int *h)
 {
-    int max_w = W.bounds_w > 0 ? W.bounds_w : 1280, max_h = W.bounds_h > 0 ? W.bounds_h : 720;
+    int max_w = 1280, max_h = 720;
+
+    if (W.bounds_w > 0 && W.bounds_h > 0) {
+        max_w = W.bounds_w;
+        max_h = W.bounds_h;
+    } else if (W.output_w > 0 && W.output_h > 0) {
+        max_w = W.output_w * 120 / W.scale120;
+        max_h = FFMAX(64, W.output_h * 120 / W.scale120 - 48);
+    }
     double sw = W.video_w * 120.0 / W.scale120, sh = W.video_h * 120.0 / W.scale120;
     double k = FFMIN(1.0, FFMIN(max_w / sw, max_h / sh));
 
@@ -1083,7 +1412,11 @@ static void output_geometry(void *d, struct wl_output *o, int32_t x, int32_t y, 
 }
 static void output_mode(void *d, struct wl_output *o, uint32_t flags, int32_t w, int32_t h, int32_t refresh)
 {
-    (void)d; (void)o; (void)flags; (void)w; (void)h; (void)refresh;
+    (void)d; (void)o; (void)refresh;
+    if ((flags & WL_OUTPUT_MODE_CURRENT) && w > W.output_w) {
+        W.output_w = w;
+        W.output_h = h;
+    }
 }
 static void output_done(void *d, struct wl_output *o) { (void)d; (void)o; }
 static void output_scale(void *d, struct wl_output *o, int32_t factor)
@@ -1394,7 +1727,8 @@ static void usage(void)
         "usage: pdvideo [options] <file>\n"
         "  --hwdec=NAME      hardware decoder (an FFmpeg hw device type, e.g. pdavd); auto (default): pdavd when\n"
         "                    this FFmpeg has it and the device opens, else software; none: software\n"
-        "  --vo=shm|null     window through wl_shm (default), or no window (decode and timing only)\n"
+        "  --vo=shm|gl|null  window through wl_shm (default); through EGL/GLES 2 with the YCbCr planes as\n"
+        "                    textures (builds with GL only); or no window (decode and timing only)\n"
         "  --ao=auto|null    AudioQueue when there is an output device, else a clock-paced stand-in (default);\n"
         "                    null: the stand-in\n"
         "  --no-audio        ignore the audio stream (the picture runs on the system clock)\n"
@@ -1445,8 +1779,18 @@ static int parse_options(int argc, char **argv)
         else return -1;
 #undef NEED
     }
-    if (!opt.file || (strcmp(opt.vo, "shm") && strcmp(opt.vo, "null")) || (strcmp(opt.ao, "auto") && strcmp(opt.ao, "null")))
+    if (!opt.file || (strcmp(opt.ao, "auto") && strcmp(opt.ao, "null")))
         return -1;
+    if (strcmp(opt.vo, "shm") && strcmp(opt.vo, "null")) {
+#ifdef PDVIDEO_GL
+        if (strcmp(opt.vo, "gl"))
+            return -1;
+#else
+        if (!strcmp(opt.vo, "gl"))
+            fprintf(stderr, "pdvideo: this build has no GL output (build-pdvideo.nix: gl = true)\n");
+        return -1;
+#endif
+    }
     opt.volume = FFMIN(100, FFMAX(0, opt.volume));
     return 0;
 }
@@ -1546,6 +1890,10 @@ int main(int argc, char **argv)
         snprintf(title, sizeof(title), "%s - pdvideo", base ? base + 1 : opt.file);
         if (window_open(title) < 0)
             goto done;
+#ifdef PDVIDEO_GL
+        if (vo_gl() && gl_init() < 0)
+            goto done;
+#endif
         window_show(NULL);      /* black until the first picture */
         W.need_redraw = 0;
     }
@@ -1626,6 +1974,11 @@ done:
         if (P.have_audio)
             pthread_join(P.audio_thread, NULL);
     }
+#ifdef PDVIDEO_GL
+    if (opt.snapshot && vo_gl() && G.program)
+        gl_snapshot(opt.snapshot, P.last_frame);
+    else
+#endif
     if (opt.snapshot && vo_window())
         window_snapshot(opt.snapshot);
     long underruns = P.ao ? P.aod->underruns(P.ao) : 0;

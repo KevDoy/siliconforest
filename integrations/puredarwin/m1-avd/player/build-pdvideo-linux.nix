@@ -11,7 +11,7 @@ in pkgs.stdenv.mkDerivation {
   name = "darwin-lab-pdvideo-linux";
   src = ./src;
   nativeBuildInputs = [ pkgs.wayland-scanner pkgs.pkg-config ];
-  buildInputs = [ pkgs.ffmpeg pkgs.wayland ];
+  buildInputs = [ pkgs.ffmpeg pkgs.wayland pkgs.libGL ];
   buildPhase = ''
     for x in stable/xdg-shell/xdg-shell stable/viewporter/viewporter staging/fractional-scale/fractional-scale-v1 \
              unstable/xdg-decoration/xdg-decoration-unstable-v1; do
@@ -19,8 +19,8 @@ in pkgs.stdenv.mkDerivation {
       wayland-scanner client-header ${proto}/$x.xml $n-client-protocol.h
       wayland-scanner private-code ${proto}/$x.xml $n-protocol.c
     done
-    $CC -std=gnu11 -O2 -g -Wall -Wextra -Wno-deprecated-declarations -I. pdvideo.c *-protocol.c \
-      $(pkg-config --cflags --libs libavformat libavcodec libswresample libswscale libavutil wayland-client) -lm -lpthread -o pdvideo
+    $CC -std=gnu11 -O2 -g -Wall -Wextra -Wno-deprecated-declarations -DPDVIDEO_GL -I. pdvideo.c *-protocol.c \
+      $(pkg-config --cflags --libs libavformat libavcodec libswresample libswscale libavutil wayland-client wayland-egl egl glesv2) -lm -lpthread -o pdvideo
   '';
   installPhase = "install -Dm755 pdvideo $out/bin/pdvideo";
 }
