@@ -4,12 +4,12 @@ SiliconForest reads, and later boots from, the M1's internal NVMe storage instea
 ## Status (2026-11-11)
 | Phase | State |
 |---|---|
-| 1 Facts | Sources, saved Apple device tree and hypervisor read: done (below). Live Linux facts (partition table, `nvme id-ctrl`, SMART): script ready, **not yet run** (the bench was held all session). |
-| 2 Read-only driver `PDAppleNVMe` | Written, builds, in a collection; host tests of the read-only gate pass. **Not booted.** The first boot that starts the controller waits for the reviewer's go. |
-| 3 Filesystem groundwork | Source survey done; ext4 on a 4096-byte-sector GPT disk exercised in QEMU (see "Filesystem"). |
+| 1 Facts | Sources, saved Apple device tree, hypervisor: done. Controller state as left by the boot chain: observed on the M1 (boot nv01, nothing written). Linux' view (read-only): partition layout, Identify, SMART baseline, kernel log, and reference SHA-256 of 30 ranges (1 MiB each: start incl. GPT, seven points across the disk, start/middle/end of every partition, end incl. backup GPT) in `runs/m1-storage/linux-a/`. |
+| 2 Read-only driver `PDAppleNVMe` | Written, builds, in a collection; host tests of the read-only gate pass; booted once in observe mode (nv01). **The controller has not been started.** The first boot that starts it (nv02) waits for the reviewer's go. |
+| 3 Filesystem groundwork | Source survey done; ext4 read-write on a 4096-byte-sector GPT disk and the behaviour of write-protected media shown in QEMU. |
 | 4 Install design | Written below. Nothing of it is implemented or executed. |
 
-Nothing here is proven on the M1 yet. "Compile evidence" and "host test" are what exists.
+Proven on the M1 so far: only what nv01 observed. Everything about reading is compile evidence and host tests.
 
 ## Phase 1: facts
 
@@ -28,14 +28,16 @@ From the Omacom tree (`arch/arm64/boot/dts/apple/t8103.dtsi`, `t8103-pmgr.dtsi`,
 | Queues | one admin queue (Linux depth 2, tag 0) and one I/O queue (depth 64); tags are shared between them and limited to 64; "linear" submission: the command is written to slot `tag` and the tag to a doorbell (`0x2490c` admin, `0x24910` I/O); completion queues are ordinary |
 | Register writes at bring-up | `LINEAR_SQ_CTRL=1`, `MAX_PEND_CMDS_CTRL=64|64<<16`, `NVMMU_NUM_TCBS=63`, `AQA`, `ASQ`, `ACQ`, NVMMU TCB bases, `CC` |
 | Namespaces | ADT `namespaces` lists ids 1, 2, 3; Linux shows `nvme0n1` (the disk), `n2`, `n3` (small, firmware-owned). Only namespace 1 is read by this driver |
-| LBA size | 4096 (to be confirmed from Identify; the driver refuses anything else) |
-| Partition table as Linux sees it | **pending live read.** An earlier inventory (`runs/m1-unattended-008`) shows `p4` EFI (vfat, mounted `/boot/efi`), `p5` ext4 `/boot`, `p6` btrfs `/` (`discard=async`); `p1`–`p3` and the last are Apple's (iBoot system container, macOS, the Linux stub, recovery) |
+| LBA size | 4096, no metadata (Linux' Identify Namespace: `lbads=12`, `nsze=ncap=nuse=244276265`); the driver refuses anything else |
+| Identify Controller as Linux reads it | `vid=0x106b`, model `APPLE SSD AP1024Q`, firmware `590`, `mdts=8` (1 MiB per command: the driver's limit of 256 blocks is exactly that), `nn=3`, `oacs=0x4`, `oncs=0x4`, `vwc=1`, `aerl=1`, `sqes=0x76`, `cqes=0x44`, `rtd3e=0` (shutdown timeout 5 s); Linux runs it with 2 queues, depth 64. Full field list for the comparison with Darwin: `runs/m1-storage/linux-a/nvme-id.txt` |
+| Partition table as Linux sees it (read live, `lsblk`/sysfs, read-only) | 1 TB (244,276,265 blocks of 4096 bytes), GPT, 7 partitions: `p1` Apple Silicon boot (APFS, 500 MiB, starts at block 6), `p2` macOS APFS (~798 GiB), `p3` APFS (2.3 GiB, the Linux stub), `p4` EFI System (vfat, 500 MiB, mounted `/boot/efi`), `p5` ext4 2 GiB `/boot`, `p6` btrfs ~123 GiB (`/`, `/home`, …), `p7` Apple Silicon recovery (5 GiB, last). `nvme0n2` 3 MiB and `nvme0n3` 128 MiB are the firmware's namespaces. Linux' request limit: 1024 KiB per command |
 
 ### What the boot chain leaves behind
 iBoot → m1n1 stage 1 (in the Linux stub volume) → stage 2 `boot.bin` on the EFI partition (this lab's "boot window" build) → RAM-loaded m1n1 → hypervisor → XNU.
 - Stage 1 uses the NVMe to read stage 2 and then runs m1n1 `nvme_shutdown()`: delete I/O queues, `CC.SHN` normal, `CC.EN=0`, RTKit sleep, PMGR reset of `ANS2`. Linux' comment says the same: "an ANS NVMe controller is handed off with firmware shut down, in an NVMe disabled state, after a clean shutdown".
 - The RAM-loaded m1n1 does not initialise the NVMe (its `nvme_shutdown()` is a no-op when not initialised).
-- So XNU should find: coprocessor stopped (`CPU_CONTROL.RUN=0`), `CC.EN=0`, the `ANS2` domain possibly on. **Not yet observed**; `pdnvme=1` (observe only, nothing written) prints it. If the coprocessor is found running, the driver stops and leaves it alone.
+- **Observed (boot nv01, `pdnvme=1`, nothing written, 8 CPUs, M1 back in Linux):** `ANS2=0x0f0020ff`, `APCIE_ST=0x0f0000ff` (both on), `APCIE=0x000000ff`; `CPU_CONTROL=0` (coprocessor stopped); both mailbox directions empty; `CC=0x00474000` (`EN=0`, `SHN=01`: the normal-shutdown notification m1n1 left, I/O SQ entry size 7), `CSTS=0`, `AQA=0x003f003f`, boot status 0, linear SQ still enabled, `NVMMU_NUM=0x3f`, `CAP=0x20f0010040` (timeout field `0xf0`: 120 s), `VS=1.1.0`. This is the stopped, cleanly shut down state Linux expects to find. The driver's rule stands: a coprocessor found running is left alone.
+- SART as left by the boot chain: entries 0–3 with flags `0xff` (three in the `0x2_3Dxx_xxxx`/`0x2_3Exx_xxxx` range, one of `0x34000` bytes near the top of RAM) and entry 5 with flags `0xea` (`0x1a0000` bytes at `0x8_0003_4000`). As in Linux, every entry found with flags is treated as the boot loader's and never written; 11 entries are free, the driver needs about 4.
 - iBoot's view in the ADT (`iop-ans-nub`: `pre-loaded`, `running`) describes its own hand-off to m1n1, not what m1n1 leaves.
 
 ### The hypervisor
@@ -58,7 +60,9 @@ m1n1's hypervisor maps all MMIO straight through except what it hooks (`proxycli
 | Write / Flush / Dataset Management (the root is mounted `discard=async`) | yes | no | **no: not in the binary** |
 | Delete queues, `CC.SHN` normal shutdown, `CC.EN=0`, RTKit AP quiesced + IOP sleep, `CPU_CONTROL=0` | yes (`apple_nvme_shutdown`) | yes | yes (same sequence) |
 
-Persistent effects to expect from one PDAppleNVMe session, all of which Linux and m1n1 also cause per boot: one more controller start/stop (the SMART `power_cycles` counter probably counts it; to be measured), `host_read_commands` and `data_units_read` grow. `unsafe_shutdowns` must not change; it would only if the machine were reset while the controller was enabled. `data_units_written` / `host_write_commands` must not change by our doing (Linux' own shutdown and boot change them; the SMART log is therefore also read inside Darwin at the start and at the end of the session, which isolates our share).
+SMART baseline, read from Linux (read-only passthrough) at two points with four ordinary bench cycles of other streams in between (each: Linux reboot, m1n1, a Darwin boot that never touched the controller, external reset, Linux boot): `power_cycles` 1588 → 1592 (**+1 per cycle**), `unsafe_shutdowns` 107 → 107 (the external reset of a stopped controller does not count), `host_write_commands` about +950 per cycle and `data_units_written` +231 in total (Linux' own shutdown and boot), `media_errors` 0, `percent_used` 4. Linux' kernel log of an ordinary boot shows no recovery, replay or orphan line; `p5` (ext4 `/boot`) and `p6` (btrfs) are mounted read-write on every boot, `p4` (EFI) too.
+
+Expected from a boot that starts the controller under Darwin: `power_cycles` +1 as for any cycle (or +2 if the firmware counts its own start; to be measured), read counters up, **`unsafe_shutdowns` unchanged**, write counters changed only by what Linux does around it. The SMART log is also read inside Darwin at the start and the end of the session, which isolates our share exactly.
 
 ## Phase 2: the read-only driver
 
@@ -128,7 +132,12 @@ Root selection facts that matter for the design:
 - without `rd=md*`, the root must come from `rd=diskNsM`, or a `root-matching` dictionary / `boot-uuid` in `/chosen` published by the loader.
 - if the root device does not appear within 60 s, this kernel calls `IOSetRecoveryBoot` (**an NVRAM write**: `boot-command=recover-system`) and panics, unless `wdt=-1` is in the boot arguments. No NVRAM controller was found in our platform code, so the write probably goes nowhere, but that must be shown, or the path patched out, before any boot waits for a disk root.
 
-Demonstration without the M1's disk: see `runs/m1-storage/qemu/` (QEMU `virt`, the same arm64 binaries; a second virtio disk with 4096-byte sectors, GPT and ext4: mount read-write, write, unmount, remount, read back; a third, read-only disk: what the stack does with write-protected media). Result: recorded in the hand-back report.
+Demonstration without the M1's disk (QEMU `virt` under TCG, the same arm64 kernel binaries, through the other stream's `qemu-dev` tools unmodified; files in `runs/m1-storage/qemu/`):
+- the system itself roots on ext4 from a GPT virtio disk, read-write (`root_device on / (ext4, local, root file system)`);
+- a second disk with **4096-byte sectors**, a GPT written for that sector size and one ext4 partition (4096-byte blocks, made on the host): the GPT is parsed (`256 60000 1 GPT part - Linux data`), the partition mounts read-write, a text file and a 20 MiB file are written, unmount, remount, both read back; on the host afterwards `e2fsck -fn` is clean and the text file is there;
+- the same image attached **read-only** (the stack sees write-protected media, as it will with PDAppleNVMe): a read-write mount fails with "Permission denied", `-o rdonly` mounts and lists, writes to `/dev/rdiskN` and `/dev/diskNs1` fail with "Permission denied", and the image's SHA-256 is unchanged afterwards.
+- two things seen on the way: (1) **`diskN` numbers are not stable**: the system disk was `disk0` in some boots and `disk1` in others, so a root must be named by partition UUID (`boot-uuid`/`root-matching`), never `rd=disk0sN`; (2) the 20 MiB write took 100 s (about 0.2 MB/s) under TCG. Whether that is the emulator or the ext4 driver's write path is not known and must be measured on real hardware before ext4 is called fast.
+- not shown: a root on the 4096-byte-sector disk (the root in these runs is the 512-byte system disk); journal replay after an unclean stop; anything about APFS.
 
 ## Phase 4: design for the real install (nothing here is executed)
 
