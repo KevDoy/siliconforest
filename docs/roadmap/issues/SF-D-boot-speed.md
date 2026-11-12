@@ -46,7 +46,7 @@ First frame 126.1 s after the cycle starts (68.5 s after the hypervisor starts t
 Boot with all of it: `tools/bs_boot.sh <bsNN>`. Changes to the defaults (`tools/gpu_desktop.sh`, `darwin-gpu-desktop-interactive.in`) are in `default-changes.patch` for the owner to apply.
 
 ## After
-Boots `bs02` and `bs03` (same configuration, all five changes), against `ht01`/`df01`/`ht02` before. Seconds.
+Boots `bs02` and `bs03` (same configuration, all five changes), against `ht01`/`df01`/`ht02` before. Seconds. Boot `df02`, the same through `tools/gpu_desktop.sh` after the defaults were changed: first frame 7.27 s after the hypervisor starts the guest, 51.2 s after the cycle starts.
 
 | Segment | Before | `bs02` | `bs03` | Kind |
 |---|---|---|---|---|
@@ -95,7 +95,7 @@ The sound driver's own lines and its state at the audio server's start are the s
 
 ## Open
 - **Console silence is a heuristic.** 3.0 s of the 7.2 s goes to waiting until drivers stop logging (last line: sound jack detection, 4.25 s after the kernel starts, because `PDAppleSound` waits 2 s before it touches hardware) plus the 1 s of silence. A kernel line that arrives in the 0.2 s the challenge takes still fails the boot. The durable fixes are a session started by a launchd job instead of a typed command (SF-D D4), or drivers that stay busy until their background bring-up is done.
-- **Harness, not this stream's to change** (measured, for the owner): Linux `systemctl reboot` until m1n1 answers on USB 12.9 to 17.5 s; m1n1 bootstrap 1.9 s; wait for the new USB enumeration and worker start 4.4 s; return to Linux after the session 40 s.
+- **Harness, not this stream's to change** (measured, for the owner): Linux `systemctl reboot` until m1n1 answers on USB 12.9 to 17.5 s; m1n1 bootstrap 1.9 s; wait for the new USB enumeration and worker start 4.4 s; return to Linux after the session 40 s. Linux is not the slow part of the first: its journal ends within a second of the reboot request (`bs05`: request 20:40:07.3, last journal line 20:40:08, m1n1 on USB 20:40:24.4), so the rest is the reset, Apple's firmware and m1n1's first stage. Only a boot that does not go through Linux (`PCIE_CHAIN`, off) avoids it.
 - **RAM root upload is still the largest item (16.7 s).** USB runs at 11 MB/s, the single-core inflate at 58 MB/s of output. 24 MB of the 92 MB sent is the compositor binary (19 MB of `__const` that barely compresses) and 14 MB is `libicudata`. Decompressing on a second core while the next part uploads would save about 6 s; not tried.
 - **Drivers are slower while BSD starts beside them.** The display coprocessor took 0.3 s to boot when the kernel sat in its 60 s wait and takes 1.3 s now (display driver registered 2.2 to 2.3 s after the kernel starts instead of 1.2 s); launchd's exec takes 1.3 s instead of 0.4 s. Not explained. The shell cannot come up before the drivers are done, so this is about a second of the 6 to 7 s.
 - **Wi-Fi bring-up is 2.3 s after the root mounts** in every boot, old and new; of that, 0.5 s is a 500 ms poll for the interface name in `PDBwfm::bringUp`. Its last log line is what the launcher's silence gate waits for once the sound delay is shortened.
