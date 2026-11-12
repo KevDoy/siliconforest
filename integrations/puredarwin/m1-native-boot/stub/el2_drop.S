@@ -193,6 +193,15 @@ boot_entry:
         bl      puts
         mov     x0, x19
         bl      puthex
+        /* what memory holds at the entry, as this core reads it with its MMU off */
+        adr     x0, msg_code
+        bl      puts
+        ldr     x0, [x19]
+        bl      puthex
+        mov     x0, #' '
+        bl      putc
+        ldr     x0, [x19, #8]
+        bl      puthex
         adr     x0, msg_nl
         bl      puts
         b       enter_el1
@@ -289,6 +298,7 @@ report:
 
 msg_boot:       .asciz "\r\nPDNB stub at EL2\r\n"
 msg_el2:        .asciz "PDNB EL2 configured, entering EL1 at "
+msg_code:       .asciz " code "
 msg_nosec:      .asciz "\r\nPDNB secondary reset without an entry\r\n"
 msg_exc:        .asciz "\r\nPDNB EXCEPTION at EL"
 msg_v:          .asciz " vector "

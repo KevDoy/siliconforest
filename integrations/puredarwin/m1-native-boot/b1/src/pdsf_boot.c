@@ -435,6 +435,8 @@ int pdsf_boot(void *payload)
     fb_improve_logo();
     printf("PDSF: entering XNU at 0x%lx (EL1 through the EL2 page), boot arguments 0x%lx\n",
            entry, lay.bootargs);
+    printf("PDSF: code at the entry, as m1n1 reads it: %016lx %016lx\n", read64(entry),
+           read64(entry + 8));
     next_stage.entry = (generic_func *)(el2 + EL2_BOOT_ENTRY);
     next_stage.args[0] = entry;
     next_stage.args[1] = lay.bootargs;

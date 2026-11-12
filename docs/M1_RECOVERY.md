@@ -141,3 +141,10 @@ nested to the limit and spun at "machine will reset or spin"), about two minutes
 panic. The tool returned 0 and the controller verified a new Linux boot. One cycle. A kernel
 that hangs silently (no panic path, interrupts dead) is still not qualified.
 
+Boots `sfb01` and `sfb02` (the controller-free stage's first RAM proofs): the same single
+reset against a machine whose boot core had entered XNU and gone silent within its first
+instructions (no banner, no panic), the other seven cores held at EL2, no proxy device, about
+three minutes after the entry. Both times the controller verified a new Linux boot. What
+state the silent core was in (spinning in the kernel's early vectors or elsewhere) is not
+known.
+
