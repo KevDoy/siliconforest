@@ -35,4 +35,4 @@ RUN=(python3 -B $Q/qd_run.py)
   --qemu-arg=-drive --qemu-arg="if=none,id=data,file=$DATA,format=raw$RO" \
   --qemu-arg=-device --qemu-arg=virtio-blk-pci,drive=data,logical_block_size=4096,physical_block_size=4096 "${EXTRA[@]}" > "$OUT/run.log" 2>&1 || true
 tail -2 "$OUT/run.log"
-rm -f "$SYS"
+[ -n "${DR_QEMU_KEEP:-}" ] || rm -f "$SYS"   # DR_QEMU_KEEP=1: keep the system image for inspection

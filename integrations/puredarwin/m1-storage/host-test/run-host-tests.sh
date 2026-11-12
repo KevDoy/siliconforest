@@ -14,6 +14,9 @@ cc -std=c11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined -o "$OUT/gate
 #   1b. the identification of the SiliconForest partition in both GPT copies (kernel/pd_nvme_part.c)
 cc -std=c11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined -o "$OUT/part_host" "$HERE/part_host.c" "$K/pd_nvme_part.c"
 "$OUT/part_host" | grep -v '^PARTHOST ok'
+#   1c. the gate of the write-fenced build (kernel/pd_nvme_wgate.c; NOT part of the read-only kext)
+cc -std=c11 -Wall -Wextra -Werror -O2 -fsanitize=address,undefined -o "$OUT/wgate_host" "$HERE/wgate_host.c" "$K/pd_nvme_wgate.c" "$K/pd_nvme_gate.c"
+"$OUT/wgate_host" | grep -v '^WGATEHOST ok'
 fail=0
 check() { if [ "$2" != "$3" ]; then echo "SRCHOST FAIL: $1: $2, expected $3"; fail=1; fi; }
 # the submission doorbells are written in exactly one statement, in PDAns::ring()
@@ -29,6 +32,8 @@ check "uses of the host-to-device flag" "$(grep -c 'ANS_TCB_DMA_TO_DEVICE' "$K/p
 check "opcode names" "$(grep -ho 'PD_NVME_\(ADMIN\|IO\)_[A-Z_]*' "$K"/*.c "$K"/*.cpp "$K"/*.h | sort -u | tr '\n' ' ')" \
   "PD_NVME_ADMIN_CREATE_CQ PD_NVME_ADMIN_CREATE_SQ PD_NVME_ADMIN_DELETE_CQ PD_NVME_ADMIN_DELETE_SQ PD_NVME_ADMIN_GET_LOG_PAGE PD_NVME_ADMIN_IDENTIFY PD_NVME_IO_QID PD_NVME_IO_READ "
 check "names of write-side commands in the driver" "$(grep -il 'nvme_cmd_write\|NVME_CMD_WRITE\|nvme_cmd_dsm\|nvme_admin_format\|nvme_admin_set_features\|nvme_cmd_flush\|NVME_CMD_FLUSH' "$K"/* | wc -l)" 0
+# the write-fenced gate is in no source list of the read-only kext and is named by none of its files
+check "read-only kext sources that mention the write gate" "$(grep -l 'wgate\|PD_NVMEW' "$K/CMakeLists.txt" "$K/PDAppleNVMe.cpp" "$K/pd_ans.cpp" "$K/pd_ans.h" "$K/pd_soc.cpp" "$K/pd_nvme_gate.c" "$K/pd_nvme_part.c" | wc -l)" 0
 # the block device always reports write protection
 check "reportWriteProtection" "$(grep -c 'reportWriteProtection.*\*isWriteProtected = true' "$K/PDAppleNVMe.cpp")" 1
 if [ -n "${1:-}" ]; then
