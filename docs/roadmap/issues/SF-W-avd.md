@@ -10,7 +10,7 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 | 2. Kernel driver `PDAppleAVD` | **works on the M1**: H.264, HEVC and VP9 (8-bit 4:2:0), every decoded frame bit-identical to a software decode | boot `av02`: 1,290 of 1,290 frames in 10 clips |
 | 3. Userland interface `/dev/pdavd` + `libpdavd` + FFmpeg hwaccel `pdavd` | works for decode (the proof of layer 2 runs through it); buffers reach programs as read-only mappings, **not** as dma-bufs | boot `av02`; see "Not done" |
 | 4. Player `pdvideo` | **plays 1080p H.264 with sound on the M1 desktop using the hardware decoder**: 300 of 300 frames shown, none dropped, 16.8 % CPU against 36.9 % for software | boot `av05`; nobody has seen the picture |
-| 5. VideoToolbox | see "VideoToolbox" | |
+| 5. VideoToolbox decode side | **works on the M1 through the public API** on the hardware decoder (test program); Firefox itself: **not proven**, it does not run here yet | boot `av06`: 1,050 of 1,050 frames in five clips |
 
 "Works" above means: a program ran on the M1 under our kernel and its output was compared with a reference made elsewhere. Nobody has looked at a decoded picture on the panel in the boots listed under layer 2 (they have no desktop).
 
@@ -69,6 +69,29 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
   coreaudiod: 0 underruns. The decoder: 1,200 pictures, 0 errors, 0 timeouts, 0 DART faults.
   Reading: hardware decode halves the CPU use of 1080p playback (most of what remains is the copy and the colour conversion, which zero-copy would remove). The M1's CPU cores decode this 1080p stream faster than real time in software too; the hardware's benefit is CPU time and power, and it grows with resolution and bitrate. The larger A/V drift maximum of the hardware run is at the start of playback (the decoder is powered and its firmware loaded at the first frame: 48 ms for the first decode call); it was not investigated further.
 - **Not proven: that the picture on the panel is right.** Nobody was at the machine and no screen capture was taken; what is proven is that the frames are bit-identical to software decode (layer 2) and that the player presented all of them in time. The owner should look.
+
+## Layer 5: VideoToolbox (`integrations/puredarwin/m1-avd/videotoolbox/`)
+**Firefox playback is not proven, and cannot be until Firefox runs on this system.** What exists is the layer Firefox (and every other macOS application) decodes through, working on the M1 from a test program that uses only the public API.
+- `VideoToolbox.c` + `VideoToolbox.h`: a replacement for the tree's `src/Frameworks/VideoToolbox/VideoToolbox.c` (which says "the codecs this system has, which is none"). A `VTDecompressionSession` is a libavcodec decoder with the `pdavd` hwaccel when `/dev/pdavd` is there, libavcodec's software decoder otherwise (or when the caller sets `EnableHardwareAcceleratedVideoDecoder` to false; `RequireHardware…` fails without the device). Input: one sample per `CMSampleBuffer`, format description from `CMVideoFormatDescriptionCreate` with the `avcC`/`hvcC` atom in `SampleDescriptionExtensionAtoms` (what Firefox and FFmpeg build); H.264, HEVC, VP9. Output: `CVPixelBuffer` NV12 (`420v`/`420f`, or planar `y420`/`f420` on request) with the stream's colour attachments, in **decode order inside the `DecodeFrame` call**, as Apple's decoder delivers them, each with its `sourceFrameRefCon` and times. `VTIsHardwareDecodeSupported`, `VTSessionCopyProperty(UsingHardwareAcceleratedVideoDecoder)`, `CanAcceptFormatDescription`, `WaitForAsynchronousFrames`, `FinishDelayedFrames`, `Invalidate` are implemented; the session is a CF object. The compression side is unchanged (no encoder).
+- For decode order the FFmpeg patch has a hook (`AVPDAVDDeviceContext.picture_decoded`): libavcodec itself only outputs in presentation order.
+- `build-videotoolbox.nix` builds the framework against the arm64 CoreFoundation, CoreMedia and CoreVideo that the Cocoa stream builds from the pinned tree (its `arm64.nix` is imported, nothing of that stream is edited). FFmpeg is linked statically and hidden (only `VT*`/`kVT*` are exported).
+- **Hardware result, boot `av06`** (`tools/avd_vt_boot.sh`; `vt-decode-test`: libavformat only demultiplexes, then format description from the atom → session requiring hardware → `CMSampleBuffer` per sample → `CVPixelBuffer` in the callback → MD5 of its planes, compared with the workstation's software decode):
+
+| Clip | Through VideoToolbox on the hardware decoder |
+|---|---|
+| bbb-1080p-h264-10s (H.264 High) | 300 / 300 frames identical |
+| bbb-1080p-h264-main-b-3s (H.264 Main, B-frames) | 90 / 90 |
+| bbb-480p-h264-cavlc-manyslices (Baseline, cropped 854x480) | 60 / 60 |
+| bbb-1080p-hevc-10s (HEVC Main) | 300 / 300 |
+| bbb-1080p-vp9-10s (VP9) | 300 / 300 |
+
+  1,050 of 1,050; every callback carried its own sample's refCon; with B-frames the callbacks arrive out of presentation order (137 of 300), i.e. decode order. In that boot the test's second pass per clip, meant to be the software path, also ran on hardware (the flag was not wired; fixed since) and matched too; **the software path of the framework has not been run.** The time per `DecodeFrame` printed by that boot includes the test's own hashing and says nothing.
+- Test scaffolding to know about: that boot staged CoreMedia and IOSurface as the Cocoa stream builds them, but a CoreVideo made of the tree's `CVPixelBuffer.c` alone (same file, without `CVDisplayLink`), because the full CoreVideo pulls OpenGL, Mesa and LLVM into a boot that has no desktop frameworks. The framework under test is the one a Cocoa root would get.
+- **What the Cocoa stream needs to pick up** (nothing of theirs was edited):
+  1. Build `VideoToolbox.framework` from `m1-avd/build-videotoolbox.nix` (or its two sources with the same link line) instead of the tree's stub, and put it in the Cocoa root.
+  2. Boot a collection with `PDAppleAVD` (`m1-avd/build-kc.nix`) with `pdavd=1`, and stage the decoder's firmware as `/Library/Firmware/apple/avd-fw-v2-t0.bin`. Without them the framework decodes in software.
+  3. `/dev/pdavd` is root-only: Firefox's decoder process must be able to open it (run as root for now, or the node's mode relaxed once control validation is ported; a sandboxed content/RDD process will also need the device allowed in its profile).
+  4. Not checked against Firefox's binary: which further CoreMedia/CoreVideo/VideoToolbox symbols it imports (e.g. `CMVideoFormatDescriptionCreateFromH264ParameterSets`, `VTDecompressionSessionCopyBlackPixelBuffer`), and that Firefox's hardware path wants IOSurface-backed pixel buffers (`CVPixelBufferGetIOSurface`): the session makes them when the destination attributes ask and CoreVideo can (needs `iosurfaced`), which has not been run. The picture is copied into the pixel buffer in either case.
 
 ## Not done / known limits
 - **No dma-buf export, so no zero-copy to the compositor or Mesa.** Decoded buffers are kernel memory mapped read-only into the process; a player copies each frame (about 3 MB at 1080p) into a wl_shm buffer or a GL texture. Zero-copy needs the decoded buffers exported as dma-bufs that the asahi DRM driver can import (PRIME import in the LinuxKPI layer of `m1-drm72`) and NV12 import in the compositor: not started.

@@ -21,7 +21,9 @@ for name in $(sed -n 's/^AVD_CLIP_BEGIN //p' "$T"); do
     for e in mp4 h264 webm mkv h265 ivf; do [ -f "$d/$name.$e.framemd5" ] && ref=$d/$name.$e.framemd5; done
   done
   awk -v n="$name" '$0=="AVD_CLIP_BEGIN " n {on=1; next} /^AVD_CLIP_END/ {on=0} on' "$T" > "$T.clip"
-  if [ -n "$ref" ]; then python3 "$HERE/tools/avd_compare.py" "$T.clip" "$ref" "$name" || rc=1
+  order=runs/avd/rec/$name.order; [ -s "$order" ] || order=
+  [ -n "$ref" ] || { r=$(ls runs/avd/clips/jvt/*/x/"$name".*.framemd5 2>/dev/null | head -1); [ -n "$r" ] && ref=$r; }
+  if [ -n "$ref" ]; then python3 "$HERE/tools/avd_compare.py" "$T.clip" "$ref" "$name" $order || rc=1
   else echo "$name: no reference framemd5; $(grep -c PDAVD_FRAME "$T.clip") pictures decoded"; fi
 done
 rm -f "$T" "$T.clip"

@@ -20,6 +20,7 @@ struct rec_ctx {
 	int      used;
 	uint32_t nbuf;
 	size_t   size;
+	uint64_t pictures;        /* complete (non-HOLD) decodes so far */
 	uint8_t *buf[PDAVD_MAX_BUFFERS];
 };
 
@@ -138,6 +139,7 @@ pdavd_create(pdavd_dev *dev, struct pdavd_create *create)
 		rec_format(create);
 		dev->ctx[c].used = 1;
 		dev->ctx[c].nbuf = create->buffers;
+		dev->ctx[c].pictures = 0;
 		dev->ctx[c].size = create->format.sizeimage;
 		if (rec_head(dev, PDAVD_REC_CREATE, (uint32_t)(sizeof(*create) + create->format_ctrl.size)) ||
 		    rec_bytes(dev, create, sizeof(*create)) ||
@@ -202,6 +204,21 @@ pdavd_decode(pdavd_dev *dev, struct pdavd_decode *decode, const struct pdavd_met
 			length += decode->ctrls[i].size;
 		decode->status = 0x1000;
 		decode->decode_us = 0;
+		/*
+		 * The picture's number in decode order goes into the first bytes of its
+		 * buffer: a program that outputs the "decoded" frames of a recording run
+		 * thereby tells in which order it would present the pictures
+		 * (tools/avd_record.sh makes <clip>.order from it).
+		 */
+		if (!(decode->flags & PDAVD_DECODE_HOLD) && decode->ctx < 16 && dev->ctx[decode->ctx].used) {
+			struct rec_ctx *c = &dev->ctx[decode->ctx];
+			const uint8_t *address;
+			size_t size;
+
+			if (decode->dst < c->nbuf && pdavd_map(dev, decode->ctx, decode->dst, &address, &size) == 0 && size >= 8)
+				memcpy(c->buf[decode->dst], &c->pictures, 8);
+			c->pictures++;
+		}
 		if (rec_head(dev, PDAVD_REC_DECODE, length) || rec_bytes(dev, decode, sizeof(*decode)) ||
 		    rec_bytes(dev, meta ? meta : &none, sizeof(none)))
 			goto fail;
