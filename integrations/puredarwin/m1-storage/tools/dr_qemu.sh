@@ -8,6 +8,8 @@
 #   frames its output with QDDESK_BEGIN / QDDESK_PASS / QDDESK_END.
 #   DR_QEMU_FILES="src=/dest ..." further files for the system image
 #   DR_QEMU_BOOTARGS   further kernel boot arguments (e.g. "rd=uuid boot-uuid=<fs UUID> launchdsuffix=sfro")
+#   DR_QEMU_SINGLE=1     the boot is single-user (give -s in DR_QEMU_BOOTARGS)
+#   DR_QEMU_KERNEL=debug the kernel that honours launchdsuffix (the release one does not)
 #   DR_QEMU_DISK2      a third, writable virtio disk (512-byte sectors): the stand-in for the memory disk
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd); cd "$ROOT"
@@ -19,12 +21,17 @@ TEST=$(cd $M && nix-build --extra-experimental-features 'nix-command flakes' --n
 FILES=(--file "$GUEST=/usr/bin/dr-guest" --file "$TEST/usr/bin/pdnvme-test=/usr/bin/pdnvme-test")
 for f in ${DR_QEMU_FILES:-}; do FILES+=(--file "$f"); done
 [ -z "${DR_QEMU_BOOTARGS:-}" ] || FILES+=(--bootargs "$DR_QEMU_BOOTARGS")
+[ -z "${DR_QEMU_KERNEL:-}" ] || FILES+=(--kernel "$DR_QEMU_KERNEL")   # debug: the kernel that honours launchdsuffix (the release one does not)
 EXTRA=(); [ -z "${DR_QEMU_DISK2:-}" ] || EXTRA=(--qemu-arg=-drive --qemu-arg="if=none,id=state,file=$(readlink -f "$DR_QEMU_DISK2"),format=raw" --qemu-arg=-device --qemu-arg=virtio-blk-pci,drive=state)
 python3 -B $Q/qd_image.py --output "$SYS" "${FILES[@]}" > "$OUT/image.json" 2> "$OUT/image.err" || { tail -5 "$OUT/image.err" >&2; exit 2; }
 RO=""; [ "$MODE" = ro ] && RO=",readonly=on"
 # --up at the very end: the tool takes a screenshot one second after that marker, and the
 # guest's serial output stopped for good when that happened in the middle of the script
-python3 -B $Q/qd_run.py --image "$SYS" --out "$OUT" --command 'sh /usr/bin/dr-guest' --up QDDESK_END --shot-every 0 --timeout "$TIMEOUT" \
+# DR_QEMU_SINGLE=1: a single-user boot (-s in the boot arguments); its prompt is a bare "# ", which
+# qd_run.py does not wait for: the same tool with that one pattern replaced, nothing of it edited
+RUN=(python3 -B $Q/qd_run.py)
+[ -z "${DR_QEMU_SINGLE:-}" ] || RUN=(python3 -B -c 'import re, sys; sys.path.insert(0, sys.argv.pop(1)); import qd_run; qd_run.PROMPT = re.compile(rb"# ?(\x1b\[[0-9;?]*[a-zA-Z]|\x00)*\s*$"); sys.exit(qd_run.main())' "$Q")
+"${RUN[@]}" --image "$SYS" --out "$OUT" --command 'sh /usr/bin/dr-guest' --up QDDESK_END --shot-every 0 --timeout "$TIMEOUT" \
   --qemu-arg=-drive --qemu-arg="if=none,id=data,file=$DATA,format=raw$RO" \
   --qemu-arg=-device --qemu-arg=virtio-blk-pci,drive=data,logical_block_size=4096,physical_block_size=4096 "${EXTRA[@]}" > "$OUT/run.log" 2>&1 || true
 tail -2 "$OUT/run.log"

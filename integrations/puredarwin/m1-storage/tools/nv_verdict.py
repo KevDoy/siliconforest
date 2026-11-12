@@ -26,6 +26,7 @@ expect_refused = None if sys.argv[4] == 'any' else int(sys.argv[4])
 # NV_VERDICT_MODE=part: the SiliconForest partition (first block NV_PART_LBA) was named to the driver and
 # mounted read-only; NV_TREE_REF holds the tree digest of the image it was copied from.
 part_mode = os.environ.get('NV_VERDICT_MODE') == 'part'
+root_mode = os.environ.get('NV_VERDICT_MODE') == 'root'     # the root filesystem was our partition, read-only (guest/darwin-diskroot.in)
 ours_lba = int(os.environ.get('NV_PART_LBA', '0'))
 level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
 bad = []
@@ -120,7 +121,7 @@ for tag in ('NV_IDCTRL', 'NV_IDNS'):
     if l and d and not same:
         lf, df = dict(re.findall(r'(\w+)=("[^"]*"|\S+)', l.group(1))), dict(re.findall(r'(\w+)=("[^"]*"|\S+)', d.group(1)))
         print('    differing: ' + ' '.join('%s linux=%s darwin=%s' % (k, lf.get(k), df.get(k)) for k in lf if lf.get(k) != df.get(k)))
-if level >= 3:
+if level >= 3 and not root_mode:
     nparts = len(table)
     census = re.findall(r'^NV_MEDIA (.*)$', con, re.M)
     want = 'published=1 partitions=%d guarded=%d foreign=0' % (nparts, nparts)
@@ -168,6 +169,42 @@ if part_mode:
     check(bool(am and mm and am.group(2) == mm.group(2)), 'all ranges hash the same after the mounts as before them (inside Darwin)')
     check(not re.search(r'^NV_FAIL', con, re.M), 'no NV_FAIL line')
     for l in re.findall(r'^NV_DMESG .*$|^.*ext4: .*$', con, re.M)[:40]: print('NV_RESULT ' + l[:200])
+if root_mode:
+    nparts = len(table)
+    def tree(text, tag='NVT_TREE_ALL'):
+        m = re.search(r'^%s (files=\d+ dirs=\d+ links=\d+ other=\d+ bytes=\d+ errors=\d+ [0-9a-f]{64})' % tag, text, re.M); return m.group(1) if m else None
+    ref = Path(os.environ['NV_TREE_REF']).read_text()
+    check(re.search(r'^NV_ROOT disk read-only: root_device on / \(ext4.*read-only.*\) on disk\d+s\d+', con, re.M) is not None, 'the root filesystem is our partition, ext4, read-only: %s' % ' | '.join(re.findall(r'^NV_ROOT (.*)$', con, re.M)))
+    check(re.search(r'^NV_BOOTARGS .*rd=uuid boot-uuid=GUID', con, re.M) is not None and not re.search(r'^NV_BOOTARGS .*rd=md0', con, re.M), 'booted with rd=uuid boot-uuid=<partition GUID>, no rd=md0')
+    check(re.search(r'^NV_MOUNT /dev/md0 on /private/ram \(ext4(?!.*read-only)', con, re.M) is not None, 'the memory disk is mounted writable on /private/ram')
+    check('sf-roinit: root read-only' in con, 'process 1 was the wrapper (sf-roinit line on the console)')
+    check(re.search(r'^NV_PART verified first=%d ' % ours_lba, con, re.M) is not None, 'the driver identified our partition in both GPT copies')
+    census = re.findall(r'^NV_(?:MEDIA|BEFORE_STOP media|AFTER_STOP media) (.*)$', con, re.M)
+    want = 'published=1 partitions=%d guarded=%d foreign=0 ours=1' % (nparts, nparts - 1)
+    check(len(census) >= 3 and all(c.strip() == want for c in census), 'below the block device, %d readings: %s' % (len(census), ' | '.join(sorted(set(census)))))
+    fences = re.findall(r'^NV_(?:FENCE|BEFORE_STOP fence|AFTER_STOP fence) (.*)$', con, re.M)
+    f = lambda t, k: int(re.search(r'\b%s=(\d+)' % k, t).group(1))
+    check(len(fences) >= 4 and all(f(t, 'readfence') == 1 and f(t, 'other') == 0 for t in fences), 'read fence on; requests served outside the GPT and our partition: 0 in every reading')
+    check(len(fences) >= 4 and f(fences[0], 'refused') == 0, 'before the deliberate test NOTHING had asked for a block of an owner partition through the block device (refused=0): %s' % (fences[0] if fences else ''))
+    check(len(fences) >= 4 and 1 <= f(fences[-1], 'refused') <= 8 and 'NVT_FAIL' in ''.join(re.findall(r'^NV_FENCETEST (.*)$', con, re.M)), 'the deliberate read of an owner partition through /dev/rdiskN was refused: %s' % (fences[-1] if fences else ''))
+    print('NV_VERDICT note reads of our partition through the block device: %s' % (fences[-1] if fences else ''))
+    sw = re.findall(r'^NV_STATEWRITE (\S+) rc=(\d+)', con, re.M)
+    check(len(sw) == 4 and all(rc == '0' for _, rc in sw), 'writes to /var, /tmp, /private/var/tmp, /etc/resolv.conf succeed (memory): %s' % ' '.join('%s=%s' % x for x in sw))
+    fw = re.findall(r'^NV_FSWRITE (\S+) rc=(\d+) ?(.*)$', con, re.M)
+    check(len(fw) == 5 and all(rc != '0' for _, rc, _ in fw), 'writes to the root filesystem refused: %s' % '; '.join('%s rc=%s %s' % x for x in fw))
+    up = re.findall(r'^NV_MOUNT_AFTER_UPGRADE (.*)$', con, re.M)
+    check(len(up) == 1 and 'read-only' in up[0], 'root still read-only after the attempt to remount read-write')
+    check(tree(con) is not None and tree(con) == tree(ref) and 'errors=0' in tree(con), 'the whole root tree as the running system sees it equals the transformed source image: %s' % tree(con))
+    files_d, files_r = re.findall(r'^NVT_FILE (\S+ \d+ [0-9a-f]{64})', con, re.M), re.findall(r'^NVT_FILE (\S+ \d+ [0-9a-f]{64})', ref, re.M)
+    # the libSystem in use reads back changed in the cache (the same other digest in QEMU and on the M1, read-only
+    # or writable root); everything else must be exact
+    IN_USE = 'usr/lib/libSystem.B.dylib 4338830 83e40e0bcd4452917ffcc01815a16b41753fe4e478cf7e5ba092ef4c00fba765'
+    check(len(files_d) == 3 and files_d[:2] == files_r[:2] and files_d[2] in (files_r[2], IN_USE), 'named files hash as in the source image (libSystem: as on disk, or the known in-use digest): %s' % ('in-use digest' if files_d[2:] == [IN_USE] else 'as on disk'))
+    for l in re.findall(r'^NV_LIBSYSTEM .*$', con, re.M): print('NV_RESULT ' + l[:220])
+    check(not re.search(r'^NV_FAIL', con, re.M), 'no NV_FAIL line')
+    check('PD_BENCH_DONE' in con.split('NV_AFTER_STOP')[-1], 'the report after the stop came out complete (from memory)')
+    print('NV_VERDICT note writes the ext4 driver tried and IOMedia refused ("privilege violation" lines): %d' % con.count('privilege violation'))
+    for l in re.findall(r'^NV_DMESG .*$', con, re.M)[:30]: print('NV_RESULT ' + l[:200])
 raws = dict(re.findall(r'^NV_SMARTRAW (\S+) ([0-9a-f]{1024})', con, re.M))
 order = [k for k in ('start', 'end', 'start2', 'end2') if k in raws]
 for a, b in zip(order, order[1:]):

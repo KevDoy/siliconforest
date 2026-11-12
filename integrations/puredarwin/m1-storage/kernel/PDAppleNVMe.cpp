@@ -21,6 +21,13 @@
  *                       (read-only: the media stays write-protected). All three must be
  *                       given and must be found exactly so in both GPT copies
  *                       (pd_nvme_part.c); otherwise every partition is guarded as before
+ *   pdnvme_readfence=1  (with the three above; for a root on our partition) the block device
+ *                       serves reads only of the GPT's own blocks and, once it is identified,
+ *                       of our partition: no filesystem or boot-volume driver can read a
+ *                       block of the owner's partitions whatever it matches on. Refusals are
+ *                       counted in kern.pd_nvme.fence. /dev/pdnvme0 is not affected.
+ *                       Guarded partitions also lose their content hint, so that such
+ *                       drivers do not consider them in the first place.
  *
  * What makes it read-only is in pd_nvme_gate.c and PDAns::ring(): there is no code that
  * builds a write, flush, trim, format, sanitize, firmware, namespace or set-features
@@ -103,6 +110,10 @@ static int       gPartState = kPartNotAsked;
 static char      gPartWhy[96] = "not asked for";
 static IOLock   *gPartLock;
 static uint32_t  gExempted;
+static uint32_t  gReadFence;
+static uint64_t  gFenceRefused, gFenceRefusedBlocks, gOursRequests, gOursBlocks, gGptRequests, gOtherRequests, gOtherBlocks;
+#define GPT_HEAD_BLOCKS 6u      /* protective MBR, header, 4 blocks of table */
+#define GPT_TAIL_BLOCKS 5u      /* 4 blocks of table, header */
 
 static uint64_t now_ms(void) { return pd_ans_now_us() / 1000; }
 
@@ -346,6 +357,20 @@ PDAppleNVMeDisk::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 block, UInt
 	}
 	if (nblks == 0 || block >= gAns.nsBlocks || nblks > gAns.nsBlocks - block || buffer->getLength() < nblks * BLOCK)
 		return kIOReturnBadArgument;
+	/* where the request lies: the GPT's own blocks, our partition (only once identified), or anything else */
+	if (block + nblks <= GPT_HEAD_BLOCKS || block >= gAns.nsBlocks - GPT_TAIL_BLOCKS) {
+		OSIncrementAtomic64((volatile SInt64 *)&gGptRequests);
+	} else if (gPartState == kPartVerified && block >= gWant.first && nblks <= gWant.blocks && block - gWant.first <= gWant.blocks - nblks) {
+		OSIncrementAtomic64((volatile SInt64 *)&gOursRequests);
+		OSAddAtomic64((SInt64)nblks, (volatile SInt64 *)&gOursBlocks);
+	} else if (gReadFence) {
+		OSIncrementAtomic64((volatile SInt64 *)&gFenceRefused);
+		OSAddAtomic64((SInt64)nblks, (volatile SInt64 *)&gFenceRefusedBlocks);
+		return kIOReturnNotPermitted;
+	} else {
+		OSIncrementAtomic64((volatile SInt64 *)&gOtherRequests);
+		OSAddAtomic64((SInt64)nblks, (volatile SInt64 *)&gOtherBlocks);
+	}
 	IOReturn ret = buffer->prepare(kIODirectionIn);
 	if (ret != kIOReturnSuccess)
 		return ret;
@@ -493,6 +518,8 @@ PDAppleNVMeMediaGuard::start(IOService *provider)
 	if (!IOService::start(provider))
 		return false;
 	setProperty("PDGuarded", kOSBooleanTrue);
+	/* boot-volume and filesystem drivers find their media by this hint (the partition's type) */
+	provider->setProperty(kIOMediaContentHintKey, "PDAppleNVMe-guarded");
 	OSIncrementAtomic((volatile SInt32 *)&gGuarded);
 	LOG("partition %s: guarded, no content driver attaches", provider->getName());
 	return true;
@@ -797,7 +824,7 @@ media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsig
 
 /* ---- sysctl -------------------------------------------------------------------------------- */
 
-enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs, kCtlMedia, kCtlSmartRaw, kCtlStart, kCtlPart };
+enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs, kCtlMedia, kCtlSmartRaw, kCtlStart, kCtlPart, kCtlFence };
 
 static uint64_t le64(const uint8_t *p) { return OSReadLittleInt64(p, 0); }
 static uint32_t le32(const uint8_t *p) { return OSReadLittleInt32(p, 0); }
@@ -933,6 +960,10 @@ pd_sysctl(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sysctl_
 		    foreign, ours, names);
 		break;
 	}
+	case kCtlFence:
+		snprintf(text, sizeof(text), "readfence=%u refused=%llu refused_blocks=%llu ours=%llu ours_blocks=%llu gpt=%llu other=%llu other_blocks=%llu",
+		    gReadFence, gFenceRefused, gFenceRefusedBlocks, gOursRequests, gOursBlocks, gGptRequests, gOtherRequests, gOtherBlocks);
+		break;
 	case kCtlPart: {
 		static const char *const names[] = { "not-asked", "unchecked", "verified", "refused" };
 		/* no GUID here: it is in the boot arguments already and belongs in no log of ours */
@@ -980,12 +1011,13 @@ SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, stop, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LO
 
 PD_STR(media, kCtlMedia, "what is attached below the block device");
 PD_STR(smart_raw, kCtlSmartRaw, "SMART / health log page as last read, hexadecimal");
+PD_STR(fence, kCtlFence, "requests through the block device by where they lie; refused ones when pdnvme_readfence=1");
 PD_STR(part, kCtlPart, "the SiliconForest partition: asked for, verified in both GPT copies, or refused");
 SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, start, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, kCtlStart, pd_sysctl, "I",
     "write 1 after a clean stop: start the controller again; reads the number of starts");
 
 static struct sysctl_oid *const gOids[] = {
-	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_part, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
+	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_part, &sysctl__kern_pd_nvme_fence, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
 	&sysctl__kern_pd_nvme, &sysctl__kern_pd_nvme_state, &sysctl__kern_pd_nvme_stats, &sysctl__kern_pd_nvme_idctrl,
 	&sysctl__kern_pd_nvme_idns, &sysctl__kern_pd_nvme_gate_selftest, &sysctl__kern_pd_nvme_smart,
 	&sysctl__kern_pd_nvme_gate_rejected, &sysctl__kern_pd_nvme_write_refused, &sysctl__kern_pd_nvme_stop,
@@ -1050,6 +1082,8 @@ PDAppleNVMe::start(IOService *provider)
 				gWant.first = first;
 				gWant.blocks = blocks;
 				gPartState = kPartUnchecked;
+				if (PE_parse_boot_argn("pdnvme_readfence", &value, sizeof(value)) && value == 1)
+					gReadFence = 1;
 				snprintf(gPartWhy, sizeof(gPartWhy), "not looked at yet");
 			} else {
 				gPartState = kPartRefused;

@@ -10,6 +10,9 @@
  *   pdnvme-test wtest <device>                   opening for writing must fail; reports how
  *   pdnvme-test head <device> <lba>              the first 64 bytes of a block in hexadecimal
  *
+ *   pdnvme-test tree|treex <dir> [file ...]      digest of a directory tree (treex: one filesystem)
+ *   pdnvme-test stopreport <nonce>               stop the controller and report, from memory
+ *
  * The same source builds on Linux (cc -O2 -o pdnvme-test pdnvme-test.c) to compute the
  * reference hashes with identical code: there the device is opened with O_DIRECT.
  */
@@ -325,6 +328,7 @@ static int cmd_head(const char *dev, unsigned long long lba)
  */
 struct ent { char *path; char type; };
 static struct ent *ents; static size_t nents, cap;
+static int one_fs; static dev_t root_dev;       /* treex: directories on another filesystem are listed, not entered */
 static int walk(const char *root, const char *rel)
 {
 	char full[2048];
@@ -342,7 +346,7 @@ static int walk(const char *root, const char *rel)
 		ents[nents].path = strdup(child);
 		ents[nents].type = S_ISREG(st.st_mode) ? 'f' : S_ISDIR(st.st_mode) ? 'd' : S_ISLNK(st.st_mode) ? 'l' : 'o';
 		nents++;
-		if (S_ISDIR(st.st_mode)) bad |= walk(root, child);
+		if (S_ISDIR(st.st_mode) && !(one_fs && st.st_dev != root_dev)) bad |= walk(root, child);
 	}
 	closedir(d);
 	return bad;
@@ -359,10 +363,19 @@ static int file_sha(const char *path, char hex[65], unsigned long long *size)
 	sha_final(&s, hex);
 	return n < 0;
 }
+/*
+ * -e <path> (before the named files): that file's content is left out of the digest (its name
+ * and size stay in). For the one file a running system does not read back as it is on the
+ * disk: the libSystem.B.dylib in use reads with another SHA-256 than its blocks have, the
+ * same other one on the M1 and in QEMU, on a read-only and on a writable root (the loader
+ * changes its pages in the cache). Its hash is printed by naming it.
+ */
+static const char *except[8]; static int nexcept;
 static int cmd_tree(const char *root, int nfiles, char **files)
 {
 	struct sha256 all, top; char hex[65], cur[256] = ""; int bad; double t0 = now();
 	unsigned long long bytes = 0, counts[4] = { 0, 0, 0, 0 };
+	{ struct stat st; if (stat(root, &st) == 0) root_dev = st.st_dev; }
 	bad = walk(root, "");
 	qsort(ents, nents, sizeof(*ents), cmp_ent);
 	sha_init(&all); sha_init(&top);
@@ -377,7 +390,10 @@ static int cmd_tree(const char *root, int nfiles, char **files)
 		snprintf(full, sizeof(full), "%s/%s", root, ents[i].path);
 		n = snprintf(line, sizeof(line), "%c %s", ents[i].type, ents[i].path) + 1;
 		if (ents[i].type == 'f') {
-			if (file_sha(full, hex, &size)) { printf("NVT_TREE_FAIL read %s: %s\n", full, strerror(errno)); bad = 1; snprintf(hex, sizeof(hex), "unreadable"); }
+			int skip = 0;
+			for (int e = 0; e < nexcept; e++) skip |= !strcmp(except[e], ents[i].path);
+			if (skip) { struct stat st; snprintf(hex, sizeof(hex), "content-not-compared"); if (stat(full, &st) == 0) size = (unsigned long long)st.st_size; }
+			else if (file_sha(full, hex, &size)) { printf("NVT_TREE_FAIL read %s: %s\n", full, strerror(errno)); bad = 1; snprintf(hex, sizeof(hex), "unreadable"); }
 			n += snprintf(line + n, sizeof(line) - (size_t)n, "%llu %s", size, hex) + 1;
 			bytes += size; counts[0]++;
 		} else if (ents[i].type == 'l') {
@@ -401,8 +417,64 @@ static int cmd_tree(const char *root, int nfiles, char **files)
 	return bad;
 }
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+/*
+ * stopreport <nonce>: the end of a boot whose root filesystem is on the disk this driver
+ * serves. After the controller stops nothing can be read from the root any more, so one
+ * process that is already in memory does all of it: the report once as a rehearsal (every
+ * page it needs is then resident), the stop, the report again, and the bench's end marker.
+ */
+static void report(const char *when)
+{
+	static const char *const names[] = { "kern.pd_nvme.state", "kern.pd_nvme.stats", "kern.pd_nvme.fence", "kern.pd_nvme.part", "kern.pd_nvme.media" };
+	for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		char text[1200] = ""; size_t len = sizeof(text) - 1;
+		if (sysctlbyname(names[i], text, &len, NULL, 0) != 0) snprintf(text, sizeof(text), "(%s)", strerror(errno));
+		printf("NV_%s %s %s\n", when, names[i] + 13, text);
+	}
+	int v = -1; size_t l = sizeof(v);
+	sysctlbyname("kern.pd_nvme.gate_rejected", &v, &l, NULL, 0); printf("NV_GATE_REJECTED %d\n", v);
+	v = -1; l = sizeof(v);
+	sysctlbyname("kern.pd_nvme.write_refused", &v, &l, NULL, 0); printf("NV_WRITE_REFUSED %d\n", v);
+	fflush(stdout);
+}
+static int cmd_stopreport(const char *nonce)
+{
+	int one = 1, rc;
+	char state[200] = ""; size_t len;
+	setvbuf(stdout, NULL, _IONBF, 0);
+	report("BEFORE_STOP");
+	rc = sysctlbyname("kern.pd_nvme.stop", NULL, NULL, &one, sizeof(one));
+	printf("NV_STOPCALL rc=%d %s\n", rc, rc ? strerror(errno) : "");
+	for (int i = 0; i < 400; i++) {
+		len = sizeof(state) - 1; state[0] = 0;
+		sysctlbyname("kern.pd_nvme.state", state, &len, NULL, 0);
+		if (!strncmp(state, "stopped", 7) || !strncmp(state, "failed", 6)) break;
+		usleep(100000);
+	}
+	printf("NV_STATE %s\n", state);
+	report("AFTER_STOP");
+	printf("NV_END_%s\n\nPD_BENCH_DONE\n", nonce);
+	return 0;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#ifdef __APPLE__
+	if (argc == 3 && !strcmp(argv[1], "stopreport"))
+		return cmd_stopreport(argv[2]);
+#endif
+	if (argc >= 3 && !strcmp(argv[1], "treex")) {
+		one_fs = 1;
+		argv[1] = (char *)"tree";
+	}
+	if (argc >= 3 && !strcmp(argv[1], "tree")) {
+		int at = 3;
+		while (at + 1 < argc && !strcmp(argv[at], "-e") && nexcept < 8) { except[nexcept++] = argv[at + 1]; at += 2; }
+		return cmd_tree(argv[2], argc - at, argv + at);
+	}
 	if (argc >= 3 && !strcmp(argv[1], "tree"))
 		return cmd_tree(argv[2], argc - 3, argv + 3);
 	setvbuf(stdout, NULL, _IOLBF, 0);
