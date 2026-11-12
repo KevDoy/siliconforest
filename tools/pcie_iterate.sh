@@ -15,7 +15,8 @@ NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007
 SSH="ssh -o HostKeyAlias=10.1.1.93 -o BatchMode=yes"
 if [ -z "${M5_HOST:-}" ]; then
   M5_HOST=10.1.1.70
-  $SSH -o ConnectTimeout=2 chriskearney@10.1.1.127 true 2>/dev/null && M5_HOST=10.1.1.127
+  # the controller answers on the dock Ethernet (.127), or on Wi-Fi as .70 or .93, whichever it has
+  for h in 10.1.1.93 10.1.1.70 10.1.1.127; do $SSH -o ConnectTimeout=2 chriskearney@$h true 2>/dev/null && M5_HOST=$h; done
 fi
 export M5_HOST; M5=chriskearney@$M5_HOST
 R=$RUN/pcie-enum-attempt-$N
