@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
 done
 session() {   # the desktop session script for the installed system: by hand, no time limit that matters
   sed -e "s/@SECONDS@/${1}/g" -e "s/@AUTOPILOT@/0/g" -e "s/@SCALE@//g" -e "s/@THEME@//g" -e "s/@ONLY@//g" \
-      -e "s/@STATS@/3600/g" -e "s/@SOUND@/1/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/1/g" -e "s/@PERSIST@/1/g" -e "s|@ENV@||g" \
+      -e "s/@STATS@/3600/g" -e "s/@SOUND@/1/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/1/g" -e "s/@FETCH@/0/g" -e "s/@PERSIST@/1/g" -e "s|@ENV@||g" \
       "$Q/guest/qemu-desktop-session.in" > "$D/qemu-desktop-session"
 }
 fsck() {      # the guest is often stopped without a clean unmount: repair before every use

@@ -79,7 +79,7 @@ T1=$(date +%s.%N)
 [ "$AUTO" = 1 ] && STATS=120 || STATS=3600
 EXPORTS=; for kv in $ENVS; do EXPORTS="${EXPORTS}export $kv; "; done
 sed -e "s/@SECONDS@/$SECS/g" -e "s/@AUTOPILOT@/$AUTO/g" -e "s/@SCALE@/$SCALE/g" -e "s/@THEME@/$THEME/g" -e "s/@ONLY@/$ONLY/g" \
-    -e "s/@STATS@/$STATS/g" -e "s/@SOUND@/$SOUND/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/$TERMS/g" -e "s/@PERSIST@/0/g" -e "s|@ENV@|$EXPORTS|g" \
+    -e "s/@STATS@/$STATS/g" -e "s/@SOUND@/$SOUND/g" -e "s/@RENDERER@/cpu/g" -e "s/@TERMINALS@/$TERMS/g" -e "s/@FETCH@/1/g" -e "s/@PERSIST@/0/g" -e "s|@ENV@|$EXPORTS|g" \
     "$Q/guest/qemu-desktop-session.in" > "$OUT/qemu-desktop-session"
 python3 -B "$Q/qd_image.py" --output "$OUT/disk.img" --resolution "$RES" "${IMAGE_ARGS[@]}" \
   --file "$BIN=/usr/bin/chonkstep-darwin-desktop" --file "$TERMINAL=/usr/bin/chonk-terminal-darwin" \

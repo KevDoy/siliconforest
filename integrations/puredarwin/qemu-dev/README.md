@@ -86,6 +86,8 @@ Base image (`build-image.nix`): upstream `image-arm64-virt-minimal-release` at t
 
 - `pdhid-publish-keyboard.patch` (in the kernel collection, `build-kc.nix`): `/dev/usb_hid_kbd`
   never appeared for QEMU's USB keyboard; one line in IOHIDFamily's event queue.
+- `virtio-net-name-interface.patch` (same collection): nothing in a root without configd names
+  network interfaces; the virtio driver asks IONetworkStack to, as the lab's Wi-Fi driver does.
 - `loader-gop-mode.patch`: `pdgopmode=WxH` in the boot arguments selects the firmware graphics
   mode. The firmware's ramfb driver offers 640x480, 800x600 and 1024x768; the default here is
   1024x768.
@@ -124,7 +126,7 @@ QEMU's user network, xHCI with a USB keyboard and a USB mouse (headless) or tabl
 | Session logic, state directory, launch and cleanup | yes | started by launchd here, by the console script on the M1 |
 | Keyboard and pointer | through PDHID, as on the M1 | QEMU USB HID, not the M1's SPI keyboard and trackpad drivers |
 | coreaudiod, volume keys, sound menu | server starts; no device | "no IOAudioEngine": volume phases report SKIPPED. No virtio or HDA sound here |
-| Networking, Wi-Fi menu | no interface yet | virtio-net is found but never named `en0` in the minimal userland (no configd); see the status doc |
+| Networking | Ethernet on QEMU's user network: en0, DHCP, DNS, TCP out | `qemu-net-up`; the Wi-Fi menu shows "No Wi-Fi hardware". No Wi-Fi interface, so nothing of the Wi-Fi menu's join path |
 | AGX GL renderer, Mesa, dma-buf import | no | CPU renderer only |
 | DCP/KMS page flips, backlight, display power (idle phase) | no | firmware framebuffer, no vblank, no backlight |
 | Touch Bar, trackpad driver (multitouch, two-finger click), SPI keyboard | no | |

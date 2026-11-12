@@ -43,7 +43,7 @@ the host stretch every number here.
 | Build from a source tree (`--src`) | works: 177 s for a first release build of the compositor with 6 jobs (incremental builds reuse `runs/qemu-dev/target`) |
 | Persistent install: create, boot, update, reset | works with the minimal userland; state and files survive reboots (shown) |
 | Full userland in the install (`--variant wayland`) | recipe written; upstream's full no-X image was still building when this was written; not booted |
-| Network in the guest | not working: see open items |
+| Network in the guest | works: `virtio-net-name-interface.patch` names the interface (en0), `qemu-net-up` gets a DHCP lease from QEMU's user network and starts mdnsd; shown in the install (ping by name, `HTTP/1.1 200 OK` from example.com with netcat) and in the loop (`QDDESK_NET_UP_RC=0`, `QDDESK_HTTP`). HTTPS needs curl: full userland |
 
 ## Runs
 - `runs/qemu-dev/t3`, `t4`: autopilot `settle,pointer,drag,type` with the M1's current binaries
@@ -88,12 +88,7 @@ the host stretch every number here.
 - Full-userland install, network, HTTPS, a desktop running as the user `sf`.
 
 ## Open items
-1. Network: the virtio interface is probed (`IOVirtIONet: MAC ...`) but never named, so there is
-   no `en0` (waited four minutes). Nothing in the minimal userland names interfaces (on the M1
-   the Wi-Fi driver asks IONetworkStack itself). Either configd's InterfaceNamer from the full
-   userland, or a small tool that asks IONetworkStack to register all interfaces. After that
-   `qemu-net-up` (DHCP by `pd-dhcp`, then `mdnsd`) is expected to work as on the M1; untested.
-   HTTPS and CA certificates need curl/openssl, which only the full userland has.
+1. HTTPS with CA certificates: needs curl/openssl from the full userland (item 2).
 2. Full userland: finish the `image-arm64-virt-wayland` build, `qemu_install.sh create --variant
    wayland`, boot it, remove what collides with our session (upstream's own
    `org.puredarwin.wayland-session` job is already removed by `create`).

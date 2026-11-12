@@ -12,7 +12,7 @@ let
     src = pkgs.applyPatches {
       name = "puredarwin-qemu-dev-kexts-source";
       src = old.src;
-      patches = [ ./pdhid-publish-keyboard.patch ];
+      patches = [ ./pdhid-publish-keyboard.patch ./virtio-net-name-interface.patch ];
     };
   });
   kc = if kernelConfig == "debug" then p.kc-arm64-debug else p.kc-arm64;
