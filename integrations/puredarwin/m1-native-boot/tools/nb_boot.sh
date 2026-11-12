@@ -16,6 +16,9 @@
 #   NB_SECONDS       desktop session length (default 30)
 #   NB_KC            kernel collection (default: the default desktop collection; more than one
 #                    processor natively needs ../build-kc.nix)
+#   NB_SESSION=launchd  native: multi-user boot, the guest script started by launchd
+#                    (../guest/org.siliconforest.desktop.plist) instead of typed; no challenge
+#   NB_GUEST         shell profile: another guest script template (default ../guest-shell.in)
 #   NB_BOOTARGS      further boot arguments;  NB_WORDS  further words for native_mode.txt
 # The whole script is one function, read completely before anything runs.
 main() {
@@ -44,6 +47,7 @@ case "$MODE" in
   *) echo "NB_MODE is probe or native" >&2; exit 2;;
 esac
 WORDS="$WORDS ${NB_WORDS:-}"
+[ "${NB_SESSION:-}" = launchd ] && { [ "$MODE" = native ] || { echo "NB_SESSION=launchd is for native boots" >&2; exit 2; }; WORDS="$WORDS multiuser"; }
 KC=${NB_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 B=integrations/puredarwin/m1-bringup
@@ -79,9 +83,10 @@ if [ "$PROFILE" = desktop ]; then
   sed -e "s/@SECONDS@/${NB_SECONDS:-30}/g" -e "s/@HOLD@/1/g" -e "s/@VOLUME@/30/g" integrations/puredarwin/m1-boot-speed/guest/darwin-gpu-desktop-fast.in > "$S"
   ARGS="cpus=${NB_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $WAITS ${NB_BOOTARGS:-}"
 else
-  cp "$HERE/guest-shell.in" "$S"
+  cp "${NB_GUEST:-$HERE/guest-shell.in}" "$S"
   ARGS="cpus=${NB_CPUS:-1} $WAITS ${NB_BOOTARGS:-}"
 fi
+[ "${NB_SESSION:-}" = launchd ] && X="${X:+$X;}$HERE/guest/org.siliconforest.desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.desktop.plist"
 # More than one processor natively: m1n1 starts the secondary cores and the EL2 page holds
 # them; the kernel releases them only with pdcpuheld=1 (./build-kc.nix has the platform kext
 # that knows it).

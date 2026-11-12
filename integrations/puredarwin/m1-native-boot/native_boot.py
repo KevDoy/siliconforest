@@ -28,6 +28,10 @@ native_mode.txt is one line of words:
                IOLog lines stay in the kernel log and off the UART. At 115200 baud the full
                log holds the boot back by about 8 s (boot nb07); kernel printf, launchd and
                the shell still print.
+  multiuser    native only: boot multi-user (the launcher's built-in -s is dropped), for a
+               session that launchd starts (guest/org.siliconforest.desktop.plist). There is
+               no shell on the console then: the challenge is never typed, the result is
+               NO_COMMAND_LINE, and the capture ends on the guest script's PD_BENCH_DONE line.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -74,7 +78,7 @@ class Mode:
         self.sprr = 'nosprr' not in words
         self.amx = 'noamx' not in words
         self.wdt = None
-        known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog'}
+        known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
         for word in words:
             match = re.fullmatch(r'wdt=(\d{2,3})', word)
@@ -95,10 +99,13 @@ class Mode:
 
 
 def bootargs(native, text):
-    if 'noiolog' not in native.words:
-        return text
-    require(text.count(' serial=3 ') == 1, 'Boot arguments lack serial=3')
-    return text.replace(' serial=3 ', ' serial=0x13 ')
+    if 'noiolog' in native.words:
+        require(text.count(' serial=3 ') == 1, 'Boot arguments lack serial=3')
+        text = text.replace(' serial=3 ', ' serial=0x13 ')
+    if 'multiuser' in native.words:
+        require(text.count(' -s ') == 1, 'Boot arguments lack -s')
+        text = text.replace(' -s ', ' ')
+    return text
 
 
 def mode():
@@ -338,11 +345,16 @@ def start(native, hv, backend, layout, directory, runtime, console_factory, writ
         p.request(p.P_VECTOR, stub + STUB_BOOT_ENTRY, entry, bootargs, 0, 0, 0)
         mark('native_vector_acknowledged')
         deadline = time.monotonic() + runtime
-        while time.monotonic() < deadline and not console.done_seen and console.thread.is_alive():
+        untyped, done = 'multiuser' in native.words, False
+        while time.monotonic() < deadline and not done and console.thread.is_alive():
             time.sleep(.2)
-        if console.done_seen:
+            # A session started by launchd: no command was typed, so the console session
+            # does not look for the end marker itself.
+            done = console.done_seen or (untyped and re.search(
+                rb'(?:^|\n)PD_BENCH_DONE\r?\n', bytes(console.proof.output[-4096:])) is not None)
+        if done:
             time.sleep(1.0)
-        mark('native_capture_end', done=console.done_seen, console_bytes=len(console.proof.output))
+        mark('native_capture_end', done=done, console_bytes=len(console.proof.output))
     finally:
         error = None
         try:

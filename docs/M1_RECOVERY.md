@@ -135,3 +135,9 @@ idle single-user shell on one and on eight processors, and twice after a desktop
 had ended. Five of five. Linux logged `PMU logged 1 boot error(s) and 0 panic(s)` after
 each, as after a hypervisor boot. Still no cycle against a panicked or hung XNU.
 
+Boot `nb10`: the same single reset against a **panicked** native XNU (a deliberate
+`sysctl debug.panic_test=4` on eight processors; the kernel printed its panic report,
+nested to the limit and spun at "machine will reset or spin"), about two minutes after the
+panic. The tool returned 0 and the controller verified a new Linux boot. One cycle. A kernel
+that hangs silently (no panic path, interrupts dead) is still not qualified.
+

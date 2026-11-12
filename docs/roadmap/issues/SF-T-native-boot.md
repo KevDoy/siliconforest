@@ -111,12 +111,14 @@ From m1n1's sources and the worker logs of `df02` and `nb02` (every access the P
 | `nb06` | native, shell profile, **`cpus=8`**, collection `k2w23az4…`, `pdcpuheld=1` | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`; `hw.activecpu = 8`, idle counters for cpu0..cpu7; prompt 6.08 s after the vector. PMU: 1 boot error, 0 panics. |
 | `nb07` | native, **desktop profile**, 8 processors, 30 s session | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`; GL on KMS 2560x1600, 10 flips, 0 missed; Wi-Fi join, address, ping; Touch Bar ready; coreaudiod; both terminals; `GPUDESK_DESKTOP_RC=0`. First frame 15.49 s after the vector. PMU: 1 boot error, 0 panics. |
 | `nb08` | as `nb07`, `noiolog` | same result; first frame 8.67 s. PMU: 1 boot error, 0 panics. |
+| `nb09` | native desktop, 8 processors, `noiolog`, **300 s session** | `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`; 299 s of desktop, 0 missed refreshes, clean end, `GPUDESK_DESKTOP_RC=0`. PMU: 1 boot error, 0 panics. |
+| `nb10` | native shell, 8 processors, **deliberate panic** (`sysctl debug.panic_test=4`, `m1-quiet-boot/darwin-quiet-panic.in`) | panic report on the UART, nested panics up to the limit, `MACH Reboot` / "machine will reset or spin": it spun. The controller's one reset brought Linux back (`..._LINUX_VERIFIED`, `reset_attempts` 1). PMU: 1 boot error, **0 panics** (a Darwin panic is not what that counter counts). |
 
 `nb01`, `nb02`, `nb03b` ended `DARWIN_COMMAND_LINE_OBSERVED_LINUX_VERIFIED`. Linux after `nb04`: `macsmc-reboot: PMU logged 1 boot error(s) and 0 panic(s)`, as after a hypervisor boot.
 
 ## Open
-- **Reset against a dead kernel.** All five native resets were sent against a running, idle kernel. A panicked or hung native XNU has not been reset; the EL2 page's exception line has never had to print.
-- **Session length.** Native sessions so far are at most 30 s of desktop (under 4 minutes of kernel uptime in `nb04`). Nothing can stop a native kernel but the reset; `wdt=` (the SoC watchdog as a dead-man) is implemented and has never been used.
+- **Reset against a dead kernel.** Qualified once against a panicked kernel (`nb10`, all eight cores stopped in the panic path); never against a silent hang. The EL2 page's exception line has never had to print.
+- **Session length.** The longest native session is 5 minutes of desktop (`nb09`). Nothing can stop a native kernel but the reset; `wdt=` (the SoC watchdog as a dead-man) is implemented and has never been used.
 - **Console.** The harness needs the UART; the real system should not print a boot log on it at all. Typing is 320 bytes/s; interactive sessions over the UART (the terminal-input experiments) were not tried.
 - **Memory.** XNU still gets only the RAM above m1n1 and its heap (`hw.memsize` 15.05 GB, as under the hypervisor): the layout was kept identical on purpose. Loading over m1n1 (`chainload.py`'s way) would return about 1.3 GB and needs the EL2 page and the held cores moved out of m1n1's memory first.
 - **Secondary cores depend on m1n1 having started them.** That is the same contract Linux has with m1n1 (spin-table), and fine for a boot chain with m1n1 in it. Finding m1n1's spin table by pattern is a launcher trick; a boot from disk wants m1n1 to hand the cores over itself.
