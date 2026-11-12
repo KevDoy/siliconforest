@@ -139,7 +139,7 @@ controls again. (a) is what is built.
 | Upstream Terminal and Calculator on our desktop | see Results |
 | Menus | not visible (proposal above); key equivalents work |
 | Popup windows (menus, pop-up buttons, tool tips) | not handled: they are borderless toplevels placed by the compositor; needs xdg_popup in the WindowServer and in the compositor (which refuses popups today) |
-| Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). Not yet: network pages (checks written, running), sandbox on, GPU process |
+| Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). a page over HTTP, https://example.com. Not yet: sandbox on, GPU process, system trust store |
 | Auto Layout | layout API on NSView and the controls, constraint activation, a Cassowary solver (patch 0011); three constraint layouts equal in structure to macOS |
 | Control geometry and drawing | macOS 26 numbers and look, measured (patch 0012); compared control by control with `conformance/sheet.py` |
 
@@ -232,6 +232,16 @@ controls again. (a) is what is built.
     button) drawn by Gecko through WebRender's software renderer; the page reports through the
     window title: `SF page: loaded image=160x100 typed=abc clicks=1` after the driver typed
     `abc` and clicked the button; the block is 160 pixels wide for 160 CSS pixels at 100%.
+  - Network (`checks/firefox-http.json`, `firefox-https.json`; runs `ff-http1`, `ff-https1`, both
+    pass): the guest takes a DHCP lease on QEMU's user network (`qemu-net-up en0`); the test
+    page and its image are fetched over HTTP from a server on the host's loopback (its log has
+    the two GETs); `https://example.com/` loads, the window is titled "Example Domain", no
+    certificate or connection error page. The chain was accepted by Firefox's own NSS roots:
+    our Security answers an empty keychain, so no system trust store took part (the system
+    trust path proper, trustd and enterprise roots, is not there at the pin). In the HTTPS
+    screenshot, taken 30 s after the title while the page was still "transferring", the
+    paragraph is drawn and the heading is not: not looked into. Both runs used the second
+    compositor change: the window sits at the work area's origin, whole frame on screen.
   - Conditions: all six `MOZ_DISABLE_*_SANDBOX` switches; `guest/firefox-profile/user.js`
     (documented preferences only: `gfx.webrender.software`, `layers.gpu-process.enabled=false`,
     one content process, no first-run pages, no background traffic, and the first-run Terms of
@@ -241,8 +251,9 @@ controls again. (a) is what is built.
   - Open: the GPU process (starts with sandboxes off, tries OpenGL on Mesa's software
     rasteriser, is killed by Firefox for an IPC timeout under emulation); one run of five
     (`ff-ns3`) died in the parent with `pthread_cond_wait` returning EINVAL (not reproduced,
-    cause not found); in `ff-p3` the window was first mapped at 921x691 and then grew itself
-    off the screen's right edge (fixed after that run in the compositor, not yet seen fixed).
+    cause not found). In `ff-p3` the window was first mapped at 921x691 and then grew itself
+    off the screen's right edge; with worktree commit 0e3967f it is held to the work area
+    (`ff-http1`, `ff-https1`).
   - Sandbox on, design (not built): on macOS Firefox's content processes have no window server
     connection at all (`HAS_WINDOW_SERVER` is FALSE in the content profile), so the content
     process must simply be headless here, which the refused-connection change gives. For
