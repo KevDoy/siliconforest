@@ -1506,3 +1506,25 @@ rate-limits SSH: batch commands into one session.
 - `tools/pcie_iterate.sh` works from a private copy of the launcher tree per boot
   (`runs/m1-desktop-010/pcie-enum-attempt-<n>/lab`) and deletes its packet on the M5 afterwards
   (`PCIE_KEEP_PACKET=1` keeps it). It reaches the M5 over the dock Ethernet when that answers.
+
+## The default build is upstream's tip (November 12; `docs/roadmap/issues/SF-V-rebase.md`)
+
+- PureDarwin source: `integrations/puredarwin/rebase/pd.nix`. Default: the tip `c713d8fb`
+  (`sources/puredarwin-rebase`). `SF_PD=pin` is the old pin `e7aa00a6` and builds every pin
+  derivation as before. Recipes import `pd.nix`; none names a revision (exceptions are listed in
+  `rebase/tools/convert_recipes.py`; the Cocoa and Homebrew directories still name the pin).
+- The default collection is whatever `tools/default_kc.sh` prints (`rebase/build-kc.nix`: one
+  recipe, one patch list in `rebase/kernel.nix`; `native`, `storage`, `reboot` variants). Every
+  wrapper asks it; no wrapper carries a store path. The old collection chain's recipes return
+  that recipe at the tip and keep their bodies for `SF_PD=pin`.
+- The RAM root is the tip's (`artifacts/rebase/ramdisk-tip.img`, base mapping with the tip's
+  `libsystem-default`). What wrappers stage from Nix (Mesa, audio server, tools) is still built
+  from the pin (`export SF_PD=pin` in each wrapper) until those recipes build at the tip.
+- The launcher base tree types its challenge at a silent console in every boot and no longer
+  requires `PDSun50iMMC`. Per-boot launcher patches are generated against that tree: after any
+  change to it, regenerate all of them (list and method in the status doc).
+- Booting the pin: `GPU_DESKTOP_PIN=1 tools/gpu_desktop.sh …`, or `SF_KC=pin PCIE_PIN=1` in front
+  of another wrapper (pin collection, pin RAM root, pin mapping).
+- Upstream publishes the internal NVMe controller as a registry nub (`/arm-io/ans`). Nothing in
+  the default collection drives it. `pdnvme=` stays forbidden; `rebase/guest/rb-prologue.sh`
+  is the check to put in front of a guest script when a collection's members change.

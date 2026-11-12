@@ -15,6 +15,10 @@ Two layers, both under runs/qemu-dev/ (never committed):
 
 Nothing is mounted: the ESP is edited with mtools, the root with debugfs, both at the
 partition's offset inside the image file.
+
+The PureDarwin source is the one ../rebase/pd.nix selects: upstream's tip, or the old pin
+with SF_PD=pin. Remembered Nix answers and templates carry the source's name, so pin and tip
+runs neither read each other's store paths nor evict each other's templates.
 """
 import argparse
 import hashlib
@@ -32,8 +36,13 @@ OUT = LAB / 'runs/qemu-dev'
 SECTOR = 512
 NIX = ['nix-build', '--extra-experimental-features', 'nix-command',
        '--extra-experimental-features', 'flakes', '--no-out-link']
+# The PureDarwin source every recipe asked here builds from (../rebase/pd.nix): `tip` unless
+# SF_PD=pin. It is part of every remembered Nix answer's key and of every template's name.
+SOURCE = os.environ.get('SF_PD') or 'tip'
+if SOURCE not in ('pin', 'tip'):
+    raise SystemExit('SF_PD=%s: expected pin or tip' % SOURCE)
 ENV = dict(os.environ, PATH=str(Path.home() / '.nix-profile/bin') + ':' + os.environ['PATH'],
-           NIX_CONFIG='build-users-group = ')
+           NIX_CONFIG='build-users-group = ', SF_PD=SOURCE)
 # no_lock_timeouts=1: upstream's switch for emulated guests on a busy host, where a descheduled
 # vCPU thread otherwise reads as a spinlock deadlock (panic seen here at host load 40).
 BOOTARGS = {'debug': 'debug=0x218 -nogzalloc_mode keepsyms=1 serial=3 gopconsole=1 serial_video_mirror=0 -noprogress no_interrupt_masked_debug=1 no_lock_timeouts=1',
@@ -47,14 +56,20 @@ def sh(argv, **kw):
 REFRESH = False
 
 
-def nix(directory, *args):
+def nix(directory, *args, source=None):
     """A Nix build's output path. Evaluating a flake costs tens of seconds each time, so the
-    answers are remembered in runs/qemu-dev/base/inputs.json until --refresh."""
+    answers are remembered in runs/qemu-dev/base/inputs.json until --refresh. A key starts
+    with the source's name (`pin: ` or `tip: `); the keys without one are the pin's answers
+    from before the source could be chosen and are never read again. `source` asks for one
+    source whatever this run's is."""
+    source = source or SOURCE
     cache = OUT / 'base/inputs.json'
     known = json.loads(cache.read_text()) if cache.exists() else {}
-    key = ' '.join([str(directory)] + [str(a) for a in args])
+    key = source + ': ' + ' '.join([str(directory)] + [str(a) for a in args])
     if REFRESH or key not in known or not Path(known[key]).exists():
-        known[key] = sh(NIX + list(args), cwd=LAB / directory).strip().splitlines()[-1]
+        out = subprocess.run([str(a) for a in NIX + list(args)], check=True, text=True, capture_output=True,
+                             env=dict(ENV, SF_PD=source), cwd=LAB / directory).stdout
+        known[key] = out.strip().splitlines()[-1]
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(known, indent=1) + '\n')
     return known[key]
@@ -87,12 +102,11 @@ def tool(name):
     found = shutil.which(name)
     if found:
         return found
-    expr = '(import (builtins.getFlake "git+file://%s/sources/puredarwin-baseline?submodules=1&shallow=1&rev=%s").inputs.nixpkgs { system = "x86_64-linux"; }).mtools' % (LAB, PD_REV)
+    expr = '(import %s/integrations/puredarwin/rebase/pd.nix).pkgs.mtools' % LAB
     return str(Path(nix('.', '--impure', '-E', expr), 'bin', name))
 
 
 TEMPLATE_VERSION = 3    # raise when the template's construction changes
-PD_REV = 'e7aa00a60f0b56ef35aa24252e81467787bf71ea'
 
 
 def base_image(kernel, variant='minimal'):
@@ -152,8 +166,11 @@ def stable_payload(mesa, libsystem='spawnattr'):
         files[d] = (cd / 'terminfo/xterm-256color', False)
     files['/usr/share/backgrounds/siliconforest/siliconforest.png'] = (cd / 'backgrounds/siliconforest.png', False)
     sound = 'integrations/puredarwin/m1-sound'
-    a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all'))
-    play = Path(nix(sound, 'build-pdplay.nix'))
+    # The audio server, its frameworks and tools are the pin's builds on either source: our
+    # coreaudiod backend is not ported to the tip's coreaudiod (owner decision of 11 November,
+    # docs/roadmap/issues/SF-V-rebase.md, "Open, not in this stream").
+    a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all', source='pin'))
+    play = Path(nix(sound, 'build-pdplay.nix', source='pin'))
     for rel in ('usr/sbin/coreaudiod', 'usr/bin/pdtone', 'usr/bin/pdvolume'):
         files['/' + rel] = (a / rel, True)
     files['/usr/bin/pdplay'] = (play / 'usr/bin/pdplay', True)
@@ -165,9 +182,11 @@ def stable_payload(mesa, libsystem='spawnattr'):
     if dhcp.exists():
         files['/usr/bin/pd-dhcp'] = (dhcp, True)
     files['/usr/bin/qemu-net-up'] = (HERE / 'guest/qemu-net-up', True)
-    if libsystem == 'homebrew':
-        # The libSystem of the Homebrew stream (GitHub issue 46: among other things, an arm64
-        # function with a stack frame over 4 KiB no longer loses its first argument).
+    if libsystem == 'homebrew' or SOURCE == 'pin':
+        # The lab's default libSystem (../libsystem-default, GitHub issue 46: among other things,
+        # an arm64 function with a stack frame over 4 KiB no longer loses its first argument),
+        # built from this run's source. A pin run always takes it from here: the base mapping
+        # above names the libSystem of the default source, which is the tip's since the switch.
         lib = Path(nix('integrations/puredarwin/homebrew', 'build-libsystem.nix'))
         files['/usr/lib/libSystem.B.dylib'] = (lib / 'usr/lib/libSystem.B.dylib', True)
     if mesa:
@@ -261,7 +280,7 @@ def template(args):
     key = hashlib.sha256(json.dumps([str(up), bootargs, args.time_waits, TEMPLATE_VERSION,
                                      sorted((d, str(s), s.stat().st_size, s.stat().st_mtime_ns, x)
                                             for d, (s, x) in files.items())]).encode()).hexdigest()[:16]
-    out = OUT / 'base' / ('template-%s-%s-%s.img' % (args.kernel, args.variant, key))
+    out = OUT / 'base' / ('template-%s-%s-%s-%s.img' % (SOURCE, args.kernel, args.variant, key))
     if out.exists():
         return out
     (OUT / 'base').mkdir(parents=True, exist_ok=True)
@@ -285,7 +304,12 @@ def template(args):
     write_root(tmp, files)
     offset, _ = partitions(tmp)[1]
     subprocess.run(['e2fsck', '-fn', '%s?offset=%d' % (tmp, offset)], check=True, capture_output=True)
-    for old in (OUT / 'base').glob('template-%s-%s-*.img' % (args.kernel, args.variant)):
+    # older templates of the same source, kernel and variant; the other source's stay. Names
+    # without a source are the pin's from before the source was part of the name.
+    stale = list((OUT / 'base').glob('template-%s-%s-%s-*.img' % (SOURCE, args.kernel, args.variant)))
+    if SOURCE == 'pin':
+        stale += list((OUT / 'base').glob('template-%s-%s-*.img' % (args.kernel, args.variant)))
+    for old in stale:
         old.unlink()
     tmp.rename(out)
     return out

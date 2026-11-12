@@ -19,6 +19,22 @@ Nothing here uses the M1, the controller or the bench.
 Both boot the same kernel collection and base image and start the desktop from a launchd job
 (`org.siliconforest.qemu-desktop`), in parallel with upstream's root shell on the serial console.
 
+### Which PureDarwin
+
+The base image is built from the source `../rebase/pd.nix` selects: upstream's tip (`c713d8fb`)
+by default since 12 November 2026, the old pin (`e7aa00a6`) with `SF_PD=pin` in the environment
+of either script (`SF_PD=pin tools/qemu_desktop.sh ...`). With `SF_PD=pin`, `build-kc.nix` and
+`build-image.nix` are the derivations they were before the switch. `qd_image.py` keeps the two
+apart: every remembered Nix answer in `runs/qemu-dev/base/inputs.json` is keyed `pin: ...` or
+`tip: ...` (keys without a source are from before the switch and are no longer read), and
+templates are named `template-<pin|tip>-<kernel>-<variant>-<hash>.img`, so a run on one source
+replaces only that source's older template. libSystem: a tip run stages the one the M1 RAM
+root's base mapping names; a pin run always stages the pin build of `../libsystem-default`.
+The audio server, its frameworks and `pdplay` are the pin's builds on both sources (our
+coreaudiod backend is not ported to the tip's server yet).
+The `wayland` variant exists at the pin only (at the tip it is about 100 derivations to build):
+`SF_PD=pin tools/qemu_install.sh create --variant wayland`.
+
 ### Throw-away loop
 
 ```sh
@@ -82,8 +98,8 @@ the state directory in one boot are read back in the next.
 
 ## What is in the guest
 
-Base image (`build-image.nix`): upstream `image-arm64-virt-minimal-release` at the pinned commit
-`e7aa00a6`, RELEASE kernel, with two changes, both only for this target:
+Base image (`build-image.nix`): upstream `image-arm64-virt-minimal-release` at the tip `c713d8fb`
+(`SF_PD=pin`: at the old pin `e7aa00a6`), RELEASE kernel, with three changes, all only for this target:
 
 - `pdhid-publish-keyboard.patch` (in the kernel collection, `build-kc.nix`): `/dev/usb_hid_kbd`
   never appeared for QEMU's USB keyboard; one line in IOHIDFamily's event queue.

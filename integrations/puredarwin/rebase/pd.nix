@@ -10,11 +10,8 @@
 #                                 derivation is the one it always was
 #
 # The switch is an environment variable because the recipes import each other by path and
-# nix-build has no argument that reaches every import. Two caches in this lab key on recipe
-# text, not on the environment: m1-boot-speed/tools/bs_nix_path.py and qemu-dev/qd_image.py
-# (runs/qemu-dev/base/inputs.json). Whoever sets SF_PD also sets BS_NIX_CACHE=0 (that cache is
-# then neither read nor written) and does not run qd_image.py with it: a tip path left in
-# either cache would be handed to the next pin run. docs/roadmap/issues/SF-V-rebase.md.
+# nix-build has no argument that reaches every import. The two caches that remember store
+# paths by recipe text key on it: m1-boot-speed/tools/bs_nix_path.py and qemu-dev/qd_image.py.
 #
 # `tip` was upstream-xnu-12377 on 11 November 2026 (clone: sources/puredarwin-rebase, which
 # is this stream's own; sources/puredarwin-upstream-next belongs to the Cocoa stream).

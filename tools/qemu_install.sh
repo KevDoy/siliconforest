@@ -17,6 +17,9 @@
 #       (e.g. --command 'ls /Users/sf; echo QDINSTALL_DONE')
 #   tools/qemu_install.sh update [--bin FILE] [--terminal FILE]
 #       replaces the compositor/terminal/session files on the existing disk, keeps everything else
+#       (--variant wayland needs SF_PD=pin: upstream's full image is built at the old pin only;
+#       at the tip, the default source, it is a Nix build of about 100 derivations that has not
+#       been run. QD_WAYLAND_TIP=1 starts that build. minimal is made from the tip.)
 #   tools/qemu_install.sh reset     deletes the disk (create makes a fresh one)
 #   tools/qemu_install.sh status    where the disk is, its size, the last boot's result
 # Other streams: the disk is runs/qemu-dev/install/disk.img (GPT: 1 = ESP, 2 = ext4 root,
@@ -51,6 +54,10 @@ case "$CMD" in
 create)
   [ ! -e "$DISK" ] || [ "$FORCE" = 1 ] || { echo "$DISK exists (reset first, or --force)" >&2; exit 2; }
   [ -x "$BIN" ] && [ -x "$TERMINAL" ] || { echo "compositor or terminal binary missing" >&2; exit 2; }
+  if [ "$VARIANT" = wayland ] && [ "${SF_PD:-tip}" != pin ] && [ "${QD_WAYLAND_TIP:-0}" != 1 ]; then
+    echo "--variant wayland is built at the pin only: SF_PD=pin tools/qemu_install.sh create --variant wayland" >&2
+    echo "(QD_WAYLAND_TIP=1 builds upstream's full image at the tip first: about 100 derivations)" >&2; exit 2
+  fi
   mkdir -p "$D"; rm -f "$DISK"
   session 14400
   # Accounts: root as upstream has it, plus `sf` (uid 501, group staff). Passwords are unset

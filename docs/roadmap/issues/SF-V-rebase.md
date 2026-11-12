@@ -61,12 +61,69 @@ Building anything of the pin: `SF_PD=pin nix-build …`.
   `mapping.json.before-tip-20261112`)
 - new: `artifacts/rebase/ramdisk-tip.img`, `.json`, `.log`
 
-**Proof boots through the default entry points:** SWITCH_BOOTS_PLACEHOLDER
+**Proof boots through the default entry points:** all returned to verified Linux.
 
-**Hand-over, if this is read mid-way:** the edits above are in the working tree; proof boots are
-listed as they finish; open are the QEMU default (a sub-agent is on `qemu-dev/`), AGENTS.md, the
-clean-up of `m1-smp/kernel-patches/0002` and the T8010 override (both are pin-only code now and
-stay for `SF_PD=pin`), and the report to the coordinator.
+| Boot | Entry point, as it now defaults | Result |
+|---|---|---|
+| `sw01` | `tools/gpu_desktop.sh sw01 2` (fast quiet boot) | desktop on GL/KMS, Wi-Fi joined, ping, clean end |
+| `sw02` | `GPU_DESKTOP_VERBOSE=1 tools/gpu_desktop.sh sw02 2` (text boot, kernel waits, no launcher patch) | the same; the silent-console wait is in the base tree now |
+| `ds10` | `DS_SECONDS=235 m1-desktop-scale/tools/ds_desktop_boot.sh ds10 600` | all 44 autopilot lines identical to `ds09` |
+| `tb12` | `m1-touchbar/tools/tb_boot.sh tb12` | 37 of 37 checks PASS |
+| `sd50` | `SD_GUEST=…/darwin-speaker-test.in m1-sound/tools/sd_boot.sh sd50` | `hold_probe 0 -> 1`, tone sensed, fault 0, end marker |
+| `sm36` | `m1-smp/tools/smp_boot.sh sm36` | 8 processors, par8 438.8 MB/s, begin and end markers |
+| `av22` | `m1-avd/tools/avd_boot.sh av22 runs/avd/rec/bbb-360p-h264-5s.pdaj` (the wrapper's `pdavd=2`) | 150 of 150 frames equal to the software decode (`avd_compare.py`, rc 0): PDAppleAVD in the default collection |
+| `nb21` | `NB_WORDS=vdm-serial NB_MODE=native NB_RETURN=vdm NB_CPUS=8 m1-native-boot/tools/nb_boot.sh nb21 175` (collection `default_kc.sh native`) | native, no hypervisor: tip kernel, `hw.activecpu = 8`, command line observed, one reset back to Linux |
+| `sw03` | `GPU_DESKTOP_PIN=1 tools/gpu_desktop.sh sw03 2` | the pin's collection and RAM root through the new launcher tree: desktop, Wi-Fi, clean end |
+
+`nb19` (tip) and `nb20` (the pin's native collection, as a control) were native boots without
+`NB_WORDS=vdm-serial`: the kernel's console then never reaches the controller, both recorded 0
+bytes and `NO_COMMAND_LINE_OBSERVED`, both returned to Linux on the one reset. An operator error of
+this stream, not a result about either kernel; `nb21` is the same boot with the word.
+
+`PCIE_TIMEWAIT` (used by `tb_boot.sh`, `sd_boot.sh`): `TIME_WAIT_PATCH applied=false, signature not
+found` on the tip kernel; the boots ran with the kernel's remaining 30 s wait. Those wrappers
+should pass `pd_quiet_wait=0 pd_rtc_wait=0` instead (not changed here).
+
+**Staged user space at the tip (built, not yet staged):** `pdplay`, `pdtbtest`, `pd-netd` and the
+AVD user tools build at the tip. `chonkstep-darwin/build-pdgop.nix` does not (`PDGOP.c:87: use of
+undeclared identifier 'CFDictionaryRef'`), and with it the Mesa test bundle; the audio server does
+not (the coreaudiod patch, see the follow-up section). Until those three are ported the wrappers
+keep `export SF_PD=pin` for what they stage.
+
+**QEMU default** (`tools/qemu_desktop.sh`, `qemu-dev/`): the tip, `SF_PD=pin` for the pin (same
+derivations as before: `build-image.nix` `j8l87ddd….drv`, `build-kc.nix` `s9kh6cna….drv`); answer
+cache and templates are kept per source. Runs `runs/qemu-dev/sw01` (tip, long sequence: ok) and
+`sw02` (`SF_PD=pin`: ok). The persistent install's `wayland` image is 100 derivations at the tip
+and stays on `SF_PD=pin tools/qemu_install.sh create --variant wayland`.
+The `type` difference is explained and is not a tip matter: the autopilot arms when one window has
+focus and measures the window focused at the start of `type`; when the second start-up terminal
+maps during the phase it takes the keys and the measured window shows no change (every failing run
+has `windows=1` at the settle check, every passing one `windows=2`; the typed text is on screen in
+the other terminal, `rq03/shots/t001.png`; pin runs of 11 November show the same one-window state).
+Fix belongs in the compositor's autopilot; sequences with `drag` before `type` are unaffected.
+Correction to the QEMU section below: the `pdpowerd` line also appears on the pin.
+
+**Cocoa patches at the tip** (checked in recipe order, not ported): apply: 0002, 0003, 0008, 0009,
+0013, 0014, 0015, 0016; already upstream: 0001, 0007, and 0010 except its one `CMakeLists.txt`
+hunk; fail: 0004 (`message.h`, `rpc_wayland.c`), 0005 (`NSWindow.m`, `NSApplication.m`,
+`NSDisplay.m`), 0006 (`O2Context_builtin.m`), 0011 (`NSModernAppKit.h`; passes with `patch` fuzz),
+0012 (`NSButtonCell.m`, `NSSegmentedCell.m`), 0017 (`NSApplication.m`), 0018 (`message.h`,
+`rpc_wayland.c`). The Cocoa and Homebrew recipes still name the pin themselves.
+
+**Not switched, and why**
+- Staged user space (above): three recipes do not build at the tip.
+- `tools/agx_boot.sh`, `tools/dcp_boot.sh`, `m1-sound/aop/tools/mic_boot.sh`, the non-`PCIE_SKIP_BUILD`
+  paths of `tools/pcie_iterate.sh` (`m1-apcie-host/build-kc.nix`, `puredarwin-patches/`): bring-up
+  tools built on the chain's lower recipes; they work with `SF_PD=pin` and are not delegated.
+- `bs_boot.sh BS_KC=stock` still names a pin collection (it is that script's "before" kernel).
+- `m1-smp/kernel-patches/0002`, the register-name block and the T8010 override are no longer used
+  by the default build; they are kept because `SF_PD=pin` still builds from them.
+- DEBUG kernel at the tip: recipes whose own default is `kernelConfig = "debug"` (`m1-cpufreq`,
+  `m1-smp/build-kc-desktop`, `m1-quiet-boot`) would build one; not built or booted.
+- Storage and reboot collections: built, not booted (by instruction).
+
+**Overnight:** `integrations/puredarwin/rebase/tools/rb_overnight_smp.sh 30 20` (20 boots of the
+default collection on 8 CPUs, names `rb30`..`rb49`, stops at the first boot not back in Linux).
 
 ## State (before the switch)
 | Step | State |

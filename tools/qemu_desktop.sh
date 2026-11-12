@@ -30,6 +30,10 @@
 #   --bootargs 'A B'   further kernel boot arguments
 #   --libsystem homebrew   the Homebrew stream's libSystem (issue 46) instead of the M1 RAM root's
 #   --smp N, --memory MB, --timeout S, --verbose-boot, --refresh (ask Nix again for inputs)
+# Environment: SF_PD=pin  the base image (kernel collection, upstream userland) and libSystem of
+#                    the old PureDarwin pin e7aa00a6 instead of upstream's tip, the default
+#                    (integrations/puredarwin/rebase/pd.nix); templates and remembered Nix
+#                    answers are kept per source
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 Q=integrations/puredarwin/qemu-dev
