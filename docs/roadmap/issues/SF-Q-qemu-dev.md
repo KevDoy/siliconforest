@@ -38,9 +38,9 @@ the host stretch every number here.
 |---|---|
 | Desktop in QEMU from one command, headless, autopilot, screenshots, pass/fail | works: `tools/qemu_desktop.sh` |
 | Time from command to desktop | 45 s (load 12) to 60 s (load 24); image staging 0.7-1.7 s of it. Under 60 s only on a host that is not busy |
-| Window mode | see "Not proven" |
+| Window mode | works on a private X server (Xvfb): the QEMU window shows the desktop, a click and typed text sent to that window with xdotool arrive in the terminal (`runs/qemu-dev/win1/x-screen.png`). Not opened on the owner's screen |
 | Resolution | 1024x768 (the firmware's largest ramfb mode) |
-| Build from a source tree (`--src`) | see "Runs" |
+| Build from a source tree (`--src`) | works: 177 s for a first release build of the compositor with 6 jobs (incremental builds reuse `runs/qemu-dev/target`) |
 | Persistent install: create, boot, update, reset | works with the minimal userland; state and files survive reboots (shown) |
 | Full userland in the install (`--variant wayland`) | recipe written; upstream's full no-X image was still building when this was written; not booted |
 | Network in the guest | not working: see open items |
@@ -53,8 +53,17 @@ the host stretch every number here.
 - `runs/qemu-dev/install`: create; boot headless 40 s (desktop at 1024x768, rc 0); boot with a
   command writing `/Users/sf/note.txt` and a theme into the state directory; next boot reads both.
 - `runs/qemu-dev/full1`: compositor built from `sources/chonkstep-darwin` as it was in the
-  working tree, full autopilot. Result: see the stream's final report (not known when this was
-  written).
+  working tree at the time (another stream's uncommitted theme work included), full autopilot,
+  1024x768. All phases ran. Passed: drag, type, fullscreen (vi), scrollback, resize, redrag,
+  minimize, menu, settings (8 of 8 picks: 5 theme picks with `persisted=1`, 2 scale picks, the
+  Wi-Fi rows reading "No Wi-Fi hardware", 1 from the keyboard), chords, menuterm, limit.
+  SKIPPED as expected without the hardware: brightness, volume, touchbar, idle. **FAILED:
+  clipboard** (`pasted_bytes=3`, the other terminal's line empty) **and scale**
+  (`round_trip_same_grid_and_logical_size=false`), so the run's verdict is FAILED and the
+  command exits 1. Neither failure has been looked into: they may come from the 1024x768 desk
+  or from emulation speed, or be real. Until that is known a green baseline needs `--only`
+  without those two phases.
+- `runs/qemu-dev/win1`: window mode on Xvfb, by hand through xdotool (see State).
 
 ## Found on the way
 - Upstream bug: with a generic USB HID keyboard (QEMU's `usb-kbd`), `/dev/usb_hid_kbd` is never
@@ -69,11 +78,12 @@ the host stretch every number here.
   root partition is copied out and back (`qd_image.py --fsck`).
 
 ## Not proven
-- Window mode on the owner's screen: not opened there (headless is the rule unless asked).
-  Whether it was exercised on a private X server is in the stream's final report.
+- Window mode on the owner's own screen (Wayland, GTK): not opened there. The Xvfb run used
+  GTK's X11 backend.
 - The theme bug (theme switch from the menu sometimes not applied, window controls wrong): not
-  reproduced here yet. The autopilot's `settings` phase picks themes and is the place to start:
-  `tools/qemu_desktop.sh --only settle,settings`.
+  reproduced here. The autopilot's `settings` phase passed all five theme picks in `full1`, so the
+  autopilot's way of picking does not show it; by hand in a window is the next thing to try
+  (`tools/qemu_desktop.sh --window`), then `--only settle,settings` in a loop.
 - Anything in the "no" rows of the README's coverage table.
 - Full-userland install, network, HTTPS, a desktop running as the user `sf`.
 

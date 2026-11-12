@@ -66,7 +66,8 @@ for live in "$records"/*/term-live.txt; do
 done
 printf 'QDDESK_STATE scale=%s theme=%s\n' "$(cat "$state/chonkstep/scale" 2>/dev/null || echo none)" "$(cat "$state/chonkstep/theme" 2>/dev/null || echo none)"
 [ -r /var/log/coreaudiod.log ] && printf 'QDDESK_COREAUDIOD_LOG %s\n' "$(tail -3 /var/log/coreaudiod.log | tr '\n' '|' | cut -c1-300)"
-wait "$net_job"
+# The network job may still be waiting for an interface: it does not hold up the end.
+kill "$net_job" 2>/dev/null
 [ "$rc" = 0 ] && printf 'QDDESK_PASS\n'
 [ "@PERSIST@" = 1 ] && sync
 printf 'QDDESK_END\n'
