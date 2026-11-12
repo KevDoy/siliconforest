@@ -8,14 +8,14 @@
 # ../../m1-touchbar/tools/tb_desktop_boot.sh; the guest script is ../guest/darwin-desktop-scale.in.
 # Queues for the bench itself.
 # Usage: ds_desktop_boot.sh <name, prefix ds> [upper bound in seconds, 120..600, default 480]
-#   DS_DESKTOP_BIN   compositor binary (default: runs/m1-desktop-010/wm-darwin-scale-desktop-build-006)
+#   DS_DESKTOP_BIN   compositor binary (default: runs/m1-desktop-010/wm-darwin-scale-desktop-build-007)
 #   DS_TERMINAL_BIN  terminal binary (default: runs/m1-desktop-010/terminal-application-build-008)
 #   DS_SECONDS       length of the desktop session (default 215; 11..14400)
 #   DS_AUTOPILOT=0   no synthetic input: the desktop for a person, DS_SECONDS long
 #   DS_ONLY          autopilot phases to run, comma separated (default: all)
 #   DS_SCALE         CHONKSTEP_SCALE for the session: 1, 1.25, 1.5, 1.75, 2, 2.5, 3 (default: by the panel, 2)
 #   DS_THEME         CHONKSTEP_THEME: a built-in theme id (default: the classic one)
-#   DS_SECOND=0      skip the second session (persisted scale and theme)
+#   DS_SECOND=0|1    the second, 30 s session from a persisted scale and theme (default: 1 unattended, 0 by hand)
 #   DS_WIFI_TOGGLE=0 the settings phase reads the Wi-Fi rows but leaves the radio alone
 #   DS_RENDERER      gl (default), cpu, auto
 #   DS_VERBOSE=1     text boot instead of the quiet boot
@@ -31,11 +31,11 @@ SECONDS_DESK=${DS_SECONDS:-215}; AUTO=${DS_AUTOPILOT:-1}
 [ "$SECONDS_DESK" -ge 11 ] && [ "$SECONDS_DESK" -le 14400 ] || { echo "DS_SECONDS is 11..14400" >&2; exit 2; }
 case "${DS_SCALE:-}" in ''|1|1.25|1.5|1.75|2|2.5|3) ;; *) echo "DS_SCALE is one of 1 1.25 1.5 1.75 2 2.5 3" >&2; exit 2;; esac
 case "${DS_THEME:-}${DS_ONLY:-}" in *[!a-z0-9,-]*) echo "DS_THEME and DS_ONLY are lower-case ids" >&2; exit 2;; esac
-KC=${DS_KC:-/nix/store/mp7x0sgmn22zvaxlbx81dm5hvnrw887v-puredarwin-kc-arm64-0.1}
+KC=${DS_KC:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-D=${DS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-006/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+D=${DS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-007/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
 TERM_BIN=${DS_TERMINAL_BIN:-$ROOT/runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
@@ -68,7 +68,7 @@ S=$(mktemp)
 # Unattended: frame statistics every 120 frames and the speakers held; by hand: as tools/gpu_desktop.sh.
 if [ "$AUTO" = 1 ]; then STATS=120; HOLD=1; else STATS=3600; HOLD=${DS_SPEAKER_HOLD:-0}; fi
 sed -e "s/@SECONDS@/$SECONDS_DESK/g" -e "s/@AUTOPILOT@/$AUTO/g" -e "s/@SCALE@/${DS_SCALE:-}/g" -e "s/@THEME@/${DS_THEME:-}/g" \
-    -e "s/@ONLY@/${DS_ONLY:-}/g" -e "s/@SECOND@/${DS_SECOND:-1}/g" -e "s/@WIFI_TOGGLE@/${DS_WIFI_TOGGLE:-1}/g" \
+    -e "s/@ONLY@/${DS_ONLY:-}/g" -e "s/@SECOND@/${DS_SECOND:-$AUTO}/g" -e "s/@WIFI_TOGGLE@/${DS_WIFI_TOGGLE:-1}/g" \
     -e "s/@RENDERER@/${DS_RENDERER:-gl}/g" -e "s/@STATS@/$STATS/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/${DS_VOLUME:-30}/g" \
     "$HERE/guest/darwin-desktop-scale.in" > "$S"
 env "${QUIET[@]}" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=8 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 ${DS_BOOTARGS:-}" PCIE_EXTRA_FILES="$X" \

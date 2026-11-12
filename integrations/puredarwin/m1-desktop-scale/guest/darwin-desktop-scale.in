@@ -117,13 +117,13 @@ fi
 desk wayland-0 @SECONDS@ "$session"
 printf 'DSDESK_STATE after_first_session scale=%s theme=%s\n' "$(cat "$state/chonkstep/scale" 2>/dev/null || echo none)" "$(cat "$state/chonkstep/theme" 2>/dev/null || echo none)"
 printf 'DSDESK_WIFI_AFTER %s\n' "$(wifi)"
-if [ "@AUTOPILOT@" = 1 ] && [ "@SECOND@" = 1 ]; then
+if [ "@SECOND@" = 1 ]; then
     # The next session starts with what the menu last chose. Here that choice is put in the
     # state file by hand (150%, Graphite: neither is the default) and nothing is in the
     # environment; the first session's own writes are the DSDESK_STATE line above.
     unset CHONKSTEP_SCALE CHONKSTEP_THEME
     mkdir -p "$state/chonkstep"; printf 180 > "$state/chonkstep/scale"; printf graphite > "$state/chonkstep/theme"
-    export CHONKSTEP_DARWIN_AUTOPILOT_ONLY=settle,type
+    [ "@AUTOPILOT@" = 1 ] && export CHONKSTEP_DARWIN_AUTOPILOT_ONLY=settle,type
     second=$(printf '%s' "$session" | sed 's/.$/f/'); [ "$second" = "$session" ] && second=$(printf '%s' "$session" | sed 's/.$/e/')
     desk wayland-1 30 "$second"
     printf 'DSDESK_STATE after_second_session scale=%s theme=%s\n' "$(cat "$state/chonkstep/scale" 2>/dev/null || echo none)" "$(cat "$state/chonkstep/theme" 2>/dev/null || echo none)"
