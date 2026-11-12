@@ -9,7 +9,7 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 | 1. Facts | done | below |
 | 2. Kernel driver `PDAppleAVD` | **works on the M1**: H.264, HEVC and VP9 (8-bit 4:2:0), every decoded frame bit-identical to a software decode | boot `av02`: 1,290 of 1,290 frames in 10 clips |
 | 3. Userland interface `/dev/pdavd` + `libpdavd` + FFmpeg hwaccel `pdavd` | works for decode (the proof of layer 2 runs through it); buffers reach programs as read-only mappings, **not** as dma-bufs | boot `av02`; see "Not done" |
-| 4. Player | see "Player" | |
+| 4. Player `pdvideo` | **plays 1080p H.264 with sound on the M1 desktop using the hardware decoder**: 300 of 300 frames shown, none dropped, 16.8 % CPU against 36.9 % for software | boot `av05`; nobody has seen the picture |
 | 5. VideoToolbox | see "VideoToolbox" | |
 
 "Works" above means: a program ran on the M1 under our kernel and its output was compared with a reference made elsewhere. Nobody has looked at a decoded picture on the panel in the boots listed under layer 2 (they have no desktop).
@@ -50,6 +50,25 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 - **`libpdavd`** (`user/pdavd.c`, MIT): thin wrapper, plus the recording backend (`PDAVD_DEVICE=record:<file>`) used by the tests.
 - **FFmpeg hwaccel `pdavd`** (`ffmpeg/0001-pdavd-hwaccel.patch` against FFmpeg 8.1.2, LGPL): hardware device type `pdavd`, pixel format `AV_PIX_FMT_PDAVD`, hwaccels `h264_pdavd`, `hevc_pdavd`, `vp9_pdavd`. FFmpeg does the parsing, reference lists, reordering (display order) and timestamps; the control filling is adapted from the V4L2 request API hwaccels (Jonas Karlman's FFmpeg branch), which is the code the Linux driver is used with. Any FFmpeg program gets hardware decode with `-hwaccel pdavd` / an hw device of that name; frames are downloaded with `av_hwframe_transfer_data()` (NV12). Colour metadata (matrix, range, primaries, transfer) is FFmpeg's, from the stream.
 - Builds: `build-user.nix` (libpdavd, `pdavd-replay`), `build-ffmpeg-pdavd.nix` (FFmpeg for our userland with the hwaccel: `/nix/store/a2828v5xbwwyysh35mq0j2r061jzfbga-darwin-lab-ffmpeg-arm64-darwin-pdavd-8.1.2`).
+
+## Layer 4: the player `pdvideo` (`integrations/puredarwin/m1-avd/player/`)
+- A small player written for this (C on the FFmpeg libraries; ffplay's clock and frame-timing logic, since ffplay itself needs SDL). **mpv was not ported**: 0.41 needs libplacebo and libass (with freetype, fribidi, harfbuzz), none of which is built for our userland, and its CoreAudio output uses AudioUnit calls beyond what our AudioToolbox has; that was judged more than a night.
+- Demuxes MP4/MOV, Matroska/WebM and raw streams; video H.264, HEVC, VP9 (hardware through `pdavd`, or software), audio AAC, Opus, Vorbis, MP3, FLAC, AC-3; window on Chonkstep (xdg-toplevel, server-side decoration, wp_viewport + fractional scale); sound through an AudioQueue to coreaudiod; A/V sync on the audio clock with frame dropping. No pause, seek or subtitles yet.
+- **Video path today: copy, not zero-copy.** The decoded NV12 frame is copied out of the decoder's buffer (1.9 ms at 1080p), converted to XRGB by swscale into a wl_shm buffer (2.1 ms) and scaled by the compositor. A GL output (`pdvideo-gl --vo=gl`: NV12 as two textures, YCbCr matrix and range in the shader) is built and was proven on a Linux host only; **it has not run on the M1** (its Mesa bundle did not fit into the RAM root next to the rest in the one boot that tried).
+- **Hardware result, boot `av05`** (hypervisor boot, the GL desktop at scale 2, speakers held 20 dB down, nobody in the room; `tools/avd_desktop_boot.sh`). Clip: Big Buck Bunny 1920x1080 30 fps, 10 s, H.264 High + AAC, played in a 960x540-unit window (1920x1080 device pixels):
+
+| Run | Frames shown / dropped | Decode per frame, mean | CPU (user+sys) of wall time | A/V drift, mean / max |
+|---|---|---|---|---|
+| H.264, **hardware** (`--hwdec=pdavd`), with sound | 300 / 0 | 3.36 ms (+1.88 ms copy) | **16.8 %** | 14.5 / 102.7 ms |
+| H.264, software (`--hwdec=none`), with sound | 290 / 10 (early) | 1.61 ms on several threads | 36.9 % | -5.0 / 19.4 ms |
+| HEVC, hardware, no sound | 300 / 0 | 6.48 ms | 25.8 % | |
+| VP9, hardware, no sound | 300 / 0 | 5.19 ms | 21.1 % | |
+| H.264 hardware, no display, as fast as possible | 300 frames in 1.57 s (191 fps) | 3.34 ms | 53 % of one core | |
+| H.264 software, no display, as fast as possible | 300 frames in 1.21 s (249 fps) | | 241 % (2.4 cores) | |
+
+  coreaudiod: 0 underruns. The decoder: 1,200 pictures, 0 errors, 0 timeouts, 0 DART faults.
+  Reading: hardware decode halves the CPU use of 1080p playback (most of what remains is the copy and the colour conversion, which zero-copy would remove). The M1's CPU cores decode this 1080p stream faster than real time in software too; the hardware's benefit is CPU time and power, and it grows with resolution and bitrate. The larger A/V drift maximum of the hardware run is at the start of playback (the decoder is powered and its firmware loaded at the first frame: 48 ms for the first decode call); it was not investigated further.
+- **Not proven: that the picture on the panel is right.** Nobody was at the machine and no screen capture was taken; what is proven is that the frames are bit-identical to software decode (layer 2) and that the player presented all of them in time. The owner should look.
 
 ## Not done / known limits
 - **No dma-buf export, so no zero-copy to the compositor or Mesa.** Decoded buffers are kernel memory mapped read-only into the process; a player copies each frame (about 3 MB at 1080p) into a wl_shm buffer or a GL texture. Zero-copy needs the decoded buffers exported as dma-bufs that the asahi DRM driver can import (PRIME import in the LinuxKPI layer of `m1-drm72`) and NV12 import in the compositor: not started.
