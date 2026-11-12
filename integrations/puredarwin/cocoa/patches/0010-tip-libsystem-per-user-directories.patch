@@ -89,3 +89,24 @@ index 00000000..49b6f296
 +    }
 +    return path;
 +}
+--- a/src/Libraries/libSystem/stub/pd_libSystem_init.c
++++ b/src/Libraries/libSystem/stub/pd_libSystem_init.c
+@@ -127,6 +127,9 @@
+ extern void pd_libdyld_tlv_initializer(void);
+ 
+ #include "../libc/darwin/libc_private.h"
++
++// pd_dirhelper.c, the per-user directories confstr hands out
++extern char *_dirhelper(int which, char *path, size_t pathlen);
+ extern void _malloc_fork_prepare(void);
+ extern void _malloc_fork_parent(void);
+ extern void _malloc_fork_child(void);
+@@ -295,7 +298,7 @@
+ 			.atfork_prepare = pd_atfork_prepare,
+ 			.atfork_parent = pd_atfork_parent,
+ 			.atfork_child = pd_atfork_child,
+-			.dirhelper = NULL,
++			.dirhelper = _dirhelper,
+ 		};
+ 		_libc_initializer(&libc_funcs, envp, apple, vars);
+ 	}

@@ -25,5 +25,9 @@
     # directories for confstr(_CS_DARWIN_USER_*). Firefox's content and GPU processes ask for
     # the cache directory before they start their sandbox and stop without it.
     ./patches/0010-tip-libsystem-per-user-directories.patch
+    # ours: a profile's permission for the window server's Mach service
+    # (com.apple.windowserver.active) is also written as what it means here, an outbound
+    # connection to the compositor's socket. Profiles without it get nothing.
+    ./patches/0014-libsandbox-window-server-permission-is-the-compositor-socket.patch
   ];
 })

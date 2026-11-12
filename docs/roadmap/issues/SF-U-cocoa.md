@@ -254,7 +254,50 @@ controls again. (a) is what is built.
     cause not found). In `ff-p3` the window was first mapped at 921x691 and then grew itself
     off the screen's right edge; with worktree commit 0e3967f it is held to the work area
     (`ff-http1`, `ff-https1`).
-  - Sandbox on, design (not built): on macOS Firefox's content processes have no window server
+  - Sandbox on, built and run (12 November; `checks/firefox-sandbox-page.json`, `-http`, `-https`:
+    the same checks with all six switches removed and `PD_SANDBOX_TRACE=1`; run `ff-sb4`):
+    - A correction first. The earlier statement here that the content process reached its
+      sandbox after patch 0010 was wrong. The cherry-pick had left out the line that hands the
+      directory helper to libc (`.dirhelper = _dirhelper` in `pd_libSystem_init.c`), so
+      `confstr(_CS_DARWIN_USER_CACHE_DIR)` failed with EIO in every process and every content
+      process stopped before `sandbox_init` (the silent `Sandbox error:`; found by listing
+      the children's command lines in the guest, run `ff-sb3`, and by asking confstr from the
+      conformance program). 0010 now carries that line.
+    - Patch 0014 (libsandbox): a profile's `(allow mach-lookup (global-name
+      "com.apple.windowserver.active"))` is also emitted as an outbound rule for the one path
+      `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`; profiles without it get nothing. Checked on the
+      build host against Mozilla's six profiles (content, GPU and GMP with the window server
+      parameter TRUE gain one rule; socket, RDD, utility none; none without the environment).
+      With `PD_SANDBOX_TRACE` set, `sandbox_init` says which process it sandboxed or why not.
+    - `ff-sb4`, sandbox on: all checks pass (page, image, keyboard, pointer), and Firefox no
+      longer shows its "sandbox is disabled" bar. Four children report `sandboxed`; by the
+      process list of `ff-sb3` these are the socket process, the RDD process and content
+      processes (one with file access); the pairing of pid to kind is inferred, not printed.
+      No child failed to start its sandbox. The content processes made no attempt on the
+      compositor's socket (they are headless, as on macOS).
+    - Denials that remain, all in sandboxed children, none fatal:
+      `file-read-data /etc/master.passwd` (48): our libc reads the password file for
+      `getpwuid`; macOS asks opendirectoryd over Mach, which the profiles allow. Ours to fix
+      (a lookup service, or the profile compiler mapping that Mach permission too); macOS
+      would also deny the file. `file-read-data /usr/share/fonts` (18) and
+      `/etc/fonts/fonts.conf` (3): our CoreText finds fonts through fontconfig, whose paths
+      Mozilla's profile does not know (it allows `/System/Library/Fonts` and the font
+      services); macOS has no such files. Ours to fix in CoreText (fonts from
+      `/System/Library/Fonts` without fontconfig's files in a sandboxed process).
+    - The GPU process is still switched off by preference, so its sandbox and the rule of 0014
+      in a process that does use the window server are not exercised in the guest yet.
+  - Fonts in Firefox (`checks/firefox-fonts.json`, page `guest/firefox-page/fonts.html`, run
+    `ff-fonts1`): 36 samples (nine families at two weights, system-ui at nine weights and six
+    sizes, italic, emoji, CJK, Greek/Cyrillic, symbols), each also drawn into a canvas and its
+    ink counted; none is blank, so bold system text does draw (the heading missing from the
+    `example.com` screenshot was not a font that cannot draw; not explained). What the
+    screenshot shows instead: every family (serif, monospace, Times, Courier, Menlo, Helvetica)
+    comes out as Inter, weights 100 to 500 as Regular and 600 to 900 as Bold. Firefox gets
+    one family from our CoreText although the root has Nimbus Roman/Sans/Mono, Source Code Pro
+    and Inter Medium/SemiBold; and the root has no CJK or emoji font at all (the test cannot
+    yet tell a glyph from a "missing glyph" box). Open: CoreText's font enumeration as
+    Firefox uses it, generic family mapping, CJK and emoji fonts under open licences.
+  - Sandbox design as first written: on macOS Firefox's content processes have no window server
     connection at all (`HAS_WINDOW_SERVER` is FALSE in the content profile), so the content
     process must simply be headless here, which the refused-connection change gives. For
     processes whose profile does allow `com.apple.windowserver.active`, libsandbox should add
@@ -279,7 +322,8 @@ controls again. (a) is what is built.
 | 0007 | libsandbox: SBPL functions, imports, named profiles | tip 1ebd97cb (part) | already there: drop |
 | 0008 | libsandbox: the rest of the profile language Firefox uses, strict-side handling of what cannot be checked | ours | not checked |
 | 0009 | Security: SecItemCopyMatching defines its result, errSecItemNotFound for an empty search | ours | not checked (the file is unchanged at the tip) |
-| 0010 | libSystem: per-user local, temporary and cache directories | tip 1ebd97cb (part) | already there: drop |
+| 0010 | libSystem: per-user local, temporary and cache directories (with the init line that gives libc the helper, missing from the first cut) | tip 1ebd97cb (part) | already there: drop |
+| 0014 | libsandbox: the window server Mach permission also allows the compositor's socket; `PD_SANDBOX_TRACE` | ours | not checked |
 | (recipe) | libSystem: `proc_name` exported | tip 7f10e1a1 (one line) | already there: drop |
 | 0011 | AppKit: layout API, constraint activation, Cassowary solver (`PDLayoutSolver`, written here from the Badros/Borning/Stuckey paper), whole-tree layout in y-down coordinates, `-layout` called on resize | ours | not checked; the tip's AppKit has none of it (it adds NSStackView only) |
 | 0012 | AppKit: control geometry and drawing of macOS 26 as measured (push, checkbox, radio, pop-up, field, slider, progress, segmented); the macOS 15 look kept behind the default `PDControlLook` = `15`; a string is drawn in a rect lower than its line | ours | not checked |

@@ -8,6 +8,9 @@
 // one small view tree is also rendered offscreen to PNG files (<path>-1x.png, <path>-2x.png).
 // A method the running AppKit does not have is reported as null: that is a finding too.
 #import <AppKit/AppKit.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 // Declarations only, for an AppKit whose headers lack these: every use is guarded by
@@ -506,6 +509,19 @@ int main(int argc, const char *argv[])
         close_obj();
         colors("colors");
         layoutCases("layout");
+        {   // the per-user cache directory, which sandboxed applications ask for before they start
+            char dir[1024] = "", real[1024] = "";
+            size_t n = confstr(_CS_DARWIN_USER_CACHE_DIR, dir, sizeof(dir));
+            char *r = n ? realpath(dir, real) : NULL;
+
+            open_obj("userCacheDirectory");
+            num("confstrLength", (double)n);
+            num("confstrErrno", n ? 0 : errno);
+            num("realpathWorks", r != NULL);
+            num("realpathErrno", r ? 0 : errno);
+            fprintf(stderr, "metrics: user cache directory \"%s\" (confstr %zu) realpath \"%s\" errno %d\n", dir, n, r ? real : "", r ? 0 : errno);
+            close_obj();
+        }
         open_obj("scroller");
         if ([NSScroller respondsToSelector:@selector(scrollerWidthForControlSize:scrollerStyle:)]) {
             num("legacyWidth", [NSScroller scrollerWidthForControlSize:NSRegularControlSize scrollerStyle:0]);
