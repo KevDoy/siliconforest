@@ -8,7 +8,7 @@
 # ../../m1-touchbar/tools/tb_desktop_boot.sh; the guest script is ../guest/darwin-desktop-scale.in.
 # Queues for the bench itself.
 # Usage: ds_desktop_boot.sh <name, prefix ds> [upper bound in seconds, 120..600, default 480]
-#   DS_DESKTOP_BIN   compositor binary (default: runs/m1-desktop-010/wm-darwin-scale-desktop-build-007)
+#   DS_DESKTOP_BIN   compositor binary (default: runs/m1-desktop-010/wm-darwin-scale-desktop-build-009)
 #   DS_TERMINAL_BIN  terminal binary (default: runs/m1-desktop-010/terminal-application-build-008)
 #   DS_SECONDS       length of the desktop session (default 215; 11..14400)
 #   DS_AUTOPILOT=0   no synthetic input: the desktop for a person, DS_SECONDS long
@@ -35,7 +35,7 @@ KC=${DS_KC:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-D=${DS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-007/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+D=${DS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
 TERM_BIN=${DS_TERMINAL_BIN:-$ROOT/runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
