@@ -55,6 +55,38 @@ extern u8 _pdsf_el2_start[], _pdsf_el2_end[];
         return -1;                                                                                 \
     } while (0)
 
+/*
+ * XNU's boot_args (xnu pexpert/pexpert/arm64/boot.h, the kernel this stage boots), by offset.
+ * Everything the stage writes into the page goes through m1n1's struct boot_args, so each
+ * member's offset there is checked against XNU's here; the command line, where the two
+ * differ (m1n1 aligns its union of command lines to 8 bytes), is written by offset.
+ */
+#define XNU_BA_REVISION       0
+#define XNU_BA_VERSION        2
+#define XNU_BA_VIRT_BASE      8
+#define XNU_BA_PHYS_BASE      16
+#define XNU_BA_MEM_SIZE       24
+#define XNU_BA_TOP_OF_KDATA   32
+#define XNU_BA_VIDEO          40        /* six unsigned long: base, display, rowBytes, width, height, depth */
+#define XNU_BA_MACHINE_TYPE   88
+#define XNU_BA_DEVTREE        96
+#define XNU_BA_DEVTREE_LENGTH 104
+#define XNU_BA_COMMAND_LINE   108
+_Static_assert(offsetof(struct boot_args, revision) == XNU_BA_REVISION, "boot_args.Revision");
+_Static_assert(offsetof(struct boot_args, version) == XNU_BA_VERSION, "boot_args.Version");
+_Static_assert(offsetof(struct boot_args, virt_base) == XNU_BA_VIRT_BASE, "boot_args.virtBase");
+_Static_assert(offsetof(struct boot_args, phys_base) == XNU_BA_PHYS_BASE, "boot_args.physBase");
+_Static_assert(offsetof(struct boot_args, mem_size) == XNU_BA_MEM_SIZE, "boot_args.memSize");
+_Static_assert(offsetof(struct boot_args, top_of_kernel_data) == XNU_BA_TOP_OF_KDATA,
+               "boot_args.topOfKernelData");
+_Static_assert(offsetof(struct boot_args, video) == XNU_BA_VIDEO, "boot_args.Video");
+_Static_assert(offsetof(struct boot_args, video.display) == XNU_BA_VIDEO + 8, "boot_args.Video.v_display");
+_Static_assert(offsetof(struct boot_args, machine_type) == XNU_BA_MACHINE_TYPE, "boot_args.machineType");
+_Static_assert(offsetof(struct boot_args, devtree) == XNU_BA_DEVTREE, "boot_args.deviceTreeP");
+_Static_assert(offsetof(struct boot_args, devtree_size) == XNU_BA_DEVTREE_LENGTH,
+               "boot_args.deviceTreeLength");
+_Static_assert(sizeof(((struct boot_args *)0)->devtree_size) == 4, "boot_args.deviceTreeLength size");
+
 static const char *const type_names[PDSF_TYPES] = {"end", "config", "kernel", "ramdisk"};
 
 static int inflate_to(const struct pdsf_item *it, void *dest)
@@ -198,6 +230,10 @@ int pdsf_boot(void *payload)
                           &cfg, &err))
         fail("config: %s\n", err);
     printf("PDSF: bootargs: %s\n", cfg.bootargs);
+    /* Every boot of this stage is from the RAM root: without rd=md0 the kernel would wait
+     * for a root device and then take its recovery path, which writes NVRAM variables. */
+    if (!pdsf_cmdline_has(cfg.bootargs, "rd=md0"))
+        fail("bootargs lack rd=md0\n");
 
     cpus = pdsf_cmdline_cpus(cfg.bootargs);
     if (cpus < 0)
@@ -402,6 +438,15 @@ int pdsf_boot(void *payload)
     }
     if (strlen(cfg.bootargs) >= cmdmax)
         fail("bootargs do not fit revision %u\n", ba->revision);
+    /*
+     * XNU's boot_args has the command line directly after deviceTreeLength. m1n1's struct
+     * (xnuboot.h) puts its union of command lines on an 8-byte boundary, four bytes later:
+     * written through that member, the kernel sees a command line that starts with four
+     * NUL bytes, i.e. none (boots sfb01..sfb03: no serial console, no rd=md0). The flags
+     * after the command line are at the same offset in both.
+     */
+    (void)cmdline;
+    cmdline = (char *)ba + XNU_BA_COMMAND_LINE;
     memset(cmdline, 0, cmdmax);
     memcpy(cmdline, cfg.bootargs, strlen(cfg.bootargs));
     ba->phys_base = lay.phys_base;
@@ -411,6 +456,20 @@ int pdsf_boot(void *payload)
     ba->devtree = (void *)(lay.adt - lay.phys_base + lay.virt_base);
     ba->devtree_size = (u32)adt_len;
     ba->video.display = cfg.display;
+    /*
+     * The page as the kernel will read it: the command line at XNU's offset must be the one
+     * asked for and must name the RAM root. Without rd=md0 the kernel waits for a root
+     * device and then takes its recovery path. (Until a disk root replaces this with a check
+     * of the root's UUID.)
+     */
+    {
+        const char *seen = (const char *)lay.bootargs + XNU_BA_COMMAND_LINE;
+
+        if (strlen(seen) != strlen(cfg.bootargs) || memcmp(seen, cfg.bootargs, strlen(cfg.bootargs)) ||
+            !pdsf_cmdline_has(seen, "rd=md0"))
+            fail("the boot arguments page does not carry the command line with rd=md0 where XNU reads it\n");
+        printf("PDSF: command line as XNU reads it (offset %d): %s\n", XNU_BA_COMMAND_LINE, seen);
+    }
 
     dc_cvau_range((void *)lay.guest_base, lay.top - lay.guest_base);
     ic_ivau_range((void *)lay.guest_base, ALIGN16K(in.image_size));
@@ -430,6 +489,17 @@ int pdsf_boot(void *payload)
             fail("no watchdog to arm\n");
         wdt_arm(wdt_base, cfg.wdt);
         printf("PDSF: SoC watchdog armed, reset in %u s\n", cfg.wdt);
+    }
+
+    /*
+     * Diagnostic (boot argument pdsfstop=1): everything is in place and the secondary cores
+     * are held, but XNU is not entered. m1n1 goes on to its USB proxy, where the launcher
+     * reads back and compares what was placed (b1/native_stage.py, word stagestop).
+     */
+    if (pdsf_cmdline_has(cfg.bootargs, "pdsfstop=1")) {
+        printf("PDSF: stop requested: not entering XNU at 0x%lx; returning to the proxy\n",
+               lay.guest_base + (macho.entry - macho.vmin));
+        return -1;
     }
 
     fb_improve_logo();

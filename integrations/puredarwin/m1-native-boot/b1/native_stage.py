@@ -40,6 +40,181 @@ def config(native, bootargs, usb_index, seed=None, xnu_base=None):
         xnu_base='%#x' % xnu_base if xnu_base is not None else None)
 
 
+def reconnect(backend, device, seconds=60):
+    """A new m1n1 was vectored into and brings its own USB proxy up: open it again on the same
+    callout device once it answers."""
+    try:
+        backend.iface.dev.close()
+    except Exception:
+        pass
+    deadline, last = time.monotonic() + seconds, None
+    time.sleep(3)                       # the old enumeration goes away first
+    while time.monotonic() < deadline:
+        try:
+            if os.path.exists(device):
+                backend.open(device)
+                backend.p.nop()
+                mark('proxy_reconnected')
+                return
+        except Exception as error:
+            last = f'{type(error).__name__}: {error}'
+            try:
+                backend.iface.dev.close()
+            except Exception:
+                pass
+        time.sleep(.5)
+    raise RuntimeError('The new m1n1 did not answer on %s: %s' % (device, last))
+
+
+def rechain(backend, inputs, raw_bootargs, device, directory, write_private):
+    """Diagnostic (word rechain): start the pinned m1n1 once more, the way the stage image is
+    started (uploaded into the running m1n1's memory, entered in place with a copy of the
+    boot arguments whose top_of_kernel_data lies behind it), and go on from ITS proxy with
+    the ordinary launcher-native boot. Separates "a third m1n1 started this way" from the
+    stage's own logic."""
+    p, iface, u = backend.p, backend.iface, backend.u
+    image = inputs.contents['m1n1']
+    size = (len(image) + PAGE - 1) & ~(PAGE - 1)
+    total = size + PAGE
+    base = u.heap.memalign(ALIGN, total)
+    require(base and base % ALIGN == 0 and backend.ba.phys_base <= base and
+            base + total <= backend.ba.phys_base + backend.ba.mem_size, 'No place for the m1n1 image')
+    old_top, = struct.unpack_from('<Q', raw_bootargs, BOOTARGS_TOP)
+    require(old_top == backend.ba.top_of_kernel_data and old_top <= base and len(raw_bootargs) <= PAGE,
+            'Boot arguments differ from the collected ones')
+    entered = bytearray(raw_bootargs.ljust(PAGE, b'\0'))
+    struct.pack_into('<Q', entered, BOOTARGS_TOP, base + total)
+    entered = bytes(entered)
+    iface.writemem(base, image)
+    if size > len(image):
+        iface.writemem(base + len(image), bytes(size - len(image)))
+    iface.writemem(base + size, entered)
+    require(iface.readmem(base, len(image)) == image and iface.readmem(base + size, PAGE) == entered,
+            'm1n1 image readback differs')
+    p.dc_cvau(base, total)
+    p.ic_ivau(base, len(image))
+    print('NATIVE_RECHAIN ' + json.dumps(dict(base=hex(base), entry=hex(base + ENTRY), bootargs=hex(base + size),
+                                             image_bytes=len(image))), flush=True)
+    # From here the machine may be without a proxy: the record that lets the controller send
+    # its one reset (vdm-return) is written before the vector, as for every native boot.
+    write_private(directory, 'native-start.json', dict(
+        hypervisor=False, rechain=True, base=base, entry=base + ENTRY, bootargs=base + size,
+        note='pinned m1n1 started once more in place; the kernel is entered later, see native-start-boot.json'))
+    mark('rechain_vector')
+    p.request(p.P_VECTOR, base + ENTRY, base + size, 0, 0, 0, 0)
+    reconnect(backend, device)
+
+
+def readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs_text, layout):
+    """Diagnostic (word stagestop): the stage placed everything and returned to its proxy
+    instead of entering XNU. Read back what it placed and compare it with what the launcher
+    would have placed itself. Prints STAGE_READBACK lines; saves the trees."""
+    import io
+    from m1n1.macho import MachO, MachOFile
+    iface, p = backend.iface, backend.p
+    text = bytes(console.proof.output).replace(b'\r', b'').decode('latin1')
+    match = re.search(r'PDSF: XNU memory (0x[0-9a-f]+)\.\.(0x[0-9a-f]+); kernel (0x[0-9a-f]+), bootargs (0x[0-9a-f]+), '
+                      r'adt (0x[0-9a-f]+),\s*PDSF: trustcache (0x[0-9a-f]+), ramdisk (0x[0-9a-f]+), top (0x[0-9a-f]+); '
+                      r'EL2 page (0x[0-9a-f]+)', text)
+    require(match is not None, 'The stage did not print its layout')
+    phys, ram_end, kernel, bootargs, adt, tc, ramdisk, top, el2 = (int(v, 16) for v in match.groups())
+    out = dict(phys_base=hex(phys), kernel=hex(kernel), bootargs=hex(bootargs), adt=hex(adt), trustcache=hex(tc),
+               ramdisk=hex(ramdisk), top=hex(top), el2=hex(el2))
+
+    def differ(name, address, expected, chunk=8 << 20):
+        first, wrong = None, 0
+        for offset in range(0, len(expected), chunk):
+            got = iface.readmem(address + offset, min(chunk, len(expected) - offset))
+            want = expected[offset:offset + len(got)]
+            if got != want:
+                for i in range(0, len(got), 4096):
+                    if got[i:i + 4096] != want[i:i + 4096]:
+                        wrong += 1
+                        if first is None:
+                            j = next(k for k in range(i, min(i + 4096, len(got))) if got[k] != want[k])
+                            first = dict(offset=hex(offset + j), got=got[j:j + 16].hex(), want=want[j:j + 16].hex())
+        out[name] = dict(bytes=len(expected), equal=first is None, pages_differing=wrong, first=first)
+        print('STAGE_READBACK ' + json.dumps({name: out[name]}), flush=True)
+
+    raw = inputs.contents['kernel']
+    outer = MachO.__new__(MachO)
+    outer.io = io.BytesIO(raw)
+    outer.off, outer.end, outer.size = 0, len(raw), len(raw)
+    outer.obj = MachOFile.parse_stream(outer.io)
+    outer.symbols, outer.subfiles = {}, {}
+    outer.load_info()
+    differ('kernel_image', kernel, outer.prepare_image())
+    # boot arguments: the page the stage wrote, field by field
+    fmt = getattr(backend.types, 'BootArgs_r' + str(struct.unpack_from('<H', raw_bootargs)[0]))
+    page = iface.readmem(bootargs, fmt.sizeof())
+    write_private(directory, 'stage-bootargs.bin', page)
+    ba, old = fmt.parse(page), fmt.parse(raw_bootargs[:fmt.sizeof()])
+    fields = {}
+    for name in ('revision', 'version', 'virt_base', 'phys_base', 'mem_size', 'top_of_kernel_data', 'machine_type',
+                 'devtree', 'devtree_size', 'boot_flags', 'mem_size_actual'):
+        fields[name] = [hex(int(getattr(old, name))), hex(int(getattr(ba, name)))]
+    for name in ('base', 'display', 'stride', 'width', 'height', 'depth'):
+        fields['video.' + name] = [hex(int(getattr(old.video, name))), hex(int(getattr(ba.video, name)))]
+    fields['cmdline'] = str(ba.cmdline)
+    fields['cmdline_at_108'] = page[108:108 + 96].split(b'\0')[0].decode('latin1')
+    fields['cmdline_starts_at_xnu_offset'] = page[108:109] != b'\0'
+    fields['raw_tail_equal'] = page[fmt.sizeof() - 16:] == raw_bootargs[fmt.sizeof() - 16:fmt.sizeof()]
+    print('STAGE_READBACK ' + json.dumps(dict(bootargs_was_now=fields)), flush=True)
+    # The whole page against the page the launcher builds for the same inputs
+    # (host_progress.load_payloads and m1n1 hv load_raw: the same fields, set on the collected
+    # boot arguments and built by the pinned Construct definition).
+    align = lambda n: (n + PAGE - 1) & ~(PAGE - 1)
+    want = fmt.parse(raw_bootargs[:fmt.sizeof()])
+    want.cmdline = bootargs_text
+    want.phys_base = phys
+    want.virt_base = 0xfffffe0010000000 + (phys & ((32 << 20) - 1))
+    want.mem_size = int(old.phys_base) + int(old.mem_size) - phys
+    want.devtree = adt - phys + want.virt_base
+    want.devtree_size = int(ba.devtree_size)            # the tree's length (ours has Apple's names)
+    want.top_of_kernel_data = top
+    want.video.display = 1
+    expected = fmt.build(want)
+    first = next((i for i in range(len(expected)) if expected[i] != page[i]), None)
+    predicted = dict(
+        phys_base=layout['phys_base'] == phys, kernel=layout['guest_base'] == kernel,
+        bootargs=layout['guest_base'] + layout['bootargs_off'] == bootargs,
+        adt=align(bootargs + PAGE) == adt)
+    print('STAGE_READBACK ' + json.dumps(dict(bootargs_page=dict(
+        bytes=len(page), equal_to_the_launchers=first is None, first_difference=first,
+        got=page[first:first + 16].hex() if first is not None else None,
+        want=expected[first:first + 16].hex() if first is not None else None,
+        addresses_as_the_launcher_predicts=predicted))), flush=True)
+    # device trees: the one the stage built, and the original it built it from, as they are now
+    built = iface.readmem(adt, int(ba.devtree_size))
+    write_private(directory, 'stage-adt.bin', built)
+    original_at = int(old.devtree) - int(old.virt_base) + int(old.phys_base)
+    original = iface.readmem(original_at, int(old.devtree_size))
+    write_private(directory, 'stage-original-adt.bin', original)
+    print('STAGE_READBACK ' + json.dumps(dict(
+        adt=dict(bytes=len(built), sha256=hashlib.sha256(built).hexdigest(),
+                 devtree_field_points_at=hex(int(ba.devtree) - int(ba.virt_base) + int(ba.phys_base))),
+        original_adt=dict(at=hex(original_at), bytes=len(original), sha256=hashlib.sha256(original).hexdigest(),
+                          equal_to_collected=original == backend.u.adt_data if hasattr(backend, 'u') and
+                          getattr(backend.u, 'adt_data', None) is not None else None))), flush=True)
+    tree = backend.adt_module.load_adt(built)
+    before = backend.adt_module.load_adt(original)
+    mm, mm0 = tree['chosen']['memory-map'], before['chosen']['memory-map']
+    for name in ('TrustCache', 'SEPFW'):
+        (a1, n1), (a0, n0) = getattr(mm, name), getattr(mm0, name)
+        differ(name.lower() + '_copy', a1, iface.readmem(a0, n0) if n0 <= 16 << 20 else b'')
+        out[name] = [hex(a0), hex(n0), hex(a1), hex(n1)]
+    out['memory_map'] = {name: [hex(v) for v in getattr(mm, name)] for name in
+                         ('SEPFW', 'TrustCache', 'DeviceTree', 'BootArgs', 'RAMDisk') if hasattr(mm, name)}
+    if inputs.contents.get('ramdisk') is not None:
+        differ('ramdisk', ramdisk, inputs.contents['ramdisk'])
+    # the EL2 page as placed (parameters filled in)
+    page = iface.readmem(el2, PAGE)
+    out['el2_page_params'] = page[0x3f00:0x3f20].hex()
+    out['el2_page_code_sha256'] = hashlib.sha256(page[:0x3f00]).hexdigest()
+    write_private(directory, 'stage-readback.json', out)
+    print('STAGE_READBACK ' + json.dumps(out), flush=True)
+
+
 def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, runtime, console_factory,
           write_private):
     """Upload, vector, capture the real serial console for `runtime` seconds (or until the
@@ -48,6 +223,9 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     own prediction for a proxy-loaded boot: without the word lowmem the stage is given its
     phys_base, and must then arrive at the same entry point and boot-arguments address."""
     p, iface, u = backend.p, backend.iface, backend.u
+    device = getattr(getattr(iface, 'dev', None), 'port', None)
+    if 'stagestop' in native.words:
+        bootargs = bootargs + ' pdsfstop=1'
     m1n1 = (HERE / IMAGE).read_bytes()
     index = int(p.iodev_whoami()) - int(backend.proxy_module.IODEV.USB0)
     require(index in (0, 1), 'The proxy is not on a USB port')
@@ -119,6 +297,16 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         # This is the last request of the boot: nothing is sent over the proxy afterwards.
         p.request(p.P_VECTOR, base + ENTRY, base + size, 0, 0, 0, 0)
         mark('native_vector_acknowledged')
+        if 'stagestop' in native.words:
+            # Diagnostic: the stage returns to its proxy instead of entering XNU.
+            limit = time.monotonic() + 90
+            while b'PDSF: stop requested' not in bytes(console.proof.output) and time.monotonic() < limit:
+                time.sleep(.2)
+            require(b'PDSF: stop requested' in bytes(console.proof.output), 'The stage did not reach its stop')
+            reconnect(backend, device)
+            readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs, layout)
+            mark('native_capture_end', done=True, console_bytes=len(console.proof.output))
+            return
         deadline = time.monotonic() + runtime
         # As native_boot.start(): a session started by launchd (multiuser) types no command,
         # so the console session does not look for the end marker itself.

@@ -148,3 +148,16 @@ three minutes after the entry. Both times the controller verified a new Linux bo
 state the silent core was in (spinning in the kernel's early vectors or elsewhere) is not
 known.
 
+## A kernel without its command line (native-boot stream, boots `sfb01`..`sfb03`)
+
+A loader mistake (the command line written four bytes from where XNU reads it) gave the
+kernel no boot arguments in three boots. Without `rd=md0` this kernel waits 60 s for a root
+device and then calls `IOSetRecoveryBoot`, which is written to set `boot-picker-bringup-reason`
+and `boot-command=recover-system` in NVRAM and to restart into Apple's recovery. A read-only
+copy of the NVRAM flash partition taken from Linux afterwards holds none of these variables,
+live or deleted, and the collection has no NVRAM controller for this machine; the M1 booted
+Linux normally after each of the three. See `docs/roadmap/issues/SF-T-native-boot.md`
+("Incident"). The same copy shows that Apple's firmware itself set
+`recovery-boot-mode=panicmedic` and `boot-command=recover` three times in the past (deleted
+entries of older banks): the firmware's own reaction to failed boots.
+

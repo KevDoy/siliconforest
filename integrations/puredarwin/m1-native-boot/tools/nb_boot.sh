@@ -68,6 +68,7 @@ QD=$(mktemp -d); S=$(mktemp); trap 'rm -rf "$QD" "$S"' EXIT
 echo "$WORDS" > "$QD/native_mode.txt"
 python3 -B -c "import sys; sys.path.insert(0, '$HERE'); import native_boot; native_boot.Mode(open('$QD/native_mode.txt').read())"
 FILES="$HERE/native_boot.py=$B/native_boot.py;$HERE/native_stub.py=$B/native_stub.py;$QD/native_mode.txt=$B/native_mode.txt"
+case " $WORDS " in *" rechain "*) FILES="$FILES;$HERE/b1/native_stage.py=$B/native_stage.py;$HERE/b1/pdsf_pack.py=$B/pdsf_pack.py";; esac
 if [ "${NB_REBOOT:-}" = 1 ]; then
   PATCH="$QD/launcher-native-self-reboot.patch"
   "$HERE/reboot/combine_patch.sh" "$PATCH"

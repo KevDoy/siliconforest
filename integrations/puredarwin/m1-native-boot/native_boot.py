@@ -91,7 +91,7 @@ class Mode:
         self.wdt = None
         known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
-        known |= {'stage', 'usbkeep', 'hostseed', 'lowmem'}
+        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem'}
         self.stage, self.usb_keep, self.host_seed = ('stage' in words, 'usbkeep' in words, 'hostseed' in words)
         self.low_mem = 'lowmem' in words
         for word in words:
@@ -103,6 +103,8 @@ class Mode:
                 require(word in known, 'Unknown word in native_mode.txt: ' + word)
         require(not (self.probe and self.native), 'native_mode.txt: probe or native, not both')
         require(not self.stage or self.native, 'stage needs native')
+        self.rechain = 'rechain' in words
+        require(not self.rechain or (self.native and not self.stage), 'rechain is for a launcher-native boot')
         require(self.stage or not (self.usb_keep or self.host_seed or self.low_mem),
                 'usbkeep, hostseed and lowmem need stage')
         self.vdm_return = 'vdm-return' in words
@@ -355,7 +357,9 @@ def start(native, hv, backend, layout, directory, runtime, console_factory, writ
             require(wdt == T8103_WDT, 'Unexpected watchdog address')
             wdt_arm(p, wdt, native.wdt)
             record['watchdog_armed_at'] = time.time()
-        write_private(directory, 'native-start.json', record)
+        # (after a rechain the first record of that name exists already)
+        write_private(directory, 'native-start-boot.json' if (directory / 'native-start.json').exists()
+                      else 'native-start.json', record)
         print('NATIVE_START ' + json.dumps(record, default=hex), flush=True)
         mark('native_vector')
         # m1n1 replies, then shuts its USB, display console and MMU down and jumps (src/main.c).

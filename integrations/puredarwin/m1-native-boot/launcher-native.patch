@@ -167,7 +167,7 @@
                      self.check_done(tail)
                      self.advance_virtual(data)
          except BaseException as error:
-@@ -1307,24 +1379,53 @@
+@@ -1307,24 +1379,59 @@
      bootargs = guest_bootargs(inputs)
      backend = ContinuingBackend(inputs, directory)
      console = None
@@ -177,6 +177,12 @@
          bq_mark('worker_begin')
          backend.open(args.device)
          snapshot, ba, adt, layout = backend.collect(inputs)
++        if native and native.native and getattr(native, 'rechain', False):
++            # Diagnostic: the pinned m1n1 started once more, as the stage image is started,
++            # and the ordinary native boot from its proxy (m1-native-boot/b1/native_stage.py).
++            import native_stage
++            native_stage.rechain(backend, inputs, ba, args.device, directory, old.write_private)
++            snapshot, ba, adt, layout = backend.collect(inputs)
 +        if native and native.probe:
 +            # The M1's real UART as the controller hears it, for the whole hypervisor boot.
 +            uart_marker = 'PDNB-UART-PROBE-' + secrets.token_hex(8)
@@ -222,7 +228,7 @@
          bq_mark('hv_init_done')
          # hv_init() runs m1n1's pcie_shutdown(), so PCIe is brought up after it:
          # pcie_init, SMC radio power, port-0 link sequence. XNU inherits the link.
-@@ -1378,6 +1479,17 @@
+@@ -1378,6 +1485,17 @@
                                 hardware_boot_observed=False, image_sha256=image.sha(inputs.contents['kernel']),
                                 prepared_image_sha256=image.sha(prepared), prepared_image_bytes=len(prepared)))
          bq_mark('hv_start')
@@ -240,7 +246,7 @@
          console = ConsoleSession(args.console_device, directory, desktop=desktop, keyboard=keyboard,
                                   virtual_input=virtual_input, terminal_input=terminal_input,
                                   native_keyboard_desktop=native_keyboard_desktop,
-@@ -1389,7 +1501,11 @@
+@@ -1389,7 +1507,11 @@
              if console is not None:
                  console.close()
          finally:
