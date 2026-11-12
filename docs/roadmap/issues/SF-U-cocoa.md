@@ -284,6 +284,11 @@ controls again. (a) is what is built.
       Mozilla's profile does not know (it allows `/System/Library/Fonts` and the font
       services); macOS has no such files. Ours to fix in CoreText (fonts from
       `/System/Library/Fonts` without fontconfig's files in a sandboxed process).
+    - Network with the sandbox on (`ff-sb5-http`, `ff-sb5-https`): both pass, four children
+      sandboxed in each, none failed. One more denial there:
+      `file-write-create /private/tmp/CoreText.XXXXXX` (2, HTTPS run): our CoreText writes a
+      font it was given as data to a temporary file; macOS keeps it in memory and would deny
+      the write too. Ours to fix in CoreText.
     - The GPU process is still switched off by preference, so its sandbox and the rule of 0014
       in a process that does use the window server are not exercised in the guest yet.
   - Fonts in Firefox (`checks/firefox-fonts.json`, page `guest/firefox-page/fonts.html`, run
