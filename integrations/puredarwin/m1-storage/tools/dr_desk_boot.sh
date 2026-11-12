@@ -24,7 +24,9 @@ case "$N" in dr[0-9]*) ;; *) echo "boot names are dr01, dr02, ..." >&2; exit 2;;
 [ ! -e "runs/m1-desktop-010/pcie-enum-attempt-$N" ] || { echo "boot $N exists" >&2; exit 2; }
 [ ! -e runs/bench.finisher.failed ] && [ ! -e runs/m1-storage/STOP ] || { echo "a stop file exists" >&2; exit 3; }
 [ -z "${PCIE_CHAIN:-}" ] || { echo "PCIE_CHAIN is not used in this stream" >&2; exit 2; }
-case "$MODE" in hv) WORDS=;; native) WORDS="native vdm-return vdm-serial";; *) echo "hv or native" >&2; exit 2;; esac
+# noiolog: driver log lines on the 115200-baud UART delay the display driver until the compositor
+# has given up on GL (boot dr07 came up on the software renderer without it)
+case "$MODE" in hv) WORDS=;; native) WORDS="native vdm-return vdm-serial noiolog";; *) echo "hv or native" >&2; exit 2;; esac
 . private/disk-root/sf-part.env
 "$HERE/host-test/run-host-tests.sh" > /dev/null || { echo "host tests failed; not booting" >&2; exit 2; }
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
