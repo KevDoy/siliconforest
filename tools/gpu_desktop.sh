@@ -16,14 +16,19 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"; export PATH=$HOME/.nix-profile/bin:$PATH
 N=${1:?name}; MIN=${2:-30}
 [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
-BOOT=140                                   # seconds from hypervisor start to the guest script
+[ "${GPU_DESKTOP_VERBOSE:-0}" = 1 ] && BOOT=140 || BOOT=20                                    # seconds from hypervisor start to the guest script (measured 5.7; was 140 for 66.6)
 RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
-# The default collection: the desktop collection with sound and the Touch Bar
-# (m1-touchbar/build-kc.nix: the quiet-boot kernel, PDAppleSound, PDAppleTouchBar; boots tb05, tb06).
-KC=${GPU_DESKTOP_KC:-/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1}
-[ -f "$KC/kernel" ] || KC=$(cd integrations/puredarwin/m1-touchbar && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-kc.nix --no-out-link | tail -1)
-NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
-T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
+# The default collection: the desktop collection with sound and the Touch Bar and the kernel
+# that does not wait a minute for a clock and a daemon this system does not have
+# (m1-boot-speed/build-kc.nix: m1-touchbar/build-kc.nix with m1-boot-speed/kernel.nix; boots bs02, bs03).
+# It needs pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args and the launcher patch below (which waits
+# for a silent console before it types): without the patch the harness fails its console proof.
+KC=${GPU_DESKTOP_KC:-/nix/store/z66w83kk8gj61xv5ych34rz1zv18hk70-puredarwin-kc-arm64-0.1}
+# Store paths of the staged builds, without evaluating a recipe whose inputs are unchanged
+# (each evaluation is 20 to 70 s; BS_NIX_CACHE=0 evaluates always).
+NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
+[ -f "$KC/kernel" ] || KC=$($NP m1-boot-speed build-kc.nix)
+T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
 # The compositor with display scaling, the settings menu, volume keys and the Touch Bar phase (wm-darwin merge, boot ds06).
 D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
@@ -45,9 +50,9 @@ BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/background
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 # Sound: the audio server, its frameworks and the tools (as m1-sound/tools/sd_desktop_boot.sh).
 SOUND=integrations/puredarwin/m1-sound
-A=$(cd $SOUND/sysaudio && $NB build-sysaudio.nix -A all 2>/dev/null | tail -1)
+A=$($NP m1-sound/sysaudio build-sysaudio.nix -A all)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
-PLAY=$(cd $SOUND && $NB build-pdplay.nix 2>/dev/null | tail -1)
+PLAY=$($NP m1-sound build-pdplay.nix)
 FW=System/Library/Frameworks
 X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume;$PLAY/usr/bin/pdplay=/usr/bin/pdplay"
 for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"; done
@@ -59,18 +64,25 @@ TBFW=private/firmware/apple/dfrmtfw-j293.bin
 # 2026-11-11; no person has listened yet). GPU_DESKTOP_SPEAKER_HOLD=1 keeps them 20 dB under it.
 HOLD=${GPU_DESKTOP_SPEAKER_HOLD:-0}; VOL=${GPU_DESKTOP_VOLUME:-30}
 QUIET=()
+# The kernel's two boot waits are switched off only together with the launcher patch below (it
+# types the console challenge once the console is silent); the text boot keeps the old waits.
+FASTARGS=
 if [ "${GPU_DESKTOP_VERBOSE:-0}" != 1 ]; then
+  FASTARGS="pd_quiet_wait=0 pd_rtc_wait=0"
   # The launcher patch (graphics boot, no mirror, paints boot-logo.gz) and the picture in the
   # framebuffer's format, both for this boot's private copy of the launcher tree only.
   Q=integrations/puredarwin/m1-quiet-boot; SPLASH=${GPU_DESKTOP_SPLASH:-$BG}
   [ -f "$SPLASH" ] || { echo "no boot picture at $SPLASH" >&2; exit 2; }
   QD=$(mktemp -d); python3 "$Q/boot_logo.py" pack "$SPLASH" "$QD" > /dev/null
   B=integrations/puredarwin/m1-bringup
-  QUIET=(PCIE_LAB_PATCH="$ROOT/$Q/quiet-boot.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
+  # the quiet boot's launcher patch, with the boot picture painted in 0.2 s instead of 4.7 s and
+  # the challenge typed only once the console is silent
+  QUIET=(PCIE_LAB_PATCH="$ROOT/integrations/puredarwin/m1-boot-speed/launcher-fast-quiet.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
 fi
 S=$(mktemp); sed -e "s/@SECONDS@/$DESK/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/$VOL/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
-echo "GPU desktop: $MIN minutes; the desktop appears about 2.5 minutes after the M1 reboots"
-env "${QUIET[@]}" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
+echo "GPU desktop: $MIN minutes; the desktop appears about 50 seconds after the M1 reboots"
+# The RAM root without the unused kernel archive, 384 MiB, free blocks zeroed: 92 MB on the wire instead of 150.
+env "${QUIET[@]}" PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $FASTARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
 rm -rf "$S" ${QD:+"$QD"}
 strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic\|PDSpeakers:\|PDTouchBar:' | cut -c1-260 | tail -40
