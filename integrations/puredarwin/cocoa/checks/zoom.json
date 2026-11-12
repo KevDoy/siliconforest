@@ -42,11 +42,10 @@
    "hold": [
     "ctrl",
     "shift"
-   ]
-  },
-  {
-   "expect": "COCOAHELLO zoom-state zoomed=1",
-   "timeout": 120,
+   ],
+   "until": "COCOAHELLO zoom-state zoomed=1",
+   "tries": 4,
+   "wait": 25,
    "name": "maximize from our title bar: resized and isZoomed"
   },
   {
@@ -74,13 +73,11 @@
    "hold": [
     "ctrl",
     "shift"
-   ]
-  },
-  {
-   "expect": "COCOAHELLO zoom-state zoomed=0 size=420x300",
-   "timeout": 60,
-   "name": "restore from our title bar",
-   "optional": true
+   ],
+   "until": "COCOAHELLO zoom-state zoomed=0",
+   "tries": 4,
+   "wait": 25,
+   "name": "restore from our title bar"
   },
   {
    "sleep": 4

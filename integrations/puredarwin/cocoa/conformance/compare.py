@@ -27,12 +27,12 @@ def leaves(node, path=()):
 
 def from_serial(path, name):
     text = open(path, 'rb').read().decode(errors='replace')
-    m = re.search(r'CONF_%s_BEGIN\r?\n(.*?)\r?\nCONF_%s_END' % (name, name), text, re.S)
-    if not m:
+    begin, end = text.rfind('CONF_%s_BEGIN' % name), text.rfind('CONF_%s_END' % name)
+    if begin < 0 or end < begin:
         raise SystemExit('no CONF_%s block in %s' % (name, path))
-    body = m.group(1).replace('\r', '')
-    start = body.index('{')
-    return json.loads(body[start:body.rindex('}') + 1])
+    # the console may have other output mixed in before the object and wraps nothing itself
+    body = text[begin:end].replace('\r', '')
+    return json.loads(body[body.index('{'):body.rindex('}') + 1])
 
 
 def main():

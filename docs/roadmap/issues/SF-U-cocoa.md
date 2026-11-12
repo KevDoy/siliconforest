@@ -196,5 +196,79 @@ from the framebuffer). The compositor is `runs/cocoa/target/...` when built from
 - Compositor commit a447cef (branch `wm-darwin-cocoa`).
 - The Homebrew stream's libSystem, which this stream uses unchanged.
 
-## Results
-(filled in below)
+## Results (QEMU arm64, 1024x768 framebuffer; every row executed, run directory under `runs/cocoa/`)
+Checks are `cocoa_check.sh <check>`; "px/pt" is measured on the framebuffer from a marker the
+application draws; "ink" is the pixel height of the first two text lines.
+
+| Check | Scale, theme | Result | Measured |
+|---|---|---|---|
+| hello (frame, button, pointer, keys, key equivalent) | 100%, nextstep-classic | pass 9/9 | 1.000 px/pt, ink 14/13 |
+| hello | 125%, jade-lacquer | pass 9/9 | 1.250 px/pt, ink 15/15 |
+| hello | 150%, amber-phosphor | pass 9/9 | 1.500 px/pt, ink 19/19 |
+| hello | 200%, graphite | pass 9/9 | 2.000 px/pt, ink 25/24 |
+| frame: our close button asks the application (refused once, then allowed, application ends) | 200% graphite; 100% nextstep-classic | pass 8/8 both | |
+| miniaturize: our button -> `windowDidMiniaturize:`, `isMiniaturized` | 100% | pass | |
+| zoom: Ctrl+Shift double click on our title bar -> resize and `isZoomed` | 200% graphite | shown once (`zoom-evidence-s2-graphite`: 510x351, zoomed=1); the restore and a second run at 100% did not register the double click (its 400 ms window does not always survive emulation); the check now repeats the click, rerun pending | |
+| apps: upstream Terminal (a typed command ran in its shell) and Calculator (the + key lights when clicked), both in our frames | 100% nextstep-classic, 150% teal-blueprint, 200% graphite | pass 9/9 each | Calculator 1.01 / 1.52 / 2.03 px/pt |
+| live scale change (the desktop steps 100 -> 125 -> ... -> 300 -> 100%) | | 125, 150, 175% followed with `windowDidChangeBackingProperties:`; at 200% the window rendered at 2.0; at 250% and 300% the compositor also shrank the window to fit and the notification was skipped (fixed: `_reportedScale120`); the compositor counted 3 commits at a stale scale during the 7 changes (frames already under way). Rerun with the fix pending | |
+| no resampled commit at a fixed scale | all of the above | pass | |
+
+Two checks had matched their own echoed command line on the console (false passes of the
+metrics run and of the Terminal step); the markers were changed and those runs repeated; the
+table has only the repeated results.
+
+Seen and not fixed: upstream Terminal draws its text at about half the cell size at every scale
+(also at 100%, so not a scaling fault; not investigated); an application-set pointer image stays
+at 1x; windows are placed by the compositor, the position AppKit asked for is ignored.
+
+## Conformance against real macOS (first scorecard)
+Reference: macOS 26.5.2 on the bench controller, used only as a renderer in `~/sf-cocoa-ref/`
+over ssh (no GUI session touched: an NSWindow that is never shown and `cacheDisplayInRect:`
+draw at 2x headless). `conformance/metrics.m` builds unchanged on both sides;
+`conformance/compare.py` compares the JSON. Raw files: `runs/cocoa/ref-macos/`,
+`runs/cocoa/conformance/` (`scorecard-001.md`, `side-by-side-001.png`, `diff-001.png`).
+No Apple font or artwork was copied anywhere; the reference PNGs stay under `runs/`.
+
+1548 values compared: 382 equal within 0.01 pt, 867 different, 299 missing on our side.
+
+| Area | Finding |
+|---|---|
+| System font | upstream ships Inter (Regular and Bold only) as the system font. Against macOS's system font: ascender within 0.03 pt at every size; descender 0.3 to 0.8 pt deeper; cap height +3.3%, x-height +3.7%; default line height equal at 9, 10, 12, 13, 14, 17 pt and 1 pt taller at 11, 15, 20, 24, 28 pt |
+| String advances | Inter has no size-dependent tracking: a 37-character label is 4.1% narrow at 9 pt, 1.2% wide at 13 pt (+2.6 pt), 5.9% wide at 17 pt, 12% wide at 28 pt (+49 pt) |
+| Tracking table (computed, not yet applied) | least-squares tracking per size that brings Inter to the reference, in 1/1000 em: 9: +15.4, 10: +8.6, 11: +2.8, 12: -3.1, 13: -9.0, 14: -13.8, 15: -18.7, 17: -28.5, 20: -40.1, 24: -50.6, 28: -51.1. Predicted residual on the text strings after it: within 2 pt up to 15 pt size, within 4 pt at 28 pt; digits stay 1.5 to 14 pt narrow and capitals wide, because the glyph proportions differ. Advances cannot be made identical without Apple's fonts |
+| Weights | ultraLight, thin, light resolve to Inter-Regular; medium, semibold, heavy, black to Inter-Bold (macOS has nine distinct weights) |
+| Monospaced | Nimbus Mono PS where macOS has Menlo / SF Mono; `monospacedDigitSystemFontOfSize:weight:` missing |
+| Control sizes (regular) | push button 92x32 (macOS 80x24), checkbox 113x18 (110x16), pop-up 106x22 (119x24), text field height 22 (24), segmented 136 (148) wide, slider `sizeToFit` returns 10000x10000 |
+| Layout API | `intrinsicContentSize`, `fittingSize`, `alignmentRectInsets`, `firstBaselineOffsetFromTop`, `baselineOffsetFromBottom` do not exist on NSView (270 of the 299 missing values): Auto Layout based applications cannot lay out against this AppKit |
+| Colours | 10 of 20 system colours equal; different: disabledControlTextColor, controlColor, placeholderTextColor, controlTextColor, keyboardFocusIndicatorColor, windowBackgroundColor and four more |
+| Window | titled frame for 400x300 content: macOS 400x332; ours 400x300 here because the compositor draws the frame (by design) |
+| Pixels (one view tree, inactive window, 1x) | 6.7% of the pixels differ by more than 8%; structural dissimilarity 0.10. Visible in `side-by-side-001.png`: older control artwork (bordered capsule button, square checkbox, square field), slider knob drawn at 0 for a value of 0.4, the offscreen render on our side is at 1x (`renderScale` 1 against 2) |
+
+Order of work this gives: layout API on NSView (blocks every modern application), control
+geometry to the reference, the tracking table and the missing weights (Inter has all nine
+as static or variable fonts under the SIL Open Font License), then control drawing. The
+conformance suite so far is this one program; the areas the owner listed (tables, menus,
+toolbars, sheets, Auto Layout, dark appearance, ...) are not written yet.
+
+## Claude and Codex desktop applications (static survey)
+- Codex: OpenAI's documented download (`persistent.oaistatic.com/codex-app-prod/Codex.dmg`,
+  896 MB, sha256 488009cf...ad4423a) contains `ChatGPT.app` (bundle id com.openai.codex,
+  26.1106.51428, macOS 13.0 or later, arm64 only): OpenAI's own Chromium runtime ("owl",
+  Chromium 157.0.8103.51, `app.asar`), Sparkle, a bundled Node 24.22.1 and Codex CLI, helper
+  applications, App Sandbox entitlements on every executable. Survey
+  (`runs/cocoa/apps/codex/survey.md`): 91 Mach-O images, 119 system libraries, 4670 imported
+  symbols, 817 missing, 48 libraries absent. The runtime uses chained fixups, so every import
+  binds at load; it alone has gaps in 49 libraries.
+- Claude: not obtained. Anthropic's documented download links answer 403 to an automated
+  client; a person has to fetch `Claude.dmg` with a browser into `runs/cocoa/apps/claude/`.
+- Beyond linking, Chromium needs: remote CoreAnimation layers into the window (upstream's
+  `pd_surface_host_v1`; our compositor has neither that nor subsurface compositing: missing),
+  the sandbox (kernel extension present; newer profile compiler carried as patch 0007;
+  `--no-sandbox` is Chromium's switch), a GPU path without Metal (ANGLE on OpenGL through
+  Mesa, or SwiftShader), IOSurface (framework present, daemon not started, untested),
+  Mach bootstrap/XPC (present, untested), Keychain and trust (Security present, trustd
+  missing at the pin), LaunchServices URL schemes (untested), audio (lab coreaudiod; AVFAudio
+  absent), accessibility and screen capture (missing).
+- Order: Firefox 160 first, then an official Electron release's blank window as the Chromium
+  stepping stone, then Codex and Claude. The command-line tools (Claude Code, Codex CLI) are
+  a separate stream's work and the short route.
