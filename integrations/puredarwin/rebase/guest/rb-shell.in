@@ -20,11 +20,11 @@ kextstat 2>&1 | wc -l
 printf 'RB_SHELL_REGISTRY\n'
 for n in ans apcie dart-apcie0 smc dcp sgx spi3 audio-spk1 dart-disp0 dart-sgx wlan; do
     printf 'RB_NODE %s\n' "$n"
-    ioreg -p IODeviceTree -n "$n" -r -d 1 -w 0 2>&1 | grep -a '+-o \|"reg"\|IODeviceMemory\|"compatible"' | head -6 | cut -c1-300
+    ioreg -p IODeviceTree -n "$n" -r -d 1 -l -w 0 2>&1 | grep -a -E '[+]-o |"reg"|IODeviceMemory|"compatible"' | head -6 | cut -c1-300
 done
 printf 'RB_SHELL_SERVICES\n'
 ioreg -p IOService -w 0 2>&1 | grep -a '+-o ' | wc -l
-ioreg -p IOService -w 0 2>&1 | grep -a 'PDApcie\|PDBwfm\|PDAgx\|PDDcp\|PDAppleSound\|PDAppleTouchBar\|PDM1SPI\|PDCpuPower\|PDGpuDT\|PDAppleBootCPUPMGR\|PDAppleAIC\|AppleARMSMP\|IO80211\|en0' | cut -c1-160 | head -40
+ioreg -p IOService -w 0 2>&1 | grep -a -E 'PDApcie|PDBwfm|PDAgx|PDDcp|PDAppleSound|PDAppleTouchBar|PDM1SPI|PDCpuPower|PDGpuDT|PDAppleBootCPUPMGR|PDAppleAIC|AppleARMSMP|IO80211|en0' | cut -c1-160 | head -40
 printf 'RB_SHELL_SPAWN\n'
 i=0; while [ "$i" -lt 20 ]; do /bin/echo spawn-$i > /dev/null || printf 'RB_SPAWN_FAIL %s\n' "$i"; i=$((i+1)); done
 dd if=/dev/zero bs=1048576 count=16 2>/dev/null | sha256sum

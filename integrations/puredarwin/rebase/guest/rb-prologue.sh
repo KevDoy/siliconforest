@@ -8,9 +8,11 @@ rb_ans=$(/usr/sbin/ioreg -p IOService -n ans -r -w 0 2>&1)
 rb_rc=$?
 rb_lines=$(printf '%s\n' "$rb_ans" | grep -c '+-o ')
 rb_disks=$(ls /dev/disk* 2>/dev/null | tr '\n' ' ')
-printf '\nRB_NVME ioreg_rc=%s entries=%s disks=%s\n' "$rb_rc" "$rb_lines" "$rb_disks"
+# and no object of an NVMe class anywhere in the service plane, whatever it hangs on
+rb_nvme=$(/usr/sbin/ioreg -p IOService -w 0 2>/dev/null | grep '+-o ' | grep -ci 'nvme')
+printf '\nRB_NVME ioreg_rc=%s entries=%s nvme_objects=%s disks=%s\n' "$rb_rc" "$rb_lines" "$rb_nvme" "$rb_disks"
 printf '%s\n' "$rb_ans" | grep '+-o ' | head -8
-if [ "$rb_rc" -ne 0 ] || [ "$rb_lines" -gt 1 ] || ! /usr/sbin/ioreg -p IOService -w 0 2>/dev/null | grep -q 'PDArmPlatformExpert\|IOPlatformExpertDevice'; then
+if [ "$rb_rc" -ne 0 ] || [ "$rb_lines" -gt 1 ] || [ "${rb_nvme:-1}" -ne 0 ] || ! /usr/sbin/ioreg -p IOService -w 0 2>/dev/null | grep -q 'IOPlatformExpertDevice'; then
     printf 'RB_STOP nvme-nub-check-failed: session ended before anything else ran\n'
     printf '\nPD_BENCH_DONE\n'
     exit 97
