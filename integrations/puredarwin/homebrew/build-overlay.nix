@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+# The "Homebrew compatibility" system overlay: every file SiliconForest's system root
+# needs on top of today's image for macOS-built programs, as one tree rooted at /.
+# hb_qemu.py --overlay <this output> writes it onto a copy of the QEMU system image.
+#
+#   usr/lib/libSystem.B.dylib          ./build-libsystem.nix (patches/libsystem-homebrew.patch)
+#   usr/lib/libhbcrash.dylib           ./build-guest-tools.nix (diagnostic, not part of the system)
+#   usr/lib/lib{ncurses.5.4,panel.5.4,expat.1,ffi,sqlite3,xml2.2,util}.dylib   ./build-syslibs.nix
+#   usr/lib/libbz2.1.0.dylib           ./build-syslibs.nix (upstream bzip2 sources)
+#   usr/lib/libedit.3.dylib            ./build-libedit.nix (upstream libedit)
+#   usr/lib/libIOKitCF.dylib           ./build-iokit.nix (the tree's IOKit + kIOMainPortDefault)
+#   usr/lib/libz.1.dylib, libcurl.4.dylib                    the tree's own dylib packages
+#   System/Library/Frameworks/{CoreServices,Security,SystemConfiguration}.framework
+#                                      the tree's arm64 frameworks, binaries only
+#   System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+#                                      a link to the image's /usr/lib/libFoundation.dylib, as its
+#                                      Versions/A is (macOS's Foundation is version C). The tree's
+#                                      framework-compat package has a binary for this path, but it
+#                                      re-exports the Swift Foundation overlay, which the image lacks.
+# Not copied: headers, configd and the launch daemons of the SystemConfiguration package
+# (they would change how the guest configures its network).
+let
+  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
+  p = pd.packages.x86_64-linux;
+  libSystem = import ./build-libsystem.nix;
+  syslibs = import ./build-syslibs.nix;
+  tools = import ./build-guest-tools.nix;
+  libedit = import ./build-libedit.nix;
+  iokit = import ./build-iokit.nix;
+  F = "System/Library/Frameworks";
+in pkgs.runCommand "darwin-lab-homebrew-overlay-arm64" { } ''
+  mkdir -p $out/usr/lib $out/${F}
+  cp ${libSystem}/usr/lib/libSystem.B.dylib $out/usr/lib/
+  cp ${tools}/usr/lib/libhbcrash.dylib $out/usr/lib/
+  cp -P ${syslibs}/usr/lib/* $out/usr/lib/
+  cp -P ${libedit}/usr/lib/* $out/usr/lib/
+  cp ${iokit}/usr/lib/libIOKitCF.dylib $out/usr/lib/
+  cp -P ${p.libzDylib-arm64}/usr/lib/libz* $out/usr/lib/
+  cp -P ${p.libcurlDylib-arm64}/usr/lib/libcurl* $out/usr/lib/
+  cp ${p.security-arm64}/usr/lib/libSecurity.dylib $out/usr/lib/
+  cp ${p.systemConfiguration-arm64}/usr/lib/libSystemConfiguration.dylib $out/usr/lib/
+  framework() {   # package, name: Versions/A/<name> and the two links, no headers
+    mkdir -p $out/${F}/$2.framework/Versions/A
+    cp -L $1/${F}/$2.framework/Versions/A/$2 $out/${F}/$2.framework/Versions/A/$2
+    ln -s A $out/${F}/$2.framework/Versions/Current
+    ln -s Versions/Current/$2 $out/${F}/$2.framework/$2
+  }
+  framework ${p.coreServices-arm64} CoreServices
+  framework ${p.security-arm64} Security
+  framework ${p.systemConfiguration-arm64} SystemConfiguration
+  mkdir -p $out/${F}/Foundation.framework/Versions/C
+  ln -s ../../../../../../usr/lib/libFoundation.dylib $out/${F}/Foundation.framework/Versions/C/Foundation
+  chmod -R u+w $out
+''
