@@ -47,7 +47,7 @@ import qd_run  # noqa: E402
 QCODES = {' ': 'spc', '\n': 'ret', '.': 'dot', ',': 'comma', '-': 'minus', '=': 'equal', '/': 'slash', ';': 'semicolon',
           "'": 'apostrophe', '\t': 'tab'}
 SHIFTED = {':': 'semicolon', '_': 'minus', '+': 'equal', '?': 'slash', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
-           '&': '7', '*': '8', '(': '9', ')': '0', '"': 'apostrophe'}
+           '&': '7', '*': '8', '(': '9', ')': '0', '"': 'apostrophe', '>': 'dot', '<': 'comma', '|': 'backslash'}
 
 
 class Driver:
@@ -258,6 +258,22 @@ def main():
                 else:
                     rec['result'] = 'NOT FOUND'
                     ok = step.get('optional', False)
+            elif 'pixel_in' in step:
+                # {"pixel_in": "ops", "points": [dx, dy], "rgb": [r, g, b], "name": "..."}: the colour of one
+                # pixel, placed like click_in; a check
+                place, got = places.get(step['pixel_in']), drv.pixels()
+                if place is None or got is None:
+                    rec['result'] = 'not located'
+                    ok = False
+                else:
+                    w, h, px = got
+                    x = min(max(round(place['box'][0] + step['points'][0] * place['per_point']), 0), w - 1)
+                    y = min(max(round(place['box'][1] + step['points'][1] * place['per_point']), 0), h - 1)
+                    seen = list(px[(y * w + x) * 3:(y * w + x) * 3 + 3])
+                    good = all(abs(a - b) <= step.get('tolerance', 12) for a, b in zip(seen, step['rgb']))
+                    rec.update(at_pixel=[x, y], seen=seen, result='ok')
+                    result['checks'][step.get('name', 'pixel in ' + step['pixel_in'])] = good
+                    result['measured'][step.get('name', 'pixel in ' + step['pixel_in'])] = dict(at=[x, y], seen=seen, wanted=step['rgb'])
             elif 'watch_scale' in step:
                 # {"watch_scale": "view", "rgb": [...], "points_wide": 378, "seconds": 90, "until": "REGEX",
                 #  "expect": [1, 1.25, ...]}: measures pixels per point of the rectangle again and again

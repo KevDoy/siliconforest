@@ -17,6 +17,8 @@
 #                    when it exists, built from the Cocoa worktree; else the M1's current one)
 #   --root DIR       the Cocoa system root (default: nix-build build-desktop-root.nix)
 #   --tree D=/DEST   a further directory tree for the image (an application bundle)
+# COCOA_LIBSYSTEM_NIX=<recipe> selects another libSystem (./build-libsystem-cocoa.nix: with the
+# newer sandbox profile compiler); its System/ tree, if it has one, is staged as well.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); LAB=$(cd "$HERE/../../.." && pwd); cd "$LAB"
 [ $# -ge 1 ] || { sed -n '2,/^set -euo/p' "$0" | sed '$d' | cut -c3-; exit 2; }
@@ -39,8 +41,8 @@ nixb() { nix-build --extra-experimental-features 'nix-command flakes' -j 1 --cor
 : > "$OUT/build.log"
 [ -n "$ROOTDIR" ] || ROOTDIR=$(nixb "$HERE/build-desktop-root.nix")
 [ -d "$ROOTDIR" ] || { echo "the Cocoa root did not build ($OUT/build.log)" >&2; exit 2; }
-# the Homebrew stream's libSystem and dyld: ___chkstk_darwin as a real stack probe and the added entry points
-LIBSYSTEM=$(nixb "$LAB/integrations/puredarwin/homebrew/build-libsystem.nix")
+# the lab.s default libSystem and dyld (libsystem-default: ___chkstk_darwin as a real stack probe, the macOS ABI entry points)
+LIBSYSTEM=$(nixb "${COCOA_LIBSYSTEM_NIX:-$LAB/integrations/puredarwin/libsystem-default/build-libsystem.nix}")
 [ -d "$LIBSYSTEM/usr/lib" ] || { echo "libSystem did not build ($OUT/build.log)" >&2; exit 2; }
 if [ -z "$COMP" ]; then
   COMP=runs/cocoa/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop
@@ -62,6 +64,7 @@ PY
 ENVLINE=$(cat "$OUT/session.env"); [ -n "$ENVLINE" ] && ENVLINE="export $ENVLINE"
 sed -e "s/@SECONDS@/$(cat "$OUT/session.seconds")/g" -e "s/@SCALE@/$SCALE/g" -e "s/@THEME@/$THEME/g" -e 's/@APPDELAY@/3/g' -e 's/@APPGAP@/4/g' \
     -e "s/@TERMINALS@/$(cat "$OUT/session.terminals")/g" -e "s|@ENV@|$ENVLINE|g" "$HERE/guest/cocoa-session.in" > "$OUT/cocoa-session"
+[ -d "$LIBSYSTEM/System" ] && TREES+=(--tree "$LIBSYSTEM/System=/System")
 python3 -B "$HERE/cocoa_image.py" --output "$OUT/disk.img" --tree "$ROOTDIR=/" --tree "$LIBSYSTEM/usr/lib=/usr/lib" "${TREES[@]}" \
   --file "$OUT/cocoa-session=/usr/bin/cocoa-session" --file "$COMP=/usr/bin/chonkstep-darwin-desktop" \
   --file "$TERMINAL=/usr/bin/chonk-terminal-darwin" \

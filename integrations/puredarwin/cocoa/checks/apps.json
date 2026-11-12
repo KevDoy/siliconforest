@@ -1,0 +1,26 @@
+{
+ "apps": ["/Applications/Calculator.app/Contents/MacOS/Calculator", "sleep 25; /Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"],
+ "env": "PD_WS_TRACE=1",
+ "seconds": 700,
+ "steps": [
+  {"wait": "COCOA_APP_START 2", "timeout": 500},
+  {"expect": "frame by the compositor \\(asked for the compositor\\)", "timeout": 600, "name": "Calculator: compositor draws the frame"},
+  {"expect": "title \"Calculator\"", "timeout": 10, "name": "Calculator window", "optional": true},
+  {"sleep": 10},
+  {"locate": "ops", "rgb": [255, 159, 10], "tolerance": 10, "points_wide": 57.25, "scale": @SCALE@, "scale_tolerance": 0.08, "name": "Calculator: operator keys at the display scale"},
+  {"shot": "01-calculator"},
+  {"click_in": "ops", "points": [28, 171]},
+  {"sleep": 5},
+  {"pixel_in": "ops", "points": [8, 152], "rgb": [255, 255, 255], "name": "Calculator: the + key lights when clicked"},
+  {"shot": "02-calculator-plus"},
+  {"expect": "frame by the compositor \\(asked for the compositor\\)", "timeout": 600, "name": "Terminal: compositor draws the frame"},
+  {"sleep": 25},
+  {"shot": "03-terminal"},
+  {"type": "echo COCOATERM_OK > /dev/console\n"},
+  {"expect": "COCOATERM_OK", "timeout": 120, "name": "Terminal: typed command ran in its shell"},
+  {"sleep": 5},
+  {"shot": "04-terminal-typed"},
+  {"absent": "WMSCALE resampled", "name": "no resampled commit"},
+  {"absent": "Segmentation|Bus error|Abort trap", "name": "no crash"}
+ ]
+}

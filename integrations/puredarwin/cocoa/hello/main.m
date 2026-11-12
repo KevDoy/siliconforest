@@ -47,8 +47,10 @@ static void say(const char *format, ...)
 
     [[NSColor colorWithCalibratedRed:0.93 green:0.95 blue:0.98 alpha:1] set];
     NSRectFill(b);
+    // a solid 4 point border in a colour nothing else on the desktop has: the automated checks
+    // find the view by it on the screen and measure pixels per point from its width
     [[NSColor colorWithCalibratedRed:0.2 green:0.45 blue:0.8 alpha:1] set];
-    NSFrameRect(NSInsetRect(b, 1, 1));
+    NSFrameRectWithWidth(b, 4);
     [[NSString stringWithFormat:@"keys %d  clicks %d", _keys, _clicks] drawAtPoint:NSMakePoint(8, b.size.height - 22)
                                                                     withAttributes:attrs];
     [[NSString stringWithFormat:@"typed: %@", _typed ?: @""] drawAtPoint:NSMakePoint(8, b.size.height - 42) withAttributes:attrs];
@@ -203,8 +205,15 @@ static void say(const char *format, ...)
 - (void)windowDidBecomeKey:(NSNotification *)note { say("COCOAHELLO window-key"); }
 - (void)windowDidResize:(NSNotification *)note
 {
-    say("COCOAHELLO window-resized %.0fx%.0f zoomed=%d", [_window frame].size.width, [_window frame].size.height,
-        (int)[_window isZoomed]);
+    say("COCOAHELLO window-resized %.0fx%.0f", [_window frame].size.width, [_window frame].size.height);
+    // the zoomed state may reach the window just after the size it comes with: reported once things are quiet
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(reportZoom) object:nil];
+    [self performSelector:@selector(reportZoom) withObject:nil afterDelay:1.5];
+}
+- (void)reportZoom
+{
+    say("COCOAHELLO zoom-state zoomed=%d size=%.0fx%.0f", (int)[_window isZoomed], [_window frame].size.width,
+        [_window frame].size.height);
 }
 - (void)windowDidMiniaturize:(NSNotification *)note { say("COCOAHELLO window-miniaturized is=%d", (int)[_window isMiniaturized]); }
 - (void)windowDidDeminiaturize:(NSNotification *)note { say("COCOAHELLO window-deminiaturized is=%d", (int)[_window isMiniaturized]); }
