@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Verdict of a boot that started the NVMe controller read-only.
 
-  nv_verdict.py <linux-before dir> <linux-after dir> <console.bin> <expected write_refused>
+  nv_verdict.py <linux-before dir> <linux-after dir> <console.bin> <expected write_refused> [level, default 2]
 
 The proof it checks, honest about Linux' own writes:
   - ranges on partitions Linux does not modify (the GPTs and the APFS partitions) must be
@@ -21,6 +21,7 @@ import re, subprocess, sys
 from pathlib import Path
 
 before, after, console, expect_refused = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), int(sys.argv[4])
+level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
 bad = []
 def check(ok, text):
     print('NV_VERDICT %s %s' % ('ok  ' if ok else 'FAIL', text))
@@ -104,7 +105,40 @@ for tag in ('NV_IDCTRL', 'NV_IDNS'):
     if l and d and not same:
         lf, df = dict(re.findall(r'(\w+)=("[^"]*"|\S+)', l.group(1))), dict(re.findall(r'(\w+)=("[^"]*"|\S+)', d.group(1)))
         print('    differing: ' + ' '.join('%s linux=%s darwin=%s' % (k, lf.get(k), df.get(k)) for k in lf if lf.get(k) != df.get(k)))
-for l in re.findall(r'^NVT_(?:SEQ|RAND) .*$|^NVT_WTEST.*$|^NVT_FAIL.*$|^NV_FAIL.*$', con, re.M): print('NV_RESULT ' + l)
+if level >= 3:
+    nparts = len(table)
+    census = re.findall(r'^NV_MEDIA (.*)$', con, re.M)
+    want = 'published=1 partitions=%d guarded=%d foreign=0' % (nparts, nparts)
+    check(len(census) >= 2 and all(c.strip() == want for c in census), 'below the block device: %s (expected "%s", before and after the reads)' % (' | '.join(census), want))
+    check(not re.search(r'ApfsFileSystemDriver|AppleAPFS|apfs_|Ext4FileSystemDriver|hfs_mount|msdosfs_mount|ext4_mount', con), 'no APFS / filesystem driver line on the console')
+    mounts_d = re.findall(r'^NV_MOUNT (.*)$', con, re.M)
+    check(bool(mounts_d) and not any('/dev/disk' in m for m in mounts_d), 'nothing from a disk is mounted in Darwin (%d mount lines, all root or devfs)' % len(mounts_d))
+    hm = hashes(con, 'NVT_MEDIA_HASH')
+    okm = sum(1 for k, h in hm.items() if hd.get(k) == h)
+    check(len(hm) == len(hd) and okm == len(hm), 'through the block device (/dev/rdiskN): %d of %d ranges equal to the same boot\'s /dev/pdnvme0 reads' % (okm, len(hm)))
+    wt = re.findall(r'^NVT_WTEST_RESULT (\S+) (\S+)', con, re.M)
+    check(len(wt) == 4 and all(r == 'writes-refused' for _, r in wt), 'write attempts: %s' % ' '.join('%s=%s' % x for x in wt))
+    check('GRANTED' not in con, 'no open for writing was granted on any node')
+    gpt = re.findall(r'^NV_GPT (\d+) (\d+) (\d+) GPT part', con, re.M)
+    check(sorted((int(a), int(b)) for a, b, _ in gpt) == sorted((st, sz) for _, st, sz, _ in table), 'GPT as parsed by the stack: %d partitions with Linux\' starts and sizes' % len(gpt))
+raws = dict(re.findall(r'^NV_SMARTRAW (\S+) ([0-9a-f]{1024})', con, re.M))
+order = [k for k in ('start', 'end', 'start2', 'end2') if k in raws]
+for a, b in zip(order, order[1:]):
+    x, y = bytes.fromhex(raws[a]), bytes.fromhex(raws[b])
+    diff = [i for i in range(512) if x[i] != y[i]]
+    fields = sorted({(i // 16) * 16 if i >= 32 else i for i in diff})
+    print('NV_VERDICT note SMART page %s -> %s: bytes differing at offsets %s (1-2 temperature, 32 data units read, 64 host reads, 96 busy time, 112 power cycles, 144 unsafe shutdowns, 48/80 writes; >=192 vendor/other)' % (a, b, fields))
+    check(not any(f in (48, 80, 144, 160, 176) or f == 0 for f in fields), 'SMART %s -> %s: no change in write counters, unsafe shutdowns, media errors, error log, critical warning' % (a, b))
+starts = con.split('PDAppleNVMe: start ')
+for chunk in starts[1:]:
+    n = chunk.split(' ', 1)[0]
+    msgs = re.findall(r'PDAns: syslog: (.*)', chunk)
+    print('NV_VERDICT note firmware log after start %s: %s' % (n, ' || '.join(m.strip()[:90] for m in msgs) or '(none)'))
+if 'start2' in raws:
+    check(len(re.findall(r'^NV_STATE stopped-clean', con, re.M)) >= 2 and 'end2' in raws, 'second start in the same boot: ready, read, stopped cleanly again')
+    hs = re.search(r'^NVT_SECOND_HASH_ALL ranges=(\d+) errors=0 ([0-9a-f]{64})', con, re.M); h1 = re.search(r'^NVT_HASH_ALL ranges=(\d+) errors=0 ([0-9a-f]{64})', con, re.M)
+    check(bool(hs and h1 and hs.group(2) == h1.group(2)), 'second start: all ranges hash to the same digest as on the first start')
+for l in re.findall(r'^NVT_(?:MEDIA_)?(?:SEQ|RAND) .*$|^NVT_WTEST.*$|^NVT_FAIL.*$|^NV_FAIL.*$', con, re.M): print('NV_RESULT ' + l)
 if bad:
     stop = Path(__file__).resolve().parents[4] / 'runs/m1-storage/STOP'
     stop.write_text('nv_verdict failed for %s: %s\n' % (console, '; '.join(bad)))

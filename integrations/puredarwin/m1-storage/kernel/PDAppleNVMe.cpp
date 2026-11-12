@@ -84,7 +84,7 @@ static bool      gHeld[PD_ANS_SLOTS];   /* a finished read whose data the caller
 static bool      gStopRequested, gSmartRequested;
 static const char *gStopReason = "";
 static int       gEvent;                /* the engine sleeps on its address */
-static uint32_t  gWriteRefused, gSyncIgnored;
+static uint32_t  gWriteRefused, gSyncIgnored, gStarts;
 static uint64_t  gMaxMicros, gSumMicros, gCompleted, gBytes, gReadyAtMs, gStartMs, gStopMs;
 static int       gMajor = -1;
 static void     *gDevNode;
@@ -578,7 +578,11 @@ pd_nvme_thread(__unused void *arg, __unused wait_result_t wr)
 	char why[160];
 	int err;
 
-	IOSleep(gDelayMs);
+	bool again = gStarts != 0;
+
+	if (!again)
+		IOSleep(gDelayMs);
+	gStarts++;
 	if (gLevel == 1) {
 		gAns.observe();
 		set_state(kStateObserved);
@@ -586,6 +590,7 @@ pd_nvme_thread(__unused void *arg, __unused wait_result_t wr)
 	}
 	set_state(kStateStarting);
 	gStartMs = now_ms();
+	LOG("start %u of this boot", gStarts);
 	LOG("starting the controller (level %u, time to live %u s); READ-ONLY build: allowlist admin 00 01 02 04 05 06, I/O 02", gLevel, gTtl);
 	err = gAns.start(why, sizeof(why));
 	if (err != 0) {
@@ -602,7 +607,7 @@ pd_nvme_thread(__unused void *arg, __unused wait_result_t wr)
 		if (gDevNode == NULL)
 			IOSleep(100);
 	}
-	if (gLevel >= 3)
+	if (gLevel >= 3 && gDisk == NULL)
 		publish_disk();
 
 	engine();
@@ -647,9 +652,70 @@ request_stop(const char *reason, uint32_t ms)
 	return stopped;
 }
 
+static void pd_nvme_thread(void *arg, wait_result_t wr);
+
+/* A further start after a clean stop: the sequence Linux runs when its driver is bound again. */
+static int
+request_start(void)
+{
+	thread_t thread;
+
+	IOLockLock(gLock);
+	if (gState != kStateStoppedClean || gLevel < 2) {
+		IOLockUnlock(gLock);
+		return EBUSY;
+	}
+	gState = kStateStarting;
+	gStopRequested = false;
+	gStopReason = "";
+	gWhy[0] = 0;
+	IOLockUnlock(gLock);
+	if (kernel_thread_start(pd_nvme_thread, NULL, &thread) != KERN_SUCCESS)
+		return ENOMEM;
+	thread_deallocate(thread);
+	return 0;
+}
+
+/*
+ * What sits below the block device in the registry: partitions, how many of them the guard
+ * holds, and every object that is neither the storage family's plumbing nor the guard.
+ */
+static void
+media_census(IORegistryEntry *entry, unsigned depth, unsigned *partitions, unsigned *guarded, unsigned *foreign, char *names, size_t len)
+{
+	OSIterator *iter = entry->getChildIterator(gIOServicePlane);
+	OSObject *o;
+
+	if (iter == NULL || depth > 8) {
+		OSSafeReleaseNULL(iter);
+		return;
+	}
+	while ((o = iter->getNextObject()) != NULL) {
+		IORegistryEntry *child = OSDynamicCast(IORegistryEntry, o);
+		IOMedia *media = OSDynamicCast(IOMedia, o);
+		const char *cls = o->getMetaClass()->getClassName();
+
+		if (child == NULL)
+			continue;
+		if (media != NULL) {
+			if (!media->isWhole())
+				(*partitions)++;
+		} else if (strcmp(cls, "PDAppleNVMeMediaGuard") == 0) {
+			(*guarded)++;
+		} else if (strcmp(cls, "IOBlockStorageDriver") != 0 && strcmp(cls, "IOGUIDPartitionScheme") != 0 &&
+		    strcmp(cls, "IOMediaBSDClient") != 0) {
+			(*foreign)++;
+			strlcat(names, " ", len);
+			strlcat(names, cls, len);
+		}
+		media_census(child, depth + 1, partitions, guarded, foreign, names, len);
+	}
+	iter->release();
+}
+
 /* ---- sysctl -------------------------------------------------------------------------------- */
 
-enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs };
+enum { kCtlState, kCtlGate, kCtlWrite, kCtlStats, kCtlIdCtrl, kCtlIdNs, kCtlSmart, kCtlStop, kCtlGateTest, kCtlRegs, kCtlMedia, kCtlSmartRaw, kCtlStart };
 
 static uint64_t le64(const uint8_t *p) { return OSReadLittleInt64(p, 0); }
 static uint32_t le32(const uint8_t *p) { return OSReadLittleInt32(p, 0); }
@@ -691,7 +757,7 @@ gate_selftest(char *text, size_t len)
 static int
 pd_sysctl(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sysctl_req *req)
 {
-	char text[1024];
+	char text[1100];
 	int value = 0, error;
 	const uint8_t *c = gAns.idCtrl, *n = gAns.idNs, *s = gAns.smart;
 
@@ -773,6 +839,27 @@ pd_sysctl(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sysctl_
 	case kCtlGateTest:
 		gate_selftest(text, sizeof(text));
 		break;
+	case kCtlMedia: {
+		unsigned partitions = 0, guarded = 0, foreign = 0;
+		char names[512] = "";
+
+		if (gDisk != NULL)
+			media_census((IORegistryEntry *)gDisk, 0, &partitions, &guarded, &foreign, names, sizeof(names));
+		snprintf(text, sizeof(text), "published=%d partitions=%u guarded=%u foreign=%u%s", gDisk != NULL, partitions, guarded,
+		    foreign, names);
+		break;
+	}
+	case kCtlSmartRaw:
+		/* the whole 512-byte page as last read; it holds counters only, no identity */
+		for (unsigned i = 0; i < 512; i++)
+			snprintf(text + 2 * i, 3, "%02x", s[i]);
+		break;
+	case kCtlStart:
+		value = (int)gStarts;
+		error = sysctl_handle_int(oidp, &value, 0, req);
+		if (error != 0 || req->newptr == USER_ADDR_NULL)
+			return error;
+		return value == 1 ? request_start() : EINVAL;
 	}
 	if (arg2 == kCtlSmart && req->newptr) {
 		/* consume the written value */
@@ -800,7 +887,13 @@ SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, write_refused, CTLTYPE_INT | CTLFLAG_RD | C
 SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, stop, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, kCtlStop, pd_sysctl, "I",
     "write 1: clean controller shutdown; reads 0 running, 1 stopped cleanly, 2 not cleanly or failed");
 
+PD_STR(media, kCtlMedia, "what is attached below the block device");
+PD_STR(smart_raw, kCtlSmartRaw, "SMART / health log page as last read, hexadecimal");
+SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, start, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, kCtlStart, pd_sysctl, "I",
+    "write 1 after a clean stop: start the controller again; reads the number of starts");
+
 static struct sysctl_oid *const gOids[] = {
+	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
 	&sysctl__kern_pd_nvme, &sysctl__kern_pd_nvme_state, &sysctl__kern_pd_nvme_stats, &sysctl__kern_pd_nvme_idctrl,
 	&sysctl__kern_pd_nvme_idns, &sysctl__kern_pd_nvme_gate_selftest, &sysctl__kern_pd_nvme_smart,
 	&sysctl__kern_pd_nvme_gate_rejected, &sysctl__kern_pd_nvme_write_refused, &sysctl__kern_pd_nvme_stop,

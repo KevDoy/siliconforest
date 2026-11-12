@@ -186,6 +186,11 @@ bool
 PDAnsMem::alloc(uint32_t bytes)
 {
 	bytes = (bytes + 0x3fffu) & ~0x3fffu;
+	if (md != NULL && va != NULL && size == bytes) {
+		/* a second start in the same boot reuses the memory of the first */
+		bzero(va, bytes);
+		return true;
+	}
 	md = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous,
 	    bytes, 0x0000000fffffc000ULL);
 	if (md == NULL)
@@ -821,6 +826,25 @@ PDAns::start(char *why, size_t whyLen)
 	uint8_t sqe[SQE_SIZE];
 
 #define FAIL(code, ...) do { snprintf(why, whyLen, __VA_ARGS__); LOG("%s", why); return (code); } while (0)
+	/*
+	 * Every start begins from the same state (the first of a boot and a later one after
+	 * a clean stop, which is what Linux does on a driver rebind). The firmware's shared
+	 * buffers of an earlier start are not reused: they are simply left allocated.
+	 */
+	bzero(endpoints, sizeof(endpoints));
+	version = 0;
+	helloSeen = epmapDone = bootFailed = crashed = iopAck = apAck = cpuStarted = false;
+	iopPower = apPower = 0;
+	for (unsigned i = 0; i < PD_ANS_SHMEM; i++)
+		shmem[i] = PDAnsMem();
+	nshmem = 0;
+	syslogEntries = syslogMsgSize = 0;
+	enabled = ioQueues = dead = false;
+	nsBlocks = 0;
+	inflight = 0;
+	sartUsed = 0;
+	for (unsigned s = 0; s < PD_ANS_SLOTS; s++)
+		slot[s].busy = false;
 	/* memory first: nothing is touched when it cannot be had */
 	if (!asq.alloc(0x4000) || !acq.alloc(0x4000) || !atcb.alloc(PD_ANS_IO_DEPTH * TCB_SIZE) || !iosq.alloc(0x4000) ||
 	    !iocq.alloc(0x4000) || !iotcb.alloc(PD_ANS_IO_DEPTH * TCB_SIZE) || !adminData.alloc(0x4000))
