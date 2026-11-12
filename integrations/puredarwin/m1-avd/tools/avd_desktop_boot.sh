@@ -26,7 +26,7 @@ case "$N" in av*) ;; *) echo "boot names are prefixed av" >&2; exit 2;; esac
 if [ "${AVD_INTERACTIVE:-0}" = 1 ]; then
   MIN=${2:-30}; [ "$MIN" -ge 2 ] && [ "$MIN" -le 235 ] || { echo "minutes must be 2..235" >&2; exit 2; }
   DESK=$((MIN * 60)); LIMIT=$((DESK + 20)); LIST=/dev/null; HOLD=0; VOLUME=${AVD_VOLUME:-30}
-  : "${AVD_CLIPS:=bbb-1080p-h264-60s.mp4 bbb-1080p-hevc-10s.mp4 bbb-1080p-vp9-10s.webm}"
+  : "${AVD_CLIPS:=bbb-1080p-h264-60s.mp4}"       # what fits: the RAM root has about 15 MB for player and clips
 else
   LIST=${2:?play list}
   DESK=${AVD_SECONDS:-120}; LIMIT=$((DESK + 100)); HOLD=1; VOLUME=${AVD_VOLUME:-45}
@@ -44,7 +44,15 @@ TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
 [ -r "$TI" ] && X="$X;$ROOT/$TI=/usr/share/terminfo/x/xterm-256color;$ROOT/$TI=/usr/share/terminfo/78/xterm-256color"
 BG=integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
 X="$X;$ROOT/$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
-for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+# With the GL player in the list the RAM root cannot hold two Mesa bundles (32 MB each): the
+# compositor is then pointed at the player's bundle (the same Mesa with the Wayland platform
+# added) through CHONKSTEP_DARWIN_GL_LIBDIR, for that boot only.
+GLENV=
+if [ "${AVD_INTERACTIVE:-0}" != 1 ] && grep -q '^pdvideo-gl' "$LIST"; then
+  GLENV='export CHONKSTEP_DARWIN_GL_LIBDIR=/usr/local/lib/mesa-asahi-wl'
+else
+  for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
+fi
 A=$($NP m1-sound/sysaudio build-sysaudio.nix -A all)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
 FW=System/Library/Frameworks
@@ -60,7 +68,7 @@ P=$($NP m1-avd build-pdvideo-pdavd.nix)
 [ -x "$P/usr/bin/pdvideo" ] || { echo "pdvideo build failed" >&2; exit 2; }
 # (left out when the play list only runs the GL variant: the RAM root does not hold both with Mesa's second bundle)
 if [ "${AVD_INTERACTIVE:-0}" = 1 ] || grep -q '^pdvideo ' "$LIST"; then X="$X;$P/usr/bin/pdvideo=/usr/local/bin/pdvideo"; fi
-if grep -q '^pdvideo-gl' "$LIST"; then
+if [ "${AVD_INTERACTIVE:-0}" != 1 ] && grep -q '^pdvideo-gl' "$LIST"; then
   G=$($NP m1-avd build-pdvideo-pdavd.nix --arg gl true)
   [ -x "$G/usr/bin/pdvideo-gl" ] || { echo "pdvideo-gl build failed" >&2; exit 2; }
   X="$X;$G/usr/bin/pdvideo-gl=/usr/local/bin/pdvideo-gl"
@@ -75,13 +83,13 @@ done
 [ "$BYTES" -le 40000000 ] || { echo "clips are $BYTES bytes; keep them under 40 MB" >&2; exit 2; }
 W=$(mktemp -d)
 cp "$LIST" "$W/play.list"; X="$X;$W/play.list=/private/var/avd/play.list"
-python3 - integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in "$HERE/guest/avd-desktop-play.in" "$W/guest" "$DESK" "$VOLUME" "$HOLD" <<'PY'
+python3 - integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in "$HERE/guest/avd-desktop-play.in" "$W/guest" "$DESK" "$VOLUME" "$HOLD" "$GLENV" <<'PY'
 import sys
-base, play, out, seconds, volume, hold = sys.argv[1:]
+base, play, out, seconds, volume, hold, glenv = sys.argv[1:]
 text = open(base).read()
 mark = 'records=$runtime/session-$session\n'
 assert text.count(mark) == 1
-text = text.replace(mark, open(play).read() + mark)
+text = text.replace(mark, glenv + '\n' + open(play).read() + mark)
 text = text.replace('@SECONDS@', seconds).replace('@HOLD@', hold).replace('@VOLUME@', volume)
 open(out, 'w').write(text)
 PY
