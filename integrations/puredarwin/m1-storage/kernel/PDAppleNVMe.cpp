@@ -35,6 +35,7 @@
 #include <IOKit/IOService.h>
 #include <IOKit/storage/IOBlockStorageDevice.h>
 #include <IOKit/storage/IOBlockStorageDriver.h>
+#include <IOKit/storage/IOMedia.h>
 #include <IOKit/storage/IOStorage.h>
 #include <IOKit/storage/IOStorageProtocolCharacteristics.h>
 #include <kern/clock.h>
@@ -378,6 +379,56 @@ PDAppleNVMeDisk::reportMediaState(bool *mediaPresent, bool *changedState)
 	return kIOReturnSuccess;
 }
 
+/*
+ * The guard of the partitions of this disk (pdnvme=3). Partition schemes, the APFS
+ * container scheme and every other content driver for IOMedia compete in the match
+ * category "IOStorage", one winner per media. This driver enters that category with the
+ * highest score for every media that is a partition (not the whole disk) below
+ * PDAppleNVMeDisk, wins, and then does nothing: it never opens the media and reads no
+ * block. So the GPT is parsed by the stack (the whole media is left to the partition
+ * schemes), the partitions get their /dev nodes (IOMediaBSDClient is in another
+ * category), and no filesystem or container driver attaches to the owner's macOS and Linux
+ * partitions. Media that is not below this disk is declined, so other disks are unaffected.
+ */
+class PDAppleNVMeMediaGuard : public IOService
+{
+	OSDeclareDefaultStructors(PDAppleNVMeMediaGuard);
+
+public:
+	IOService *probe(IOService *provider, SInt32 *score) APPLE_KEXT_OVERRIDE;
+	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+};
+
+OSDefineMetaClassAndStructors(PDAppleNVMeMediaGuard, IOService);
+static uint32_t gGuarded;
+
+IOService *
+PDAppleNVMeMediaGuard::probe(IOService *provider, SInt32 *score)
+{
+	IOMedia *media = OSDynamicCast(IOMedia, provider);
+	bool ours = false;
+
+	if (media == NULL || gDisk == NULL || media->isWhole())
+		return NULL;
+	for (IORegistryEntry *e = provider; e != NULL && !ours; e = e->getParentEntry(gIOServicePlane))
+		ours = e == (IORegistryEntry *)gDisk;
+	if (!ours)
+		return NULL;
+	*score = 1000000;
+	return this;
+}
+
+bool
+PDAppleNVMeMediaGuard::start(IOService *provider)
+{
+	if (!IOService::start(provider))
+		return false;
+	setProperty("PDGuarded", kOSBooleanTrue);
+	OSIncrementAtomic((volatile SInt32 *)&gGuarded);
+	LOG("partition %s: guarded, no content driver attaches", provider->getName());
+	return true;
+}
+
 static void
 publish_disk(void)
 {
@@ -659,13 +710,13 @@ pd_sysctl(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sysctl_
 		snprintf(text, sizeof(text), "admin=%llu reads=%llu blocks=%llu bytes=%llu errors=%llu timeouts=%llu stray=%llu "
 		    "tcb_inval_fail=%llu avg_us=%llu max_us=%llu doorbells_admin=%llu doorbells_io=%llu "
 		    "admin_ops[00,01,02,04,05,06]=%llu,%llu,%llu,%llu,%llu,%llu io_ops[02]=%llu sync_ignored=%u syslog=%u "
-		    "rtkit_rx=%u rtkit_tx=%u rtkit_unknown=%u sart_used=0x%x sart_protected=0x%x start_ms=%llu stop_ms=%llu",
+		    "rtkit_rx=%u rtkit_tx=%u rtkit_unknown=%u sart_used=0x%x sart_protected=0x%x start_ms=%llu stop_ms=%llu guarded=%u",
 		    gAns.adminCommands, gAns.readCommands, gAns.readBlocks, gBytes, gAns.cmdErrors, gAns.cmdTimeouts,
 		    gAns.strayCompletions, gAns.tcbInvalFailures, gCompleted ? gSumMicros / gCompleted : 0, gMaxMicros,
 		    gAns.doorbells[0], gAns.doorbells[1], gAns.opcodeCount[0][0], gAns.opcodeCount[0][1], gAns.opcodeCount[0][2],
 		    gAns.opcodeCount[0][4], gAns.opcodeCount[0][5], gAns.opcodeCount[0][6], gAns.opcodeCount[1][2], gSyncIgnored,
 		    gAns.syslogLines, gAns.rxMessages, gAns.txMessages, gAns.unknownMessages, gAns.sartUsed, gAns.sartProtected,
-		    gReadyAtMs ? gReadyAtMs - gStartMs : 0, gStopMs);
+		    gReadyAtMs ? gReadyAtMs - gStartMs : 0, gStopMs, gGuarded);
 		break;
 	case kCtlIdCtrl: {
 		/* the fields `nvme id-ctrl` prints, without the serial number and other identities */

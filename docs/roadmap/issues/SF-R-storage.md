@@ -5,11 +5,11 @@ SiliconForest reads, and later boots from, the M1's internal NVMe storage instea
 | Phase | State |
 |---|---|
 | 1 Facts | Sources, saved Apple device tree, hypervisor: done. Controller state as left by the boot chain: observed on the M1 (boot nv01, nothing written). Linux' view (read-only): partition layout, Identify, SMART baseline, kernel log, and reference SHA-256 of 30 ranges (1 MiB each: start incl. GPT, seven points across the disk, start/middle/end of every partition, end incl. backup GPT) in `runs/m1-storage/linux-a/`. |
-| 2 Read-only driver `PDAppleNVMe` | Written, builds, in a collection; host tests of the read-only gate pass; booted once in observe mode (nv01). **The controller has not been started.** The first boot that starts it (nv02) waits for the reviewer's go. |
+| 2 Read-only driver `PDAppleNVMe` | **Level 2 proven on the M1 (boot nv02):** controller start, Identify equal to Linux', 30 of 30 comparable ranges equal, no write, clean stop, Linux clean afterwards. Level 3 (block device, GPT through the stack) is built with a partition guard and **not booted**; it waits for the reviewer. |
 | 3 Filesystem groundwork | Source survey done; ext4 read-write on a 4096-byte-sector GPT disk and the behaviour of write-protected media shown in QEMU. |
 | 4 Install design | Written below. Nothing of it is implemented or executed. |
 
-Proven on the M1 so far: only what nv01 observed. Everything about reading is compile evidence and host tests.
+Proven on the M1: what nv01 observed and what nv02 measured ("Result of nv02"). The block-device path is compile evidence.
 
 ## Phase 1: facts
 
@@ -60,9 +60,7 @@ m1n1's hypervisor maps all MMIO straight through except what it hooks (`proxycli
 | Write / Flush / Dataset Management (the root is mounted `discard=async`) | yes | no | **no: not in the binary** |
 | Delete queues, `CC.SHN` normal shutdown, `CC.EN=0`, RTKit AP quiesced + IOP sleep, `CPU_CONTROL=0` | yes (`apple_nvme_shutdown`) | yes | yes (same sequence) |
 
-SMART baseline, read from Linux (read-only passthrough) at two points with four ordinary bench cycles of other streams in between (each: Linux reboot, m1n1, a Darwin boot that never touched the controller, external reset, Linux boot): `power_cycles` 1588 → 1592 (**+1 per cycle**), `unsafe_shutdowns` 107 → 107 (the external reset of a stopped controller does not count), `host_write_commands` about +950 per cycle and `data_units_written` +231 in total (Linux' own shutdown and boot), `media_errors` 0, `percent_used` 4. Linux' kernel log of an ordinary boot shows no recovery, replay or orphan line; `p5` (ext4 `/boot`) and `p6` (btrfs) are mounted read-write on every boot, `p4` (EFI) too.
-
-Expected from a boot that starts the controller under Darwin: `power_cycles` +1 as for any cycle (or +2 if the firmware counts its own start; to be measured), read counters up, **`unsafe_shutdowns` unchanged**, write counters changed only by what Linux does around it. The SMART log is also read inside Darwin at the start and the end of the session, which isolates our share exactly.
+SMART, read from Linux (read-only passthrough) around ordinary bench cycles and around nv02: `power_cycles` grows by **1 per machine reset** (two per bench cycle: Linux' reboot and the external reset), whoever starts the controller afterwards; `unsafe_shutdowns` stays at 107 (the external reset of a stopped controller does not count); `host_write_commands` grows by roughly 600–1400 at each Linux shutdown and boot (Linux' own writes); `media_errors` 0, `percent_used` 4. Linux' kernel log of an ordinary boot shows no recovery, replay or orphan line; `p4` (EFI), `p5` (ext4 `/boot`) and `p6` (btrfs) are mounted read-write on every boot.
 
 ## Phase 2: the read-only driver
 
@@ -99,7 +97,7 @@ Collection: `/nix/store/a3xw8ld5pqg4vvhdgcshlyqcarxn9k2c-puredarwin-kc-arm64-0.1
 ### Shutdown
 The bench ends every boot with an external reset. The controller must already be stopped then:
 - the guest script ends with `kern.pd_nvme.stop=1` and waits for `stopped-clean` before `PD_BENCH_DONE`;
-- independently the driver stops the controller itself `pdnvme_ttl` seconds after it became ready (default 90; the wrapper sets runtime − 150);
+- independently the driver stops the controller itself `pdnvme_ttl` seconds after it became ready (the wrapper sets 120; a boot reaches the guest script about 12 s after the kernel starts, and the bench's reset comes at the runtime bound of 300 s only if the script never finishes);
 - `systemWillShutdown` does the same.
 Not covered: a kernel panic or hang before the stop. The controller is then reset while enabled, as when the power button is held under Linux; with no write in flight there is nothing to lose, but `unsafe_shutdowns` would grow by one. It is checked after every boot.
 
@@ -108,8 +106,23 @@ Not covered: a kernel panic or hang before the stop. The controller is then rese
 |---|---|---|
 | nv01 | 1 | observe: PMGR states, `CPU_CONTROL`, `CC`/`CSTS`, SART entries as left by m1n1. Writes nothing; does not start the controller |
 | nv02 | 2 | **first controller start (needs the go).** RTKit, Identify vs Linux, hashes of the ranges through `/dev/pdnvme0`, throughput, latency, write refusal, SMART start/end, clean stop |
-| nv03 | 3 | block device, GPT through the stack, same hashes through `/dev/rdiskN`, write attempts through the block layer, nothing mounted |
-Before nv02 and after each: `tools/linux_m1.sh facts` and `hash` (ranges: start, GPT, seven points across the disk, start/middle/end of every partition, end). Ranges Linux itself changes between its two boots (inside its mounted filesystems) are reported separately: for those, equality with Darwin cannot be attributed.
+| nv03 | 3 | **not approved yet.** Block device with the partition guard, GPT through the stack, same hashes through `/dev/rdiskN`, write attempts through the block layer, nothing mounted, nothing attached |
+Before nv02 and after each: `tools/linux_m1.sh all` and `hash` (ranges: start, GPT, seven points across the disk, start/middle/end of every partition, end). Ranges Linux itself changes between its two boots (inside its mounted filesystems) are reported separately: for those, equality with Darwin cannot be attributed.
+
+### Result of nv02 (`pdnvme=2`, 8 CPUs, runtime bound 300 s, `pdnvme_ttl=120`; collection `/nix/store/a3xw8ld5pqg4vvhdgcshlyqcarxn9k2c-puredarwin-kc-arm64-0.1`)
+One bench slot, nothing else in between: Linux baseline → Darwin boot → Linux again → `tools/nv_verdict.py` (`runs/m1-storage/nv02-*`).
+- **Bring-up:** found stopped as in nv01; RTKit protocol 12 in 142 ms; controller ready 150 ms after the driver started; firmware asked for three buffers (crashlog, ioreport, syslog), placed in SART entries 4, 6, 7 and cleared at stop.
+- **Identify:** every field of Identify Controller and Identify Namespace 1 that the two sides print is equal to Linux' (model, firmware, `mdts`, `nn`, sizes, LBA format).
+- **Hashes (30 ranges of 1 MiB):** the 20 ranges on the GPTs and the APFS partitions (`p1`, `p2`, `p3`, `p7`) are identical in Linux before, under Darwin, and in Linux after. Of the 10 ranges inside Linux' mounted filesystems, 6 were not touched by Linux between its two readings and are equal under Darwin too; 4 (`p4` start, `p5` start and end, one in `p6`) differ between Linux-before and Linux-after, i.e. Linux rewrote them at its shutdown or boot, and nothing can be attributed there.
+- **Writes:** `gate_rejected` 0; `write_refused` 2 = the two deliberate opens for writing of `/dev/pdnvme0`, both refused with "Read-only file system"; SMART read inside Darwin at start and end: `host_write_commands` +0, `data_units_written` +0, `host_read_commands` +6591 (= the driver's own count of reads), `unsafe_shutdowns` +0, `power_cycles` +0. Commands sent in the whole session: Identify ×2, Create CQ, Create SQ, Get Log Page ×3, Delete SQ, Delete CQ, Read ×6591. No error, timeout, stray completion or NVMMU invalidation failure.
+- **Speed (polled, every read copied once, at most 8 commands of 1 MiB in flight):** sequential 512 MiB at 8 MiB per call: **710 MB/s**; 1 MiB per call: 608 MB/s; 128 KiB per call: 282 MB/s. Random 4 KiB reads over the whole disk, one at a time: **98 µs average, 99 µs median, 235 µs 99th percentile**, 832 µs worst, about 10,000 per second. Linux on the same disk reaches several times the sequential figure; the copy and the single polling thread are the limit here, not the disk.
+- **Stop:** by the guest script 14 s after it began (the time-to-live of 120 s was not needed): queues deleted, normal shutdown notification completed (the firmware logged `NVMe shutdown start … saveCtx`), `CC.EN=0`, RTKit AP quiesced / IOP sleep, coprocessor stopped, state `stopped-clean`. The capture ended there; the external reset came with the controller off.
+- **Linux afterwards:** verified by the bench; kernel log without recovery, replay or error lines for NVMe, btrfs, ext4 or vfat; `p4`, `p5`, `p6` mounted read-write as usual; controller `live`; `unsafe_shutdowns` 107 → 107; `media_errors` 0.
+- **Open observation:** at start the firmware's own log said `gc_search_bm.c: Restarting rebuild from lba …` and, 150 ms later, `Finished rebuilding GC Search BM`. Linux' kernel log (three boots checked, including the one after nv02) shows only `boot mode normal` from the firmware. It is firmware-internal (no host write was counted) and whether Linux simply does not get this message, or something in our start provokes the rebuild, is not known.
+- **Checker mistake, for the record:** the first run of the verdict reported one failure and wrote the STOP file: its "driver anomaly" pattern matched the script's own `NV_WRITE_REFUSED` marker. No condition was off; the pattern was corrected and the verdict re-run on the same data (`NV_VERDICT PASSED`); the stale file is kept as `runs/m1-storage/nv02-STOP-checker-false-positive.txt`.
+
+### Proposal for nv03 (`pdnvme=3`): partitions guarded
+Partition schemes, the tree's APFS container scheme and any other content driver for IOMedia compete in one match category (`IOStorage`), one winner per media. The kext now carries `PDAppleNVMeMediaGuard`: it enters that category with the highest score for every media that is a partition below `PDAppleNVMeDisk`, wins, and does nothing (it never opens the media). Effect: the whole disk still goes to the GPT scheme (the GPT is parsed by the stack), every partition gets its `/dev` nodes for raw read-only access (IOMediaBSDClient is in another category), and **no APFS container, filesystem or other content driver attaches to the owner's partitions**. Media of other disks is declined. The filesystem kexts themselves only act on a `mount`, which nothing issues. A future SiliconForest partition would be exempted by its type GUID. Built (collection `/nix/store/masv3q1wc8gylzbi0yamyqrm8dan9zy3-puredarwin-kc-arm64-0.1`), host tests pass, **not booted**. The boot's check: the registry shows the guard on all seven partitions (`guarded=7` in `kern.pd_nvme.stats`), no `AppleAPFS*` object below the disk, and the console has no `ApfsFileSystemDriver` line.
 
 ### Not done in this driver
 Interrupts (AIC 590; the engine polls, spinning only while a read is out), zero-copy DMA (everything is copied once), more than 8 reads in flight, namespaces 2 and 3, error recovery beyond "stop using the controller and shut it down", sleep.
@@ -168,6 +181,10 @@ Today SiliconForest has only ever run as a guest of the m1n1 hypervisor, started
 | B3 own boot object: a second stub volume and boot policy, like a second Linux install | new APFS volume, **boot policy / Startup Security change** in recovery (`kmutil configure-boot` from 1TR) | physical presence in recovery, the machine password | touches the Secure Enclave's boot policies; a mistake does not harm the other systems' data but can require recovery to repair | delete the volume and its policy | as B1 (no key hold) |
 None is irreversible in the strict sense. The steps that deserve the word in practice: any repartitioning without a backup, and B3's boot-policy change (cannot be tested beforehand, must be done at the machine).
 
+### Open prerequisites (recorded, not started)
+- **Does our kernel run without the hypervisor?** Never tried. What a safe test with the existing rig would need, with no disk involved: a launcher on the M5 that, like today's, RAM-loads the collection and the RAM root over USB into the m1n1 proxy but then enters XNU directly (m1n1's `chainload.py` already loads a Mach-O and jumps without the hypervisor) with iBoot's device tree and boot arguments. What the hypervisor does for us today and would have to be replaced or shown unnecessary: the console (virtual UART over the proxy's USB port: natively the guest owns that port, so the console must come from the real UART pins or the screen), secondary CPU start, SPRR/GXF (emulated today unless the registers are unlocked), the PMGR hooks that keep the proxy's USB alive, and the capture of faults. The bench's return path (external reset, Linux check) works unchanged. Risk: a hang with no console; cost: one external reset. Owner: the boot stream.
+- **The 60 s root wait.** With a disk root that does not appear, this kernel calls `IOSetRecoveryBoot(BSD_BOOTFAIL_MEDIA_MISSING)`: it would set NVRAM `40A0DDD2-…:boot-picker-bringup-reason=missing-boot-media` and `boot-command=recover-system`, sync, and panic. From the sources: the only NVRAM controllers in the tree belong to the x86 platform experts; PDArmPlatformExpert registers none, nothing in the lab drives the SPI flash that holds the M1's NVRAM, and the hypervisor offers none. So under the hypervisor and natively alike the variables could at most land in the kernel's in-memory copy, and the code would then block forever waiting for the `IONVRAM` resource instead of panicking. That is inferred, not observed. No storage boot can reach it: all of them boot with `rd=md0`. Before any boot waits for a disk root: `wdt=-1` in its boot arguments and the call patched out of the kernel, so that it does not depend on the absence of a driver.
+
 ### Order proposed
 1. Read-only driver proven (this ticket's phase 2).
 2. Partition by the owner (P1), ext4 made from Linux, root file tree copied from Linux (Linux can mount it).
@@ -181,4 +198,4 @@ None is irreversible in the strict sense. The steps that deserve the word in pra
 4. B1, B2 or B3 as the target chain; B0 first in any case.
 
 ## Rules
-Inherits SF-B. In addition: no boot with `pdnvme=2` or `3` without the host tests passing; after every such boot the Linux check (`linux_m1.sh facts`: root mounted without recovery, no NVMe error, SMART compared); any anomaly creates `runs/m1-storage/STOP` and stops all storage boots.
+Inherits SF-B. In addition: no boot with `pdnvme=2` or `3` without the host tests passing; after every such boot the Linux check (`linux_m1.sh all`: root mounted without recovery, no NVMe error, SMART compared); any anomaly creates `runs/m1-storage/STOP` and stops all storage boots.

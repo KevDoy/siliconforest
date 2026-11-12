@@ -11,8 +11,8 @@
 #   NV_RANGES    "<lba> <blocks>" lines for the hashes (levels 2, 3; from tools/linux_ranges.sh)
 #   NV_RUNTIME   upper bound of the guest's run in seconds, 120 to 600 (default 300)
 #   NV_TTL       seconds after which the driver shuts the controller down by itself
-#                (default runtime - 150, at least 60)
-#   NV_SEQ_LBA / NV_SEQ_MIB   start and size of the sequential read (default 262144 / 1024)
+#                (default 120: a boot reaches the guest script about 12 s after the kernel starts)
+#   NV_SEQ_LBA / NV_SEQ_MIB   start and size of the sequential read (default 262144 / 512)
 #   NV_BOOTARGS  further kernel boot arguments
 #   NV_CPUS      guest processors (default 8)
 set -euo pipefail
@@ -34,14 +34,14 @@ TEST=$(cd "$HERE" && $NIX build-pdnvme-test.nix 2>/dev/null | tail -1)
 [ -x "$TEST/usr/bin/pdnvme-test" ] || { echo "pdnvme-test build failed" >&2; exit 2; }
 RUNTIME=${NV_RUNTIME:-300}
 [ "$RUNTIME" -ge 120 ] && [ "$RUNTIME" -le 600 ] || { echo "boots run 120 to 600 s" >&2; exit 2; }
-TTL=${NV_TTL:-$((RUNTIME - 150))}; [ "$TTL" -ge 60 ] || TTL=60
+TTL=${NV_TTL:-120}
 W=$(mktemp -d)
 FILES="$TEST/usr/bin/pdnvme-test=/usr/bin/pdnvme-test"
 if [ "$LEVEL" = 1 ]; then
   cp "$HERE/guest/darwin-nvme-observe.in" "$W/guest"
 else
   [ -f "${NV_RANGES:-}" ] || { echo "NV_RANGES=<range file> is needed for levels 2 and 3" >&2; exit 2; }
-  sed -e "s/@SEQ_LBA@/${NV_SEQ_LBA:-262144}/g" -e "s/@SEQ_MIB@/${NV_SEQ_MIB:-1024}/g" "$HERE/guest/darwin-nvme-test.in" > "$W/guest"
+  sed -e "s/@SEQ_LBA@/${NV_SEQ_LBA:-262144}/g" -e "s/@SEQ_MIB@/${NV_SEQ_MIB:-512}/g" "$HERE/guest/darwin-nvme-test.in" > "$W/guest"
   FILES="$FILES;$NV_RANGES=/etc/pdnvme-ranges"
 fi
 PCIE_KC="$KC" PCIE_TIMEWAIT="${NV_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${NV_CPUS:-8} pdnvme=$LEVEL pdnvme_ttl=$TTL ${NV_BOOTARGS:-}" \
