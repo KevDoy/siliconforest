@@ -16,6 +16,9 @@ KERNEL=(ROOT/('runs/m1-desktop-010/bwfm-kc-build-001/result/kernel' if WIFI else
 if os.environ.get('PCIE_KC'): KERNEL=(Path(os.environ['PCIE_KC'])/'kernel').resolve(strict=True)
 SUPERVISOR=ROOT/('integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-test' if WIFI else 'integrations/puredarwin/m1-apcie-host/supervisor/darwin-pcie-enum-test')
 STAGER=ROOT/'integrations/puredarwin/chonkstep-darwin/stage_ramdisk.py'
+# PCIE_STAGER=<script>: another stager with the same arguments and record (the slim RAM root:
+# integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py). Default: the one above.
+if os.environ.get('PCIE_STAGER'): STAGER=Path(os.environ['PCIE_STAGER']).resolve(strict=True)
 ORIGINAL=ROOT/'artifacts/m1-bringup-009/ramdisk.img'
 SRC=ROOT/'integrations/puredarwin/m1-apcie-host'
 _sha={}
