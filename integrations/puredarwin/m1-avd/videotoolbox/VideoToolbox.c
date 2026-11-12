@@ -41,6 +41,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <time.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
@@ -106,15 +108,32 @@ struct OpaqueVTDecompressionSession {
     Boolean direct;                      // hardware pictures are emitted as they are decoded
     Boolean invalid;
     uint64_t decoded, emitted;
+    Boolean timing;                      // VT_AVD_TIMING=1: where the time goes, printed at teardown
+    uint64_t send_us, create_us, copy_us, callback_us;
 };
 
 static void picture_decoded(void *opaque, const AVFrame *frame);
+
+static uint64_t now_us(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000u + ts.tv_nsec / 1000;
+}
 
 static CFTypeID sSessionID;
 static pthread_once_t sSessionOnce = PTHREAD_ONCE_INIT;
 
 static void session_teardown(VTDecompressionSessionRef s)
 {
+    if (s->timing && s->emitted)
+        fprintf(stderr, "VT_AVD_TIMING pictures %llu hardware %d per picture: decoder %llu us, pixel buffer create %llu us, "
+                "copy %llu us, caller's callback %llu us\n", (unsigned long long)s->emitted, (int)s->hardware,
+                (unsigned long long)((s->send_us - s->create_us - s->copy_us - s->callback_us) / s->emitted),
+                (unsigned long long)(s->create_us / s->emitted), (unsigned long long)(s->copy_us / s->emitted),
+                (unsigned long long)(s->callback_us / s->emitted));
+    s->timing = false;
     if (s->avctx)
         avcodec_free_context(&s->avctx);
     av_buffer_unref(&s->device);
@@ -274,6 +293,7 @@ OSStatus VTDecompressionSessionCreate(CFAllocatorRef allocator, CMVideoFormatDes
         return kVTAllocationFailedErr;
     memset((char *)s + sizeof(CFRuntimeBase), 0, sizeof(*s) - sizeof(CFRuntimeBase));
     pthread_mutex_init(&s->lock, NULL);
+    s->timing = getenv("VT_AVD_TIMING") != NULL;
     if (outputCallback)
         s->callback = *outputCallback;
     s->format = (CMVideoFormatDescriptionRef)CFRetain(format);
@@ -429,6 +449,88 @@ static void attach_colour(CVPixelBufferRef buffer, const AVFrame *frame)
     set_attachment(buffer, kCVImageBufferTransferFunctionKey, v);
 }
 
+// ---- memory for pixel buffers -----------------------------------------------------------------
+// CVPixelBufferCreate allocates and clears a new block per picture (17 ms for 1920x1080 on
+// the M1 in boot av11, five times the decode itself). Pictures of one size follow each other,
+// so released blocks are kept and handed out again; the pixel buffer wraps the block
+// (CVPixelBufferCreateWithPlanarBytes) and its release callback brings it back.
+#define POOL_KEEP 12
+static pthread_mutex_t sPoolLock = PTHREAD_MUTEX_INITIALIZER;
+static struct { void *block; size_t size; } sPool[POOL_KEEP];
+
+static void *pool_take(size_t size)
+{
+    void *block = NULL;
+
+    pthread_mutex_lock(&sPoolLock);
+    for (int i = 0; i < POOL_KEEP && block == NULL; i++) {
+        if (sPool[i].block != NULL && sPool[i].size == size) {
+            block = sPool[i].block;
+            sPool[i].block = NULL;
+        }
+    }
+    pthread_mutex_unlock(&sPoolLock);
+    return block ? block : malloc(size);
+}
+
+static void pool_give(void *block, size_t size)
+{
+    int slot = -1;
+
+    pthread_mutex_lock(&sPoolLock);
+    for (int i = 0; i < POOL_KEEP && slot < 0; i++)
+        if (sPool[i].block == NULL)
+            slot = i;
+    if (slot < 0) {
+        // full: a block of another size makes room, else this one goes
+        for (int i = 0; i < POOL_KEEP && slot < 0; i++)
+            if (sPool[i].size != size)
+                slot = i;
+        if (slot >= 0)
+            free(sPool[slot].block);
+    }
+    if (slot >= 0) {
+        sPool[slot].block = block;
+        sPool[slot].size = size;
+        block = NULL;
+    }
+    pthread_mutex_unlock(&sPoolLock);
+    free(block);
+}
+
+static void pool_release(void *refCon, const void *dataPtr, size_t dataSize, size_t numberOfPlanes, const void *planeAddresses[])
+{
+    (void)refCon;
+    (void)numberOfPlanes;
+    (void)planeAddresses;
+    pool_give((void *)dataPtr, dataSize);
+}
+
+// A pixel buffer of this type on pooled memory; NULL when it cannot be made.
+static CVPixelBufferRef pooled_buffer(int w, int h, OSType type, Boolean planar)
+{
+    size_t cw = (size_t)(w + 1) / 2, ch = (size_t)(h + 1) / 2;
+    size_t stride = ((size_t)w + 63) & ~(size_t)63, cstride = planar ? ((cw + 63) & ~(size_t)63) : stride;
+    size_t planes = planar ? 3 : 2;
+    size_t size = stride * h + (planes - 1) * cstride * ch;
+    void *base[3];
+    size_t pw[3] = { (size_t)w, cw, cw }, ph[3] = { (size_t)h, ch, ch }, bpr[3] = { stride, cstride, cstride };
+    CVPixelBufferRef buffer = NULL;
+    uint8_t *block = pool_take(size);
+
+    if (block == NULL)
+        return NULL;
+    base[0] = block;
+    base[1] = block + stride * h;
+    base[2] = block + stride * h + cstride * ch;
+    if (CVPixelBufferCreateWithPlanarBytes(NULL, w, h, type, block, size, planes, base, pw, ph, bpr, pool_release, NULL, NULL,
+                                           &buffer) != kCVReturnSuccess || buffer == NULL) {
+        pool_give(block, size);
+        return NULL;
+    }
+    return buffer;
+}
+
 // The decoded picture as a CVPixelBuffer of the session's format; NULL when it cannot be made.
 static CVPixelBufferRef make_image(VTDecompressionSessionRef s, AVFrame *decoded)
 {
@@ -437,13 +539,24 @@ static CVPixelBufferRef make_image(VTDecompressionSessionRef s, AVFrame *decoded
     CVPixelBufferRef buffer = NULL;
     OSType type;
     int w, h, cw, ch;
+    uint64_t t0 = s->timing ? now_us() : 0, t1;
 
     if (decoded->hw_frames_ctx != NULL) {
-        // out of the decoder's buffer: NV12 in memory
+        // the decoder's own buffer (read-only mapping), viewed as an NV12 frame: one copy, below
+        AVHWFramesContext *frames = (AVHWFramesContext *)decoded->hw_frames_ctx->data;
+        const AVPDAVDFramesContext *layout = frames->hwctx;
+        const AVPDAVDFrame *picture = (const AVPDAVDFrame *)decoded->data[0];
+
+        if (picture == NULL || picture->data == NULL || frames->sw_format != AV_PIX_FMT_NV12)
+            return NULL;       // 10 bit and 4:2:2 are not delivered yet
         av_frame_unref(s->software);
-        if (av_hwframe_transfer_data(s->software, decoded, 0) < 0)
-            return NULL;
         av_frame_copy_props(s->software, decoded);
+        s->software->format = AV_PIX_FMT_NV12;
+        s->software->width = decoded->width;
+        s->software->height = decoded->height;
+        s->software->data[0] = (uint8_t *)picture->data;
+        s->software->data[1] = (uint8_t *)picture->data + layout->uv_offset;
+        s->software->linesize[0] = s->software->linesize[1] = (int)layout->bytesperline;
         frame = s->software;
     }
     if (frame->format != AV_PIX_FMT_NV12 && frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P)
@@ -457,14 +570,15 @@ static CVPixelBufferRef make_image(VTDecompressionSessionRef s, AVFrame *decoded
     h = frame->height - (int)frame->crop_top - (int)frame->crop_bottom;
     if (w <= 0 || h <= 0)
         return NULL;
-    // on an IOSurface when asked for and the surface can be made, else in plain memory
+    // on an IOSurface when asked for and the surface can be made, else in (pooled) plain memory
     if (s->surface == NULL || CVPixelBufferCreate(NULL, w, h, type, s->surface, &buffer) != kCVReturnSuccess || buffer == NULL) {
-        buffer = NULL;
-        if (CVPixelBufferCreate(NULL, w, h, type, NULL, &buffer) != kCVReturnSuccess || buffer == NULL)
+        buffer = pooled_buffer(w, h, type, planar);
+        if (buffer == NULL && (CVPixelBufferCreate(NULL, w, h, type, NULL, &buffer) != kCVReturnSuccess || buffer == NULL))
             return NULL;
     }
     cw = (w + 1) / 2;
     ch = (h + 1) / 2;
+    t1 = s->timing ? now_us() : 0;
 
     CVPixelBufferLockBaseAddress(buffer, 0);
     {
@@ -512,6 +626,10 @@ static CVPixelBufferRef make_image(VTDecompressionSessionRef s, AVFrame *decoded
     }
     CVPixelBufferUnlockBaseAddress(buffer, 0);
     attach_colour(buffer, frame);
+    if (s->timing) {
+        s->copy_us += now_us() - t1;
+        s->create_us += t1 - t0;
+    }
     return buffer;
 }
 
@@ -528,10 +646,15 @@ static void emit_one(VTDecompressionSessionRef s, AVFrame *frame)
             status = kVTVideoDecoderUnsupportedDataFormatErr;
     }
     s->emitted++;
-    if (s->callback.decompressionOutputCallback != NULL && info != NULL)
+    if (s->callback.decompressionOutputCallback != NULL && info != NULL) {
+        uint64_t t0 = s->timing ? now_us() : 0;
+
         s->callback.decompressionOutputCallback(s->callback.decompressionOutputRefCon, info->refCon, status,
                                                 image == NULL && status == noErr ? kVTDecodeInfo_FrameDropped : 0, image,
                                                 info->pts, info->duration);
+        if (s->timing)
+            s->callback_us += now_us() - t0;
+    }
     if (image != NULL)
         CVPixelBufferRelease(image);
 }
@@ -581,6 +704,7 @@ OSStatus VTDecompressionSessionDecodeFrame(VTDecompressionSessionRef s, CMSample
     CMBlockBufferRef data;
     OSStatus status = noErr;
     size_t length;
+    uint64_t t0;
     int ret;
 
     if (infoFlagsOut)
@@ -615,6 +739,7 @@ OSStatus VTDecompressionSessionDecodeFrame(VTDecompressionSessionRef s, CMSample
     s->packet->pts = microseconds(info->pts);
     s->packet->dts = microseconds(CMSampleBufferGetDecodeTimeStamp(sample));
 
+    t0 = s->timing ? now_us() : 0;
     ret = avcodec_send_packet(s->avctx, s->packet);
     if (ret == AVERROR(EAGAIN)) {
         // the decoder wants its output taken first
@@ -635,6 +760,8 @@ OSStatus VTDecompressionSessionDecodeFrame(VTDecompressionSessionRef s, CMSample
         if (status == noErr)
             status = emit_frames(s);
     }
+    if (s->timing)
+        s->send_us += now_us() - t0;
     pthread_mutex_unlock(&s->lock);
     return status;
 }

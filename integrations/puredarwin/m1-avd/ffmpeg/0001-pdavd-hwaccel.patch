@@ -83,7 +83,7 @@ diff -ruN a/libavcodec/h264_slice.c b/libavcodec/h264_slice.c
              else
 diff -ruN a/libavcodec/hevc/hevcdec.c b/libavcodec/hevc/hevcdec.c
 --- a/libavcodec/hevc/hevcdec.c	2026-11-12 00:10:07.534679842 -0800
-+++ b/libavcodec/hevc/hevcdec.c	2026-11-12 00:34:04.211340964 -0800
++++ b/libavcodec/hevc/hevcdec.c	2026-11-12 01:36:15.542553310 -0800
 @@ -579,6 +579,7 @@
  #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
                       CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
@@ -102,7 +102,17 @@ diff -ruN a/libavcodec/hevc/hevcdec.c b/libavcodec/hevc/hevcdec.c
  #if CONFIG_HEVC_VDPAU_HWACCEL
          *fmt++ = AV_PIX_FMT_VDPAU;
  #endif
-@@ -4269,6 +4273,9 @@
+@@ -634,6 +638,9 @@
+ #if CONFIG_HEVC_VAAPI_HWACCEL
+         *fmt++ = AV_PIX_FMT_VAAPI;
+ #endif
++#if CONFIG_HEVC_PDAVD_HWACCEL
++        *fmt++ = AV_PIX_FMT_PDAVD;
++#endif
+ #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
+         *fmt++ = AV_PIX_FMT_VIDEOTOOLBOX;
+ #endif
+@@ -4269,6 +4276,9 @@
  #if CONFIG_HEVC_NVDEC_HWACCEL
                                 HWACCEL_NVDEC(hevc),
  #endif
@@ -448,8 +458,8 @@ diff -ruN a/libavcodec/pdavd.h b/libavcodec/pdavd.h
 +#endif /* AVCODEC_PDAVD_H */
 diff -ruN a/libavcodec/pdavd_h264.c b/libavcodec/pdavd_h264.c
 --- a/libavcodec/pdavd_h264.c	1969-12-31 16:00:00.000000000 -0800
-+++ b/libavcodec/pdavd_h264.c	2026-11-12 00:14:09.175640259 -0800
-@@ -0,0 +1,455 @@
++++ b/libavcodec/pdavd_h264.c	2026-11-12 01:45:21.164306821 -0800
+@@ -0,0 +1,464 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -810,6 +820,15 @@ diff -ruN a/libavcodec/pdavd_h264.c b/libavcodec/pdavd_h264.c
 +        ff_pdavd_reset(avctx);
 +    }
 +
++    /*
++     * Without the zero bytes that may follow a NAL unit in a byte stream
++     * (trailing_zero_8bits, and the zero_byte of the next start code): the decoder
++     * takes the slice's length as the end of its data, and a slice that is not the
++     * last of its picture fails with them.
++     */
++    while (size > 1 && buffer[size - 1] == 0)
++        size--;
++
 +    ret = ff_pdavd_append(avctx, buffer, size);
 +    if (ret)
 +        return ret;
@@ -907,8 +926,8 @@ diff -ruN a/libavcodec/pdavd_h264.c b/libavcodec/pdavd_h264.c
 +};
 diff -ruN a/libavcodec/pdavd_hevc.c b/libavcodec/pdavd_hevc.c
 --- a/libavcodec/pdavd_hevc.c	1969-12-31 16:00:00.000000000 -0800
-+++ b/libavcodec/pdavd_hevc.c	2026-11-12 00:34:04.192960619 -0800
-@@ -0,0 +1,618 @@
++++ b/libavcodec/pdavd_hevc.c	2026-11-12 01:45:21.165267017 -0800
+@@ -0,0 +1,622 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -1420,6 +1439,10 @@ diff -ruN a/libavcodec/pdavd_hevc.c b/libavcodec/pdavd_hevc.c
 +
 +    if (slice >= PDAVD_HEVC_MAX_SLICES)
 +        return AVERROR(ENOSYS);
++
++    /* without the zero bytes that may follow a NAL unit in a byte stream (see pdavd_h264.c) */
++    while (size > 2 && buffer[size - 1] == 0)
++        size--;
 +
 +    if (controls->allocated_slice_params < slice + 1) {
 +        int slices = controls->allocated_slice_params ? controls->allocated_slice_params * 2 : 4;

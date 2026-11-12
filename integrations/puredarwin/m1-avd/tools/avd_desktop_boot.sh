@@ -58,7 +58,8 @@ X="$X;$ROOT/$AVFW=/Library/Firmware/apple/avd-fw-v2-t0.bin"
 # the player with hardware decode, and its GL variant with the Wayland Mesa bundle it links
 P=$($NP m1-avd build-pdvideo-pdavd.nix)
 [ -x "$P/usr/bin/pdvideo" ] || { echo "pdvideo build failed" >&2; exit 2; }
-X="$X;$P/usr/bin/pdvideo=/usr/local/bin/pdvideo"
+# (left out when the play list only runs the GL variant: the RAM root does not hold both with Mesa's second bundle)
+if [ "${AVD_INTERACTIVE:-0}" = 1 ] || grep -q '^pdvideo ' "$LIST"; then X="$X;$P/usr/bin/pdvideo=/usr/local/bin/pdvideo"; fi
 if grep -q '^pdvideo-gl' "$LIST"; then
   G=$($NP m1-avd build-pdvideo-pdavd.nix --arg gl true)
   [ -x "$G/usr/bin/pdvideo-gl" ] || { echo "pdvideo-gl build failed" >&2; exit 2; }

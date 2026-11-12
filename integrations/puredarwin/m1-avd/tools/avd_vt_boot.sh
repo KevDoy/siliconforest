@@ -26,9 +26,9 @@ for c in "$@"; do
   b=${c%.*}
   # the two runs of a clip are reported under two names; both compare with <clip>.framemd5
   E="$E
-printf 'AVD_CLIP_BEGIN %s\n' '$b'; vt-decode-test /private/var/avd/$c 2>&1; printf 'AVD_CLIP_END %s rc=%s\n' '$b' \"\$?\"
+printf 'AVD_CLIP_BEGIN %s\n' '$b'; VT_AVD_TIMING=1 vt-decode-test /private/var/avd/$c 2>&1; printf 'AVD_CLIP_END %s rc=%s\n' '$b' \"\$?\"
 printf 'AVD_STATS vt %s\n' \"\$(get stats)\"
-printf 'AVD_VTSW_BEGIN %s\n' '$b'; vt-decode-test --software /private/var/avd/$c 2>&1 | sed 's/^PDAVD_FRAME/VTSW_FRAME/'; printf 'AVD_VTSW_END %s\n' '$b'"
+printf 'AVD_VTSW_BEGIN %s\n' '$b'; VT_AVD_TIMING=1 vt-decode-test --software /private/var/avd/$c 2>&1 | sed 's/^PDAVD_FRAME/VTSW_FRAME/'; printf 'AVD_VTSW_END %s\n' '$b'"
 done
 AVD_FILES="$F" AVD_EXTRA="$E" AVD_RUNTIME=${AVD_RUNTIME:-240} "$HERE/tools/avd_boot.sh" "$N"
 C=runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin

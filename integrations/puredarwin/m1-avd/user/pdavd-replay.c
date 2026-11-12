@@ -153,13 +153,17 @@ main(int argc, char **argv)
 						w = m->format.width;
 						h = m->format.height;
 					}
+					/* P010: two bytes per sample, hashed as they lie (ffmpeg's p010le) */
+					uint32_t bps = m->format.pixelformat == PDAVD_PIX_P010 ? 2 : 1;
+
 					pd_md5_init(&md5);
 					for (uint32_t y = 0; y < h; y++)
-						pd_md5_update(&md5, p + (size_t)(y + r.meta.crop_top) * m->format.bytesperline + r.meta.crop_left, w);
+						pd_md5_update(&md5, p + (size_t)(y + r.meta.crop_top) * m->format.bytesperline + r.meta.crop_left * bps,
+						    w * bps);
 					for (uint32_t y = 0; y < (h + 1) / 2; y++)
 						pd_md5_update(&md5, p + m->format.uv_offset +
-						    (size_t)(y + r.meta.crop_top / 2) * m->format.bytesperline + (r.meta.crop_left & ~1u),
-						    (w + 1) & ~1u);
+						    (size_t)(y + r.meta.crop_top / 2) * m->format.bytesperline + (r.meta.crop_left & ~1u) * bps,
+						    ((w + 1) & ~1u) * bps);
 					pd_md5_final(&md5, hex);
 					if (!quiet)
 						printf("PDAVD_FRAME %ld pts %" PRId64 " %ux%u %s us %" PRIu64 " st 0x%x\n", n, r.meta.pts, w, h, hex,
@@ -168,9 +172,9 @@ main(int argc, char **argv)
 						FILE *o = fopen(dump, "wb");
 						if (o != NULL) {
 							for (uint32_t y = 0; y < h; y++)
-								fwrite(p + (size_t)y * m->format.bytesperline, 1, w, o);
+								fwrite(p + (size_t)y * m->format.bytesperline, 1, w * bps, o);
 							for (uint32_t y = 0; y < (h + 1) / 2; y++)
-								fwrite(p + m->format.uv_offset + (size_t)y * m->format.bytesperline, 1, (w + 1) & ~1u, o);
+								fwrite(p + m->format.uv_offset + (size_t)y * m->format.bytesperline, 1, ((w + 1) & ~1u) * bps, o);
 							fclose(o);
 							printf("PDAVD_DUMPED picture %ld %ux%u nv12 to %s\n", n, w, h, dump);
 						}

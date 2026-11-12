@@ -113,6 +113,7 @@ int main(int argc, char **argv)
     uint64_t samples = 0, total_us = 0, max_us = 0;
     OSStatus err;
 
+    setvbuf(stdout, NULL, _IOLBF, 0);       /* whole lines, also next to the framework's stderr */
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--software"))
             software = 1;

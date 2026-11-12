@@ -7,7 +7,7 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 | Layer | State | Proof |
 |---|---|---|
 | 1. Facts | done | below |
-| 2. Kernel driver `PDAppleAVD` | **works on the M1**: H.264, HEVC and VP9 (8-bit 4:2:0), every decoded frame bit-identical to a software decode | boot `av02`: 1,290 of 1,290 frames in 10 clips |
+| 2. Kernel driver `PDAppleAVD` | **works on the M1**: H.264, HEVC (8 and 10 bit) and VP9, every decoded frame bit-identical to a software decode; all 63 progressive JVT H.264 conformance streams | boots `av12`-`av14`: 12,146 of 12,147 frames (the one: a console line cut short) |
 | 3. Userland interface `/dev/pdavd` + `libpdavd` + FFmpeg hwaccel `pdavd` | works for decode (the proof of layer 2 runs through it); buffers reach programs as read-only mappings, **not** as dma-bufs | boot `av02`; see "Not done" |
 | 4. Player `pdvideo` | **plays 1080p H.264 with sound on the M1 desktop using the hardware decoder**: 300 of 300 frames shown, none dropped, 16.8 % CPU against 36.9 % for software | boot `av05`; nobody has seen the picture |
 | 5. VideoToolbox decode side | **works on the M1 through the public API** on the hardware decoder (test program); Firefox itself: **not proven**, it does not run here yet | boot `av06`: 1,050 of 1,050 frames in five clips |
@@ -43,6 +43,10 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 | bbb-1080p-vp9-10s | VP9 profile 0 1920x1080 | 300 / 300 | 2.52 / 7.73 ms |
 
   1,290 of 1,290 frames; 0 decode errors, 0 watchdog timeouts, 0 DART faults, 2 interrupts per picture. Decode time is from submission to the decoder's "done" interrupt, including the wake-up of the waiting thread. The M1 returned to verified Linux. (Boot `av01` before it proved only that the kext loads: its wrapper did not select the guest script.)
+- **10-bit**: HEVC Main 10 1080p (x265, 3 s): 90 of 90 frames identical to software (`p010le`), 2.36 ms per frame (boot `av10`). The decoder writes P010 (16-bit samples). H.264 High 10 and VP9 profile 2 were not tried and the FFmpeg hwaccel does not offer them.
+- **JVT conformance streams** (ITU-T H.264.1 suites from the ITU site: 63 bitstreams that are progressive 8-bit 4:2:0, 10,377 frames; reference = FFmpeg's software decode, which equals the suite's own YUV for every stream that ships one). First pass (boots `av07`, `av08`): 58 of 63 streams identical. The five failures (BA1_FT_C, BASQP1_Sony_C, MR1_BT_A, SVA_Base_B: all frames; FRExt1_Panasonic: 2 of 8) all timed out in the decoder at the boundary between two slices. Cause found and fixed in the FFmpeg hwaccel, not in the driver: these are raw byte streams, and the zero byte in front of the next start code was passed as part of the slice; the decoder takes the slice's length as the end of its data. (The same pictures cut into slices by x264 in MP4 decode: QCIF with 3 slices, CIF with 12.) **Result with the fix (boots `av12`, `av13`): 63 of 63 streams, 10,376 of 10,377 frames identical, no decode error or timeout.** The one remaining line is frame 298 of CANL2_Sony_E in `av12`, whose console line was overwritten by a kernel log message after 31 of its 32 hash digits, which equal the reference; the same frame matched in full in `av07`.
+- The watchdog path is thereby exercised: 65 pictures timed out in `av08`, each time the block was reset through PMGR (`AVD_SYS`), its DART reprogrammed, the firmware started again, and the following streams decoded correctly.
+- **Final code, everything again** (boot `av14`, after the hwaccel fix above and with the kext as committed): the ten clips of the table plus the 10-bit clip and three small multi-slice clips: 14 clips, 1,770 of 1,770 frames identical.
 - Content: Big Buck Bunny (Blender Foundation, CC BY 3.0), cut and re-encoded on the workstation (`player/tools/make_clips.sh`; three more variants in `runs/avd/t`, commands in this stream's log). Nothing of it is committed.
 
 ## Layer 3: `/dev/pdavd`, `libpdavd`, FFmpeg hwaccel
@@ -85,7 +89,7 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 | bbb-1080p-hevc-10s (HEVC Main) | 300 / 300 |
 | bbb-1080p-vp9-10s (VP9) | 300 / 300 |
 
-  1,050 of 1,050; every callback carried its own sample's refCon; with B-frames the callbacks arrive out of presentation order (137 of 300), i.e. decode order. In that boot the test's second pass per clip, meant to be the software path, also ran on hardware (the flag was not wired; fixed since) and matched too; **the software path of the framework has not been run.** The time per `DecodeFrame` printed by that boot includes the test's own hashing and says nothing.
+  1,050 of 1,050; every callback carried its own sample's refCon; with B-frames the callbacks arrive out of presentation order (137 of 300), i.e. decode order. In that boot the test's second pass per clip, meant to be the software path, also ran on hardware (the flag was not wired). Boot `av09` repeated it with the flag wired: four clips, 750 of 750 frames on the hardware decoder and 750 of 750 through the framework's software path (`EnableHardwareAcceleratedVideoDecoder` = false; frames then arrive in presentation order).
 - Test scaffolding to know about: that boot staged CoreMedia and IOSurface as the Cocoa stream builds them, but a CoreVideo made of the tree's `CVPixelBuffer.c` alone (same file, without `CVDisplayLink`), because the full CoreVideo pulls OpenGL, Mesa and LLVM into a boot that has no desktop frameworks. The framework under test is the one a Cocoa root would get.
 - **What the Cocoa stream needs to pick up** (nothing of theirs was edited):
   1. Build `VideoToolbox.framework` from `m1-avd/build-videotoolbox.nix` (or its two sources with the same link line) instead of the tree's stub, and put it in the Cocoa root.
@@ -96,8 +100,7 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 ## Not done / known limits
 - **No dma-buf export, so no zero-copy to the compositor or Mesa.** Decoded buffers are kernel memory mapped read-only into the process; a player copies each frame (about 3 MB at 1080p) into a wl_shm buffer or a GL texture. Zero-copy needs the decoded buffers exported as dma-bufs that the asahi DRM driver can import (PRIME import in the LinuxKPI layer of `m1-drm72`) and NV12 import in the compositor: not started.
 - **The device node is root-only (0600)**: the Linux codec files trust the parameter structures to the degree V4L2's control framework validates them, and that validation is only partly ported (sizes and array bounds are checked; field ranges are not). Opening it to unprivileged users needs that validation.
-- 10-bit (P010) and 4:2:2 output are in the driver but nothing was decoded in them; the FFmpeg hwaccel is offered for 8-bit 4:2:0 only.
+- 4:2:2 output is in the driver but nothing was decoded in it. 10-bit is proven for HEVC Main 10 only; the player shows 10-bit through swscale, and VideoToolbox does not deliver 10-bit pixel buffers yet.
 - One decode at a time (as Linux's mem2mem); several contexts can exist (8). No runtime power management: the block is on while a context exists.
-- The watchdog/reset path (PMGR reset of `AVD_SYS`, DART reprogramming) has never run: no decode ever timed out.
 - Interlaced H.264 is refused by the driver (as in Linux). Resolution changes inside a stream need a new context (FFmpeg does that).
-- Conformance: the JVT/ITU conformance suites were not run through the hardware yet (the clips above are encoder output of x264, x265 and libvpx).
+- Conformance: only H.264 has been run against a conformance suite (JVT, progressive 8-bit 4:2:0). The interlaced, 4:2:2 and 10-bit JVT streams (9 of the 72 fetched) were not run: the driver refuses interlace. HEVC and VP9 were checked with encoder output only (x265, libvpx), not with the JCT-VC or Argon suites.
