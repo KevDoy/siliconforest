@@ -26,6 +26,11 @@ import pdsf_pack
 
 HERE = Path(__file__).resolve().parent
 IMAGE = 'm1n1-sf-stage.bin'
+BOOT_BIN, STAGE1_TEST = 'sf-boot.bin', 'sf-stage1-test.bin'      # ../install/build.sh
+# What a stage 1 appends behind the file it chainloads (m1n1 src/chainload.c: its variable
+# lines, here the one the installer gives every stage 1), so that the stage is entered with
+# the bytes behind its records that it will find there when it is installed.
+CHAINLOAD_TAIL = b'chosen.asahi,efi-system-partition=00000000-0000-0000-0000-000000000000\n'
 ALIGN, ENTRY, PAGE = 0x10000, 0x800, 0x4000
 BOOTARGS_TOP = 32                       # struct boot_args: top_of_kernel_data (m1n1 src/startup.c)
 CHUNK = 4 << 20
@@ -237,25 +242,59 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     device = getattr(getattr(iface, 'dev', None), 'port', None)
     if 'stagestop' in native.words:
         bootargs = bootargs + ' pdsfstop=1'
-    m1n1 = (HERE / IMAGE).read_bytes()
+    m1n1 = (HERE / IMAGE).read_bytes() if not (getattr(native, 'boot_bin', False) or getattr(native, 'stage1', False)) else b''
     index = int(p.iodev_whoami()) - int(backend.proxy_module.IODEV.USB0)
     require(index in (0, 1), 'The proxy is not on a USB port')
-    cpus = [token for token in bootargs.split() if token.startswith('cpus=')]
-    require(cpus == ['cpus=1'] or 'pdcpuheld=1' in bootargs.split(),
-            'More than one processor through the stage needs pdcpuheld=1')
     mark('stage_pack_begin')
     seed = os.urandom(256) if native.host_seed else None
     xnu_base = None if native.low_mem else layout['phys_base']
-    text = config(native, bootargs, index, seed, xnu_base)
-    # noramdisk (a root on the disk): the RAM root the launcher holds is not put into the image
-    ramdisk = None if getattr(native, 'no_ramdisk', False) else inputs.contents.get('ramdisk')
-    require(ramdisk is not None or ('rd=uuid' in bootargs.split() and 'rd=md0' not in bootargs.split()),
-            'An image without a RAM root needs rd=uuid on the command line')
-    image = pdsf_pack.image(m1n1, text, inputs.contents['kernel'], ramdisk)
-    at = pdsf_pack.records_offset(image)
-    found, _ = pdsf_pack.parse(image, at)
-    require(at == len(m1n1) and all(item[4] for item in found), 'Stage image self-check')
+    prebuilt = None
+    if getattr(native, 'stage1', False):
+        # The installed stage 1 as the installer writes it (image, variable lines, four zero
+        # bytes). No records, no kernel: it looks for its boot partition and stops.
+        image = m1n1 = (HERE / STAGE1_TEST).read_bytes()
+        require(image[0x808:0x810] == b'AURALOAD' and b'\nchainload=' in image[-600:] and image.endswith(bytes(4)),
+                'Not a stage 1 with its chainload line')
+        text, found, xnu_base = b'', [], None
+        bootargs = '(stage 1 test: no kernel is entered)'
+        prebuilt = dict(file=STAGE1_TEST, sha256=hashlib.sha256(image).hexdigest(), bytes=len(image))
+    elif getattr(native, 'boot_bin', False):
+        # The file an installed stage 1 will read: nothing is packed here, and its own
+        # configuration record decides everything, the kernel command line included.
+        import zlib
+        data = (HERE / BOOT_BIN).read_bytes()
+        at = pdsf_pack.records_offset(data)
+        found, end = pdsf_pack.parse(data, at)
+        m1n1 = data[:at]
+        require([item[0] for item in found] == [pdsf_pack.CONFIG, pdsf_pack.KERNEL] and all(item[4] for item in found) and
+                data[end:] == bytes(4), 'sf-boot.bin is not stage + configuration + kernel')
+        text = data[found[0][5]:found[0][5] + found[0][2]]
+        keys = dict(line.split('=', 1) for line in text.decode('ascii').splitlines())
+        bootargs = keys['bootargs']
+        require('rd=uuid' in bootargs.split() and 'rd=md0' not in bootargs.split() and 'pdsfstop=1' not in bootargs.split()
+                and 'seed-hex' not in keys and 'wdt' not in keys, 'sf-boot.bin: not a disk-root configuration')
+        require(keys.get('usb-nodes') in ('keep', 'remove%d' % index), 'sf-boot.bin removes the nodes of another USB port than the proxy uses')
+        xnu_base = int(keys['xnu-base'], 16) if 'xnu-base' in keys else None
+        stored = data[found[1][5]:found[1][5] + found[1][2]]
+        require(found[1][1] & pdsf_pack.F_GZIP and zlib.decompress(stored, 31) == inputs.contents['kernel'],
+                "sf-boot.bin's kernel is not the collection of this boot")
+        image = data + CHAINLOAD_TAIL
+        prebuilt = dict(file=BOOT_BIN, sha256=hashlib.sha256(data).hexdigest(), bytes=len(data),
+                        appended_as_stage1_would=CHAINLOAD_TAIL.decode().strip())
+    else:
+        text = config(native, bootargs, index, seed, xnu_base)
+        # noramdisk (a root on the disk): the RAM root the launcher holds is not put into the image
+        ramdisk = None if getattr(native, 'no_ramdisk', False) else inputs.contents.get('ramdisk')
+        require(ramdisk is not None or ('rd=uuid' in bootargs.split() and 'rd=md0' not in bootargs.split()),
+                'An image without a RAM root needs rd=uuid on the command line')
+        image = pdsf_pack.image(m1n1, text, inputs.contents['kernel'], ramdisk)
+        at = pdsf_pack.records_offset(image)
+        found, _ = pdsf_pack.parse(image, at)
+        require(at == len(m1n1) and all(item[4] for item in found), 'Stage image self-check')
     mark('stage_pack_end', bytes=len(image))
+    cpus = [token for token in bootargs.split() if token.startswith('cpus=')]
+    require(getattr(native, 'stage1', False) or cpus == ['cpus=1'] or 'pdcpuheld=1' in bootargs.split(),
+            'More than one processor through the stage needs pdcpuheld=1')
 
     # The image runs where it is uploaded (m1n1 is position independent). It is entered with
     # a copy of this m1n1's boot arguments that differs in one field: top_of_kernel_data is
@@ -300,6 +339,9 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
                       xnu_base='%#x' % layout['phys_base'], entry='%#x' % layout['entry'],
                       bootargs='%#x' % (layout['guest_base'] + layout['bootargs_off']))),
                   watchdog_armed_by='the stage, just before it enters the kernel' if native.wdt else None)
+    if prebuilt is not None:
+        # the launcher's own prediction does not apply: the file's configuration decides
+        record['prebuilt'], record['expected'] = prebuilt, None
     if native.vdm_serial:
         record['serial_mode_ok'] = native_boot.serial_mode()
     console = console_factory(native_boot.UART_DEVICE)
@@ -320,6 +362,14 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         # This is the last request of the boot: nothing is sent over the proxy afterwards.
         p.request(p.P_VECTOR, base + ENTRY, base + size, 0, 0, 0, 0)
         mark('native_vector_acknowledged')
+        if getattr(native, 'stage1', False):
+            # The stage 1 test: it stops by itself (sf_stop prints SF_STOPPED) or the time runs out.
+            limit = time.monotonic() + min(runtime, 90)
+            while b'SF_STOPPED' not in bytes(console.proof.output) and time.monotonic() < limit:
+                time.sleep(.2)
+            time.sleep(2.0)
+            mark('native_capture_end', done=b'SF_STOPPED' in bytes(console.proof.output), console_bytes=len(console.proof.output))
+            return
         if 'stagestop' in native.words:
             # Diagnostic: the stage returns to its proxy instead of entering XNU.
             limit = time.monotonic() + 90

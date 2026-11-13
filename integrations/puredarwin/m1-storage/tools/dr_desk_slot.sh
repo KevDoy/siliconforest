@@ -30,6 +30,34 @@ C=runs/m1-desktop-010/pcie-enum-attempt-$N
 # natively nothing is typed back to the controller the same way: its own status is checked for Linux, the rest by the verdict
 grep -q '"status": *"[A-Z_]*LINUX_VERIFIED"' "$C/result.json" 2>/dev/null || stop "$N: the cycle did not end with Linux verified; all storage boots stopped"
 "$HERE/tools/linux_m1.sh" all "$N-after" "$R" || stop "$N: Linux could not be read after the boot; all storage boots stopped"
+if [ -n "${DR_STAGE1:-}" ]; then
+  # The installed stage 1 with a boot partition that does not exist: it must stop by itself, with its reason on
+  # the console, enter no kernel and change nothing on the disk (it starts the storage controller to read the
+  # partition table, as every stage 1 does).
+  sleep 30
+  DR_OUT=$ROOT/runs/m1-storage/$N-wcheck.txt "$HERE/tools/dr_linux_root.sh" wcheck > /dev/null || stop "$N: our partition could not be checked from Linux after the stage 1 test; all storage boots stopped"
+  CON=$(mktemp); strings -n 4 "$C/guest/console.bin" | sed -e 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' > "$CON"
+  {
+    grep -a 'SFL_FSCK\|SFL_SB_FIRST Filesystem state\|SFL_SB_FIRST Journal start' "runs/m1-storage/$N-wcheck.txt" | sed 's/^/DR_STAGE1 /'
+    python3 -B "$HERE/tools/dr_plain_ranges.py" "runs/m1-storage/$N-before" "runs/m1-storage/$N-after" "$SF_PART_LBA" "$SF_PART_BLOCKS" | sed 's/^DR_PLAIN/DR_STAGE1/' || true
+    echo "DR_STAGE1 reset_attempts=$(sed -n 's/.*"reset_attempts": *\([0-9]*\).*/\1/p' "$C/result.json" | head -1)"
+    want() { if grep -a -q -- "$2" "$CON"; then echo "DR_STAGE1 ok   $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-200)"; else echo "DR_STAGE1 FAIL $1"; fi; }
+    wantnot() { if grep -a -q -- "$2" "$CON"; then echo "DR_STAGE1 FAIL $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-160)"; else echo "DR_STAGE1 ok   $1"; fi; }
+    want "it is our stage 1" 'siliconforest-stage1'
+    want "it found no payload to start" 'No valid payload found'
+    want "it stopped" '^SF_STOPPED'
+    want "it said what to do" 'Hold the power button'
+    wantnot "no kernel was entered" 'Darwin Kernel Version'
+    wantnot "no proxy was offered" 'Running proxy'
+    grep -a -i 'chainload\|nvme\|payload\|SiliconForest\|partition\|GPT\|fat' "$CON" | cut -c1-200 | head -40 | sed 's/^/DR_STAGE1 line /'
+  } | tee "runs/m1-storage/$N-verdict.txt"
+  rm -f "$CON"; V=runs/m1-storage/$N-verdict.txt
+  grep -q '^DR_STAGE1 SFL_FSCK_RC 0$' "$V" && grep -q '^DR_STAGE1 SFL_SB_FIRST Filesystem state: *clean$' "$V" && grep -q '^DR_STAGE1 linux_side=ok$' "$V" \
+    || stop "$N: after the stage 1 test our partition is not clean in Linux, or a range Linux never writes or a SMART counter changed; all storage boots stopped"
+  if grep -q '^DR_STAGE1 FAIL' "$V"; then echo "DR_STAGE1 storage checks passed; $(grep -c '^DR_STAGE1 FAIL' "$V") line(s) FAILED"; exit 1; fi
+  echo "DR_STAGE1 PASSED: stage 1 found no boot partition, stopped by itself, entered nothing; the disk is unchanged"
+  exit 0
+fi
 if [ "${DR_STAGE_STOP:-0}" = 1 ]; then
   sleep 30
   DR_OUT=$ROOT/runs/m1-storage/$N-wcheck.txt "$HERE/tools/dr_linux_root.sh" wcheck > /dev/null || stop "$N: our partition could not be checked from Linux after the read-back boot; all storage boots stopped"

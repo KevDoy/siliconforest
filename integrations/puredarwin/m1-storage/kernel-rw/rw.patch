@@ -286,7 +286,7 @@
   *
   * OFF unless the boot arguments say otherwise:
   *   pdnvme=0 or absent  nothing is touched: no power domain, no register, no memory
-@@ -62,6 +82,8 @@
+@@ -64,6 +84,8 @@
  #include <sys/systm.h>
  #include <sys/uio.h>
  
@@ -295,7 +295,7 @@
  #include "pd_ans.h"
  #include "pd_nvme_part.h"
  
-@@ -74,8 +96,12 @@
+@@ -76,8 +98,12 @@
  static const char *const kStateNames[] = { "off", "observed", "starting", "ready", "stopping", "stopped-clean",
      "stopped-unclean", "failed" };
  
@@ -308,7 +308,7 @@
  	uint64_t lba;
  	uint32_t blocks;
  	int      slot;          /* valid when done with result 0: the caller copies out and releases it */
-@@ -111,6 +137,17 @@
+@@ -113,6 +139,17 @@
  static IOLock   *gPartLock;
  static uint32_t  gExempted;
  static uint32_t  gReadFence;
@@ -326,7 +326,7 @@
  static uint64_t  gFenceRefused, gFenceRefusedBlocks, gOursRequests, gOursBlocks, gGptRequests, gOtherRequests, gOtherBlocks;
  #define GPT_HEAD_BLOCKS 6u      /* protective MBR, header, 4 blocks of table */
  #define GPT_TAIL_BLOCKS 5u      /* 4 blocks of table, header */
-@@ -135,7 +172,7 @@
+@@ -137,7 +174,7 @@
  typedef int (*pd_sink_t)(void *ctx, uint64_t offset, const uint8_t *data, uint32_t len);
  
  static IOReturn
@@ -335,7 +335,7 @@
  {
  	uint64_t done = 0;
  	IOReturn result = kIOReturnSuccess;
-@@ -154,6 +191,9 @@
+@@ -156,6 +193,9 @@
  			PDReq *r = &reqs[n++];
  
  			r->next = NULL;
@@ -345,7 +345,7 @@
  			r->lba = lba + at;
  			r->blocks = left > PD_NVME_MAX_READ_BLOCKS ? PD_NVME_MAX_READ_BLOCKS : (uint32_t)left;
  			r->slot = -1;
-@@ -177,6 +217,8 @@
+@@ -179,6 +219,8 @@
  					result = r->result;
  				continue;
  			}
@@ -354,7 +354,7 @@
  			/* the slot is this request's until it is released: copy without the lock */
  			IOLockUnlock(gLock);
  			if (result == kIOReturnSuccess &&
-@@ -192,6 +234,61 @@
+@@ -194,6 +236,61 @@
  	return result;
  }
  
@@ -416,7 +416,7 @@
  /* ---- /dev/pdnvme0 ------------------------------------------------------------------------- */
  
  static int
-@@ -360,7 +457,7 @@
+@@ -362,7 +459,7 @@
  	/* where the request lies: the GPT's own blocks, our partition (only once identified), or anything else */
  	if (block + nblks <= GPT_HEAD_BLOCKS || block >= gAns.nsBlocks - GPT_TAIL_BLOCKS) {
  		OSIncrementAtomic64((volatile SInt64 *)&gGptRequests);
@@ -425,7 +425,7 @@
  		OSIncrementAtomic64((volatile SInt64 *)&gOursRequests);
  		OSAddAtomic64((SInt64)nblks, (volatile SInt64 *)&gOursBlocks);
  	} else if (gReadFence) {
-@@ -420,6 +517,149 @@
+@@ -422,6 +519,149 @@
  }
  
  /*
@@ -575,7 +575,7 @@
   * The guard of the partitions of this disk (pdnvme=3). Partition schemes, the APFS
   * container scheme and every other content driver for IOMedia compete in the match
   * category "IOStorage", one winner per media. This driver enters that category with the
-@@ -484,6 +724,15 @@
+@@ -486,6 +726,15 @@
  		if (work != NULL)
  			IOFree(work, PD_PART_WORK);
  		gPartState = r == 0 ? kPartVerified : kPartRefused;
@@ -591,7 +591,7 @@
  		LOG("the SiliconForest partition (blocks %llu..%llu): %s (%d): %s", gWant.first, gWant.first + gWant.blocks - 1,
  		    r == 0 ? "identified, not guarded" : "NOT identified, guarded like the others", r, gPartWhy);
  	}
-@@ -504,7 +753,7 @@
+@@ -506,7 +755,7 @@
  		ours = e == (IORegistryEntry *)gDisk;
  	if (!ours)
  		return NULL;
@@ -600,7 +600,7 @@
  		OSIncrementAtomic((volatile SInt32 *)&gExempted);
  		return NULL;
  	}
-@@ -522,6 +771,8 @@
+@@ -524,6 +773,8 @@
  	provider->setProperty(kIOMediaContentHintKey, "PDAppleNVMe-guarded");
  	OSIncrementAtomic((volatile SInt32 *)&gGuarded);
  	LOG("partition %s: guarded, no content driver attaches", provider->getName());
@@ -609,7 +609,7 @@
  	return true;
  }
  
-@@ -599,10 +850,32 @@
+@@ -601,10 +852,32 @@
  		}
  		while (gQueueHead != NULL && (s = pick_slot()) >= 0) {
  			PDReq *r = gQueueHead;
@@ -643,7 +643,7 @@
  			if (err != 0)
  				finish(r, err == EPERM ? kIOReturnNotPermitted : kIOReturnBadArgument);
  			else
-@@ -614,6 +887,27 @@
+@@ -616,6 +889,27 @@
  
  			if (r == NULL)
  				continue;       /* a read that was given up on long ago */
@@ -671,7 +671,7 @@
  			r->micros = comps[i].micros;
  			gCompleted++;
  			gSumMicros += comps[i].micros;
-@@ -695,7 +989,7 @@
+@@ -697,7 +991,7 @@
  	set_state(kStateStarting);
  	gStartMs = now_ms();
  	LOG("start %u of this boot", gStarts);
@@ -680,7 +680,7 @@
  	err = gAns.start(why, sizeof(why));
  	if (err != 0) {
  		bool clean = gAns.stop(gWhy, sizeof(gWhy));
-@@ -718,6 +1012,17 @@
+@@ -720,6 +1014,17 @@
  	engine();
  
  	LOG("stopping the controller (%s)", gStopReason);
@@ -698,7 +698,7 @@
  	if (!gAns.dead)
  		gAns.readSmart();
  	bool clean = gAns.stop(why, sizeof(why));
-@@ -726,6 +1031,8 @@
+@@ -728,6 +1033,8 @@
  	LOG("controller stopped %s (%s); gate_rejected=%u write_refused=%u reads=%llu blocks=%llu errors=%llu timeouts=%llu",
  	    clean ? "CLEANLY" : "NOT CLEANLY", gWhy, gAns.gateRejected, gWriteRefused, gAns.readCommands, gAns.readBlocks,
  	    gAns.cmdErrors, gAns.cmdTimeouts);
@@ -707,7 +707,7 @@
  	IOLockLock(gLock);
  	gState = clean ? kStateStoppedClean : kStateStoppedUnclean;
  	IOLockWakeup(gLock, &gState, false);
-@@ -766,7 +1073,7 @@
+@@ -768,7 +1075,7 @@
  	thread_t thread;
  
  	IOLockLock(gLock);
@@ -716,7 +716,7 @@
  		IOLockUnlock(gLock);
  		return EBUSY;
  	}
-@@ -824,7 +1131,100 @@
+@@ -826,7 +1133,100 @@
  
  /* ---- sysctl -------------------------------------------------------------------------------- */
  
@@ -818,7 +818,7 @@
  
  static uint64_t le64(const uint8_t *p) { return OSReadLittleInt64(p, 0); }
  static uint32_t le32(const uint8_t *p) { return OSReadLittleInt32(p, 0); }
-@@ -942,9 +1342,74 @@
+@@ -944,9 +1344,74 @@
  		error = sysctl_handle_int(oidp, &value, 0, req);
  		if (error != 0 || req->newptr == USER_ADDR_NULL)
  			return error;
@@ -893,7 +893,7 @@
  	case kCtlGateTest:
  		gate_selftest(text, sizeof(text));
  		break;
-@@ -1016,7 +1481,15 @@
+@@ -1018,7 +1483,15 @@
  SYSCTL_PROC(_kern_pd_nvme, OID_AUTO, start, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, kCtlStart, pd_sysctl, "I",
      "write 1 after a clean stop: start the controller again; reads the number of starts");
  
@@ -909,7 +909,7 @@
  	&sysctl__kern_pd_nvme_media, &sysctl__kern_pd_nvme_part, &sysctl__kern_pd_nvme_fence, &sysctl__kern_pd_nvme_smart_raw, &sysctl__kern_pd_nvme_start,
  	&sysctl__kern_pd_nvme, &sysctl__kern_pd_nvme_state, &sysctl__kern_pd_nvme_stats, &sysctl__kern_pd_nvme_idctrl,
  	&sysctl__kern_pd_nvme_idns, &sysctl__kern_pd_nvme_gate_selftest, &sysctl__kern_pd_nvme_smart,
-@@ -1084,6 +1557,9 @@
+@@ -1086,6 +1559,9 @@
  				gPartState = kPartUnchecked;
  				if (PE_parse_boot_argn("pdnvme_readfence", &value, sizeof(value)) && value == 1)
  					gReadFence = 1;

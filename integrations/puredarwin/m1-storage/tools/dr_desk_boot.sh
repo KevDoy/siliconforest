@@ -52,6 +52,14 @@
 #               returns to its proxy; the launcher compares what it placed (b1/native_stage.py readback). The
 #               first boot after any change to the stage or to what it is given. Ends with one controller reset.
 #   DR_STAGE_WORDS  further stage words (e.g. hostseed)
+#   DR_BOOTBIN=<file>  (with DR_STAGE=disk DR_PLAIN=1) nothing is packed on the controller: this file (the install
+#               kit's boot-bench.bin or boot.bin, ../../m1-native-boot/install/build.sh: stage 2 + configuration +
+#               collection, as stage 1 reads it from the boot partition) is uploaded byte for byte and entered.
+#               ITS configuration is the boot's: session length, time to live and every other boot argument are
+#               the file's, not this script's. The collection must be the one in the file.
+#   DR_STAGE1=<file>  (with DR_STAGE=disk) the install kit's sf-stage1-test.bin (stage 1 with a chainload line that
+#               names a partition that does not exist) is uploaded and entered, nothing else: it must find nothing
+#               and stop (SF_STOPPED). No kernel. Ends with one controller reset.
 # Run inside a slot (Linux before and after): tools/dr_desk_slot.sh.
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
@@ -78,8 +86,17 @@ if [ -n "$STAGE" ]; then
   [ "$STAGE" != disk ] || { [ "$HALT" = reboot ] && [ "${DR_INSTALL:-0}" != 1 ]; } || { echo "DR_STAGE=disk: DR_HALT=reboot, and nothing can be installed without a RAM root" >&2; exit 2; }
   [ -f "$STAGE_IMAGE" ] || { echo "no stage image at $STAGE_IMAGE: run B1_ROOT_UUID=<filesystem UUID> $B1/build.sh" >&2; exit 2; }
   # the stage refuses every disk root but the one it was built for: do not spend a boot on finding that out
-  [ "$(grep -a -c -F "$SF_FSUUID" "$STAGE_IMAGE")" -ge 1 ] || { echo "the stage image was not built for this root (B1_ROOT_UUID)" >&2; exit 2; }
+  [ "$(grep -a -c -F "$SF_FSUUID" "${DR_BOOTBIN:-$STAGE_IMAGE}")" -ge 1 ] || { echo "the stage image was not built for this root (B1_ROOT_UUID)" >&2; exit 2; }
   WORDS="$WORDS stage ${DR_STAGE_WORDS:-}"
+  if [ -n "${DR_BOOTBIN:-}" ]; then
+    [ -f "$DR_BOOTBIN" ] && [ "$STAGE" = disk ] && [ "${DR_PLAIN:-0}" = 1 ] && [ -z "${DR_STAGE1:-}" ] || { echo "DR_BOOTBIN=<file> needs DR_STAGE=disk DR_PLAIN=1" >&2; exit 2; }
+    WORDS="$WORDS bootbin"
+  fi
+  if [ -n "${DR_STAGE1:-}" ]; then
+    [ -f "$DR_STAGE1" ] && [ "$STAGE" = disk ] && [ "${DR_PLAIN:-0}" != 1 ] && [ "${DR_STAGE_STOP:-0}" != 1 ] || { echo "DR_STAGE1=<file> needs DR_STAGE=disk and nothing else" >&2; exit 2; }
+    grep -a -q 'SF_STOPPED' "$DR_STAGE1" || { echo "DR_STAGE1: not the installed variant (it would restart or fall back to the proxy)" >&2; exit 2; }
+    WORDS="$WORDS stage1"
+  fi
   [ "$STAGE" != disk ] || WORDS="$WORDS noramdisk multiuser"
   [ "${DR_STAGE_STOP:-0}" != 1 ] || WORDS="$WORDS stagestop"
   [ "${DR_PLAIN:-0}" != 1 ] || { [ "$STAGE" = disk ] && [ "${DR_STAGE_STOP:-0}" != 1 ] && [ -z "${DR_AUTO_ONLY:-}" ]; } || { echo "DR_PLAIN needs DR_STAGE=disk, no read-back and no autopilot" >&2; exit 2; }
@@ -108,6 +125,8 @@ fi
 FILES="$NB/native_boot.py=$B/native_boot.py;$NB/native_stub.py=$B/native_stub.py;$QD/native_mode.txt=$B/native_mode.txt"
 [ -z "$HALT" ] || FILES="$FILES;$QD/self_reboot_mode.txt=$B/self_reboot_mode.txt"
 [ -z "$STAGE" ] || FILES="$FILES;$B1/native_stage.py=$B/native_stage.py;$B1/pdsf_pack.py=$B/pdsf_pack.py;$STAGE_IMAGE=$B/m1n1-sf-stage.bin"
+[ -z "${DR_BOOTBIN:-}" ] || FILES="$FILES;$DR_BOOTBIN=$B/sf-boot.bin"
+[ -z "${DR_STAGE1:-}" ] || FILES="$FILES;$DR_STAGE1=$B/sf-stage1-test.bin"
 TTL=${DR_TTL:-$((LIMIT - 40))}
 DISK="rd=uuid boot-uuid=$SF_FSUUID launchdsuffix=sfro wdt=-1 pdnvme=3 pdnvme_ttl=$TTL pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0"
 [ -f "${DR_RANGES:-}" ] || { echo "DR_RANGES=<range file> is needed" >&2; exit 2; }
@@ -168,5 +187,7 @@ env PCIE_LAB_PATCH="$QD/launcher.patch" PCIE_LAB_FILES="$FILES" \
 [ -f "$R/times.txt" ] || { echo "no boot was recorded in $R" >&2; exit 1; }
 printf 'mode=%s\nprofile=%s\nkc=%s\nlimit=%s\nrw=%s\nhalt=%s\ninstall=%s\nauto=%s keep=%s\n' "$MODE" "${DR_PROFILE:-desktop}" "$KC" "$LIMIT" "$RW" "$HALT" "${DR_INSTALL:-0}" "${DR_AUTO_ONLY:-}" "${DR_AUTO_KEEP:-0}" > "$R/dr-config.txt"
 [ -z "$STAGE" ] || printf 'stage=%s stop=%s plain=%s words=%s image_sha256=%s\n' "$STAGE" "${DR_STAGE_STOP:-0}" "${DR_PLAIN:-0}" "$WORDS" "$(sha256sum "$STAGE_IMAGE" | cut -d' ' -f1)" >> "$R/dr-config.txt"
+[ -z "${DR_BOOTBIN:-}" ] || printf 'bootbin_sha256=%s\n' "$(sha256sum "$DR_BOOTBIN" | cut -d' ' -f1)" >> "$R/dr-config.txt"
+[ -z "${DR_STAGE1:-}" ] || printf 'stage1_test_sha256=%s\n' "$(sha256sum "$DR_STAGE1" | cut -d' ' -f1)" >> "$R/dr-config.txt"
 [ -z "$STAGE" ] || { grep -a 'NATIVE_STAGE_START\|STAGE_READBACK' "$R/guest/worker.log" | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-700 || true; }
 grep -o '"status": *"[^"]*"' "$R/result.json" 2>/dev/null || echo "no result.json"

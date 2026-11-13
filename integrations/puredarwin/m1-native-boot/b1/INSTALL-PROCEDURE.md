@@ -17,6 +17,10 @@
 > former D2) are closed and are no longer among the decisions of section 11. Everything from
 > section 5 step B on is still not authorised and not executed.
 
+> **Since 13 November 2026 the kit exists: `../install/INSTALL.md` has the scripts and the owner's numbered
+> steps and replaces sections 4 to 8 below** (the installer itself runs with our data instead of a script of our
+> own; the boot partition is 500 MiB and EFI-typed; `pdnvme_ttl=0` had to be added to the driver). Still not executed.
+
 The model is the Asahi installer, which made the Linux entry on this machine. Its source was
 read for this (`runs/m1-storage/ref/asahi-installer/src/stub.py`, `osinstall.py`, `main.py`,
 `step2/step2.sh`, `build.sh`); file and function names below refer to it. Stage and kernel

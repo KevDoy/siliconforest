@@ -47,6 +47,15 @@ native_mode.txt is one line of words:
                and the collection only): for a boot whose root is on the disk (rd=uuid
                boot-uuid=<the filesystem the stage was built for>; the stage refuses rd=md0
                without the record). Nothing of the RAM root reaches the M1.
+               bootbin (with noramdisk): nothing is packed on the controller. The file
+               sf-boot.bin next to the launcher (install/build.sh: the file an installed
+               stage 1 reads from the boot partition) is uploaded byte for byte, followed by
+               a variable line as stage 1's chainload appends one, and entered. Its own
+               configuration record is the boot's: the launcher's boot arguments are not used.
+               stage1: the file sf-stage1-test.bin (the installed stage 1 with its
+               chainload= line, as the installer writes the boot object) is uploaded and
+               entered; nothing else. It is expected to find no partition and stop
+               (SF_STOPPED on the UART); the kernel is never entered.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -95,7 +104,7 @@ class Mode:
         self.wdt = None
         known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
-        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem', 'noramdisk'}
+        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem', 'noramdisk', 'bootbin', 'stage1'}
         self.stage, self.usb_keep, self.host_seed = ('stage' in words, 'usbkeep' in words, 'hostseed' in words)
         self.low_mem = 'lowmem' in words
         self.no_ramdisk = 'noramdisk' in words
@@ -112,6 +121,12 @@ class Mode:
         require(not self.rechain or (self.native and not self.stage), 'rechain is for a launcher-native boot')
         require(self.stage or not (self.usb_keep or self.host_seed or self.low_mem or self.no_ramdisk),
                 'usbkeep, hostseed, lowmem and noramdisk need stage')
+        self.boot_bin, self.stage1 = 'bootbin' in words, 'stage1' in words
+        require(not (self.boot_bin or self.stage1) or self.stage, 'bootbin and stage1 need stage')
+        require(not self.boot_bin or (self.no_ramdisk and not self.stage1), 'bootbin needs noramdisk')
+        require(not (self.boot_bin or self.stage1) or not (self.host_seed or self.low_mem or self.usb_keep or
+                                                           'stagestop' in words or self.wdt is not None),
+                'bootbin and stage1 take nothing from the launcher: no hostseed, lowmem, usbkeep, stagestop, wdt=')
         self.vdm_return = 'vdm-return' in words
         require(self.wdt is None or self.native, 'wdt= needs native')
         require(not self.vdm_return or self.native, 'vdm-return needs native')

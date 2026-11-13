@@ -12,7 +12,9 @@
  *                       write-protected, non-removable block device (IOMedia not writable)
  *   pdnvme_ttl=<s>      seconds after which the controller is shut down cleanly whatever the
  *                       system is doing (default 90, 10..570): the bench resets the machine
- *                       at the end of a boot, and a controller must not be running then
+ *                       at the end of a boot, and a controller must not be running then.
+ *                       pdnvme_ttl=0: no time limit (an installed system: the controller runs
+ *                       until the system's own halt stops it)
  *   pdnvme_delay=<ms>   wait before the bring-up (default 3000)
  *   pdnvme_verbose=1    every mailbox message
  *   pdnvme_part=<GUID> pdnvme_part_lba=<first block> pdnvme_part_blocks=<length>
@@ -584,7 +586,7 @@ engine(void)
 		unsigned n, held = 0;
 		int s;
 
-		if (!gStopRequested && now_ms() >= ttlAt) {
+		if (gTtl != 0 && !gStopRequested && now_ms() >= ttlAt) {
 			gStopRequested = true;
 			gStopReason = "time to live";
 		}
@@ -1060,7 +1062,7 @@ PDAppleNVMe::start(IOService *provider)
 		LOG("chip 0x%x is not T8103; nothing is done", chipID);
 		return false;
 	}
-	if (PE_parse_boot_argn("pdnvme_ttl", &value, sizeof(value)) && value >= 10 && value <= 570)
+	if (PE_parse_boot_argn("pdnvme_ttl", &value, sizeof(value)) && (value == 0 || (value >= 10 && value <= 570)))
 		gTtl = value;
 	if (PE_parse_boot_argn("pdnvme_delay", &value, sizeof(value)) && value <= 60000)
 		gDelayMs = value;
