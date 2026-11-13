@@ -43,6 +43,10 @@ native_mode.txt is one line of words:
                the stage chooses where XNU's memory begins (just above its own, about 0.8 GB
                lower); without it the stage is told the launcher's own phys_base, so that
                every address is the one of the native boots so far.
+               noramdisk: the image carries NO RAM root record (the stage, its configuration
+               and the collection only): for a boot whose root is on the disk (rd=uuid
+               boot-uuid=<the filesystem the stage was built for>; the stage refuses rd=md0
+               without the record). Nothing of the RAM root reaches the M1.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -91,9 +95,10 @@ class Mode:
         self.wdt = None
         known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
-        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem'}
+        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem', 'noramdisk'}
         self.stage, self.usb_keep, self.host_seed = ('stage' in words, 'usbkeep' in words, 'hostseed' in words)
         self.low_mem = 'lowmem' in words
+        self.no_ramdisk = 'noramdisk' in words
         for word in words:
             match = re.fullmatch(r'wdt=(\d{2,3})', word)
             if match:
@@ -105,8 +110,8 @@ class Mode:
         require(not self.stage or self.native, 'stage needs native')
         self.rechain = 'rechain' in words
         require(not self.rechain or (self.native and not self.stage), 'rechain is for a launcher-native boot')
-        require(self.stage or not (self.usb_keep or self.host_seed or self.low_mem),
-                'usbkeep, hostseed and lowmem need stage')
+        require(self.stage or not (self.usb_keep or self.host_seed or self.low_mem or self.no_ramdisk),
+                'usbkeep, hostseed, lowmem and noramdisk need stage')
         self.vdm_return = 'vdm-return' in words
         require(self.wdt is None or self.native, 'wdt= needs native')
         require(not self.vdm_return or self.native, 'vdm-return needs native')

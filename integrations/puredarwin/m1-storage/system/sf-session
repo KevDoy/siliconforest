@@ -1,0 +1,121 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# /usr/libexec/sf-session: the desktop session of a SiliconForest disk root. It is what
+# /usr/bin/darwin-desktop-test (system/darwin-desktop-test.disk) runs when the boot uploaded
+# no RAM root, i.e. what launchd's job org.siliconforest.desktop starts in a multi-user boot.
+# It is ../../m1-boot-speed/guest/darwin-gpu-desktop-fast.in for a system that boots by
+# itself: nothing is typed, no Wi-Fi credentials are in it (the network is pd-netd's, started
+# by its own launchd job, which joins the networks the system remembers), and when the session
+# ends the machine is restarted or switched off by the system's own command:
+#   the desktop menu's Session > Restart or Shut Down leave `restart` or `poweroff` in
+#   $XDG_RUNTIME_DIR/session-end-request; anything else (the session's time is up, the
+#   compositor ended by itself) restarts. /bin/reboot and /bin/shutdown are system/sf-command.
+# Boot arguments it reads:
+#   sfsession_seconds=<11..14400>  the session's length (the compositor's own bound is four
+#                                  hours, which is also the default: an open wart)
+#   sfbench=<name>                 a bench boot of that name: when /private/var/db/sf-bench holds
+#                                  the bench's own pieces (prelude.in, end.in, pdnvme-test, the range
+#                                  list; put there by a boot with a RAM root, tools/dr_desk_boot.sh
+#                                  DR_INSTALL=1), the prelude's facts are printed before the desktop
+#                                  and the end script runs instead of the plain restart (it prints
+#                                  the storage facts and then runs `reboot` itself). Without the
+#                                  argument, or without those files, nothing of the bench runs.
+#   sfbench_auto=<phases>          with sfbench: the compositor's autopilot phases (e.g. settle)
+nonce=${1:-none}
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+arg() { sysctl -n kern.bootargs 2>/dev/null | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+seconds=$(arg sfsession_seconds)
+case "$seconds" in ''|*[!0-9]*|0*) seconds=14400;; esac
+[ "$seconds" -ge 11 ] && [ "$seconds" -le 14400 ] || seconds=14400
+bench=$(arg sfbench); B=/private/var/db/sf-bench
+case "$bench" in ''|*[!a-z0-9]*) bench=;; esac
+[ -n "$bench" ] && [ -r "$B/prelude.in" ] && [ -r "$B/end.in" ] || bench=
+auto=$(arg sfbench_auto); case "$auto" in *[!a-z,]*) auto=;; esac
+lba=$(arg pdnvme_part_lba); blocks=$(arg pdnvme_part_blocks)
+case "$lba$blocks" in ''|*[!0-9]*) lba=0; blocks=0;; esac
+fill() {
+    sed -e "s/@NAME@/$bench/g" -e "s/@PART_LBA@/$lba/g" -e "s/@PART_BLOCKS@/$blocks/g" -e 's/@INSTALL@/0/g' \
+        -e "s/@AUTO_ONLY@/$auto/g" -e 's/@AUTO_KEEP@/0/g' -e 's/@AUTO_END@//g' -e 's/@HALT_COMMAND@/reboot/g' "$1"
+}
+printf '\nSF_SESSION begin seconds=%s bench=%s started_by=%s\n' "$seconds" "${bench:-no}" "$nonce"
+if [ -n "$bench" ]; then
+    # the bench's facts about this boot, in this shell (it also sets the autopilot's variables)
+    fill "$B/prelude.in" > /private/tmp/sf-bench-prelude.sh && . /private/tmp/sf-bench-prelude.sh
+fi
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin; export PATH
+session=000000000000000000000000000000000000000000000001
+runtime=/private/var/run/gpu-desktop
+mkdir -p "$runtime" && chmod 0700 "$runtime"
+# the menu's Theme and Display choices are kept here, on the disk
+state=/private/var/db/desktop-state
+mkdir -p "$state"
+export XDG_STATE_HOME="$state"
+export XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY=wayland-0
+export XKB_CONFIG_ROOT=/usr/share/X11/xkb TMPDIR=/private/tmp
+export CHONKSTEP_DARWIN_FRAME_STATS=3600
+[ -d /usr/share/backgrounds/siliconforest ] && export CHONKSTEP_BACKGROUND_DIR=/usr/share/backgrounds/siliconforest
+get() { sysctl -n "$1" 2>/dev/null; }
+# until_ok <tenths of a second> <command...>: poll every 0.1 s until the command succeeds
+until_ok() {
+    limit=$1; shift; tries=0
+    until "$@" >/dev/null 2>&1; do
+        tries=$((tries + 1)); [ "$tries" -le "$limit" ] || return 1; sleep 0.1
+    done
+}
+net_online() { grep -q 'state=online' /var/run/pd-netd.en0.status 2>/dev/null; }
+printf '\nGPUDESK_BEGIN_%s seconds=%s\n' "$nonce" "$seconds"
+until_ok 50 test -c /dev/dri/card0
+ls -l /dev/dri 2>&1 | head -6
+# The network is not this script's: it only says what pd-netd reached within a minute.
+(
+    until_ok 600 net_online; rc=$?
+    printf 'GPUDESK_NET_UP_RC=%s by=pd-netd %s\n' "$rc" "$(cat /var/run/pd-netd.en0.status 2>/dev/null | sed 's/ssid=[^ ]*/ssid=(not printed)/' | cut -c1-120)"
+    [ "$rc" -eq 0 ] && { ping -c 2 1.1.1.1 >/dev/null 2>&1; printf 'GPUDESK_PING_RC=%s\n' "$?"; }
+) &
+# Sound: the audio server. The speakers stay 20 dB under the protection model's limit (hold_probe=1).
+if [ -x /usr/sbin/coreaudiod ]; then
+    (
+        until_ok 100 test -c /dev/pdaudio
+        sysctl -w kern.pd_speaker.hold_probe=1 kern.pd_sound.volume_db=30 > /dev/null 2>&1
+        mkdir -p /var/log /var/run /Library/Preferences
+        /usr/sbin/coreaudiod > /var/log/coreaudiod.log 2>&1 &
+        printf 'GPUDESK_COREAUDIOD pid=%s hold_probe=%s sound=%s | speakers=%s\n' "$!" "$(get kern.pd_speaker.hold_probe)" "$(get kern.pd_sound.state)" "$(get kern.pd_speaker.state | cut -c1-60)"
+    ) &
+fi
+# the digitizer's firmware loads after the root mounts; at most 30 s
+n=0
+while [ "$n" -lt 300 ]; do
+    case "$(get kern.pd_touchbar.state)" in ready*|display-only*|display-failed*|off*|'') break;; esac
+    sleep 0.1; n=$((n+1))
+done
+printf 'GPUDESK_TOUCHBAR state=%s\n' "$(get kern.pd_touchbar.state)"
+[ -x /usr/bin/darwin-trackpad-enum ] && { /usr/bin/darwin-trackpad-enum --nonce "$session"; printf 'GPUDESK_ENUM rc=%s\n' "$?"; }
+count=0
+while [ ! -c /dev/usb_hid_kbd ] || [ ! -c /dev/usb_hid_mouse ]; do
+    count=$((count + 1)); [ "$count" -le 100 ] || break; sleep 0.1
+done
+printf 'GPUDESK_INPUT kbd=%s mouse=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes || echo no)" "$([ -c /dev/usb_hid_mouse ] && echo yes || echo no)"
+records=$runtime/session-$session
+mkdir -m 0700 "$records"
+rm -f "$runtime/desktop.rc" "$runtime/session-end-request"
+printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s\n' "$seconds" "$(date +%s)"
+# The desktop's own exit status, not that of the filter it is piped through.
+{
+    /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
+    echo "$?" > "$runtime/desktop.rc"
+} | grep -v 'chonkstep-gl: step:'
+printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
+[ -r "$records/session-result.txt" ] && grep -v ' gate=\| kernel_messages=\| cs_at_spawn=\| exit_reason=' "$records/session-result.txt" | cut -c1-260 | sed 's/^/GPUDESK_RESULT /' | head -60
+printf 'GPUDESK_SOUND_END speakers=%s trips=%s sessions=%s | touchbar=%s key_events=%s reports=%s spi_errors=%s dart_faults=%s\n' "$(get kern.pd_speaker.state | cut -c1-40)" "$(get kern.pd_speaker.trips)" "$(get kern.pd_speaker.sessions)" "$(get kern.pd_touchbar.state)" "$(get kern.pd_touchbar.key_events)" "$(get kern.pd_touchbar.reports)" "$(get kern.pd_touchbar.spi_errors)" "$(get kern.pd_touchbar.dart_faults)"
+printf 'GPUDESK_END_%s\n' "$nonce"
+# ---- the end of the session is the end of this boot
+request=$(cat "$runtime/session-end-request" 2>/dev/null)
+printf 'SF_SESSION end request=%s desktop_rc=%s\n' "${request:-none}" "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)"
+if [ -n "$bench" ]; then
+    fill "$B/end.in" > /private/tmp/sf-bench-end.sh && exec /bin/sh /private/tmp/sf-bench-end.sh "$nonce"
+    printf 'SF_SESSION the bench end script could not be run; restarting\n'
+fi
+case "$request" in
+    poweroff) /bin/shutdown -h now; printf 'SF_SESSION the power-off was refused (rc=%s); restarting instead\n' "$?";;
+esac
+exec /bin/reboot

@@ -112,7 +112,7 @@ def physical(address, virt_base, phys_base):
     return (int(address) - int(virt_base) + int(phys_base)) & 0xffffffffffffffff
 
 
-def readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs_text, layout):
+def readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs_text, layout, native=None):
     """Diagnostic (word stagestop): the stage placed everything and returned to its proxy
     instead of entering XNU. Read back what it placed and compare it with what the launcher
     would have placed itself. Prints STAGE_READBACK lines; saves the trees."""
@@ -212,8 +212,12 @@ def readback(backend, inputs, raw_bootargs, console, directory, write_private, b
         out[name] = [hex(a0), hex(n0), hex(a1), hex(n1)]
     out['memory_map'] = {name: [hex(v) for v in getattr(mm, name)] for name in
                          ('SEPFW', 'TrustCache', 'DeviceTree', 'BootArgs', 'RAMDisk') if hasattr(mm, name)}
-    if inputs.contents.get('ramdisk') is not None:
+    if inputs.contents.get('ramdisk') is not None and not getattr(native, 'no_ramdisk', False):
         differ('ramdisk', ramdisk, inputs.contents['ramdisk'])
+    elif getattr(native, 'no_ramdisk', False):
+        # no RAM root record: the tree must not name one
+        out['ramdisk_in_memory_map'] = hasattr(mm, 'RAMDisk')
+        print('STAGE_READBACK ' + json.dumps(dict(no_ramdisk=dict(memory_map_names_a_ramdisk=out['ramdisk_in_memory_map']))), flush=True)
     # the EL2 page as placed (parameters filled in)
     page = iface.readmem(el2, PAGE)
     out['el2_page_params'] = page[0x3f00:0x3f20].hex()
@@ -243,7 +247,11 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     seed = os.urandom(256) if native.host_seed else None
     xnu_base = None if native.low_mem else layout['phys_base']
     text = config(native, bootargs, index, seed, xnu_base)
-    image = pdsf_pack.image(m1n1, text, inputs.contents['kernel'], inputs.contents.get('ramdisk'))
+    # noramdisk (a root on the disk): the RAM root the launcher holds is not put into the image
+    ramdisk = None if getattr(native, 'no_ramdisk', False) else inputs.contents.get('ramdisk')
+    require(ramdisk is not None or ('rd=uuid' in bootargs.split() and 'rd=md0' not in bootargs.split()),
+            'An image without a RAM root needs rd=uuid on the command line')
+    image = pdsf_pack.image(m1n1, text, inputs.contents['kernel'], ramdisk)
     at = pdsf_pack.records_offset(image)
     found, _ = pdsf_pack.parse(image, at)
     require(at == len(m1n1) and all(item[4] for item in found), 'Stage image self-check')
@@ -319,18 +327,28 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
                 time.sleep(.2)
             require(b'PDSF: stop requested' in bytes(console.proof.output), 'The stage did not reach its stop')
             reconnect(backend, device)
-            readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs, layout)
+            readback(backend, inputs, raw_bootargs, console, directory, write_private, bootargs, layout, native)
             mark('native_capture_end', done=True, console_bytes=len(console.proof.output))
             return
         deadline = time.monotonic() + runtime
         # As native_boot.start(): a session started by launchd (multiuser) types no command,
         # so the console session does not look for the end marker itself.
         untyped, done = 'multiuser' in native.words, False
+        # A guest that restarts the machine itself (reboot/launcher-self-reboot.diff puts
+        # self_reboot_mode.txt next to this file): in a typed session the console session sees
+        # its PD_BENCH_REBOOT line and ends the capture; in an untyped one this loop does, the
+        # same ten seconds after the line (the stop of the storage controller and the restart
+        # follow it on the console).
+        self_reboot, reboot_at = (HERE / 'self_reboot_mode.txt').exists(), None
         while time.monotonic() < deadline and not done and console.thread.is_alive():
             time.sleep(.2)
-            done = console.done_seen or (untyped and re.search(
-                rb'(?:^|\n)PD_BENCH_DONE\n', bytes(console.proof.output[-4096:]).replace(b'\r', b'')) is not None)
-        if done:
+            tail = bytes(console.proof.output[-4096:]).replace(b'\r', b'')
+            done = console.done_seen or (untyped and re.search(rb'(?:^|\n)PD_BENCH_DONE\n', tail) is not None)
+            if untyped and self_reboot and reboot_at is None and re.search(rb'(?:^|\n)PD_BENCH_REBOOT\n', tail) is not None:
+                reboot_at = time.monotonic()
+                mark('guest_reboot_announced')
+            done = done or (reboot_at is not None and time.monotonic() - reboot_at >= 10)
+        if done and reboot_at is None:
             time.sleep(1.0)
         mark('native_capture_end', done=done, console_bytes=len(console.proof.output))
     finally:

@@ -18,7 +18,8 @@ FS=$W/$N-fs.img; DISK=$W/$N-disk.img; GUID=5F1D0A7E-0000-4000-8000-0000000000A1
 mkdir -p "$W"; cp --reflink=auto "$SRC" "$FS"; chmod u+w "$FS"
 inject() {  # <image> <phase>
   { echo "mkdir /usr/share/sf-system"
-    for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk; do echo "rm /usr/share/sf-system/$f"; echo "write $S/$f /usr/share/sf-system/$f"; done
+    echo "rm /usr/share/sf-system/org.siliconforest.desktop.plist"; echo "write $M/../m1-native-boot/guest/org.siliconforest.desktop.plist /usr/share/sf-system/org.siliconforest.desktop.plist"
+    for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk sf-session; do echo "rm /usr/share/sf-system/$f"; echo "write $S/$f /usr/share/sf-system/$f"; done
     echo "rm /usr/share/sf-system/sf-halt"; echo "write $TOOLS/sbin/sf-halt /usr/share/sf-system/sf-halt"
     echo "rm /usr/share/sf-system/sf-clock"; echo "write $TOOLS/usr/sbin/sf-clock /usr/share/sf-system/sf-clock"
     echo "rm /usr/bin/dr-guest"; echo "write $M/guest/qemu-halt.sh /usr/bin/dr-guest"

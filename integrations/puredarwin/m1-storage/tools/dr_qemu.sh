@@ -10,6 +10,7 @@
 #   DR_QEMU_BOOTARGS   further kernel boot arguments (e.g. "rd=uuid boot-uuid=<fs UUID> launchdsuffix=sfro")
 #   DR_QEMU_SINGLE=1     the boot is single-user (give -s in DR_QEMU_BOOTARGS)
 #   DR_QEMU_KERNEL=debug the kernel that honours launchdsuffix (the release one does not)
+#   DR_QEMU_UP         the line that ends the run (default QDDESK_END)
 #   DR_QEMU_DISK2      a third, writable virtio disk (512-byte sectors): the stand-in for the memory disk
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd); cd "$ROOT"
@@ -31,7 +32,7 @@ RO=""; [ "$MODE" = ro ] && RO=",readonly=on"
 # qd_run.py does not wait for: the same tool with that one pattern replaced, nothing of it edited
 RUN=(python3 -B $Q/qd_run.py)
 [ -z "${DR_QEMU_SINGLE:-}" ] || RUN=(python3 -B -c 'import re, sys; sys.path.insert(0, sys.argv.pop(1)); import qd_run; qd_run.PROMPT = re.compile(rb"# ?(\x1b\[[0-9;?]*[a-zA-Z]|\x00)*\s*$"); sys.exit(qd_run.main())' "$Q")
-"${RUN[@]}" --image "$SYS" --out "$OUT" --command 'sh /usr/bin/dr-guest' --up QDDESK_END --shot-every 0 --timeout "$TIMEOUT" \
+"${RUN[@]}" --image "$SYS" --out "$OUT" --command 'sh /usr/bin/dr-guest' --up "${DR_QEMU_UP:-QDDESK_END}" --shot-every 0 --timeout "$TIMEOUT" \
   --qemu-arg=-drive --qemu-arg="if=none,id=data,file=$DATA,format=raw$RO" \
   --qemu-arg=-device --qemu-arg=virtio-blk-pci,drive=data,logical_block_size=4096,physical_block_size=4096 "${EXTRA[@]}" > "$OUT/run.log" 2>&1 || true
 tail -2 "$OUT/run.log"

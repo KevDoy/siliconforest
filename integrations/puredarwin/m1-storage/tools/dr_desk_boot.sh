@@ -30,6 +30,24 @@
 #               another) in its RAM root and its script installs them on the disk root (through the fenced driver)
 #   DR_AUTO_ONLY=<phases>  the compositor's autopilot runs these phases (e.g. settle,settings); DR_AUTO_KEEP=1:
 #               its settings phase picks another theme and display scale from the menu and leaves them
+#               With DR_INSTALL=1 the boot also carries the session of a boot without a RAM root (../system/sf-session,
+#               the launchd job ../../m1-native-boot/guest/org.siliconforest.desktop.plist) and the bench's own
+#               pieces for such a boot (this boot's prelude and end script as templates, pdnvme-test, the range
+#               list), which sf-install.sh puts on the disk root.
+#   DR_STAGE=1  (with DR_RW=1 and DR_HALT, native) step 4: the launcher uploads ONE image, the SiliconForest stage
+#               (../../m1-native-boot/b1: stage m1n1 + configuration + this collection + the RAM root), vectors m1n1
+#               into it and only listens; the stage boots the kernel by itself. The stage image (b1/out, b1/build.sh)
+#               must have been built for this root: B1_ROOT_UUID=<filesystem UUID of the partition>.
+#   DR_STAGE=disk  the same WITHOUT the RAM root record: nothing but the stage and the kernel is uploaded, and
+#               nothing of the boot comes from the controller afterwards. Multi-user; the session is the disk's own
+#               (launchd's job org.siliconforest.desktop -> /usr/bin/darwin-desktop-test -> /usr/libexec/sf-session),
+#               which must have been installed by an earlier boot with DR_INSTALL=1. The boot arguments name the
+#               boot to the disk's session (sfbench=<name> sfsession_seconds=<DR_SECONDS>, sfbench_auto=<DR_AUTO_ONLY>):
+#               it prints the bench's facts and ends by the system's own `reboot`. DR_HALT must be reboot.
+#   DR_STAGE_STOP=1  (with DR_STAGE) read-back boot: the stage places everything, does NOT enter the kernel and
+#               returns to its proxy; the launcher compares what it placed (b1/native_stage.py readback). The
+#               first boot after any change to the stage or to what it is given. Ends with one controller reset.
+#   DR_STAGE_WORDS  further stage words (e.g. hostseed)
 # Run inside a slot (Linux before and after): tools/dr_desk_slot.sh.
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
@@ -47,7 +65,21 @@ case "$MODE" in hv) WORDS=;; native) WORDS="native vdm-return vdm-serial noiolog
 . private/disk-root/sf-part.env
 "$HERE/host-test/run-host-tests.sh" > /dev/null || { echo "host tests failed; not booting" >&2; exit 2; }
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
-RW=${DR_RW:-0}; HALT=${DR_HALT:-}
+RW=${DR_RW:-0}; HALT=${DR_HALT:-}; STAGE=${DR_STAGE:-}
+B1=$NB/b1; STAGE_IMAGE=${DR_STAGE_IMAGE:-$B1/out/m1n1-sf-stage.bin}
+if [ -n "$STAGE" ]; then
+  case "$STAGE" in 1|disk) ;; *) echo "DR_STAGE is 1 or disk" >&2; exit 2;; esac
+  [ "$RW" = 1 ] && [ "$MODE" = native ] && [ -n "$HALT" ] || { echo "DR_STAGE needs DR_RW=1, DR_HALT and a native boot" >&2; exit 2; }
+  [ "${DR_PROFILE:-desktop}" = desktop ] || { echo "DR_STAGE boots the desktop profile" >&2; exit 2; }
+  [ "$STAGE" != disk ] || { [ "$HALT" = reboot ] && [ "${DR_INSTALL:-0}" != 1 ]; } || { echo "DR_STAGE=disk: DR_HALT=reboot, and nothing can be installed without a RAM root" >&2; exit 2; }
+  [ -f "$STAGE_IMAGE" ] || { echo "no stage image at $STAGE_IMAGE: run B1_ROOT_UUID=<filesystem UUID> $B1/build.sh" >&2; exit 2; }
+  # the stage refuses every disk root but the one it was built for: do not spend a boot on finding that out
+  [ "$(grep -a -c -F "$SF_FSUUID" "$STAGE_IMAGE")" -ge 1 ] || { echo "the stage image was not built for this root (B1_ROOT_UUID)" >&2; exit 2; }
+  WORDS="$WORDS stage ${DR_STAGE_WORDS:-}"
+  [ "$STAGE" != disk ] || WORDS="$WORDS noramdisk multiuser"
+  [ "${DR_STAGE_STOP:-0}" != 1 ] || WORDS="$WORDS stagestop"
+elif [ "${DR_STAGE_STOP:-0}" = 1 ]; then echo "DR_STAGE_STOP needs DR_STAGE" >&2; exit 2
+fi
 if [ -n "$HALT" ]; then
   [ "$RW" = 1 ] && [ "$MODE" = native ] || { echo "DR_HALT needs DR_RW=1 and a native boot" >&2; exit 2; }
   case "$HALT" in reboot|"shutdown -r now"|menu) ;; *) echo "DR_HALT is reboot, \"shutdown -r now\" or menu (a power-off needs a person at the machine)" >&2; exit 2;; esac
@@ -70,6 +102,7 @@ fi
 [ "$RW" != 1 ] || cat "$HERE/launcher-m1-members.patch" >> "$QD/launcher.patch"
 FILES="$NB/native_boot.py=$B/native_boot.py;$NB/native_stub.py=$B/native_stub.py;$QD/native_mode.txt=$B/native_mode.txt"
 [ -z "$HALT" ] || FILES="$FILES;$QD/self_reboot_mode.txt=$B/self_reboot_mode.txt"
+[ -z "$STAGE" ] || FILES="$FILES;$B1/native_stage.py=$B/native_stage.py;$B1/pdsf_pack.py=$B/pdsf_pack.py;$STAGE_IMAGE=$B/m1n1-sf-stage.bin"
 TTL=${DR_TTL:-$((LIMIT - 40))}
 DISK="rd=uuid boot-uuid=$SF_FSUUID launchdsuffix=sfro wdt=-1 pdnvme=3 pdnvme_ttl=$TTL pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0"
 [ -f "${DR_RANGES:-}" ] || { echo "DR_RANGES=<range file> is needed" >&2; exit 2; }
@@ -89,7 +122,13 @@ if [ -n "$HALT" ] && [ "${DR_INSTALL:-0}" = 1 ]; then
   SYS=$(env -u SF_PD $NP m1-storage build-system-tools.nix); [ -x "$SYS/sbin/sf-halt" ] || { echo "no system tools" >&2; exit 2; }
   COMP=${DR_COMPOSITOR:-$(env -u SF_PD tools/staged.sh compositor)}; [ -x "$COMP" ] || { echo "no compositor at $COMP" >&2; exit 2; }
   X="$X;$SYS/sbin/sf-halt=/usr/share/sf-system/sf-halt;$SYS/usr/sbin/sf-clock=/usr/share/sf-system/sf-clock;$COMP=/usr/bin/chonkstep-darwin-desktop"
-  for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk; do X="$X;$HERE/system/$f=/usr/share/sf-system/$f"; done
+  for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk sf-session; do X="$X;$HERE/system/$f=/usr/share/sf-system/$f"; done
+  X="$X;$NB/guest/org.siliconforest.desktop.plist=/usr/share/sf-system/org.siliconforest.desktop.plist"
+  # the bench's own pieces for a boot without a RAM root: this boot's prelude and end script as templates
+  # (system/sf-session fills them in at boot), reading from the disk what they read from the memory disk here
+  "$HERE/tools/dr_bench_templates.sh" "$QD"
+  X="$X;$QD/bench-prelude.in=/usr/share/sf-system/bench/prelude.in;$QD/bench-end.in=/usr/share/sf-system/bench/end.in"
+  X="$X;$TEST/usr/bin/pdnvme-test=/usr/share/sf-system/bench/pdnvme-test;$DR_RANGES=/usr/share/sf-system/bench/pdnvme-ranges"
 fi
 if [ "${DR_PROFILE:-desktop}" = desktop ]; then
   BG=$ROOT/integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
@@ -110,6 +149,10 @@ else
   ARGS="cpus=8 $DISK ${DR_BOOTARGS:-}"
 fi
 case "$MODE" in native) ARGS="$ARGS pdcpuheld=1";; esac
+if [ "$STAGE" = disk ]; then
+  case "$N${DR_AUTO_ONLY:-}" in *[!a-z0-9,]*) echo "DR_STAGE=disk: the name and DR_AUTO_ONLY travel as boot arguments (a-z, 0-9, comma)" >&2; exit 2;; esac
+  ARGS="$ARGS sfbench=$N sfsession_seconds=${DR_SECONDS:-30}${DR_AUTO_ONLY:+ sfbench_auto=$DR_AUTO_ONLY}"
+fi
 R=runs/m1-desktop-010/pcie-enum-attempt-$N
 env PCIE_LAB_PATCH="$QD/launcher.patch" PCIE_LAB_FILES="$FILES" \
   PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" \
@@ -118,4 +161,6 @@ env PCIE_LAB_PATCH="$QD/launcher.patch" PCIE_LAB_FILES="$FILES" \
   tools/pcie_iterate.sh "$N" "$LIMIT" 2>&1 | grep -a '"status"\|rror\|delivered\|No space\|BENCH_TIMES' | cut -c1-240 || true
 [ -f "$R/times.txt" ] || { echo "no boot was recorded in $R" >&2; exit 1; }
 printf 'mode=%s\nprofile=%s\nkc=%s\nlimit=%s\nrw=%s\nhalt=%s\ninstall=%s\nauto=%s keep=%s\n' "$MODE" "${DR_PROFILE:-desktop}" "$KC" "$LIMIT" "$RW" "$HALT" "${DR_INSTALL:-0}" "${DR_AUTO_ONLY:-}" "${DR_AUTO_KEEP:-0}" > "$R/dr-config.txt"
+[ -z "$STAGE" ] || printf 'stage=%s stop=%s words=%s image_sha256=%s\n' "$STAGE" "${DR_STAGE_STOP:-0}" "$WORDS" "$(sha256sum "$STAGE_IMAGE" | cut -d' ' -f1)" >> "$R/dr-config.txt"
+[ -z "$STAGE" ] || { grep -a 'NATIVE_STAGE_START\|STAGE_READBACK' "$R/guest/worker.log" | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-700 || true; }
 grep -o '"status": *"[^"]*"' "$R/result.json" 2>/dev/null || echo "no result.json"

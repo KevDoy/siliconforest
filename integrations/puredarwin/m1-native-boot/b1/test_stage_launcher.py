@@ -162,6 +162,63 @@ class StageLauncher(unittest.TestCase):
         self.assertNotIn('seed-hex', ''.join(record['config']))        # never in the record or the log
         self.assertNotIn('write32', [entry[0] for entry in fakes.log])  # the stage arms the watchdog, not the launcher
 
+    def test_no_ramdisk_image_for_a_disk_root(self):
+        """noramdisk: stage, configuration and kernel only; the RAM root the launcher holds is not uploaded."""
+        fakes = Fakes()
+        disk = '-v -s serial=3 rd=uuid boot-uuid=0F0E0D0C-0000-4000-8000-00000000000A cpus=8 pdcpuheld=1 '
+        names = fakes.run('native stage vdm-return noiolog noramdisk multiuser', bootargs=disk)
+        record = fakes.saved['native-start.json']
+        image = self.uploaded(fakes, record['image_bytes'])
+        found, end = pdsf_pack.parse(image, len(self.m1n1))
+        self.assertEqual([k for k, *_ in found], [1, 2])                # config, kernel: no RAM root record
+        self.assertEqual([r['type'] for r in record['records']], ['config', 'kernel'])
+        self.assertLess(record['image_bytes'], len(self.m1n1) + len(fakes.inputs.contents['kernel']) + 4096)
+        config = image[found[0][5]:found[0][5] + found[0][2]].decode().splitlines()[0]
+        self.assertIn(' rd=uuid boot-uuid=0F0E0D0C-0000-4000-8000-00000000000A ', config)
+        self.assertNotIn('rd=md0', config)
+        self.assertNotIn(' -s ', config)                                # multi-user
+        self.assertEqual(names.count('request'), 1)
+        # the same word with a RAM root on the command line is refused before anything is uploaded
+        fakes = Fakes()
+        with self.assertRaises(ValueError):
+            fakes.run('native stage vdm-return noramdisk')
+        self.assertNotIn('writemem', [entry[0] for entry in fakes.log])
+        with self.assertRaises(ValueError):
+            native_boot.Mode('native vdm-return noramdisk')              # needs stage
+
+    def test_untyped_session_that_restarts_the_machine_itself(self):
+        """multiuser + self_reboot_mode.txt: the capture ends ten seconds after the guest's PD_BENCH_REBOOT line."""
+        fakes = Fakes()
+        (Path(self.tmp.name) / 'self_reboot_mode.txt').write_text('test\n')
+        out = bytearray(b'boot\n')
+        alive = threading.Event()
+        thread = threading.Thread(target=alive.wait, daemon=True)
+        thread.start()
+        fakes.console = lambda port: SimpleNamespace(
+            done_seen=False, proof=SimpleNamespace(output=out), dev=SimpleNamespace(write=len, flush=lambda: None),
+            thread=thread, close=lambda: fakes.log.append(('console_close',)))
+        clock = [1000.0]
+        real_monotonic, real_sleep = native_stage.time.monotonic, native_stage.time.sleep
+
+        def sleep(seconds):
+            clock[0] += seconds
+            if clock[0] > 1003 and b'PD_BENCH_REBOOT' not in out:
+                out.extend(b'SF_HALT ...\nPD_BENCH_REBOOT\nSF_HALT restarting now\n')
+                sleep.announced = clock[0]
+        native_stage.time.monotonic, native_stage.time.sleep = (lambda: clock[0]), sleep
+        native = native_boot.Mode('native stage vdm-return noiolog noramdisk multiuser')
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                native_stage.start(native, fakes.backend, fakes.inputs, native_boot.bootargs(
+                    native, '-v -s serial=3 rd=uuid boot-uuid=X cpus=8 pdcpuheld=1 '), fakes.raw_bootargs, fakes.layout,
+                    Path(directory), 100, fakes.console, lambda d, name, value: fakes.saved.__setitem__(name, value))
+        finally:
+            native_stage.time.monotonic, native_stage.time.sleep = real_monotonic, real_sleep
+            alive.set()
+        waited = clock[0] - sleep.announced
+        self.assertTrue(10 <= waited < 11, waited)                      # not the runtime bound of 100 s
+        self.assertTrue(fakes.saved['capture-core.json']['console_capture_finalized'])
+
     def test_refusals(self):
         with self.assertRaises(ValueError):                             # SMP without the kernel's release path
             Fakes().run('native stage vdm-return', bootargs='-v cpus=8 ')
