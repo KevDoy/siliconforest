@@ -12,16 +12,21 @@
 #   with a packed isa reads the magic bits as part of the class pointer and faults (found
 #   with Terminal.app's first Swift call, docs/roadmap/issues/SF-Y-terminal-app.md).
 #
+# and one addition to the Foundation overlay (libswiftFoundation): ./swift/SFBridging.swift,
+# Dictionary <-> NSDictionary and Int, Bool <-> NSNumber bridging.
+#
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-swift-runtime.nix
 let
   pd = (import ../rebase/pd.nix).pd;
 in pd.packages.x86_64-linux."swift-runtime-arm64".overrideAttrs (old: {
   pname = "siliconforest-swift-runtime";
   buildPhase = builtins.replaceStrings
-    [ "cmake -P $S/Runtimes/Resync.cmake > /dev/null" ]
+    [ "cmake -P $S/Runtimes/Resync.cmake > /dev/null"
+      "$FO/NSFastEnumeration.swift $FO/PDSwiftStringBridge.m" ]
     [ ''
       grep -q '#      define SWIFT_ISA_MASK 0x00007ffffffffff8ULL' $S/stdlib/public/runtime/Private.h
       sed -i 's|#      define SWIFT_ISA_MASK 0x00007ffffffffff8ULL|#      define SWIFT_ISA_MASK 0x0000000ffffffff8ULL /* SiliconForest: libobjc is a plain arm64 build */|' $S/stdlib/public/runtime/Private.h
-      cmake -P $S/Runtimes/Resync.cmake > /dev/null'' ]
+      cmake -P $S/Runtimes/Resync.cmake > /dev/null''
+      "$FO/NSFastEnumeration.swift ${./swift/SFBridging.swift} $FO/PDSwiftStringBridge.m" ]
     old.buildPhase;
 })

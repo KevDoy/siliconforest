@@ -1,0 +1,131 @@
+--- a/src/Frameworks/AppKit/nib.subproj/NSNibLoading.m
++++ b/src/Frameworks/AppKit/nib.subproj/NSNibLoading.m
+@@ -56,7 +56,7 @@
+ 		NSString *name = [[fileName copy] autorelease];
+ 		name = [name stringByDeletingPathExtension];
+ 		NSBundle     *bundle=self;
+-		NSString     *platformName=[name stringByAppendingFormat:@"-%@",NSPlatformResourceNameSuffix];
++		NSString     *platformName=[NSString stringWithFormat:@"%@-%@",name,NSPlatformResourceNameSuffix];
+ 		
+ 		path=[bundle pathForResource:platformName ofType:@"nib"];
+ 		if(path==nil)
+--- a/src/Frameworks/AppKit/nib.subproj/NSNib.m
++++ b/src/Frameworks/AppKit/nib.subproj/NSNib.m
+@@ -93,7 +93,10 @@
+ -(void)unarchiver:(NSKeyedUnarchiver *)unarchiver willReplaceObject:object withObject:replacement {
+    if(object!=nil && replacement!=nil){
+     NSUInteger index=[_allObjects indexOfObjectIdenticalTo:object];
+-    [_allObjects replaceObjectAtIndex:index withObject:replacement];
++    if(index!=NSNotFound)
++     [_allObjects replaceObjectAtIndex:index withObject:replacement];
++    else
++     [_allObjects addObject:replacement];
+    }
+ }
+ 
+--- a/src/Frameworks/AppKit/NSApplication.m
++++ b/src/Frameworks/AppKit/NSApplication.m
+@@ -1518,12 +1518,19 @@
+    do {
+     // There is another pool inside nextEventMatchingMask. Do we really need this one?
+     pool = [NSAutoreleasePool new];
+-    NSEvent           *event;
++    NSEvent           *event=nil;
+ 
+-    event=[self nextEventMatchingMask:NSAnyEventMask untilDate:[NSDate distantFuture] inMode:NSDefaultRunLoopMode dequeue:YES];
++    // Timers, delayed performs and notifications run inside this call: an exception from one of
++    // them is reported like one from an event, and the application goes on (as on macOS).
++    NS_DURING
++     event=[self nextEventMatchingMask:NSAnyEventMask untilDate:[NSDate distantFuture] inMode:NSDefaultRunLoopMode dequeue:YES];
++    NS_HANDLER
++     [self reportException:localException];
++    NS_ENDHANDLER
+ 
+     NS_DURING
+-     [self sendEvent:event];
++     if(event!=nil)
++      [self sendEvent:event];
+ 
+     NS_HANDLER
+      [self reportException:localException];
+--- a/src/Frameworks/AppKit/NSFontPanel.m
++++ b/src/Frameworks/AppKit/NSFontPanel.m
+@@ -177,7 +177,7 @@
+    NSFont *font=[self selectedFont];
+    float     pointSize=[self selectedPointSize];
+ 
+-   [_sampleTextField setStringValue:[[font displayName] stringByAppendingFormat:@" %g pt",pointSize]];
++   [_sampleTextField setStringValue:[NSString stringWithFormat:@"%@ %g pt",[font displayName],pointSize]];
+    [_sampleTextField setFont:font];
+ }
+ 
+--- a/src/Frameworks/AppKit/NSPathControl.m
++++ b/src/Frameworks/AppKit/NSPathControl.m
+@@ -1,6 +1,7 @@
+ #import <AppKit/NSPathControl.h>
+ 
+ #import "AppKit/NSRaise.h"
++#import <objc/runtime.h>
+ 
+ @implementation NSPathControl
+ 
+@@ -76,13 +77,12 @@
+ 
+ - (id < NSPathControlDelegate >)delegate;
+ {
+-	NSUnimplementedMethod();
+-	return nil;
++	return objc_getAssociatedObject(self, @selector(delegate));
+ }
+ 
+ - (void)setDelegate:(id < NSPathControlDelegate >)delegate;
+ {
+-	NSUnimplementedMethod();
++	objc_setAssociatedObject(self, @selector(delegate), delegate, OBJC_ASSOCIATION_ASSIGN);
+ }
+ 
+ - (void)setDraggingSourceOperationMask:(NSDragOperation)mask forLocal:(BOOL)isLocal;
+--- a/src/Frameworks/AppKit/NSViewController.m
++++ b/src/Frameworks/AppKit/NSViewController.m
+@@ -94,8 +94,8 @@
+    NSBundle *bundle=[self nibBundle];
+ 
+    if(name==nil){
+-   // should pathForResource assert name for non-nil?
+-    [NSException raise:NSInvalidArgumentException format:@"-[%@ %s] nibName is nil",[self class],_cmd];
++    // a controller without a nib has a plain view (macOS 10.10 and later)
++    [self setView:[[[NSView alloc] initWithFrame:NSZeroRect] autorelease]];
+     return;
+    }
+ 
+--- a/src/Frameworks/AppKit/NSWindow.m
++++ b/src/Frameworks/AppKit/NSWindow.m
+@@ -257,7 +257,15 @@
+ }
+ 
+ +(void)removeFrameUsingName:(NSString *)name {
+-   NSUnimplementedMethod();
++   if(name!=nil)
++   {
++    // the frames are saved per screen arrangement ("NSWindow frame <name> <screen frame>")
++    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
++    NSString *prefix=[NSString stringWithFormat:@"NSWindow frame %@ ",name];
++    for(NSString *key in [[defaults dictionaryRepresentation] allKeys])
++     if([key hasPrefix:prefix])
++      [defaults removeObjectForKey:key];
++   }
+ }
+ 
+ +(NSButton *)standardWindowButton:(NSWindowButton)button forStyleMask:(unsigned)styleMask {
+@@ -3871,7 +3879,10 @@
+         _number, _frame.origin.x, _frame.origin.y,
+         _frame.size.width, _frame.size.height, _styleMask, 0, {'\0'}, _level
+     };
+-    strncpy(data.title, [_title UTF8String], sizeof(data.title));
++    // a window may have no title (nil), and a title may have no UTF-8 form
++    const char *titleUTF8 = [_title UTF8String];
++    strncpy(data.title, titleUTF8 != NULL ? titleUTF8 : "", sizeof(data.title) - 1);
++    data.title[sizeof(data.title) - 1] = 0;
+     if(_isMiniaturized == YES)
+         data.state = MINIMIZED;
+     else if(_styleMask & NSFullScreenWindowMask)

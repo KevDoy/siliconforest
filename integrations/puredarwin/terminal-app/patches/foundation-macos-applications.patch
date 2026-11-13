@@ -1,0 +1,1207 @@
+diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:36:45.977257047 -0800
+@@ -6,6 +6,7 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSSet.h>
+ #import <Foundation/NSCoder.h>
+ #import <Foundation/NSException.h>
+ #import <Foundation/NSString.h>
+@@ -132,3 +133,22 @@
+ }
+ 
+ @end
++
++// ---- secure coding spellings: the class is checked after decoding
++@implementation NSCoder (NSSecureCodingSpellings)
++- (id)decodeObjectOfClass:(Class)cls forKey:(NSString *)key {
++    id object = [self decodeObjectForKey:key];
++    return (object == nil || cls == Nil || [object isKindOfClass:cls]) ? object : nil;
++}
++- (id)decodeObjectOfClasses:(NSSet *)classes forKey:(NSString *)key {
++    id object = [self decodeObjectForKey:key];
++    if (object == nil || classes == nil)
++        return object;
++    for (Class cls in classes) {
++        if ([object isKindOfClass:cls])
++            return object;
++    }
++    return nil;
++}
++- (BOOL)requiresSecureCoding { return NO; }
++@end
+diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:21:40.944630498 -0800
+@@ -13,7 +13,8 @@
+ 
+ @class NSData, NSMutableArray, NSError;
+ 
+-/* Decoding half of the property-list-backed keyed archive format. */
++/* Decoding half of the property-list-backed keyed archive format, and a reader of archives
++ * made by Apple's NSKeyedArchiver (compiled nibs, archived fonts and colours in preferences). */
+ @class NSMutableDictionary;
+ 
+ @interface NSKeyedUnarchiver : NSCoder
+@@ -24,6 +25,10 @@
+     id _root;
+     NSMutableDictionary *_classes;
+     id _delegate;
++    /* an archive in Apple's NSKeyedArchiver form ($archiver, $top, $objects with UID references) */
++    NSArray *_objects;
++    void *_uidToObject;              /* CFMutableDictionary: UID -> object, neither retained */
++    NSMutableArray *_decoded;        /* the decoded objects, kept alive for the unarchiver's life */
+ }
+ 
+ + (id)unarchiveObjectWithData:(NSData *)data;
+@@ -40,6 +45,7 @@
+ - (id)initForReadingWithData:(NSData *)data;
+ - (id)initForReadingFromData:(NSData *)data error:(NSError **)error;
+ 
++- (void)replaceObject:(id)object withObject:(id)replacement;
+ - (void)finishDecoding;
+ 
+ - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length;
+diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:36:45.977407737 -0800
+@@ -6,6 +6,8 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSError.h>
++#import <Foundation/FoundationErrors.h>
+ #import <Foundation/NSKeyedUnarchiver.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSData.h>
+@@ -67,6 +69,208 @@
+ // substitutions shared by every unarchiver, an instance's own map is consulted first
+ static NSMutableDictionary *globalClasses;
+ 
++// ---- Apple's keyed archive: {$archiver, $version, $top: {key: UID}, $objects: [...]}.
++// An object is a dictionary whose $class refers to {$classname, $classes}; a reference is a
++// UID, which the property list reader hands over as {CF$UID: n}. Objects 0 is "$null".
++#import <Foundation/NSDate.h>
++#import <Foundation/NSException.h>
++#import <Foundation/NSGeometry.h>
++#import <Foundation/NSNull.h>
++#import <Foundation/NSRange.h>
++#import <Foundation/NSSet.h>
++#import <Foundation/NSURL.h>
++#import <Foundation/NSValue.h>
++
++@interface NSObject (NSKeyedUnarchiverAwake)
++- (id)awakeAfterUsingCoder:(NSCoder *)coder;
++- (void)unarchiver:(NSKeyedUnarchiver *)unarchiver willReplaceObject:(id)object withObject:(id)replacement;
++- (id)unarchiver:(NSKeyedUnarchiver *)unarchiver didDecodeObject:(id)object;
++@end
++
++// CoreFoundation's binary property list reader makes a UID an object of its own type
++#include <CoreFoundation/CoreFoundation.h>
++extern CFTypeID _CFKeyedArchiverUIDGetTypeID(void);
++extern uint32_t _CFKeyedArchiverUIDGetValue(CFTypeRef uid);
++
++static NSInteger appleUID(id value) {
++    if(value == nil)
++        return -1;
++    if(CFGetTypeID((CFTypeRef)value) == _CFKeyedArchiverUIDGetTypeID())
++        return (NSInteger)_CFKeyedArchiverUIDGetValue((CFTypeRef)value);
++    if([value isKindOfClass:[NSDictionary class]] && [value count] == 1) {
++        id n = [value objectForKey:@"CF$UID"];
++        if(n != nil)
++            return [n integerValue];
++    }
++    return -1;
++}
++
++static id appleDecodeUID(NSKeyedUnarchiver *u, NSInteger uid);
++
++static NSMutableArray *appleDecodeList(NSKeyedUnarchiver *u, id list) {
++    NSMutableArray *result = [NSMutableArray array];
++    if(![list isKindOfClass:[NSArray class]])
++        return result;
++    for(id item in list) {
++        NSInteger uid = appleUID(item);
++        id object = uid >= 0 ? appleDecodeUID(u, uid) : item;
++        // a collection cannot hold nil: an element that did not decode is NSNull, as in a nib it marks a hole
++        [result addObject:object != nil ? object : (id)[NSNull null]];
++    }
++    return result;
++}
++
++static BOOL appleNamed(NSArray *classes, NSString *name) {
++    return [classes containsObject:name];
++}
++
++// Foundation's value classes, built from the keys Apple's classes encode themselves with
++static BOOL appleDecodeValue(NSKeyedUnarchiver *u, NSDictionary *record, NSArray *classes, id *out) {
++    id result = nil;
++    if(appleNamed(classes, @"NSLocalizableString")) {
++        // a string of a nib with its key into the localisation table; the development string stands
++        NSInteger dev = appleUID([record objectForKey:@"NSDev"]);
++        result = dev >= 0 ? appleDecodeUID(u, dev) : [record objectForKey:@"NSDev"];
++        if(result == nil) { NSInteger key = appleUID([record objectForKey:@"NSKey"]); result = key >= 0 ? appleDecodeUID(u, key) : @""; }
++    } else if(appleNamed(classes, @"NSString") && ([record objectForKey:@"NS.string"] != nil || [record objectForKey:@"NS.bytes"] != nil)) {
++        id s = [record objectForKey:@"NS.string"];
++        if(s == nil)
++            s = [[[NSString alloc] initWithData:[record objectForKey:@"NS.bytes"] encoding:NSUTF8StringEncoding] autorelease];
++        result = appleNamed(classes, @"NSMutableString") ? (id)[NSMutableString stringWithString:s != nil ? s : @""] : s;
++    } else if(appleNamed(classes, @"NSDictionary") && [record objectForKey:@"NS.keys"] != nil) {
++        NSArray *keys = appleDecodeList(u, [record objectForKey:@"NS.keys"]);
++        NSArray *values = appleDecodeList(u, [record objectForKey:@"NS.objects"]);
++        NSMutableDictionary *d = [NSMutableDictionary dictionary];
++        for(NSUInteger i = 0; i < [keys count] && i < [values count]; i++)
++            [d setObject:[values objectAtIndex:i] forKey:[keys objectAtIndex:i]];
++        result = appleNamed(classes, @"NSMutableDictionary") ? (id)d : (id)[NSDictionary dictionaryWithDictionary:d];
++    } else if(appleNamed(classes, @"NSArray") && [record objectForKey:@"NS.objects"] != nil) {
++        NSMutableArray *a = appleDecodeList(u, [record objectForKey:@"NS.objects"]);
++        result = appleNamed(classes, @"NSMutableArray") ? (id)a : (id)[NSArray arrayWithArray:a];
++    } else if((appleNamed(classes, @"NSSet") || appleNamed(classes, @"NSOrderedSet")) && [record objectForKey:@"NS.objects"] != nil) {
++        NSMutableArray *a = appleDecodeList(u, [record objectForKey:@"NS.objects"]);
++        [a removeObject:[NSNull null]];
++        Class c = NSClassFromString([classes objectAtIndex:0]);
++        if(c == Nil || ![c respondsToSelector:@selector(setWithArray:)])
++            c = appleNamed(classes, @"NSMutableSet") ? [NSMutableSet class] : [NSSet class];
++        result = appleNamed(classes, @"NSOrderedSet") ? (id)a : (id)[c setWithArray:a];
++    } else if(appleNamed(classes, @"NSData") && [record objectForKey:@"NS.data"] != nil) {
++        id d = [record objectForKey:@"NS.data"];
++        result = appleNamed(classes, @"NSMutableData") ? (id)[NSMutableData dataWithData:d] : d;
++    } else if(appleNamed(classes, @"NSDate") && [record objectForKey:@"NS.time"] != nil) {
++        result = [NSDate dateWithTimeIntervalSinceReferenceDate:[[record objectForKey:@"NS.time"] doubleValue]];
++    } else if(appleNamed(classes, @"NSNull")) {
++        result = [NSNull null];
++    } else if(appleNamed(classes, @"NSURL") && [record objectForKey:@"NS.relative"] != nil) {
++        NSInteger rel = appleUID([record objectForKey:@"NS.relative"]), base = appleUID([record objectForKey:@"NS.base"]);
++        NSString *relative = rel >= 0 ? appleDecodeUID(u, rel) : nil;
++        NSURL *baseURL = base >= 0 ? appleDecodeUID(u, base) : nil;
++        result = relative != nil ? [NSURL URLWithString:relative relativeToURL:baseURL] : nil;
++    } else if(appleNamed(classes, @"NSValue") && [record objectForKey:@"NS.special"] != nil) {
++        NSInteger special = [[record objectForKey:@"NS.special"] integerValue];
++        id v;
++        #define APPLE_STR(key) ({ id raw = [record objectForKey:key]; NSInteger r = appleUID(raw); r >= 0 ? appleDecodeUID(u, r) : raw; })
++        switch(special) {
++        case 1: v = APPLE_STR(@"NS.pointval"); result = [NSValue valueWithPoint:NSPointFromString(v)]; break;
++        case 2: v = APPLE_STR(@"NS.sizeval"); result = [NSValue valueWithSize:NSSizeFromString(v)]; break;
++        case 3: v = APPLE_STR(@"NS.rectval"); result = [NSValue valueWithRect:NSRectFromString(v)]; break;
++        case 4: result = [NSValue valueWithRange:NSMakeRange([[record objectForKey:@"NS.rangeval.location"] unsignedIntegerValue],
++                                                             [[record objectForKey:@"NS.rangeval.length"] unsignedIntegerValue])]; break;
++        default: return NO;
++        }
++        #undef APPLE_STR
++    } else {
++        return NO;
++    }
++    *out = result;
++    return YES;
++}
++
++static id appleDecodeUID(NSKeyedUnarchiver *u, NSInteger uid) {
++    if(uid <= 0 || uid >= (NSInteger)[u->_objects count])
++        return nil;                                      // 0 is "$null"
++    // The table does not retain: a class's -initWithCoder: may free the object it was sent to and
++    // return another (Cocotron's classes do), and the entry made before it ran must not keep or
++    // release that object. What has finished decoding is kept alive by _decoded.
++    CFMutableDictionaryRef table = (CFMutableDictionaryRef)u->_uidToObject;
++    const void *slot = (const void *)(uintptr_t)uid;
++    id cached = (id)CFDictionaryGetValue(table, slot);
++    if(cached != nil)
++        return cached;
++    id record = [u->_objects objectAtIndex:uid];
++    if([record isKindOfClass:[NSString class]] && [record isEqualToString:@"$null"])
++        return nil;
++    NSInteger classUID = [record isKindOfClass:[NSDictionary class]] ? appleUID([record objectForKey:@"$class"]) : -1;
++    if(classUID < 0 || classUID >= (NSInteger)[u->_objects count]) {
++        CFDictionarySetValue(table, slot, record);      // a plain string, number or data (the archive keeps it)
++        return record;
++    }
++    NSDictionary *classRecord = [u->_objects objectAtIndex:classUID];
++    NSString *name = [classRecord objectForKey:@"$classname"];
++    NSArray *classes = [classRecord objectForKey:@"$classes"];
++    if(![classes isKindOfClass:[NSArray class]])
++        classes = name != nil ? [NSArray arrayWithObject:name] : [NSArray array];
++    Class cls = [u classForClassName:name];
++    if(cls == Nil)
++        cls = [NSKeyedUnarchiver classForClassName:name];
++    id result = nil;
++    if(cls == Nil && appleDecodeValue(u, record, classes, &result)) {
++        if(result != nil) {
++            [u->_decoded addObject:result];
++            CFDictionarySetValue(table, slot, result);
++        }
++        return result;
++    }
++    if(cls == Nil)
++        cls = NSClassFromString(name);
++    if(cls == Nil && [u->_delegate respondsToSelector:@selector(unarchiver:cannotDecodeObjectOfClassName:originalClasses:)])
++        cls = [u->_delegate unarchiver:u cannotDecodeObjectOfClassName:name originalClasses:classes];
++    if(cls == Nil)
++        [NSException raise:@"NSInvalidUnarchiveOperationException"
++                    format:@"*** -[NSKeyedUnarchiver decodeObjectForKey:]: cannot decode object of class (%@)", name];
++    // known before -initWithCoder: runs, so that an object decoded inside it that refers back finds it
++    id allocated = [cls alloc];
++    CFDictionarySetValue(table, slot, allocated);
++    [u->_containers addObject:record];
++    result = [allocated initWithCoder:u];
++    [u->_containers removeLastObject];
++    if(result != nil && [result respondsToSelector:@selector(awakeAfterUsingCoder:)]) {
++        id awake = [result awakeAfterUsingCoder:u];
++        result = awake;
++    }
++    if(result != nil && [u->_delegate respondsToSelector:@selector(unarchiver:didDecodeObject:)]) {
++        // the delegate sees every object that was made by a class (a nib collects them to wake them)
++        id answered = [u->_delegate unarchiver:u didDecodeObject:result];
++        if(answered != result) {
++            [answered retain];
++            [result release];
++            result = answered;
++        }
++    }
++    // -replaceObject:withObject: may have put another object in this place meanwhile
++    id now = (id)CFDictionaryGetValue(table, slot);
++    if(result != nil) {
++        [u->_decoded addObject:result];
++        [result release];
++        if(now == nil || now == allocated)
++            CFDictionarySetValue(table, slot, result);
++        else
++            result = now;
++    } else if(now == allocated) {
++        CFDictionaryRemoveValue(table, slot);
++    }
++    return result;
++}
++
++static id appleValue(NSKeyedUnarchiver *u, id value) {
++    NSInteger uid = appleUID(value);
++    if(uid >= 0)
++        return appleDecodeUID(u, uid);
++    if([value isKindOfClass:[NSArray class]] && [value count] > 0 && appleUID([value objectAtIndex:0]) >= 0)
++        return appleDecodeList(u, value);
++    return value;
++}
++
+ @implementation NSKeyedUnarchiver
+ 
+ + (void)setClass:(Class)cls forClassName:(NSString *)name {
+@@ -110,11 +314,30 @@
+ 
+ + (id)unarchiveObjectWithData:(NSData *)data {
+     NSKeyedUnarchiver *unarchiver = [[self alloc] initForReadingFromData:data error:NULL];
+-    id result = [unarchiveValue(unarchiver, unarchiver->_root) retain];
++    id result = [(unarchiver->_objects != nil ? [unarchiver decodeObjectForKey:@"root"] : unarchiveValue(unarchiver, unarchiver->_root)) retain];
+     [unarchiver release];
+     return [result autorelease];
+ }
+ 
+++ (id)unarchivedObjectOfClasses:(NSSet *)classes fromData:(NSData *)data error:(NSError **)error {
++    id result = nil;
++    @try {
++        result = [self unarchiveObjectWithData:data];
++    } @catch (NSException *exception) {
++        result = nil;
++    }
++    if (result != nil && classes != nil) {
++        BOOL allowed = NO;
++        for (Class cls in classes)
++            allowed = allowed || [result isKindOfClass:cls];
++        if (!allowed)
++            result = nil;
++    }
++    if (result == nil && error != NULL)
++        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864 /* NSCoderReadCorruptError */ userInfo:nil];
++    return result;
++}
++
+ + (id)unarchivedObjectOfClass:(Class)cls fromData:(NSData *)data error:(NSError **)error {
+     id result = [self unarchiveObjectWithData:data];
+     return [result isKindOfClass:cls] ? result : nil;
+@@ -135,12 +358,23 @@
+             [self release];
+             return nil;
+         }
++        if([_root isKindOfClass:[NSDictionary class]] && [_root objectForKey:@"$archiver"] != nil &&
++           [[_root objectForKey:@"$objects"] isKindOfClass:[NSArray class]] && [[_root objectForKey:@"$top"] isKindOfClass:[NSDictionary class]]) {
++            _objects = [[_root objectForKey:@"$objects"] retain];
++            _uidToObject = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
++            _decoded = [NSMutableArray new];
++            [_containers addObject:[_root objectForKey:@"$top"]];
++        }
+     }
+     return self;
+ }
+ 
+ - (void)dealloc {
+     [_classes release];
++    [_objects release];
++    if(_uidToObject != NULL)
++        CFRelease((CFTypeRef)_uidToObject);
++    [_decoded release];
+     [_data release];
+     [_containers release];
+     [_root release];
+@@ -156,6 +390,8 @@
+ }
+ 
+ - (id)decodeObjectForKey:(NSString *)key {
++    if(_objects != nil)
++        return appleValue(self, [[_containers lastObject] objectForKey:key]);
+     return unarchiveValue(self, [[_containers lastObject] objectForKey:key]);
+ }
+ 
+@@ -188,6 +424,8 @@
+ - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length {
+     id value = [[_containers lastObject] objectForKey:key];
+ 
++    if (_objects != nil && appleUID(value) >= 0)
++        value = appleDecodeUID(self, appleUID(value));
+     if (![value isKindOfClass:[NSData class]]) {
+         if (length != NULL)
+             *length = 0;
+@@ -198,6 +436,33 @@
+     return [value bytes];
+ }
+ 
++// every later reference to an object already decoded gives the replacement (a nib's
++// placeholder for its owner, replaced by the owner itself)
++- (void)replaceObject:(id)object withObject:(id)replacement {
++    if(_uidToObject == NULL || object == nil || object == replacement)
++        return;
++    CFMutableDictionaryRef table = (CFMutableDictionaryRef)_uidToObject;
++    CFIndex count = CFDictionaryGetCount(table);
++    const void **keys = malloc(sizeof(void *) * (size_t)(count + 1)), **values = malloc(sizeof(void *) * (size_t)(count + 1));
++    CFDictionaryGetKeysAndValues(table, keys, values);
++    BOOL told = NO;
++    for(CFIndex i = 0; i < count; i++) {
++        if(values[i] != (const void *)object)
++            continue;
++        if(!told && [_delegate respondsToSelector:@selector(unarchiver:willReplaceObject:withObject:)])
++            [_delegate unarchiver:self willReplaceObject:object withObject:replacement];
++        told = YES;
++        if(replacement != nil)
++            CFDictionarySetValue(table, keys[i], replacement);
++        else
++            CFDictionaryRemoveValue(table, keys[i]);
++    }
++    if(told && replacement != nil)
++        [_decoded addObject:replacement];
++    free(keys);
++    free(values);
++}
++
+ - (void)finishDecoding {
+ }
+ 
+diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:33:52.014119091 -0800
+@@ -472,6 +472,8 @@
+  * from each element, which is what callers use to pluck a field out. */
+ - (id)valueForKey:(NSString *)key {
+     CFIndex count = CFArrayGetCount((CFArrayRef)self);
++    if ([key hasPrefix:@"@"])           // @count and the other collection operators (NSKeyValueCoding.m)
++        return [self valueForKeyPath:key];
+     CFMutableArrayRef values = CFArrayCreateMutable(kCFAllocatorDefault, count,
+                                                      &ns_array_callbacks);
+ 
+@@ -1104,3 +1106,26 @@
+ }
+ 
+ @end
++
++// ---- additions for applications built against the macOS SDK
++@implementation NSArray (NSSortingByFunction)
++
++- (NSArray *)sortedArrayUsingFunction:(NSInteger (*)(id, id, void *))comparator context:(void *)context {
++    CFMutableArrayRef result = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, (CFArrayRef)self);
++    CFArraySortValues(result, CFRangeMake(0, CFArrayGetCount(result)), (CFComparatorFunction)comparator, context);
++    return (id)CFAutorelease(result);
++}
++
++- (NSArray *)sortedArrayUsingFunction:(NSInteger (*)(id, id, void *))comparator context:(void *)context hint:(NSData *)hint {
++    return [self sortedArrayUsingFunction:comparator context:context];
++}
++
++@end
++
++@implementation NSMutableArray (NSSortingByFunction)
++
++- (void)sortUsingFunction:(NSInteger (*)(id, id, void *))comparator context:(void *)context {
++    CFArraySortValues((CFMutableArrayRef)self, CFRangeMake(0, CFArrayGetCount((CFArrayRef)self)), (CFComparatorFunction)comparator, context);
++}
++
++@end
+diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:36:29.471136542 -0800
+@@ -398,3 +398,41 @@
+ }
+ 
+ @end
++
++// ---- additions for applications built against the macOS SDK
++@implementation NSIndexSet (NSRangeCounting)
++
++- (NSUInteger)countOfIndexesInRange:(NSRange)range {
++    NSUInteger total = 0;
++    for (NSUInteger i = 0; i < self->_rangeCount; i++) {
++        NSRange common = NSIntersectionRange(self->_ranges[i], range);
++        total += common.length;
++    }
++    return total;
++}
++
++// private on macOS, used by Apple's applications: the number of contiguous ranges, and one of them
++- (NSUInteger)rangeCount {
++    return self->_rangeCount;
++}
++
++- (NSRange)rangeAtIndex:(NSUInteger)index {
++    return index < self->_rangeCount ? self->_ranges[index] : NSMakeRange(NSNotFound, 0);
++}
++
++@end
++
++@implementation NSIndexSet (NSRangeEnumeration)
++- (void)enumerateRangesUsingBlock:(void (^)(NSRange range, BOOL *stop))block {
++    NSUInteger count = self->_rangeCount;
++    NSRange *copy = malloc(sizeof(NSRange) * (count ? count : 1));
++    memcpy(copy, self->_ranges, sizeof(NSRange) * count);
++    for (NSUInteger i = 0; i < count; i++) {
++        BOOL stop = NO;
++        block(copy[i], &stop);
++        if (stop)
++            break;
++    }
++    free(copy);
++}
++@end
+diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:16:53.432324537 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:36:45.977728582 -0800
+@@ -6,6 +6,7 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSArray.h>
+ #import <Foundation/NSString.h>
+ #import <Foundation/NSSet.h>
+ #include <CoreFoundation/CFBase.h>
+@@ -627,3 +628,9 @@
+ }
+ 
+ @end
++
++@implementation NSSet (NSMacOSSDKAdditions)
+++ (instancetype)setWithSet:(NSSet *)set {
++    return [[[self alloc] initWithArray:set != nil ? [set allObjects] : [NSArray array]] autorelease];
++}
++@end
+diff -ruN a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:16:53.434019832 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:36:45.978142073 -0800
+@@ -6,6 +6,7 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSURL.h>
+ #import <Foundation/NSFileManager.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSData.h>
+@@ -885,3 +886,24 @@
+ }
+ 
+ @end
++
++@implementation NSFileManager (NSMacOSSDKAdditions)
++// The enumerator of -enumeratorAtPath: gives relative paths; this one gives file URLs under the
++// directory. Options: 1 skip descendants of subdirectories, 4 skip hidden files.
++- (NSEnumerator *)enumeratorAtURL:(NSURL *)url includingPropertiesForKeys:(NSArray *)keys options:(NSUInteger)options
++                     errorHandler:(BOOL (^)(NSURL *url, NSError *error))handler {
++    NSString *base = [url path];
++    NSMutableArray *urls = [NSMutableArray array];
++    NSDirectoryEnumerator *walk = [self enumeratorAtPath:base];
++    for (NSString *relative in walk) {
++        if ((options & 4) && [[relative lastPathComponent] hasPrefix:@"."]) {
++            [walk skipDescendants];
++            continue;
++        }
++        if ((options & 1) && [[relative pathComponents] count] > 1)
++            continue;
++        [urls addObject:[NSURL fileURLWithPath:[base stringByAppendingPathComponent:relative]]];
++    }
++    return [urls objectEnumerator];
++}
++@end
+diff -ruN a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:16:53.434448999 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:36:45.975985919 -0800
+@@ -189,3 +189,15 @@
+ }
+ 
+ @end
++
++@implementation NSDateFormatter (NSMacOSSDKAdditions)
+++ (NSString *)localizedStringFromDate:(NSDate *)date dateStyle:(NSDateFormatterStyle)dateStyle timeStyle:(NSDateFormatterStyle)timeStyle {
++    NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
++    [formatter setDateStyle:dateStyle];
++    [formatter setTimeStyle:timeStyle];
++    return [formatter stringFromDate:date];
++}
++// the 10.0 and 10.4 behaviours of the class: this formatter has the 10.4 one only
++- (void)setFormatterBehavior:(NSUInteger)behavior { }
++- (NSUInteger)formatterBehavior { return 1040; }
++@end
+diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 13:16:53.434729533 -0800
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 13:33:38.074303998 -0800
+@@ -177,6 +177,10 @@
+     return YES;
+ }
+ 
++@interface NSObject (NSKeyValueCollectionOperators)
++- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath;
++@end
++
+ @implementation NSObject (NSKeyValueCoding)
+ 
+ + (BOOL)accessInstanceVariablesDirectly {
+@@ -260,7 +264,13 @@
+     id current = self;
+ 
+     for (NSUInteger i = 0; i < count && current != nil; i++) {
+-        current = [current valueForKey:[components objectAtIndex:i]];
++        NSString *component = [components objectAtIndex:i];
++        if ([component hasPrefix:@"@"] && [current respondsToSelector:@selector(_kvcCollectionOperator:keyPath:)]) {
++            // a collection operator takes the rest of the path as the key path it works on
++            NSString *rest = i + 1 < count ? [[components subarrayWithRange:NSMakeRange(i + 1, count - i - 1)] componentsJoinedByString:@"."] : nil;
++            return [current _kvcCollectionOperator:component keyPath:rest];
++        }
++        current = [current valueForKey:component];
+     }
+     return current;
+ }
+@@ -320,3 +330,131 @@
+ }
+ 
+ @end
++
++// ---- -mutableArrayValueForKey:. The array that is handed out reads the container's value for the
++// key each time and writes a changed copy back with -setValue:forKey:, so every change is seen
++// by the container's own setter and by its observers.
++#import <Foundation/NSArray.h>
++
++@interface NSKeyValueMutableArray : NSMutableArray {
++    id _container;
++    NSString *_key;
++}
++@end
++
++@implementation NSKeyValueMutableArray
++
++- (id)initWithContainer:(id)container key:(NSString *)key {
++    if ((self = [super init])) {
++        _container = [container retain];
++        _key = [key copy];
++    }
++    return self;
++}
++
++- (void)dealloc {
++    [_container release];
++    [_key release];
++    [super dealloc];
++}
++
++- (NSArray *)_current {
++    id value = [_container valueForKey:_key];
++    return [value isKindOfClass:[NSArray class]] ? value : [NSArray array];
++}
++
++- (void)_store:(NSMutableArray *)changed {
++    [_container setValue:changed forKey:_key];
++}
++
++- (NSUInteger)count { return [[self _current] count]; }
++- (id)objectAtIndex:(NSUInteger)index { return [[self _current] objectAtIndex:index]; }
++
++- (void)insertObject:(id)object atIndex:(NSUInteger)index {
++    NSMutableArray *changed = [NSMutableArray arrayWithArray:[self _current]];
++    [changed insertObject:object atIndex:index];
++    [self _store:changed];
++}
++
++- (void)removeObjectAtIndex:(NSUInteger)index {
++    NSMutableArray *changed = [NSMutableArray arrayWithArray:[self _current]];
++    [changed removeObjectAtIndex:index];
++    [self _store:changed];
++}
++
++- (void)addObject:(id)object { [self insertObject:object atIndex:[self count]]; }
++- (void)removeLastObject { [self removeObjectAtIndex:[self count] - 1]; }
++
++- (void)replaceObjectAtIndex:(NSUInteger)index withObject:(id)object {
++    NSMutableArray *changed = [NSMutableArray arrayWithArray:[self _current]];
++    [changed replaceObjectAtIndex:index withObject:object];
++    [self _store:changed];
++}
++
++@end
++
++@implementation NSObject (NSKeyValueMutableCollections)
++
++- (NSMutableArray *)mutableArrayValueForKey:(NSString *)key {
++    return [[[NSKeyValueMutableArray alloc] initWithContainer:self key:key] autorelease];
++}
++
++- (NSMutableArray *)mutableArrayValueForKeyPath:(NSString *)keyPath {
++    NSRange dot = [keyPath rangeOfString:@"." options:NSBackwardsSearch];
++    if (dot.location == NSNotFound)
++        return [self mutableArrayValueForKey:keyPath];
++    id container = [self valueForKeyPath:[keyPath substringToIndex:dot.location]];
++    return [container mutableArrayValueForKey:[keyPath substringFromIndex:NSMaxRange(dot)]];
++}
++
++@end
++
++// ---- collection operators of key paths: @count, @sum, @avg, @max, @min, @unionOfObjects,
++// @distinctUnionOfObjects, on arrays and sets
++#import <Foundation/NSSet.h>
++
++static id kvcOperate(id collection, NSString *name, NSString *keyPath) {
++    NSArray *items = [collection isKindOfClass:[NSArray class]] ? collection : [collection allObjects];
++    if ([name isEqualToString:@"@count"])
++        return [NSNumber numberWithUnsignedInteger:[items count]];
++    NSMutableArray *values = [NSMutableArray array];
++    for (id item in items) {
++        id value = keyPath != nil ? [item valueForKeyPath:keyPath] : item;
++        if (value != nil && value != (id)[NSNull null])
++            [values addObject:value];
++    }
++    if ([name isEqualToString:@"@unionOfObjects"])
++        return values;
++    if ([name isEqualToString:@"@distinctUnionOfObjects"])
++        return [[NSSet setWithArray:values] allObjects];
++    if ([name isEqualToString:@"@sum"] || [name isEqualToString:@"@avg"]) {
++        double total = 0;
++        for (id value in values)
++            total += [value doubleValue];
++        if ([name isEqualToString:@"@avg"])
++            return [values count] ? [NSNumber numberWithDouble:total / (double)[values count]] : [NSNumber numberWithInt:0];
++        return [NSNumber numberWithDouble:total];
++    }
++    if ([name isEqualToString:@"@max"] || [name isEqualToString:@"@min"]) {
++        id best = nil;
++        BOOL wantMax = [name isEqualToString:@"@max"];
++        for (id value in values) {
++            if (best == nil) { best = value; continue; }
++            NSComparisonResult order = [value compare:best];
++            if ((wantMax && order == NSOrderedDescending) || (!wantMax && order == NSOrderedAscending))
++                best = value;
++        }
++        return best;
++    }
++    [NSException raise:NSInvalidArgumentException format:@"[<%@ %p> valueForKeyPath:]: this class does not implement the %@ operation.",
++                       [collection class], collection, name];
++    return nil;
++}
++
++@implementation NSArray (NSKeyValueCollectionOperators)
++- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath { return kvcOperate(self, name, keyPath); }
++@end
++
++@implementation NSSet (NSKeyValueCollectionOperators)
++- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath { return kvcOperate(self, name, keyPath); }
++@end
+diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:53:53.870421956 -0800
+@@ -6,6 +6,11 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#include <execinfo.h>
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ #import <Foundation/NSException.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSDictionary.h>
+@@ -77,10 +82,33 @@
+     return self;
+ }
+ 
++// NSExceptionRaiseBacktrace=1 in the environment: every -raise says on stderr what is raised and from where
++static void _NSExceptionBacktrace(NSException *exception) {
++    static int wanted = -1;
++    if (wanted < 0)
++        wanted = getenv("NSExceptionRaiseBacktrace") != NULL;
++    if (!wanted)
++        return;
++    void *frames[40];
++    int count = backtrace(frames, 40);
++    fprintf(stderr, "NSException raise: %s: %s\n", [[exception name] UTF8String], [[exception reason] UTF8String]);
++    for (int i = 2; i < count; i++) {
++        Dl_info info;
++        if (dladdr(frames[i], &info) && info.dli_fname != NULL) {
++            const char *leaf = strrchr(info.dli_fname, '/');
++            fprintf(stderr, "  #%-2d %s+0x%lx %s\n", i - 2, leaf ? leaf + 1 : info.dli_fname,
++                    (unsigned long)((char *)frames[i] - (char *)info.dli_fbase), info.dli_sname ? info.dli_sname : "");
++        } else {
++            fprintf(stderr, "  #%-2d %p\n", i - 2, frames[i]);
++        }
++    }
++}
++
+ - (void)raise {
+     if (_uncaughtHandler != NULL) {
+         _uncaughtHandler(self);
+     }
++    _NSExceptionBacktrace(self);
+     @throw self;
+ }
+ 
+diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:41:04.042310718 -0800
+@@ -110,8 +110,15 @@
+ "   .globl _NSForwardingTrampoline          \n"
+ "   .p2align 2                              \n"
+ "_NSForwardingTrampoline:                   \n"
++// unwind information: an exception raised by the forwarded method (or because nothing answers
++// the message) must be able to pass through this frame to the caller's handlers
++"   .cfi_startproc                          \n"
+ "   stp   x29, x30, [sp, #-16]!             \n"
++"   .cfi_def_cfa_offset 16                  \n"
++"   .cfi_offset w29, -16                    \n"
++"   .cfi_offset w30, -8                     \n"
+ "   mov   x29, sp                           \n"
++"   .cfi_def_cfa w29, 16                    \n"
+ "   sub   sp, sp, #160                      \n"
+ "   stp   x0, x1, [sp, #0]                  \n"
+ "   stp   x2, x3, [sp, #16]                 \n"
+@@ -131,6 +138,7 @@
+ "   mov   sp, x29                           \n"
+ "   ldp   x29, x30, [sp], #16               \n"
+ "   ret                                     \n"
++"   .cfi_endproc                            \n"
+ );
+ 
+ extern void NSForwardingTrampoline(void);
+@@ -327,6 +335,50 @@
+ }
+ #endif
+ 
++/* A message nothing answers is an NSInvalidArgumentException, as on macOS: it can be caught, and
++ * an application's event loop reports it and goes on. (objc4's own -doesNotRecognizeSelector:,
++ * which these replace, ends the process.) */
++#include <execinfo.h>
++
++// NSUnrecognizedSelectorBacktrace=1 in the environment: where the message came from, on stderr
++static void _NSUnrecognizedBacktrace(void) {
++    static int wanted = -1;
++    if (wanted < 0)
++        wanted = getenv("NSUnrecognizedSelectorBacktrace") != NULL;
++    if (!wanted)
++        return;
++    void *frames[40];
++    int count = backtrace(frames, 40);
++    for (int i = 2; i < count; i++) {
++        Dl_info info;
++        if (dladdr(frames[i], &info) && info.dli_fname != NULL) {
++            const char *leaf = strrchr(info.dli_fname, '/');
++            fprintf(stderr, "  #%-2d %s+0x%lx %s\n", i - 2, leaf ? leaf + 1 : info.dli_fname,
++                    (unsigned long)((char *)frames[i] - (char *)info.dli_fbase), info.dli_sname ? info.dli_sname : "");
++        } else {
++            fprintf(stderr, "  #%-2d %p\n", i - 2, frames[i]);
++        }
++    }
++}
++
++@implementation NSObject (NSUnrecognizedSelector)
++
++- (void)doesNotRecognizeSelector:(SEL)selector {
++    _NSUnrecognizedBacktrace();
++    [NSException raise:NSInvalidArgumentException
++                format:@"-[%s %s]: unrecognized selector sent to instance %p",
++                       object_getClassName(self), sel_getName(selector), self];
++}
++
+++ (void)doesNotRecognizeSelector:(SEL)selector {
++    _NSUnrecognizedBacktrace();
++    [NSException raise:NSInvalidArgumentException
++                format:@"+[%s %s]: unrecognized selector sent to class %p",
++                       class_getName(self), sel_getName(selector), self];
++}
++
++@end
++
+ __attribute__((constructor))
+ static void _NSInstallForwardHandler(void) {
+ #if defined(NS_HAVE_FORWARDING_TRAMPOLINE) && ARGON_LIBOBJC2
+diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:16:53.438324457 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:28:47.364980906 -0800
+@@ -289,3 +289,17 @@
+ }
+ 
+ @end
++
++// ---- additions for applications built against the macOS SDK
++@implementation NSUserDefaults (NSStringArrays)
++
++- (NSArray *)stringArrayForKey:(NSString *)key {
++    NSArray *value = [self arrayForKey:key];
++    for (id item in value) {
++        if (![item isKindOfClass:[NSString class]])
++            return nil;
++    }
++    return value;
++}
++
++@end
+diff -ruN a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:52:36.909610945 -0800
+@@ -39,6 +39,13 @@
+ 
+ @implementation NSAttributedString
+ 
++// +alloc gives a shell that an initializer replaces by the CoreFoundation object. A plain -init
++// (or +new) must do the same: without it the shell itself was handed out, and the methods below
++// read it as a CoreFoundation attributed string.
++- (instancetype)init {
++    return [self initWithString:@"" attributes:nil];
++}
++
+ - (instancetype)initWithString:(NSString *)string {
+     return [self initWithString:string attributes:nil];
+ }
+diff -ruN a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
+--- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:36:45.977053117 -0800
+@@ -6,6 +6,7 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#include <CoreFoundation/CoreFoundation.h>
+ #import <Foundation/NSCharacterSet.h>
+ #include <CoreFoundation/CFCharacterSet.h>
+ #include <CoreFoundation/ForFoundationOnly.h>
+@@ -218,3 +219,14 @@
+ }
+ 
+ @end
++
++@implementation NSMutableCharacterSet (NSMacOSSDKAdditions)
++- (void)formUnionWithCharacterSet:(NSCharacterSet *)other {
++    if (other != nil)
++        CFCharacterSetUnion((CFMutableCharacterSetRef)self, (CFCharacterSetRef)other);
++}
++- (void)formIntersectionWithCharacterSet:(NSCharacterSet *)other {
++    if (other != nil)
++        CFCharacterSetIntersect((CFMutableCharacterSetRef)self, (CFCharacterSetRef)other);
++}
++@end
+diff -ruN a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks/Foundation/String.subproj/NSString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:56:11.786892112 -0800
+@@ -6,6 +6,10 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSValue.h>
++#import <Foundation/NSError.h>
++#import <Foundation/NSURL.h>
++#include <ctype.h>
+ #import <Foundation/NSString.h>
+ #import <Foundation/NSException.h>
+ #import <Foundation/NSArray.h>
+@@ -732,8 +736,30 @@
+     return [self stringWithCString:cString encoding:NSUTF8StringEncoding];
+ }
+ 
++// The characters in the encoding, zero-terminated, in memory that lives as long as the current
++// autorelease pool; NULL only when a character has no form in the encoding. (It used to be the
++// string's own storage or NULL, which is NULL for most strings.)
+ - (const char *)cStringUsingEncoding:(NSStringEncoding)encoding {
+-    return CFStringGetCStringPtr((CFStringRef)self, __NSStringCFEncoding(encoding));
++    NSUInteger length = [self length];
++    if (encoding == NSUnicodeStringEncoding || encoding == NSUTF16LittleEndianStringEncoding) {
++        // UTF-16 in the machine's byte order, without a byte order mark: callers read it as unichars
++        NSMutableData *buffer = [NSMutableData dataWithLength:(length + 1) * sizeof(unichar)];
++        if (length > 0)
++            [self getCharacters:[buffer mutableBytes] range:NSMakeRange(0, length)];
++        return [buffer bytes];
++    }
++    CFStringEncoding cfEncoding = __NSStringCFEncoding(encoding);
++    CFMutableStringRef copy = __NSStringCreateCFCopy(self);
++    CFRange range = CFRangeMake(0, CFStringGetLength(copy));
++    CFIndex used = 0;
++    CFIndex converted = CFStringGetBytes(copy, range, cfEncoding, 0, false, NULL, 0, &used);
++    NSMutableData *buffer = nil;
++    if (converted == range.length) {
++        buffer = [NSMutableData dataWithLength:(NSUInteger)used + 4];      // room for a terminator of any width
++        CFStringGetBytes(copy, range, cfEncoding, 0, false, [buffer mutableBytes], used, &used);
++    }
++    CFRelease(copy);
++    return [buffer bytes];
+ }
+ 
+ 
+@@ -985,3 +1011,165 @@
+ }
+ 
+ @end
++
++// ---- additions for applications built against the macOS SDK
++#import <Foundation/NSCharacterSet.h>
++
++@implementation NSString (NSCharacterSearchInRange)
++
++- (NSRange)rangeOfCharacterFromSet:(NSCharacterSet *)set options:(NSStringCompareOptions)options range:(NSRange)range {
++    NSUInteger length = [self length];
++    if (set == nil || range.location > length || range.length > length - range.location)
++        return NSMakeRange(NSNotFound, 0);
++    BOOL backwards = (options & NSBackwardsSearch) != 0;
++    BOOL anchored = (options & NSAnchoredSearch) != 0;
++    NSUInteger count = anchored ? (range.length > 0 ? 1 : 0) : range.length;
++    for (NSUInteger step = 0; step < count; step++) {
++        NSUInteger index = backwards ? NSMaxRange(range) - 1 - step : range.location + step;
++        unichar c = [self characterAtIndex:index];
++        // a surrogate pair is one character of the set's domain
++        if (c >= 0xD800 && c <= 0xDBFF && index + 1 < NSMaxRange(range)) {
++            unichar low = [self characterAtIndex:index + 1];
++            if (low >= 0xDC00 && low <= 0xDFFF) {
++                uint32_t full = 0x10000 + (((uint32_t)c - 0xD800) << 10) + (low - 0xDC00);
++                if (CFCharacterSetIsLongCharacterMember((CFCharacterSetRef)set, full))
++                    return NSMakeRange(index, 2);
++                continue;
++            }
++        }
++        if ([set characterIsMember:c])
++            return NSMakeRange(index, 1);
++    }
++    return NSMakeRange(NSNotFound, 0);
++}
++
++- (NSRange)rangeOfCharacterFromSet:(NSCharacterSet *)set options:(NSStringCompareOptions)options {
++    return [self rangeOfCharacterFromSet:set options:options range:NSMakeRange(0, [self length])];
++}
++
++- (NSRange)rangeOfComposedCharacterSequenceAtIndex:(NSUInteger)index {
++    if (index >= [self length])
++        [NSException raise:NSRangeException format:@"-[NSString rangeOfComposedCharacterSequenceAtIndex:]: index %lu beyond length %lu",
++                           (unsigned long)index, (unsigned long)[self length]];
++    CFRange r = CFStringGetRangeOfComposedCharactersAtIndex((CFStringRef)self, (CFIndex)index);
++    return NSMakeRange((NSUInteger)r.location, (NSUInteger)r.length);
++}
++
++- (NSRange)rangeOfComposedCharacterSequencesForRange:(NSRange)range {
++    NSUInteger length = [self length];
++    if (range.location >= length)
++        return NSMakeRange(length, 0);
++    NSRange first = [self rangeOfComposedCharacterSequenceAtIndex:range.location];
++    if (range.length == 0)
++        return NSMakeRange(first.location, 0);
++    NSUInteger last = NSMaxRange(range) - 1;
++    if (last >= length)
++        last = length - 1;
++    NSRange end = [self rangeOfComposedCharacterSequenceAtIndex:last];
++    return NSMakeRange(first.location, NSMaxRange(end) - first.location);
++}
++
++@end
++
++@implementation NSString (NSMacOSSDKAdditions)
++
++- (NSString *)commonPrefixWithString:(NSString *)other options:(NSStringCompareOptions)options {
++    NSUInteger limit = MIN([self length], [other length]), i = 0;
++    BOOL insensitive = (options & NSCaseInsensitiveSearch) != 0;
++    while (i < limit) {
++        unichar a = [self characterAtIndex:i], b = [other characterAtIndex:i];
++        if (a != b && !(insensitive && a < 128 && b < 128 && tolower(a) == tolower(b)))
++            break;
++        i++;
++    }
++    // not in the middle of a composed character
++    if (i > 0 && i < [self length]) {
++        NSRange r = [self rangeOfComposedCharacterSequenceAtIndex:i];
++        if (r.location < i)
++            i = r.location;
++    }
++    return [self substringToIndex:i];
++}
++
++- (void)enumerateSubstringsInRange:(NSRange)range options:(NSUInteger)options
++                        usingBlock:(void (^)(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop))block {
++    // by: 0 lines, 1 paragraphs, 2 composed character sequences, 3 words, 4 sentences; 0x100 reverse, 0x200 no substring
++    NSUInteger by = options & 0xff;
++    BOOL reverse = (options & 0x100) != 0, omit = (options & 0x200) != 0;
++    NSMutableArray *pieces = [NSMutableArray array];      // pairs: substring range, enclosing range
++    NSUInteger end = NSMaxRange(range), at = range.location;
++    if (end > [self length])
++        end = [self length];
++    if (by == 2) {
++        while (at < end) {
++            NSRange r = [self rangeOfComposedCharacterSequenceAtIndex:at];
++            [pieces addObject:[NSValue valueWithRange:r]];
++            [pieces addObject:[NSValue valueWithRange:r]];
++            at = NSMaxRange(r);
++        }
++    } else if (by == 3 || by == 4) {
++        // words: runs of letters and digits; sentences: runs up to a full stop, mark or line end
++        NSCharacterSet *separators = by == 3 ? [[NSCharacterSet alphanumericCharacterSet] invertedSet]
++                                             : [NSCharacterSet characterSetWithCharactersInString:@".!?\n"];
++        while (at < end) {
++            NSRange sep = [self rangeOfCharacterFromSet:separators options:0 range:NSMakeRange(at, end - at)];
++            NSUInteger stopAt = sep.location == NSNotFound ? end : sep.location;
++            NSUInteger next = sep.location == NSNotFound ? end : NSMaxRange(sep);
++            if (stopAt > at) {
++                [pieces addObject:[NSValue valueWithRange:NSMakeRange(at, stopAt - at)]];
++                [pieces addObject:[NSValue valueWithRange:NSMakeRange(at, next - at)]];
++            }
++            at = next;
++        }
++    } else {
++        while (at < end) {
++            NSUInteger lineStart = at, lineEnd = at, contentsEnd = at;
++            [self getLineStart:&lineStart end:&lineEnd contentsEnd:&contentsEnd forRange:NSMakeRange(at, 0)];
++            if (lineEnd > end) lineEnd = end;
++            if (contentsEnd > end) contentsEnd = end;
++            if (lineStart < range.location) lineStart = range.location;
++            [pieces addObject:[NSValue valueWithRange:NSMakeRange(lineStart, contentsEnd - lineStart)]];
++            [pieces addObject:[NSValue valueWithRange:NSMakeRange(lineStart, lineEnd - lineStart)]];
++            if (lineEnd <= at)
++                break;
++            at = lineEnd;
++        }
++    }
++    NSUInteger count = [pieces count] / 2;
++    for (NSUInteger n = 0; n < count; n++) {
++        NSUInteger i = reverse ? count - 1 - n : n;
++        NSRange sub = [[pieces objectAtIndex:i * 2] rangeValue], enclosing = [[pieces objectAtIndex:i * 2 + 1] rangeValue];
++        BOOL stop = NO;
++        block(omit ? nil : [self substringWithRange:sub], sub, enclosing, &stop);
++        if (stop)
++            break;
++    }
++}
++
++- (NSString *)stringByAddingPercentEscapesUsingEncoding:(NSStringEncoding)encoding {
++    CFStringRef result = CFURLCreateStringByAddingPercentEscapes(kCFAllocatorDefault, (CFStringRef)self, NULL, NULL,
++                                                                 CFStringConvertNSStringEncodingToEncoding(encoding));
++    return [(NSString *)result autorelease];
++}
++
++- (NSString *)stringByReplacingPercentEscapesUsingEncoding:(NSStringEncoding)encoding {
++    CFStringRef result = CFURLCreateStringByReplacingPercentEscapesUsingEncoding(kCFAllocatorDefault, (CFStringRef)self, CFSTR(""),
++                                                                                 CFStringConvertNSStringEncodingToEncoding(encoding));
++    return [(NSString *)result autorelease];
++}
++
+++ (NSString *)localizedNameOfStringEncoding:(NSStringEncoding)encoding {
++    CFStringRef name = CFStringGetNameOfEncoding(CFStringConvertNSStringEncodingToEncoding(encoding));
++    return name != NULL ? (NSString *)name : @"";
++}
++
++- (BOOL)writeToURL:(NSURL *)url atomically:(BOOL)atomically encoding:(NSStringEncoding)encoding error:(NSError **)error {
++    if (![url isFileURL]) {
++        if (error != NULL)
++            *error = [NSError errorWithDomain:NSCocoaErrorDomain code:518 /* NSFileWriteUnsupportedSchemeError */ userInfo:nil];
++        return NO;
++    }
++    return [self writeToFile:[url path] atomically:atomically encoding:encoding error:error];
++}
++
++@end
+diff -ruN a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:16:53.441146971 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:36:45.976783726 -0800
+@@ -6,6 +6,10 @@
+  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+  */
+ 
++#import <Foundation/NSFileManager.h>
++#import <Foundation/NSData.h>
++#import <Foundation/NSDictionary.h>
++#import <Foundation/NSString.h>
+ #import <Foundation/NSURL.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSNumber.h>
+@@ -274,3 +278,73 @@
+     _CFRuntimeBridgeClasses(CFURLGetTypeID(), "NSURL");
+ }
+ #endif
++
++@implementation NSURL (NSMacOSSDKAdditions)
++
++- (NSURL *)URLByResolvingSymlinksInPath {
++    if (![self isFileURL])
++        return self;
++    return [NSURL fileURLWithPath:[[self path] stringByResolvingSymlinksInPath]];
++}
++
++- (NSString *)parameterString {
++    return nil;          // the ";parameters" part of a path; RFC 3986 URLs have none
++}
++
++// Resource values a file system can answer here: name, path, directory, regular file, symbolic link
++- (BOOL)getResourceValue:(id *)value forKey:(NSString *)key error:(NSError **)error {
++    if (value != NULL)
++        *value = nil;
++    if (![self isFileURL] || key == nil)
++        return YES;
++    NSString *path = [self path];
++    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:error];
++    if (attributes == nil)
++        return NO;
++    NSString *type = [attributes objectForKey:NSFileType];
++    id answer = nil;
++    if ([key isEqualToString:@"NSURLNameKey"] || [key isEqualToString:@"NSURLLocalizedNameKey"])
++        answer = [path lastPathComponent];
++    else if ([key isEqualToString:@"_NSURLPathKey"])
++        answer = path;
++    else if ([key isEqualToString:@"NSURLIsDirectoryKey"])
++        answer = [NSNumber numberWithBool:[type isEqualToString:NSFileTypeDirectory]];
++    else if ([key isEqualToString:@"NSURLIsRegularFileKey"])
++        answer = [NSNumber numberWithBool:[type isEqualToString:NSFileTypeRegular]];
++    else if ([key isEqualToString:@"NSURLIsSymbolicLinkKey"])
++        answer = [NSNumber numberWithBool:[type isEqualToString:NSFileTypeSymbolicLink]];
++    else if ([key isEqualToString:@"NSURLIsAliasFileKey"])
++        answer = [NSNumber numberWithBool:NO];
++    else if ([key isEqualToString:@"NSURLFileSizeKey"])
++        answer = [attributes objectForKey:NSFileSize];
++    else if ([key isEqualToString:@"NSURLContentModificationDateKey"])
++        answer = [attributes objectForKey:NSFileModificationDate];
++    if (value != NULL)
++        *value = answer;
++    return YES;
++}
++
++// Bookmarks (file references that survive a move) need a file-ID service this system does not
++// have: none can be made, none can be resolved.
++- (NSData *)bookmarkDataWithOptions:(NSUInteger)options includingResourceValuesForKeys:(NSArray *)keys relativeToURL:(NSURL *)relativeURL error:(NSError **)error {
++    if (error != NULL)
++        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:3328 /* NSFeatureUnsupportedError */ userInfo:nil];
++    return nil;
++}
+++ (NSData *)bookmarkDataWithContentsOfURL:(NSURL *)bookmarkFileURL error:(NSError **)error {
++    if (error != NULL)
++        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:3328 userInfo:nil];
++    return nil;
++}
+++ (instancetype)URLByResolvingBookmarkData:(NSData *)data options:(NSUInteger)options relativeToURL:(NSURL *)relativeURL bookmarkDataIsStale:(BOOL *)isStale error:(NSError **)error {
++    if (isStale != NULL)
++        *isStale = NO;
++    if (error != NULL)
++        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:3328 userInfo:nil];
++    return nil;
++}
+++ (NSDictionary *)resourceValuesForKeys:(NSArray *)keys fromBookmarkData:(NSData *)data {
++    return nil;
++}
++
++@end

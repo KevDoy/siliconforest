@@ -117,7 +117,19 @@ static void report(struct request *rq)
         if (frame[0] <= fp) break;
         fp = frame[0];
     }
-    for (int i = 0; i < nimages; i++) fprintf(stderr, "SFCATCH image %012llx-%012llx %s\n", (unsigned long long)images[i].base, (unsigned long long)images[i].end, images[i].path);
+    // SFCATCH_DUMP="19 22": eight words of memory at the addresses in those registers, each named
+    const char *dump = getenv("SFCATCH_DUMP");
+    while (dump != NULL && *dump) {
+        char *end; long reg = strtol(dump, &end, 10);
+        if (end == dump) break;
+        dump = end;
+        if (reg < 0 || reg > 30) continue;
+        uint64_t words[8];
+        if (!rd(task, r[reg] & 0x7fffffffffULL, words, sizeof(words))) { fprintf(stderr, "SFCATCH [x%ld] unreadable\n", reg); continue; }
+        for (int i = 0; i < 8; i++) { name(words[i], nm, sizeof(nm)); fprintf(stderr, "SFCATCH [x%ld+%d] %016llx %s\n", reg, i * 8, (unsigned long long)words[i], nm); }
+    }
+    if (getenv("SFCATCH_IMAGES") != NULL)       // the whole image list only when asked for
+        for (int i = 0; i < nimages; i++) fprintf(stderr, "SFCATCH image %012llx-%012llx %s\n", (unsigned long long)images[i].base, (unsigned long long)images[i].end, images[i].path);
 }
 
 int main(int argc, char **argv)

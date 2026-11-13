@@ -28,6 +28,12 @@
 #   0020  AppKit: names applications built against the macOS 26 SDK import (first user: Apple's
 #         Terminal.app, docs/roadmap/issues/SF-Y-terminal-app.md): constants, accessibility helpers,
 #         gesture recognizers, NSTextFinder, private classes that answer nothing to what they lack
+#   0021  AppKit: faults found with Terminal.app: an undeclared variadic call in nib loading, a nil
+#         window title, exceptions from run-loop callouts reported instead of ending the program,
+#         nib objects replaced before they were collected, +removeFrameUsingName:, NSViewController
+#         without a nib, NSPathControl's delegate
+#   0022  WindowServer: PD_WS_DUMP_DIR writes the picture a window presents (a diagnostic where the
+#         compositor has no screen capture)
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -59,10 +65,12 @@ let
     ./patches/0017-appkit-popups.patch
     ./patches/0019-tip-appkit-stackview-accessibilityelement.patch
     ./patches/0020-appkit-macos26-additions.patch
+    ./patches/0021-appkit-fixes-found-with-terminal.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
     ./patches/0018-windowserver-popup-placement.patch
+    ./patches/0022-windowserver-presented-frame-dump.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch

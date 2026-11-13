@@ -57,7 +57,7 @@ OBJC="-lobjc -lFoundation -lCoreFoundation"
 # CoreFoundation and Foundation at their framework paths (the root has links to /usr/lib there)
 lib $F/CoreFoundation.framework/Versions/A/CoreFoundation 150:1338 $S/CoreFoundation.m -- \
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/libCoreFoundation.dylib -lobjc -licucore
-lib $F/Foundation.framework/Versions/C/Foundation 300:5026.5.4 $S/Foundation.m $S/FoundationSwiftTraps.c -- \
+lib $F/Foundation.framework/Versions/C/Foundation 300:5026.5.4 $S/Foundation.m -- \
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/swift/libswiftFoundation.dylib -lobjc -lCoreFoundation
 wrap CoreGraphics A 64:1889 $S/CoreGraphics.c -- -lCoreFoundation
 wrap CoreText A 1:1 $S/CoreText.c -- $LINKROOT$F/CoreGraphics.framework/Versions/A/CoreGraphics -lCoreFoundation
