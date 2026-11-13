@@ -11,7 +11,7 @@ git-ignored). The final binary comes from the M1's macOS 27.0: nothing below may
 
 ## State (13 November 2026, evening)
 **On the M1, from a scratch prefix (`/private/tmp/sfy`, nothing installed, the system's own dyld,
-libSystem, Foundation untouched): the unmodified arm64e code of Apple's Terminal 2.15 loads, runs
+libSystem, Foundation untouched): the unmodified arm64e code of Apple's Terminal (the macOS 26.5.2 copy) loads, runs
 its `main`, loads its nibs, opens its window on the running compositor and starts a shell on a pty.
 The window is white: no text is drawn yet.** Not run in QEMU at all (the owner made the M1 the
 instrument on 13 November).
