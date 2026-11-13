@@ -13,7 +13,7 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; MODE=${2:?hv or native}; LIMIT=${3:-200}
-R=${NV_RANGE_FILE:-runs/m1-storage/linux-b/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
+R=${NV_RANGE_FILE:-runs/m1-storage/linux-c/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
 [ ! -e runs/m1-storage/STOP ] || { echo "runs/m1-storage/STOP exists: $(cat runs/m1-storage/STOP)" >&2; exit 3; }
 stop() { echo "$1" | tee runs/m1-storage/STOP; exit 3; }
 . private/disk-root/sf-part.env || exit 2

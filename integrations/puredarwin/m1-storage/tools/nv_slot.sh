@@ -4,7 +4,7 @@
 # the boot, Linux again, the verdict. Run it through the bench so nothing else boots in
 # between:   BENCH_WHO=storage tools/bench.sh run .../nv_slot.sh <name> <level> <expected write_refused>
 # The ranges are those of runs/m1-storage/linux-a/ranges (fixed, so every set is comparable);
-# NV_RANGE_FILE names another set (linux-b/ranges: the layout with the SiliconForest partition).
+# NV_RANGE_FILE names another set (linux-c/ranges: the layout with the SiliconForest partition as shrunk on 12 November 2026; linux-b/ranges before that).
 # NV_VERDICT_MODE=root: the boot ROOTS on the SiliconForest partition, read-only (guest/darwin-diskroot.in,
 # launcher-diskroot.patch, read fence on); the partition must have been prepared with tools/dr_linux_root.sh transform.
 # NV_VERDICT_MODE=part: the boot names the SiliconForest partition (NV_PART=1) and mounts it

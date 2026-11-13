@@ -38,6 +38,24 @@ fi
 for d in /dev/rdisk[0-9]; do [ "$d" != "/dev/r$fenced" ] && gpt -r show "$d" 2>/dev/null | awk '{print "NV_GPT", $1, $2, $3, $4, $5, $6, $7, $8}'; done
 ps -ax 2>/dev/null | wc -l | sed 's/^ */NV_PROCESSES /'
 
+# the range check at the fence's ends, by absolute block (kern.pd_nvme.wprobe: nothing is written, whatever
+# the answer). The 610,345 blocks after the partition were given up for the startup-picker volume: the first
+# of them, the partition's last block before that (+610,304) and the last of them must all be refused.
+phase fence
+probe() { sysctl -w kern.pd_nvme.wprobe="$2 $3" > /dev/null 2>&1; printf 'NV_WPROBE %s lba=%s blocks=%s rc=%s\n' "$1" "$2" "$3" "$?"; }
+F=@PART_LBA@; L=$((@PART_LBA@ + @PART_BLOCKS@ - 1))
+probe in-first $F 1
+probe in-last $L 1
+probe in-last-256 $((L - 255)) 256
+probe out-before $((F - 1)) 1
+probe out-after $((L + 1)) 1
+probe out-across-end $L 2
+probe out-old-last $((L + 610304)) 1
+probe out-freed-last $((L + 610345)) 1
+probe out-block0 0 1
+printf 'NV_WPROBE_TOTAL %s\n' "$(get kern.pd_nvme.wprobe)"
+wstats probed
+
 phase identify
 printf 'NV_IDCTRL %s\n' "$(get kern.pd_nvme.idctrl)"
 printf 'NV_IDNS %s\n' "$(get kern.pd_nvme.idns)"

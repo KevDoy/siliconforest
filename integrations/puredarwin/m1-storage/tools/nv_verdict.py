@@ -382,6 +382,14 @@ if halt:
             check(bool(chk) and chk.group(1) == 'equal', 'the frame on the panel in that look, read back from the renderer, equals the CPU render of the scene: %s' % (chk.group(0)[:200] if chk else 'no settle check'))
         else:
             print('NV_VERDICT note the previous boot chose no theme or scale in the menu')
+    # the fence's ends, asked of the range check with the root mounted (nothing is written by a probe)
+    pr = re.findall(r'^NV_WPROBE (\S+) lba=(\d+) blocks=(\d+) rc=(\d+)', con, re.M)
+    first, last = ours_lba, ours_lba + int(os.environ['NV_PART_BLOCKS']) - 1
+    names = dict((p[0], (int(p[1]), int(p[2]))) for p in pr)
+    wrong = [p for p in pr if (p[0].startswith('in-')) != (p[3] == '0')]
+    check(len(pr) == 9 and not wrong and names.get('in-first') == (first, 1) and names.get('in-last') == (last, 1) and names.get('out-after') == (last + 1, 1) and names.get('out-across-end') == (last, 2) and names.get('out-before') == (first - 1, 1),
+          'range check at the fence [%d, %d]: first, last and the last 256 blocks admitted; one before, one after, across the end, the partition\'s last block before it was shrunk (%s), the last unallocated block (%s) and block 0 refused (%d probes, nothing written)%s'
+          % (first, last, names.get('out-old-last', ('?',))[0], names.get('out-freed-last', ('?',))[0], len(pr), ' WRONG: %s' % wrong if wrong else ''))
     # the end by the system's own command
     if os.environ.get('NV_HALT_MENU') == '1':
         check(re.search(r'^WMSET session_end=restart', con, re.M) is not None and re.search(r'^NV_SESSION_END request=restart$', con, re.M) is not None,

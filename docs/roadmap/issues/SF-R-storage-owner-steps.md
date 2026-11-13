@@ -1,5 +1,7 @@
 # Making room for SiliconForest: the owner's steps in macOS
 
+> **Later change (12 November 2026):** this page records how the partition was created, at 64 GiB (16,777,216 blocks). The owner has since shrunk it from its end to 16,166,912 blocks (last block 208,800,773) to make room for SiliconForest's startup-picker volume; blocks 208,800,774 to 209,411,118 are unallocated. The numbers below are those of the day it was made. Present state: `SF-R-storage.md`.
+
 Two commands in macOS Terminal: shrink the macOS container by 64 GiB, then create one empty partition in the freed space. This is what the Asahi Linux installer does on these machines; the commands and checks below are taken from its source (`asahi-installer` commit `e93743d`, `src/main.py` `action_resize`, `src/diskutil.py`, `src/osinstall.py`), not from memory. Where something is **not** from that source it says so.
 
 Nothing here touches Linux, the EFI partition, boot policy or NVRAM. Formatting the new partition is **not** part of this: that is done later from Linux, after a check.
