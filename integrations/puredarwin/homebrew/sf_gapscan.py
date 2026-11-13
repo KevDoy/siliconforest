@@ -28,6 +28,9 @@ Static analysis only: it predicts dyld's verdict, not behaviour; dlopen()ed name
   sf_gapscan.py --root R --system                 # the root's own frameworks, libraries, programs
   sf_gapscan.py --root R --binary /opt/homebrew/bin/vim [--binary ...]
   sf_gapscan.py --root R --overlay DIR ...        # DIR laid over the root (a candidate fix), searched first
+  sf_gapscan.py --root R --kegs runs/homebrew/kegs/arm64_tahoe --brew --name wide
+                                                  # unpacked bottles (hb_fetch.py) as the prefix: a formula
+                                                  # set wider than what a machine has installed
 writes runs/sf-gaps/<name>.json (everything) and <name>.md (the ranked summary).
 """
 import argparse
@@ -45,25 +48,28 @@ SYSTEM_DIRS = ('usr/lib', 'System/Library', 'bin', 'sbin', 'usr/bin', 'usr/sbin'
 
 
 class Root:
-    """A root directory, optionally with overlays searched first; logical path -> host file."""
-    def __init__(self, root, overlays=()):
-        self.roots = [Path(o) for o in overlays] + [Path(root)]
+    """A root directory, optionally with overlays searched first; logical path -> host file.
+    A mount puts a host directory at a logical path (unpacked bottles as /opt/homebrew/Cellar)."""
+    def __init__(self, root, overlays=(), mounts=()):
+        self.roots = [(Path(m[1]), m[0].rstrip('/')) for m in mounts] + [(Path(o), '') for o in overlays] + [(Path(root), '')]
         self.machos = {}
         self.exp = {}
 
     def resolve(self, name, depth=0):
         """Host file for the logical absolute path `name`, following links inside the root."""
         name = os.path.normpath(name)
-        parts = Path(name.lstrip('/')).parts
-        for root in self.roots:
+        for root, prefix in self.roots:
+            if prefix and not name.startswith(prefix + '/'):
+                continue
+            parts = Path(name[len(prefix):].lstrip('/')).parts
             cur = root
             for i, part in enumerate(parts):
                 cur = cur / part
                 if cur.is_symlink():
                     if depth > 30:
                         return None
-                    target = os.readlink(cur)
-                    base = target if target.startswith('/') else os.path.join('/', *parts[:i], target)
+                    target = os.readlink(cur).replace('@@HOMEBREW_CELLAR@@', '/opt/homebrew/Cellar').replace('@@HOMEBREW_PREFIX@@', '/opt/homebrew')
+                    base = target if target.startswith('/') else os.path.join(prefix + '/', *parts[:i], target)
                     rest = '/'.join(parts[i + 1:])
                     return self.resolve(base + ('/' + rest if rest else ''), depth + 1)
                 if not cur.exists():
@@ -88,6 +94,9 @@ class Root:
         """(logical, host) of the library an image names, or None."""
         here = os.path.dirname(loader_logical)
         exed = os.path.dirname(exe_logical)
+        # a bottle that was unpacked but not poured still carries Homebrew's placeholders
+        lib = lib.replace('@@HOMEBREW_CELLAR@@', '/opt/homebrew/Cellar').replace('@@HOMEBREW_PREFIX@@', '/opt/homebrew')
+        rpaths = [r.replace('@@HOMEBREW_CELLAR@@', '/opt/homebrew/Cellar').replace('@@HOMEBREW_PREFIX@@', '/opt/homebrew') for r in rpaths]
         if lib.startswith('@rpath/'):
             cands = [r.replace('@loader_path', here).replace('@executable_path', exed) + lib[len('@rpath'):] for r in rpaths]
         else:
@@ -205,20 +214,68 @@ def closure_files(root, logical, host):
 def walk(root, sub):
     """(logical, host) of every Mach-O executable, dylib or bundle under root/<sub>."""
     seen = set()
-    for r in root.roots:
-        top = r / sub
+    for r, prefix in root.roots:
+        if prefix and not ('/' + sub + '/').startswith(prefix + '/'):
+            continue
+        top = r / ('/' + sub)[len(prefix):].lstrip('/')
         for dirpath, _dirs, files in os.walk(top):
             for f in files:
                 p = Path(dirpath) / f
                 if p.is_symlink() or f.endswith(('.a', '.o')):
                     continue
-                logical = '/' + str(p.relative_to(r))
+                logical = prefix + '/' + str(p.relative_to(r))
                 if logical in seen:
                     continue
                 m = root.macho(p)
                 if m is not None and m.filetype in (2, 6, 8):
                     seen.add(logical)
                     yield logical, p
+
+
+def shebangs(root, sub):
+    """{interpreter outside the prefix: {formula: count}} over every executable script under root/<sub>."""
+    out = collections.defaultdict(lambda: collections.defaultdict(int))
+    for r, prefix in root.roots:
+        if prefix and not ('/' + sub + '/').startswith(prefix + '/'):
+            continue
+        for dirpath, _dirs, files in os.walk(r / ('/' + sub)[len(prefix):].lstrip('/')):
+            for f in files:
+                p = Path(dirpath) / f
+                if p.is_symlink() or not os.access(p, os.X_OK):
+                    continue
+                try:
+                    with open(p, 'rb') as fh:
+                        line = fh.readline(200)
+                except OSError:
+                    continue
+                if not line.startswith(b'#!'):
+                    continue
+                words = line[2:].decode('utf-8', 'replace').split()
+                if not words or words[0].startswith(('/opt/homebrew', '@@HOMEBREW')):
+                    continue
+                interp = words[0]
+                if interp.endswith('/env') and len(words) > 1:
+                    interp += ' ' + next((w for w in words[1:] if not w.startswith('-') and '=' not in w), '')
+                out[interp][owner(prefix + '/' + str(p.relative_to(r)))] += 1
+    return out
+
+
+def shebang_table(root, sb):
+    rows = []
+    for interp, owners in sb.items():
+        name = interp.split(' ', 1)[1] if ' ' in interp else interp
+        if ' ' in interp:      # env <name>: on the PATH a login has
+            have = any(root.resolve(d + '/' + name) for d in ('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'))
+        else:
+            have = root.resolve(name) is not None
+        rows.append((have, -len(owners), interp, owners))
+    rows.sort()
+    out = ['### Interpreters that scripts in the prefix name (outside the prefix)', '',
+           '| Interpreter | In the root | Formulae | Scripts |', '|---|---|---|---|']
+    for have, _n, interp, owners in rows:
+        o = sorted(owners)
+        out.append('| `%s` | %s | %d: %s | %d |' % (interp, 'yes' if have else '**no**', len(o), ', '.join(o[:10]) + (' …' if len(o) > 10 else ''), sum(owners.values())))
+    return '\n'.join(out) + '\n'
 
 
 def owner(logical):
@@ -334,11 +391,34 @@ def main():
     ap.add_argument('--brew', action='store_true', help='scan opt/homebrew/Cellar')
     ap.add_argument('--system', action='store_true', help="scan the root's own frameworks, libraries and programs")
     ap.add_argument('--binary', action='append', default=[], help='a logical path in the root, with its load closure; repeatable')
+    ap.add_argument('--kegs', help='a directory of unpacked bottles (<formula>/<version>/...) to scan as the prefix instead of the root\'s')
     ap.add_argument('--closure', action='store_true', help='with --binary: list the files of the load closure (CLOSURE size path)')
     ap.add_argument('--name', default='scan')
     ap.add_argument('--out', default=str(LAB / 'runs/sf-gaps'))
     a = ap.parse_args()
-    root = Root(a.root, a.overlay)
+    overlays, mounts = list(a.overlay), []
+    if a.kegs:
+        # unpacked bottles as the prefix: the keg directory is /opt/homebrew/Cellar; a directory of
+        # links gives opt/<formula> (its newest version) and lib/<leaf> (what `brew link` puts there)
+        kegs = Path(a.kegs).resolve()
+        mounts.append(('/opt/homebrew/Cellar', kegs))
+        view = Path(a.out) / (a.name + '-prefix')
+        if view.exists():
+            import shutil
+            shutil.rmtree(view)
+        (view / 'opt/homebrew/opt').mkdir(parents=True)
+        (view / 'opt/homebrew/lib').mkdir()
+        for keg in sorted(kegs.iterdir()):
+            versions = sorted(v.name for v in keg.iterdir() if v.is_dir())
+            if not versions:
+                continue
+            os.symlink('/opt/homebrew/Cellar/%s/%s' % (keg.name, versions[-1]), view / 'opt/homebrew/opt' / keg.name)
+            libdir = keg / versions[-1] / 'lib'
+            for lib in (sorted(libdir.iterdir()) if libdir.is_dir() else []):
+                if lib.name.endswith('.dylib') and not os.path.lexists(view / 'opt/homebrew/lib' / lib.name):
+                    os.symlink('/opt/homebrew/Cellar/%s/%s/lib/%s' % (keg.name, versions[-1], lib.name), view / 'opt/homebrew/lib' / lib.name)
+        overlays.insert(0, str(view))
+    root = Root(a.root, overlays, mounts)
     md, js = [], {}
     if a.brew:
         images = list(walk(root, 'opt/homebrew/Cellar'))
@@ -346,6 +426,7 @@ def main():
         res = scan(root, images, programs)
         t, blocked = table(res, 'Homebrew prefix (/opt/homebrew/Cellar)')
         md.append(t)
+        md.append(shebang_table(root, shebangs(root, 'opt/homebrew/Cellar')))
         js['brew'] = dict(per_program=res['per_program'], blocked={k: sorted(v) for k, v in blocked.items()},
                           formulae=sorted({owner(lg) for lg, _h in images}))
         print('brew: %d images, %d programs, %d formulae of %d with a program that does not start'

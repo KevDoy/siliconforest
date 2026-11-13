@@ -19,7 +19,8 @@
 #                                          in use as libSystem.B.dylib.old and only then renames. The one file in use this tool replaces.
 #
 #   sys     what macOS programs expect of a system and this root lacks (../../homebrew/build-overlay.nix:
-#           libraries in /usr/lib, three frameworks, /usr/bin/curl, locale data), the SSH client programs,
+#           libraries in /usr/lib, three frameworks, /usr/bin/curl, locale data; ../../macos-compat/
+#           build-compat-root.nix: AppKit and Cocoa, the system Perl 5.34), the SSH client programs,
 #           sftp-server. Only paths the root does not have yet: nothing in use is replaced.
 #   brew    /opt/homebrew: the Homebrew client with its Ruby and the bottles of SF_FORMULAE, poured and
 #           relocated on this workstation (../../homebrew/hb_pour.py), owned by the account `sf` (501:20)
@@ -65,6 +66,12 @@ stage)
   S=$(integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py m1-storage/userland build-openssh.nix)
   [ -x "$O/usr/bin/curl" ] && [ -x "$S/bin/ssh" ] || { echo "no overlay or no OpenSSH" >&2; exit 2; }
   mkdir -p "$ST/sys"; cp -a "$O/." "$ST/sys/"; chmod -R u+w "$ST/sys"
+  # AppKit/Cocoa and the system Perl 5.34 (../../macos-compat/build-compat-root.nix; SF_COMPAT=0 leaves them out)
+  if [ "${SF_COMPAT:-1}" = 1 ]; then
+    CR=$(cd integrations/puredarwin/macos-compat && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-compat-root.nix | tail -1)
+    [ -d "$CR/System/Library/Frameworks/AppKit.framework" ] || { echo "no compat root" >&2; exit 2; }
+    cp -a "$CR/." "$ST/sys/"; chmod -R u+w "$ST/sys"
+  fi
   rm -f "$ST/sys/usr/lib/libhbcrash.dylib"                      # a diagnostic of the Homebrew stream
   mkdir -p "$ST/sys/bin" "$ST/sys/libexec" "$ST/sys/etc/ssh"
   for f in ssh scp sftp ssh-add ssh-agent ssh-keyscan; do cp "$S/bin/$f" "$ST/sys/bin/$f"; done

@@ -14,7 +14,9 @@
 #   usr/share/locale                   the tree's locale data (nix/pkgs/base/locale-data.nix)
 #   System/Library/Frameworks/{CoreServices,Security,SystemConfiguration}.framework
 #                                      the tree's arm64 frameworks, binaries only; Security from
-#                                      ./build-security.nix (+ SecTrustCopyCertificateChain)
+#                                      ./build-security.nix (+ SecTrustCopyCertificateChain),
+#                                      CoreServices from ../macos-compat/build-coreservices.nix
+#                                      (+ the Text Encoding Converter and LocaleRefGetPartString)
 #   System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
 #                                      a link to the image's /usr/lib/libFoundation.dylib, as its
 #                                      Versions/A is (macOS's Foundation is version C). The tree's
@@ -32,6 +34,8 @@ let
   libedit = import ./build-libedit.nix;
   iokit = import ./build-iokit.nix;
   security = import ./build-security.nix;
+  # the tree's CoreServices + the text-encoding calls vim and neovim import (GitHub issue 45)
+  coreServices = import ../macos-compat/build-coreservices.nix;
   # The tree's /usr/share/locale (Apple libc format: en_US.UTF-8 and C.UTF-8 among them);
   # upstream's full images carry it, the minimal image does not. Without it setlocale()
   # refuses every UTF-8 locale and tmux, among others, will not start.
@@ -59,7 +63,7 @@ in pkgs.runCommand "darwin-lab-homebrew-overlay-arm64" { } ''
     ln -s A $out/${F}/$2.framework/Versions/Current
     ln -s Versions/Current/$2 $out/${F}/$2.framework/$2
   }
-  framework ${p.coreServices-arm64} CoreServices
+  framework ${coreServices} CoreServices
   framework ${security} Security
   framework ${p.systemConfiguration-arm64} SystemConfiguration
   mkdir -p $out/${F}/Foundation.framework/Versions/C

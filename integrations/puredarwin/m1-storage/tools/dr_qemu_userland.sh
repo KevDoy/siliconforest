@@ -13,10 +13,11 @@
 # DR_QEMU_ROOT_FILES="src=/dest ..."   further files written into the root image, mode 755 (the parent directory is made, its parent must exist)
 # DR_QEMU_PREFIX=<directory>   the /opt/homebrew to put on the second disk instead of the staged one (a copy of the M1's)
 # DR_QEMU_FS_SIZE=<size>       the root file system's size (default 2G)
+# DR_QEMU_STAGE=<directory>    another stage directory (sys, sys.sha256, brew, claude as sf_userland_push.sh stage makes them)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-N=${1:?name}; PHASE=${2:-plain}; M=integrations/puredarwin/m1-storage; W=runs/m1-storage/qemu-dr; U=$M/userland; ST=runs/sf-userland/stage
+N=${1:?name}; PHASE=${2:-plain}; M=integrations/puredarwin/m1-storage; W=runs/m1-storage/qemu-dr; U=$M/userland; ST=${DR_QEMU_STAGE:-runs/sf-userland/stage}
 SRC=${DR_QEMU_ROOT_IMAGE:-artifacts/m1-desktop-010/pcie-enum-candidate-sw01/ramdisk.img}
 [ -s "$ST/sys.sha256" ] && [ -d "$ST/brew/opt/homebrew/Cellar" ] || { echo "run tools/sf_userland_push.sh stage first" >&2; exit 2; }
 BASE=$(cd $M && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-qemu-image.nix 2>/dev/null | tail -1)
