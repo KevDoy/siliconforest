@@ -21,9 +21,9 @@
 extern "C" {
 #endif
 
-/* The SiliconForest partition of THIS machine (J293, internal disk): 16,166,912 blocks (61.7 GiB; shrunk 2026-11-12 to leave 2.5 GB after it for the startup-picker volume). No boot argument changes these. */
+/* The SiliconForest partition of THIS machine (J293, internal disk): 16,035,840 blocks (61.17 GiB; shrunk twice on 2026-11-12: 2.5 GB for the startup-picker volume, 512 MiB for the boot partition). No boot argument changes these. */
 #define PD_SF_FENCE_FIRST  192633862ULL
-#define PD_SF_FENCE_BLOCKS 16166912ULL
+#define PD_SF_FENCE_BLOCKS 16035840ULL
 
 enum {
 	PD_WRING_DIRECTION = 17,        /* the data direction does not fit the opcode and queue */
