@@ -24,6 +24,10 @@
 #         for menus, submenus, pop-up and pull-down buttons and combo boxes, with the keyboard
 #   0018  WindowServer: a popup's anchor and kind in its positioner (flip, slide), where the compositor
 #         put it reported back, a held button kept across the surfaces of an open menu
+#   0019  tip cherry-pick: NSStackView, NSAccessibilityElement (files as at upstream c713d8fb)
+#   0020  AppKit: names applications built against the macOS 26 SDK import (first user: Apple's
+#         Terminal.app, docs/roadmap/issues/SF-Y-terminal-app.md): constants, accessibility helpers,
+#         gesture recognizers, NSTextFinder, private classes that answer nothing to what they lack
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -53,6 +57,8 @@ let
     ./patches/0015-appkit-popup-view-array.patch
     ./patches/0016-appkit-event-queue-discard.patch
     ./patches/0017-appkit-popups.patch
+    ./patches/0019-tip-appkit-stackview-accessibilityelement.patch
+    ./patches/0020-appkit-macos26-additions.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
