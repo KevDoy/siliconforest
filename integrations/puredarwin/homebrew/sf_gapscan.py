@@ -57,8 +57,8 @@ SYSTEM_DIRS = ('usr/lib', 'System/Library', 'bin', 'sbin', 'usr/bin', 'usr/sbin'
 class Root:
     """A root directory, optionally with overlays searched first; logical path -> host file.
     A mount puts a host directory at a logical path (unpacked bottles as /opt/homebrew/Cellar)."""
-    def __init__(self, root, overlays=(), mounts=()):
-        self.roots = [(Path(m[1]), m[0].rstrip('/')) for m in mounts] + [(Path(o), '') for o in overlays] + [(Path(root), '')]
+    def __init__(self, root, overlays=(), mounts=(), under=()):
+        self.roots = [(Path(m[1]), m[0].rstrip('/')) for m in mounts] + [(Path(o), '') for o in overlays] + [(Path(root), '')] + [(Path(u), '') for u in under]
         self.machos = {}
         self.exp = {}
         self.prefer = None          # slice of a universal file: 'arm64e' or 'arm64'
@@ -476,6 +476,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--root', required=True, help='a copy of the root as a directory')
     ap.add_argument('--overlay', action='append', default=[], help='a tree laid over the root (searched first); repeatable')
+    ap.add_argument('--under', action='append', default=[], help='a tree laid under the root (searched last: what the root would get where it has nothing); repeatable')
     ap.add_argument('--brew', action='store_true', help='scan opt/homebrew/Cellar')
     ap.add_argument('--system', action='store_true', help="scan the root's own frameworks, libraries and programs")
     ap.add_argument('--binary', action='append', default=[], help='a logical path in the root, with its load closure; repeatable')
@@ -518,7 +519,7 @@ def main():
             exe = plistlib.load(fh)['CFBundleExecutable']
         mounts.append((lg, hostdir))
         apps.append(lg + '/Contents/MacOS/' + exe)
-    root = Root(a.root, overlays, mounts)
+    root = Root(a.root, overlays, mounts, a.under)
     root.prefer = a.arch
     md, js = [], {}
     for b in apps:
