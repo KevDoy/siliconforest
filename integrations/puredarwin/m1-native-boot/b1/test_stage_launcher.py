@@ -219,6 +219,44 @@ class StageLauncher(unittest.TestCase):
         self.assertTrue(10 <= waited < 11, waited)                      # not the runtime bound of 100 s
         self.assertTrue(fakes.saved['capture-core.json']['console_capture_finalized'])
 
+    def test_stage1_is_entered_as_iboot_enters_it(self):
+        """The installed stage 1: top_of_kernel_data directly behind the image and the boot arguments page
+        (no 64 MiB of room, which the installed machine does not have); stage1room gives the room;
+        stage1go takes the command line from the copy of the kernel file and uploads none of it."""
+        stage1 = fake_m1n1() + b'chosen.asahi,efi-system-partition=x\nchainload=x;sf/boot.bin\n' + bytes(4)
+        (Path(self.tmp.name) / native_stage.STAGE1_TEST).write_bytes(stage1)
+        size = (len(stage1) + 0x3fff) & ~0x3fff
+        for words, room in (('', 0), (' stage1room', 64 << 20)):
+            fakes = Fakes()
+            fakes.console = lambda port, f=fakes: SimpleNamespace(
+                done_seen=True, proof=SimpleNamespace(output=b'SF_STOPPED\n'), dev=SimpleNamespace(write=len, flush=lambda: None),
+                thread=threading.Thread(target=lambda: None), close=lambda: None)
+            fakes.run('native stage stage1 noramdisk multiuser vdm-return noiolog' + words, '-v -s serial=3 rd=uuid cpus=8 pdcpuheld=1 ')
+            record = fakes.saved['native-start.json']
+            self.assertEqual(record['bootargs'], BASE + size + room)
+            self.assertEqual(('memalign', 0x10000, size + room + 0x4000), [e for e in fakes.log if e[0] == 'memalign'][0])
+            entered = b''.join(fakes.mem[a] for a in range(BASE + size + room, BASE + size + room + 0x4000, 0x4000))
+            self.assertEqual(struct.unpack_from('<Q', entered, 32)[0], BASE + size + room + 0x4000)
+            self.assertEqual(self.uploaded(fakes, len(stage1)), stage1)
+        # stage1go
+        args = '-v rd=uuid boot-uuid=u cpus=8 pdcpuheld=1 sfsession_seconds=150 sfmark=1'
+        fakes = Fakes(usb=0)
+        kernel_file = pdsf_pack.records(pdsf_pack.config_text(args, usb_nodes='remove0'), fakes.inputs.contents['kernel'])
+        (Path(self.tmp.name) / native_stage.STAGE1_KERNEL).write_bytes(kernel_file)
+        fakes.run('native stage stage1 stage1go noramdisk multiuser vdm-return noiolog', '-v -s serial=3 rd=uuid cpus=8 pdcpuheld=1 ')
+        record = fakes.saved['native-start.json']
+        self.assertEqual(fakes.saved['before-start.json']['bootargs'], args)
+        self.assertEqual(record['image_bytes'], len(stage1))             # nothing but stage 1 went to the machine
+        self.assertEqual(record['bootargs'], BASE + size)
+        self.assertEqual(sum(e[2] for e in fakes.log if e[0] == 'writemem'), size + 0x4000)
+        (Path(self.tmp.name) / native_stage.STAGE1_KERNEL).write_bytes(
+            pdsf_pack.records(pdsf_pack.config_text(args, usb_nodes='remove0'), os.urandom(5000)))
+        with self.assertRaises(Exception):
+            Fakes(usb=0).run('native stage stage1 stage1go noramdisk multiuser vdm-return noiolog', '-v -s serial=3 rd=uuid cpus=8 pdcpuheld=1 ')
+        for bad in ('native stage stage1room vdm-return', 'native stage stage1 stage1go noramdisk vdm-return'):
+            with self.assertRaises(Exception):
+                native_boot.Mode(bad)
+
     def test_refusals(self):
         with self.assertRaises(ValueError):                             # SMP without the kernel's release path
             Fakes().run('native stage vdm-return', bootargs='-v cpus=8 ')

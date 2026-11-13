@@ -55,7 +55,15 @@ native_mode.txt is one line of words:
                stage1: the file sf-stage1-test.bin (the installed stage 1 with its
                chainload= line, as the installer writes the boot object) is uploaded and
                entered; nothing else. It is expected to find no partition and stop
-               (SF_STOPPED on the UART); the kernel is never entered.
+               (SF_STOPPED on the UART); the kernel is never entered. It is entered as
+               iBoot enters it: top_of_kernel_data directly behind the image.
+               stage1room (with stage1): 64 MiB of room behind the image instead (boot dr34;
+               the installed machine has no such room).
+               stage1go (with stage1 and multiuser): stage 1 is expected to start the system
+               from the boot partition it names (sf/boot.bin, which reads sf/kernel.bin);
+               the capture runs until the session's own restart. sf-kernel.bin next to the
+               launcher is a copy of the kernel file on that partition (for the record and
+               the check that its kernel is this boot's); it is not uploaded.
   vdm-return   native only, read by the controller (tools/m1_bringup_cycle.py as patched by
                launcher-native.patch): when the capture is over and neither Linux nor a
                proxy answers, wait 45 s for a Linux that is coming back by itself, then
@@ -104,7 +112,7 @@ class Mode:
         self.wdt = None
         known = {'probe', 'native', 'nosprr', 'noamx', 'off', 'vdm-return', 'vdm-serial', 'noiolog', 'multiuser'}
         self.vdm_serial = 'vdm-serial' in words
-        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem', 'noramdisk', 'bootbin', 'stage1'}
+        known |= {'stage', 'rechain', 'stagestop', 'usbkeep', 'hostseed', 'lowmem', 'noramdisk', 'bootbin', 'stage1', 'stage1room', 'stage1go'}
         self.stage, self.usb_keep, self.host_seed = ('stage' in words, 'usbkeep' in words, 'hostseed' in words)
         self.low_mem = 'lowmem' in words
         self.no_ramdisk = 'noramdisk' in words
@@ -123,6 +131,9 @@ class Mode:
                 'usbkeep, hostseed, lowmem and noramdisk need stage')
         self.boot_bin, self.stage1 = 'bootbin' in words, 'stage1' in words
         require(not (self.boot_bin or self.stage1) or self.stage, 'bootbin and stage1 need stage')
+        self.stage1_room, self.stage1_go = 'stage1room' in words, 'stage1go' in words
+        require(self.stage1 or not (self.stage1_room or self.stage1_go), 'stage1room and stage1go need stage1')
+        require(not self.stage1_go or 'multiuser' in words, 'stage1go needs multiuser')
         require(not self.boot_bin or (self.no_ramdisk and not self.stage1), 'bootbin needs noramdisk')
         require(not (self.boot_bin or self.stage1) or not (self.host_seed or self.low_mem or self.usb_keep or
                                                            'stagestop' in words or self.wdt is not None),

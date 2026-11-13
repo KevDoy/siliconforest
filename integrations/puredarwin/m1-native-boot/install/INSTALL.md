@@ -1,8 +1,11 @@
 # Installing SiliconForest on the M1's disk: the kit and the steps
 
-> **Nothing in this document has been executed on the M1's disk.** The kit is built and tested
-> on the workstation and, as far as that is possible without the partitions, on the bench from
-> RAM ("What is proven" at the end). The steps that write (4 and 6) are the owner's.
+> **Installed on 13 November 2026** (steps 1 to 6 done by the owner). The first start stopped
+> safely in stage 1: the first kit's `sf/boot.bin` (stage 2 + configuration + collection in one
+> 14.4 MB file) was larger than a stage 1 can start. The fix needed no new install: `sf/boot.bin`
+> is now stage 2 alone and reads `sf/kernel.bin` itself; both were put on SFBOOT from Linux
+> ("Two files, and why" below; "What is proven" at the end). A fresh install from this kit gets
+> the same two files. The steps that write (4 and 6) are the owner's.
 > This replaces sections 4 to 8 of `../b1/INSTALL-PROCEDURE.md`; its sections 1 to 3 (what
 > exists afterwards, where the space is, what the stub needs from Apple) still describe the result.
 
@@ -17,7 +20,7 @@ partition, and the boot object; `step2.sh` in recovery sets the boot policy. Wha
 |---|---|---|
 | OS entry | `installer/installer_data.json` | one entry, "SiliconForest": boot object `m1n1.bin`, next object `sf/boot.bin`, one partition `SFBOOT` (type EFI, FAT32, 500 MiB, filled from the package's `esp/` tree) |
 | Stage 1 | `installer/boot/m1n1.bin` | m1n1 at the lab's pin, `RELEASE=1 CHAINLOADING=1`, our logo, the installed variant (below). The installer appends `chainload=<PARTUUID of SFBOOT>;sf/boot.bin` and puts the result into the stub as the boot object |
-| Package | `installer/os/siliconforest.zip` | `esp/sf/boot.bin` (stage 2 + configuration + kernel collection, 14.4 MB) and the icon |
+| Package | `installer/os/siliconforest.zip` | `esp/sf/boot.bin` (stage 2 alone, 4.1 MB), `esp/sf/kernel.bin` (configuration + kernel collection as a record list, 10.2 MB) and the icon |
 | Icon | `installer/logo.icns` | from `branding/siliconforest-icon.svg` |
 | Menu | `installer/main.py` | the installer's, with one hunk (`installer/main-menu.patch`): only "install into free space", "repair an incomplete installation" and "quit" are offered. Resizing a container, replacing the m1n1 of another stub, rebuilding firmware and other disks are not on the menu |
 
@@ -27,7 +30,7 @@ Two things differ from the earlier plan, on purpose:
 - **SFBOOT is 500 MiB (128,000 blocks), not 512.** The free space is 2,896.16 MiB and the stub
   takes 2,384; 512 would leave 0.16 MiB for whatever alignment `diskutil` applies to two
   partitions whose space starts at an odd block. 500 MiB is the size the installer has always
-  used for its FAT partition; about 12 MiB after it stay unallocated. The file is 14.4 MB.
+  used for its FAT partition; about 12 MiB after it stay unallocated. The two files are 14.3 MB.
 - **SFBOOT has the partition type "EFI System"**, because that is the only type for which the
   installer records the partition and writes `chainload=` (`osinstall.py`: `if ptype == "EFI"`).
   A second EFI-typed partition is what every second Asahi install on one disk has. Linux's own
@@ -46,12 +49,41 @@ No USB device appears, nothing restarts by itself, nothing is written. (The log 
 message is m1n1's own and includes its copyright line, "The Asahi Linux Contributors"; it is
 visible only in this failure case. A normal start shows the mark on black and nothing else.)
 
+## Two files, and why
+
+Stage 1 copies the image it chainloads to its own base. m1n1 (`src/chainload.c`,
+`chainload_image`) refuses an image whose end, `ALIGN_UP(file + the variable lines stage 1
+passes on + 4, 16 KiB)` from that base, lies above the `top_of_kernel_data` stage 1 was started
+with, once its heap (which begins there) is in use; and it always is, because the file was read
+into it: `chainload: image span overlaps the live heap`. iBoot starts our stage 1 as a raw
+object of 4,325,376 bytes plus its variable lines with that top shortly behind it. On the
+installed machine stage 1 ran at `0x805494000` (its variable lines ended at `0x8058b4082`) and
+refused the 14,423,700-byte file, so the top was below `0x806258000`; where exactly is not
+known. **The only room that is certain is stage 1's own image: 4,325,376 bytes.**
+
+- `sf/boot.bin` = stage 2 alone, 4,128,768 bytes: span 4,145,152 with 512 bytes allowed for
+  the lines (stage 1 passes two, 169 bytes), 180,224 bytes to spare. `build.sh` fails when
+  span + 32 KiB exceeds stage 1's size, and `linux/sf-bootbin-install.sh` refuses such a file.
+  Stage 2 is the stage of `../b1` built with m1n1's FAT reader (`CHAINLOADING=1`) and
+  `SF_KERNEL_FILE=1` (`patches/stage2/0001`, `src/pdsf_file.c`), with one EL3 stack instead of
+  four (`patches/stage2/0002`; T8103 has no EL3), which is what keeps it below stage 1's size.
+- `sf/kernel.bin` = the records (configuration, kernel collection, end) that used to follow
+  the image. Stage 2 finds no records behind itself, takes the partition from the line stage 1
+  passes on (`chosen.asahi,efi-system-partition=<PARTUUID>`; stage 1 does not pass
+  `chainload=`, and stage 2 refuses `chainload=`, `boot=` and any other payload), starts the
+  storage controller, reads the file into its heap with m1n1's read-only NVMe and FAT code,
+  stops the controller, and handles the records exactly as appended ones: same checksums, same
+  root rule, `sf_stop` on any failure.
+- Stage 1 in the stub is unchanged (`build.sh` stops if it would build another one,
+  `STAGE1_INSTALLED`): a new stage 1 needs recovery mode again.
+- Records appended to the image still work (`boot-bench.bin`, the bench's start from RAM).
+
 ## What an unattended start does when something fails
 
 | Failure | What happens | What the owner sees | Way out |
 |---|---|---|---|
-| stage 1 finds no partition with that PARTUUID, no `sf/boot.bin`, or cannot read it | `sf_stop` | the m1n1 log and the message above | hold power; start again (default system), or the picker |
-| stage 2 refuses (`PDSF: …`: a checksum, a root other than the one it was built for, no room, no seed from the SEP) | `sf_stop` | the reason line, then the message | the same; then repair `sf/boot.bin` from Linux (`linux/sf-bootbin-install.sh`, `--rollback`) |
+| stage 1 finds no partition with that PARTUUID, no `sf/boot.bin`, cannot read it, or the file is too large for it (`image span overlaps the live heap`: 13 November, the first kit) | `sf_stop` | the m1n1 log and the message above | hold power; start again (default system), or the picker |
+| stage 2 refuses (`PDSF: …`: no `sf/kernel.bin` or it cannot be read, a checksum, a root other than the one it was built for, no room, no seed from the SEP) | `sf_stop` | the reason line, then the message | the same; then repair the files from Linux (`linux/sf-bootbin-install.sh`, `--rollback`) |
 | m1n1 itself panics | `sf_stop` instead of its restart | the message | the same |
 | the kernel starts and finds no root (partition table changed, filesystem gone, the driver's fence refuses) | the kernel waits for the root. Seen once on the bench for four minutes (boot dr03): no restart, nothing written. `IOSetRecoveryBoot` is a no-op in this kernel (`kernel-patches/0001`), and there is no NVRAM driver: boot policy and NVRAM cannot be changed from here. **Not observed beyond four minutes** | the mark, nothing else | hold power |
 | the kernel panics | it spins (boot nb10: "machine will reset or spin", it spun); the report goes to the serial port only | a frozen picture | hold power. The root was mounted read-write: its journal is replayed by SiliconForest at its next start (boots dr13 to dr16); Linux never mounts it |
@@ -151,7 +183,7 @@ Back out: nothing was changed (the Python bundle is a directory inside `mac-kit`
 | "Installation successful!" with `APFS VGID` and **`EFI PARTUUID`** | note the PARTUUID (it is SFBOOT's; put it into `private/disk-root/`, never into git) |
 | instructions for the next step, "Press enter to shut down the system." | read step 5 first, then Enter |
 
-After this: the two partitions exist, `sf/boot.bin` is on SFBOOT, the stub has its recovery
+After this: the two partitions exist, `sf/boot.bin` and `sf/kernel.bin` are on SFBOOT, the stub has its recovery
 and our stage 1 waiting inside `Finish Installation.app`; **the default startup volume is
 SiliconForest, which cannot start yet.**
 Back out: if it stops before "Installation successful": run it again; with an incomplete
@@ -168,16 +200,17 @@ once). Coordinator:
     python3 linux/sf-gpt-check.py check ../../../../private/disk-root/gpt-backup/sf-gpt-after \
         --partuuid $SF_PARTUUID --first $SF_PART_LBA --blocks $SF_PART_BLOCKS \
         --free-first 208669702 --free-last 209411118 --before ../../../../private/disk-root/gpt-backup/sf-gpt-before --new 2
-    $M1 'sudo ./sf-bootbin-install.sh <EFI PARTUUID> --show'     # read-only mount: sf/boot.bin and its sha256 (= out/boot.bin)
+    $M1 'sudo bash ./sf-bootbin-install.sh <EFI PARTUUID> --show' # read-only mount: sf/boot.bin, sf/kernel.bin and their sha256 (= out/)
     $M1 'findmnt -rn | grep nvme; systemctl --failed --no-legend'  # Linux mounted what it always mounts
 
 Expect `GPT ALL OK`: both copies valid and identical, our entry unchanged, every earlier
 entry still there byte for byte, exactly two new entries inside the free space (APFS,
 610,304 blocks; EFI-typed, about 128,000 blocks). The line "N earlier entries changed their
 position" may be non-zero; Linux mounts by UUID. Then a new range list (the successor of
-`runs/m1-storage/linux-d/ranges`: the free-space ranges now lie in the two new partitions,
-which Linux never mounts) and **one disk-root boot from the bench** (the command of boot dr31
-below): `NV_PART verified … found in both GPT copies` is the driver's own answer to "does it
+`runs/m1-storage/linux-d/ranges`: `linux-e/ranges`, the same plus three ranges of SFBOOT; the
+free-space ranges now lie in the two new partitions, which Linux never mounts; put
+`SF_BOOT_PARTUUID`, `SF_BOOT_LBA`, `SF_BOOT_BLOCKS` into `private/disk-root/sf-part.env`) and
+**one boot of the installed chain from the bench** (the last command below): `NV_PART verified … found in both GPT copies` is the driver's own answer to "does it
 still find p3".
 If the check fails: do not go on to step 6. Nothing of SiliconForest starts from the disk
 (the driver refuses by itself); the saved tables are the reference; what to restore is decided then.
@@ -225,17 +258,22 @@ The checks of step 5 again (table, mounts), `journalctl -k -b | grep "macsmc-reb
 
 ## Updating the kernel later (no recovery mode, no macOS)
 
-    ./build.sh                                              # workstation: out/boot.bin
-    scp out/boot.bin linux/sf-bootbin-install.sh chrisk@10.1.1.211:
-    ssh … 'sudo ./sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin'
+    ./build.sh && python3 -I -B test_kit.py                 # workstation: out/boot.bin, out/kernel.bin
+    scp out/boot.bin out/kernel.bin linux/sf-bootbin-install.sh chrisk@10.1.1.211:
+    ssh … 'sudo bash ./sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin kernel.bin'
 
 The script refuses any partition that is not FAT, labelled SFBOOT, EFI-typed, at most
-600 MiB, unmounted, absent from `/etc/fstab` and not the EFI partition Linux booted from; it
-refuses a file that is not stage + configuration + kernel with good checksums, built for the
-root on this disk, in the installed variant, at most 60 MiB. It keeps the previous file as
-`sf/boot.bin.old`; `--rollback` swaps them back; `--show` lists what is there. Stage 1 never
-changes. **Prove a new `boot.bin` on the bench first** (`DR_BOOTBIN=`, below).
-The script has not been run: there is no SFBOOT yet.
+600 MiB, unmounted, absent from `/etc/fstab` and not the EFI partition Linux booted from. It
+refuses a `boot.bin` that is not the installed stage 2 alone, built for the root on this disk,
+or that would not fit in stage 1's footprint; and a `kernel.bin` that is not configuration +
+kernel with good checksums for that root, or whose session ends by itself (the bench's
+`kernel-bench.bin`, accepted only with `SF_BENCH=1` and never kept as a previous file). A file
+that is already there byte for byte is left alone. It keeps each replaced file as `sf/<name>.old`;
+`--rollback` swaps back every file that has one; `--show` lists what is there. Stage 1 never
+changes. **Prove new files on the bench first** (below): from RAM with `DR_BOOTBIN=`
+(`boot-bench.bin`), or the installed chain itself with `SF_BENCH=1` + `DR_STAGE1_GO=`.
+`sf/boot.bin.old` on the installed machine is the first kit's 14.4 MB file: stage 1 refuses
+it, so a `--rollback` to it stops safely and does not start anything.
 
 ## Uninstall
 
@@ -258,25 +296,35 @@ documentation, and the script's way of finding the container has never met a rea
 
 `docs/roadmap/issues/SF-R-storage.md`, "Step 6", has the evidence lines. In short:
 
-- **Proven on the M1 from RAM.** dr31: the bytes of `boot-bench.bin` (= `boot.bin` plus
-  `sfsession_seconds=150 sfmark=1` in its configuration record) uploaded and entered, nothing
-  else sent: desktop from the disk root 11 s later, Wi-Fi, clean self-restart with
-  `pdnvme_ttl=0`, no controller reset, Linux finds the root clean and everything else unchanged.
-  dr32: stage 1 as the installer writes it, with a PARTUUID nobody has: `Chainload failed:
-  PartitionNotFound`, `SiliconForest: stopped`, no proxy, no kernel, disk unchanged.
-  dr34: the same stage 1 with `chainload=<Linux's EFI partition>;m1n1/boot.bin` (read-only)
-  finds the partition, reads the file, copies it to its own base and jumps: Linux came up by
-  itself, its file and every watched range unchanged.
-- **Proven on the workstation.** `test_kit.py`: the installer's own code with our data asks
-  for exactly one EFI-typed 500 MiB partition after the stub, puts `sf/boot.bin` on it and
-  builds the boot object from our stage 1 and the two variable lines. `sf-gpt-check.py`
-  against the real table copies and altered ones.
-- **First proven at install.** Stage 1 chainloading *our* `sf/boot.bin` from *our* FAT
-  partition (dr34 did it with Linux's file from Linux's partition); iBoot starting our stage 1; picker name and icon; the installer's
-  run on macOS and `diskutil`'s placement; the three macOS scripts and the Linux update
-  script (never run); a start without the bench's cable; a session longer than 150 s.
-  If any of the first three fails, the machine shows the stop message or Apple's recovery
-  text and the way out is the picker; Linux and macOS are not involved.
+- **The installed chain, proven on the bench with the real boot partition** (13 November,
+  after the install). dr35: the boot object that is in the stub (stage 1 + the two variable
+  lines with SFBOOT's PARTUUID), uploaded and entered as iBoot enters it (top of memory
+  directly behind it), with the first kit's 14.4 MB `sf/boot.bin` on SFBOOT: `Partition offset:
+  209280006`, `chainload: image span overlaps the live heap`, `SiliconForest: stopped` — the
+  owner's failure, line for line. dr36: the same stage 1, the new `sf/boot.bin` and
+  `sf/kernel.bin` (bench session) on SFBOOT, nothing else uploaded: stage 1 read 4,128,768
+  bytes and started them, stage 2 read 10,163,888 bytes itself, checksums ok, kernel entered,
+  desktop from the disk root, Wi-Fi, clean self-restart, no controller reset, Linux finds the
+  root clean and the 30 ranges it never writes (SFBOOT's three among them) unchanged.
+- **Proven on the M1 from RAM earlier.** dr31: stage 2 with the records behind it, uploaded
+  and entered (the first kit's file; the appended path is kept, `boot-bench.bin`). dr32:
+  stage 1 with a PARTUUID nobody has stops with `PartitionNotFound`. dr34: stage 1 given 64 MiB
+  of room chainloaded Linux's `m1n1/boot.bin` (a layout the installed machine does not have:
+  `DR_STAGE1_ROOM=1`).
+- **Proven on the workstation.** `test_kit.py` (11 tests): the installer's own code with our
+  data asks for exactly one EFI-typed 500 MiB partition after the stub, puts `sf/boot.bin` and
+  `sf/kernel.bin` on it and builds the boot object from our stage 1 and the two variable lines;
+  `boot.bin` fits stage 1's footprint and the first kit's file does not; the update script's
+  checks accept the pair and refuse seven wrong ones. `sf-gpt-check.py` against the real table
+  copies (before and after the install) and altered ones.
+- **Proven by the install itself.** iBoot starts our stage 1 from the picker entry (logo, then
+  its log); the installer's run, `diskutil`'s placement (`GPT ALL OK`), `sf-bootbin-install.sh`
+  on the real SFBOOT (install, refusals, `--show`).
+- **Not proven yet.** The real start from the picker with the new files (iBoot's own
+  `top_of_kernel_data`, which the bench can only imitate; the build's fit check does not depend
+  on it); `sf/kernel.bin` as it is on SFBOOT now (dr36 booted `kernel-bench.bin`, which differs
+  in the configuration record only: two words that end the session); a start without the
+  bench's cable; a session longer than 150 s; `--rollback`; uninstall.
 
 Bench commands (the M1 in Linux, `private/disk-root/sf-part.env` present):
 
@@ -284,3 +332,17 @@ Bench commands (the M1 in Linux, `private/disk-root/sf-part.env` present):
         tools/bench.sh run integrations/puredarwin/m1-storage/tools/dr_desk_slot.sh drNN native 300
     BENCH_WHO=disk DR_RW=1 DR_HALT=reboot DR_STAGE=disk DR_STAGE1=$PWD/integrations/puredarwin/m1-native-boot/install/out/sf-stage1-test.bin \
         tools/bench.sh run integrations/puredarwin/m1-storage/tools/dr_desk_slot.sh drNN native 180
+
+The installed chain (stage 1 with SFBOOT's PARTUUID is `out/sf-stage1-installed.bin`, built when
+`SF_BOOT_PARTUUID` is in `sf-part.env`). First put the bench session's kernel file on SFBOOT,
+afterwards the real one again (the bench one is not kept as `.old`):
+
+    O=$PWD/integrations/puredarwin/m1-native-boot/install/out
+    scp $O/boot.bin $O/kernel.bin $O/kernel-bench.bin …/linux/sf-bootbin-install.sh chrisk@10.1.1.211:
+    ssh … 'SF_BENCH=1 sudo --preserve-env=SF_BENCH bash ./sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin kernel-bench.bin'
+    BENCH_WHO=disk DR_RW=1 DR_HALT=reboot DR_STAGE=disk DR_STAGE1=$O/sf-stage1-installed.bin DR_STAGE1_GO=$O/kernel-bench.bin \
+        tools/bench.sh run integrations/puredarwin/m1-storage/tools/dr_desk_slot.sh drNN native 330
+    ssh … 'sudo bash ./sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin kernel.bin'
+
+The bench's return to Linux relies on Linux being the default startup volume
+(`sudo asahi-bless --list-volumes`: the star): check it before any bench boot.

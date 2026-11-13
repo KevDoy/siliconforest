@@ -4,7 +4,9 @@
 
     pdsf_pack.py pack --m1n1 out/m1n1-sf-stage.bin --kernel <collection>/kernel \
         [--ramdisk root.img] --bootargs '<kernel command line>' [--set key=value ...] -o image.bin
-    pdsf_pack.py list image.bin
+    pdsf_pack.py pack --kernel <collection>/kernel --bootargs '...' [--set ...] -o kernel.bin
+        (no --m1n1: the record list alone, the file sf/kernel.bin an installed stage 2 reads)
+    pdsf_pack.py list image.bin | kernel.bin
 
 Also imported by the launcher on the controller (native_boot.py, mode word `stage`): standard
 library only. Nothing here talks to a device or writes anywhere but the named output file.
@@ -96,6 +98,8 @@ def parse(data, offset=0):
 
 def records_offset(data):
     """Offset of the record list in an image: the stage m1n1's footprint from its load header."""
+    if data[:4] == struct.pack('<I', MAGIC):
+        return 0                                    # the record list alone (sf/kernel.bin)
     if data[0x808:0x810] != b'AURALOAD':
         raise ValueError('no m1n1 load header')
     return struct.unpack_from('<Q', data, 0x808 + 0x10)[0]
@@ -105,7 +109,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
     pack = sub.add_parser('pack')
-    pack.add_argument('--m1n1', required=True)
+    pack.add_argument('--m1n1')
     pack.add_argument('--kernel', required=True)
     pack.add_argument('--ramdisk')
     pack.add_argument('--bootargs', required=True)
@@ -124,10 +128,13 @@ def main(argv=None):
                 NAMES[kind], stored, ' gzip' if flags & F_GZIP else '', raw, 'ok' if ok else 'WRONG'))
         return 0 if all(item[4] for item in found) else 1
     keys = dict(item.split('=', 1) for item in args.set)
-    m1n1 = open(args.m1n1, 'rb').read()
+    m1n1 = open(args.m1n1, 'rb').read() if args.m1n1 else b''
     kernel = open(args.kernel, 'rb').read()
     ramdisk = open(args.ramdisk, 'rb').read() if args.ramdisk else None
-    data = image(m1n1, config_text(args.bootargs, **keys), kernel, ramdisk)
+    if args.m1n1:
+        data = image(m1n1, config_text(args.bootargs, **keys), kernel, ramdisk)
+    else:
+        data = records(config_text(args.bootargs, **keys), kernel, ramdisk)
     with open(args.output, 'wb') as out:
         out.write(data)
     print('%s: %d bytes (m1n1 %d, kernel %d%s)' % (

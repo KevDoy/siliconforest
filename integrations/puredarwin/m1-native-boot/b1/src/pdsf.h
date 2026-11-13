@@ -162,6 +162,12 @@ long pdsf_adt_size(const u8 *src, u64 srclen);
 #ifndef PDSF_HOST
 /* pdsf_boot.c. 1: no SiliconForest payload at `payload`; 0: next_stage is set; < 0: failed */
 int pdsf_boot(void *payload);
+/* The same for a record list anywhere in RAM (`appended` 0: in m1n1's heap) */
+int pdsf_boot_records(const u8 *payload, u64 limit, int appended);
+/* Installed stage 2 only (../install/src/pdsf_file.c, SF_KERNEL_FILE): the same from the file
+ * PDSF_KERNEL_FILE of the FAT partition with this PARTUUID. 0: next_stage is set; < 0: failed */
+#define PDSF_KERNEL_FILE "sf/kernel.bin"
+int pdsf_boot_file(const char *partuuid);
 #endif
 
 #endif

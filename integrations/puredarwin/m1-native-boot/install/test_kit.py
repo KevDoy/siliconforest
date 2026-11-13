@@ -8,7 +8,7 @@ what it writes as the stub's boot object. Nothing is partitioned, mounted or for
 
     python3 -I -B test_kit.py [out directory]
 """
-import hashlib, json, os, pathlib, subprocess, sys, tempfile, types, unittest
+import hashlib, json, os, pathlib, struct, subprocess, sys, tempfile, types, unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = pathlib.Path(sys.argv.pop(1)) if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else HERE / 'out'
@@ -22,6 +22,8 @@ import pdsf_pack
 
 FREE_BLOCKS, STUB = 741417, util.align_down(util.psize('2.5GB'), util.psize('1MiB'))
 PARTUUID = '0FC63DAF-0000-4000-8000-000053464254'
+# the stage 1 in the stub of the installed machine (build.sh STAGE1_INSTALLED)
+STAGE1_INSTALLED = '44c1ef0bda96224f5fe8c6228cc12ec1966b7781f38844cea960b21b47654318'
 
 
 class Recorder:
@@ -84,13 +86,70 @@ class Kit(unittest.TestCase):
     def test_boot_partition_content(self):
         mnt = pathlib.Path(self.tmp) / 'mnt-disk0s99'
         files = sorted(str(p.relative_to(mnt)) for p in mnt.rglob('*') if p.is_file())
-        self.assertEqual(files, ['sf/boot.bin'])
-        data = (mnt / 'sf/boot.bin').read_bytes()
-        self.assertEqual(data, (OUT / 'boot.bin').read_bytes())
-        found, end = pdsf_pack.parse(data, pdsf_pack.records_offset(data))
+        self.assertEqual(files, ['sf/boot.bin', 'sf/kernel.bin'])
+        # sf/boot.bin: stage 2 alone, nothing behind the image
+        boot = (mnt / 'sf/boot.bin').read_bytes()
+        self.assertEqual(boot, (OUT / 'boot.bin').read_bytes())
+        self.assertEqual(boot, (OUT / 'sf-stage2.bin').read_bytes())
+        self.assertEqual(struct.unpack_from('<Q', boot, 0x818)[0], len(boot))
+        # sf/kernel.bin: the record list alone
+        data = (mnt / 'sf/kernel.bin').read_bytes()
+        self.assertEqual(data, (OUT / 'kernel.bin').read_bytes())
+        self.assertEqual(pdsf_pack.records_offset(data), 0)
+        found, end = pdsf_pack.parse(data, 0)
         self.assertEqual([i[0] for i in found], [pdsf_pack.CONFIG, pdsf_pack.KERNEL])
         self.assertTrue(all(i[4] for i in found))
-        self.assertLessEqual(len(data), pdsf_pack.ESP_IMAGE_LIMIT)
+        self.assertEqual(end, len(data))
+
+    def test_stage1_can_start_boot_bin(self):
+        # m1n1 src/chainload.c chainload_image: with stage 1's heap in use, an image whose end
+        # (ALIGN_UP(file + variable lines + 4, 16 KiB) from stage 1's base) lies above the
+        # top_of_kernel_data stage 1 inherited is refused. Certain room: stage 1's own image.
+        stage1, boot = (OUT / 'sf-stage1.bin').read_bytes(), (OUT / 'boot.bin').read_bytes()
+        self.assertEqual(hashlib.sha256(stage1).hexdigest(), STAGE1_INSTALLED)
+        self.assertEqual(len(stage1), 4325376)
+        lines = ('chosen.asahi,m1n1-stage1-version=%s\nchosen.asahi,efi-system-partition=%s\n'
+                 % (m1n1.get_version(str(OUT / 'sf-stage1.bin')).split('##')[-1], PARTUUID.lower())).encode()
+        self.assertLess(len(lines), 512)
+        span = lambda size, extra: (size + extra + 4 + 16383) // 16384 * 16384
+        self.assertLessEqual(span(len(boot), 512) + (32 << 10), len(stage1))
+        # the file of the first install (stage 2 + records, 14,423,700 bytes) does not fit: the refusal the
+        # installed machine showed
+        self.assertGreater(span(14423700, len(lines)), len(stage1))
+        # stage 2 reads the kernel file itself and cannot be told to chainload; stage 1 knows no kernel file
+        self.assertIn(b'sf/kernel.bin', boot)
+        self.assertIn(b'chainload=, boot= and other payloads are not accepted', boot)
+        self.assertNotIn(b'sf/kernel.bin', stage1)
+
+    def test_linux_update_script_checks(self):
+        script = (HERE / 'linux' / 'sf-bootbin-install.sh').read_text()
+        code = script.split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+        text = (OUT / 'kernel.bin').read_bytes()[32:1200].decode('ascii', 'replace')
+        root = text.split('boot-uuid=', 1)[1].split()[0]
+        def check(boot, kernel, bench='0', root=root):
+            return subprocess.run([sys.executable, '-I', '-B', '-c', code, str(boot), str(kernel), root, bench],
+                                  capture_output=True, text=True)
+        tmp = pathlib.Path(self.tmp)
+        self.assertEqual(check(OUT / 'boot.bin', OUT / 'kernel.bin').returncode, 0)
+        self.assertIn('BENCH SESSION', check(OUT / 'boot.bin', OUT / 'kernel-bench.bin', '1').stdout)
+        refused = [
+            (OUT / 'boot.bin', OUT / 'kernel-bench.bin', "session ends by itself"),          # a bench kernel, unasked
+            (OUT / 'boot-bench.bin', OUT / 'kernel.bin', 'not stage 2 alone'),              # records behind the image
+            (OUT / 'sf-stage1.bin', OUT / 'kernel.bin', 'do not fit'),                      # too large for stage 1
+            (OUT / 'kernel.bin', OUT / 'kernel.bin', 'no m1n1 load header'),
+            (OUT / 'boot.bin', OUT / 'boot.bin', 'not a record'),
+        ]
+        damaged = bytearray((OUT / 'kernel.bin').read_bytes()); damaged[5000] ^= 1
+        (tmp / 'damaged.bin').write_bytes(damaged)
+        refused.append((OUT / 'boot.bin', tmp / 'damaged.bin', 'checksum'))
+        (tmp / 'longer.bin').write_bytes((OUT / 'kernel.bin').read_bytes() + bytes(4))
+        refused.append((OUT / 'boot.bin', tmp / 'longer.bin', 'nothing else'))
+        for boot, kernel, why in refused:
+            result = check(boot, kernel)
+            self.assertNotEqual(result.returncode, 0, why)
+            self.assertIn(why, result.stderr, why)
+        self.assertIn('another root', check(OUT / 'boot.bin', OUT / 'kernel.bin', root='0' * 36).stderr)
+        subprocess.run(['bash', '-n', str(HERE / 'linux' / 'sf-bootbin-install.sh')], check=True)
 
     def test_boot_object_is_stage1_with_the_chainload_line(self):
         stage1 = (OUT / 'sf-stage1.bin').read_bytes()
@@ -119,11 +178,11 @@ class Kit(unittest.TestCase):
             self.assertIn(b'SF_STOPPED', image)                 # the installed variant: stops, no proxy, no restart
         self.assertNotIn(b'PDSF: ', s1)                          # stage 1 has no kernel loader
         self.assertIn(b'PDSF: ', s2)
-        # only the configuration record differs between boot.bin and the bench's image
-        a, b = (OUT / 'boot.bin').read_bytes(), (OUT / 'boot-bench.bin').read_bytes()
-        at = pdsf_pack.records_offset(a)
-        fa, fb = pdsf_pack.parse(a, at)[0], pdsf_pack.parse(b, at)[0]
-        self.assertEqual(a[:at], b[:at]); self.assertEqual(a[:at], s2)
+        # only the configuration record differs between kernel.bin and the bench's kernel file
+        a, b = (OUT / 'kernel.bin').read_bytes(), (OUT / 'kernel-bench.bin').read_bytes()
+        fa, fb = pdsf_pack.parse(a, 0)[0], pdsf_pack.parse(b, 0)[0]
+        # the bench's image for a start from RAM: stage 2, the bench's records behind it, four zero bytes
+        self.assertEqual((OUT / 'boot-bench.bin').read_bytes(), s2 + b + bytes(4))
         ka, kb = a[fa[1][5]:fa[1][5] + fa[1][2]], b[fb[1][5]:fb[1][5] + fb[1][2]]
         self.assertEqual(hashlib.sha256(ka).digest(), hashlib.sha256(kb).digest())
         ta, tb = a[fa[0][5]:fa[0][5] + fa[0][2]].decode(), b[fb[0][5]:fb[0][5] + fb[0][2]].decode()

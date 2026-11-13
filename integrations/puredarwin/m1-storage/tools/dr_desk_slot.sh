@@ -19,7 +19,7 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; MODE=${2:?hv or native}; LIMIT=${3:-200}
-R=${NV_RANGE_FILE:-runs/m1-storage/linux-d/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
+R=${NV_RANGE_FILE:-runs/m1-storage/linux-e/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
 [ ! -e runs/m1-storage/STOP ] || { echo "runs/m1-storage/STOP exists: $(cat runs/m1-storage/STOP)" >&2; exit 3; }
 stop() { echo "$1" | tee runs/m1-storage/STOP; exit 3; }
 . private/disk-root/sf-part.env || exit 2
@@ -30,10 +30,11 @@ C=runs/m1-desktop-010/pcie-enum-attempt-$N
 # natively nothing is typed back to the controller the same way: its own status is checked for Linux, the rest by the verdict
 grep -q '"status": *"[A-Z_]*LINUX_VERIFIED"' "$C/result.json" 2>/dev/null || stop "$N: the cycle did not end with Linux verified; all storage boots stopped"
 "$HERE/tools/linux_m1.sh" all "$N-after" "$R" || stop "$N: Linux could not be read after the boot; all storage boots stopped"
-if [ -n "${DR_STAGE1:-}" ]; then
-  # The installed stage 1 with a boot partition that does not exist: it must stop by itself, with its reason on
-  # the console, enter no kernel and change nothing on the disk (it starts the storage controller to read the
-  # partition table, as every stage 1 does).
+export SF_BOOT_LBA=${SF_BOOT_LBA:-} SF_BOOT_BLOCKS=${SF_BOOT_BLOCKS:-}   # sf-part.env: the boot partition (dr_plain_ranges.py)
+if [ -n "${DR_STAGE1:-}" ] && [ -z "${DR_STAGE1_GO:-}" ]; then
+  # The installed stage 1 with a boot partition that does not exist, or with a file it cannot start: it must
+  # stop by itself, with its reason on the console, enter no kernel and change nothing on the disk (it starts
+  # the storage controller to read the partition table, as every stage 1 does).
   sleep 30
   DR_OUT=$ROOT/runs/m1-storage/$N-wcheck.txt "$HERE/tools/dr_linux_root.sh" wcheck > /dev/null || stop "$N: our partition could not be checked from Linux after the stage 1 test; all storage boots stopped"
   CON=$(mktemp); strings -n 4 "$C/guest/console.bin" | sed -e 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' > "$CON"
@@ -49,13 +50,14 @@ if [ -n "${DR_STAGE1:-}" ]; then
     want "it said what to do" 'Hold the power button'
     wantnot "no kernel was entered" 'Darwin Kernel Version'
     wantnot "no proxy was offered" 'Running proxy'
+    echo "DR_STAGE1 reason: $(grep -a 'Chainload failed\|chainload: image\|chainload: .*overlap' "$CON" | head -2 | tr '\n' ';' | cut -c1-200)"
     grep -a -i 'chainload\|nvme\|payload\|SiliconForest\|partition\|GPT\|fat' "$CON" | cut -c1-200 | head -40 | sed 's/^/DR_STAGE1 line /'
   } | tee "runs/m1-storage/$N-verdict.txt"
   rm -f "$CON"; V=runs/m1-storage/$N-verdict.txt
   grep -q '^DR_STAGE1 SFL_FSCK_RC 0$' "$V" && grep -q '^DR_STAGE1 SFL_SB_FIRST Filesystem state: *clean$' "$V" && grep -q '^DR_STAGE1 linux_side=ok$' "$V" \
     || stop "$N: after the stage 1 test our partition is not clean in Linux, or a range Linux never writes or a SMART counter changed; all storage boots stopped"
   if grep -q '^DR_STAGE1 FAIL' "$V"; then echo "DR_STAGE1 storage checks passed; $(grep -c '^DR_STAGE1 FAIL' "$V") line(s) FAILED"; exit 1; fi
-  echo "DR_STAGE1 PASSED: stage 1 found no boot partition, stopped by itself, entered nothing; the disk is unchanged"
+  echo "DR_STAGE1 PASSED: stage 1 started nothing (its reason is the line above), stopped by itself, entered nothing; the disk is unchanged"
   exit 0
 fi
 if [ "${DR_STAGE_STOP:-0}" = 1 ]; then
@@ -77,7 +79,7 @@ if [ "${DR_STAGE_STOP:-0}" = 1 ]; then
   echo "DR_STOP PASSED: the stage placed what the launcher would have placed, the kernel was not entered, our partition is untouched"
   exit 0
 fi
-if [ "${DR_PLAIN:-0}" = 1 ]; then
+if [ "${DR_PLAIN:-0}" = 1 ] || [ -n "${DR_STAGE1_GO:-}" ]; then
   # A session without sfbench= prints none of the bench's lines: no verdict. Storage (these stop the stream): the
   # machine came back by itself, our partition is clean in Linux, every range Linux never writes is as before. The rest is
   # reported line by line (PLAIN ok / PLAIN FAIL) from what the session and sf-halt themselves print.
@@ -90,6 +92,23 @@ if [ "${DR_PLAIN:-0}" = 1 ]; then
     echo "DR_PLAIN reset_attempts=$(sed -n 's/.*"reset_attempts": *\([0-9]*\).*/\1/p' "$C/result.json" | head -1)"
     want() { if grep -a -q -- "$2" "$CON"; then echo "DR_PLAIN ok   $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-200)"; else echo "DR_PLAIN FAIL $1"; fi; }
     wantnot() { if grep -a -q -- "$2" "$CON"; then echo "DR_PLAIN FAIL $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-160)"; else echo "DR_PLAIN ok   $1"; fi; }
+    if [ -n "${DR_STAGE1_GO:-}" ]; then
+      # the installed chain: stage 1 (uploaded, entered as iBoot enters it) -> sf/boot.bin from the boot
+      # partition -> sf/kernel.bin from the boot partition -> the kernel; nothing else was uploaded
+      want "stage 1 is ours" 'siliconforest-stage1'
+      want "stage 1 read sf/boot.bin from the boot partition" 'File read successfully'
+      want "stage 1 started it" 'chainload: image 0x'
+      wantnot "stage 1 did not refuse it" 'overlaps the live heap'
+      want "stage 2 is ours" 'siliconforest-boot-v'
+      want "stage 2 read sf/kernel.bin itself" 'PDSF: reading sf/kernel.bin'
+      want "the records came from the boot partition" 'PDSF: SiliconForest payload at .*read from the boot partition'
+      want "the kernel record's checksum" 'PDSF: kernel .* crc [0-9a-f]* ok'
+      want "the root rule" 'PDSF: root: the disk filesystem this stage was built for'
+      want "the kernel was entered" 'PDSF: entering XNU'
+      wantnot "nothing stopped" '^SF_STOPPED'
+      [ "$(grep -a -c 'File read successfully' "$CON")" = 2 ] && echo "DR_PLAIN ok   two files were read from the boot partition" || echo "DR_PLAIN FAIL two files were read from the boot partition"
+      grep -a 'chainload\|Partition offset\|File size\|nvme: \|PDSF: \(reading\|SiliconForest\|config\|kernel\|root\|XNU memory\|boot seed\|entering\)\|##m1n1_ver\|^m1n1 [0-9a-f]\|Vectoring\|payload' "$CON" | cut -c1-200 | head -40 | sed 's/^/DR_PLAIN chain /'
+    fi
     wantnot "the boot arguments carry no sfbench=" 'sfbench='
     wantnot "nothing of the bench ran (no NV_ line)" '^NV_[A-Z]'
     want "the session is the disk's own, started by launchd, without the bench" 'SF_SESSION begin seconds=[0-9]* bench=no started_by=launchd'

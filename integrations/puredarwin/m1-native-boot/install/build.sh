@@ -15,11 +15,19 @@
 #   sf-stage1.bin        stage 1: m1n1 that chainloads sf/boot.bin from a FAT partition named by
 #                        PARTUUID (RELEASE, CHAINLOADING, SF_INSTALLED, our logo). The installer
 #                        appends the chainload= line and puts the result into the stub.
-#   sf-stage2.bin        stage 2: the stage of ../b1 (m1n1 + pdsf), RELEASE, SF_INSTALLED, our logo
-#   boot.bin             stage 2 + configuration + collection: the file sf/boot.bin of the boot partition
-#   boot-bench.bin       the same with `sfsession_seconds=150 sfmark=1` added to the command line, for the
+#   sf-stage2.bin        stage 2: the stage of ../b1 (m1n1 + pdsf), RELEASE, SF_INSTALLED, our logo, with
+#                        m1n1's FAT reader (CHAINLOADING) and SF_KERNEL_FILE: it reads sf/kernel.bin itself
+#   boot.bin             = sf-stage2.bin, nothing behind it: the file sf/boot.bin of the boot partition.
+#                        Stage 1 can only start an image that fits in its own footprint (m1n1
+#                        chainload.c, "image span overlaps the live heap"): the build FAILS if it does not.
+#   kernel.bin           configuration + collection as a record list: the file sf/kernel.bin, read by stage 2
+#   kernel-bench.bin     the same with `sfsession_seconds=150 sfmark=1` added to the command line, for the
 #                        bench proof (a session that ends itself); differs in the configuration record only
+#   boot-bench.bin       stage 2 + the records of kernel-bench.bin behind it (bench only, DR_BOOTBIN: the
+#                        appended-records path, entered from RAM; too large for a stage 1)
 #   sf-stage1-test.bin   stage 1 as the installer would write it, with a PARTUUID that does not exist (bench)
+#   sf-stage1-installed.bin  the same with the PARTUUID of the real boot partition (SF_BOOT_PARTUUID in
+#                        sf-part.env, when it is there): the boot object that is in the stub (bench)
 #   siliconforest.icns   the icon
 #   mac-kit/, siliconforest-mac-kit.tar   what is copied to macOS (INSTALL.md step 2)
 #   build.json           sizes and digests (no identifiers)
@@ -93,6 +101,8 @@ m1n1() { # <name> <version tag> <with the stage's records: 0|1> <make variables.
       [ "$(sha256sum build/pdsf_el2.bin | cut -d' ' -f1)" = "$(sed -n "s/^STUB_SHA256 = '\(.*\)'/\1/p" "$B1/../native_stub.py")" ] || die "el2_drop.S does not assemble to the booted page"
     fi
     for p in "$HERE"/patches/*.patch; do git apply "$p"; done
+    # stage 2 only (stage 1's source stays exactly what the stage 1 in the stub was built from)
+    [ "$pdsf" != 1 ] || { for p in "$HERE"/patches/stage2/*.patch; do git apply "$p"; done; cp "$HERE/src/pdsf_file.c" src/; }
     cp "$WORK/siliconforest_128.bin" "$WORK/siliconforest_256.bin" data/
     M1N1_VERSION_TAG=$tag make -j"$(nproc)" USE_CLANG=1 CARGO_FLAGS="$cargo" RELEASE=1 SF_INSTALLED=1 \
       BUILTIN_LOGO=siliconforest "$@" build/m1n1.bin > "$OUT/$name.log" 2>&1 || { tail -30 "$OUT/$name.log" >&2; exit 1; }
@@ -104,7 +114,15 @@ m1n1() { # <name> <version tag> <with the stage's records: 0|1> <make variables.
 }
 m1n1 sf-stage1 "$PIN-siliconforest-stage1-v1" 0 CHAINLOADING=1
 grep -q '^#define CHAINLOADING$' "$WORK/sf-stage1/build/build_cfg.h" || die "stage 1 cannot chainload"
-m1n1 sf-stage2 "$PIN-siliconforest-boot-v1" 1
+# The stage 1 that is in the stub of the installed machine (13 November 2026). It can only be replaced
+# from recovery mode, and everything below is fitted to it: a build that makes another one stops here.
+STAGE1_INSTALLED=44c1ef0bda96224f5fe8c6228cc12ec1966b7781f38844cea960b21b47654318
+[ "$(sha256sum "$OUT/sf-stage1.bin" | cut -d' ' -f1)" = "$STAGE1_INSTALLED" ] || [ "${SF_NEW_STAGE1:-0}" = 1 ] ||
+  die "sf-stage1.bin is not the stage 1 that is installed (SF_NEW_STAGE1=1: build a new one, which needs a new install)"
+m1n1 sf-stage2 "$PIN-siliconforest-boot-v2" 1 CHAINLOADING=1 SF_KERNEL_FILE=1
+grep -q '^#define SF_KERNEL_FILE$' "$WORK/sf-stage2/build/build_cfg.h" || die "stage 2 does not read sf/kernel.bin"
+! grep -q '^#define SF_KERNEL_FILE$' "$WORK/sf-stage1/build/build_cfg.h" || die "stage 1 is built as a stage 2"
+grep -a -q 'sf/kernel.bin' "$OUT/sf-stage2.bin" || die "stage 2 does not name sf/kernel.bin"
 [ "$(grep -a -c -F "$SF_FSUUID" "$OUT/sf-stage2.bin")" -ge 1 ] || die "stage 2 does not carry the root's filesystem UUID"
 
 # ---- boot.bin -----------------------------------------------------------------------------
@@ -114,17 +132,39 @@ ARGS="-v debug=0x14e keepsyms=1 serial=0x13 serial-device-name=uart0 disable-uar
 ARGS="$ARGS pdm1kbd=1 pdm1trackpadenum=1 pdm1trackpadchild=1 cpus=8 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2"
 ARGS="$ARGS rd=uuid boot-uuid=$SF_FSUUID wdt=-1 pdnvme=3 pdnvme_ttl=0 pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS"
 ARGS="$ARGS pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 pdthermal_delay=4 pdcpuheld=1 pdapciebridge=1${SF_EXTRA_BOOTARGS:+ $SF_EXTRA_BOOTARGS}"
-pack() { python3 -B "$B1/pdsf_pack.py" pack --m1n1 "$OUT/sf-stage2.bin" --kernel "$KC/kernel" --bootargs "$1" \
-           --set display=1 --set usb-nodes=remove0 --set sprr=1 --set amx=1 --set "xnu-base=$XNU_BASE" -o "$2" > /dev/null
-         python3 -B "$B1/pdsf_pack.py" list "$2" > /dev/null || die "$2: records"; }
-pack "$ARGS" "$OUT/boot.bin"
-pack "$ARGS sfsession_seconds=150 sfmark=1" "$OUT/boot-bench.bin"
-[ "$(stat -c %s "$OUT/boot.bin")" -le $((60 << 20)) ] || die "boot.bin is larger than a stage 1 can chainload (60 MiB)"
+pack() { # <command line> <output> [--m1n1 <stage>]
+  local args=$1 out=$2; shift 2
+  python3 -B "$B1/pdsf_pack.py" pack "$@" --kernel "$KC/kernel" --bootargs "$args" \
+    --set display=1 --set usb-nodes=remove0 --set sprr=1 --set amx=1 --set "xnu-base=$XNU_BASE" -o "$out" > /dev/null
+  python3 -B "$B1/pdsf_pack.py" list "$out" > /dev/null || die "$out: records"; }
+cp "$OUT/sf-stage2.bin" "$OUT/boot.bin"; chmod 644 "$OUT/boot.bin"
+pack "$ARGS" "$OUT/kernel.bin"
+pack "$ARGS sfsession_seconds=150 sfmark=1" "$OUT/kernel-bench.bin"
+pack "$ARGS sfsession_seconds=150 sfmark=1" "$OUT/boot-bench.bin" --m1n1 "$OUT/sf-stage2.bin"
+# What stage 1 can start (sources/m1n1-baseline src/chainload.c, chainload_image): the next image is copied
+# to stage 1's own base, and once stage 1's heap is in use (it always is: the file was read into it) an
+# image whose end, ALIGN_UP(file + the variable lines stage 1 passes on + 4, 16 KiB), lies above the
+# top_of_kernel_data stage 1 inherited is refused. iBoot starts our stage 1 as a raw object with that top
+# somewhere behind the image and its variable lines; the only room that is certain is stage 1's own image.
+# (The installed machine, 13 November: stage 1 at 0x805494000, its variable lines end at 0x8058b4082; the
+# 14,423,700-byte file was refused, so that top was below 0x806258000.) Variable lines: 512 bytes allowed
+# (stage 1 passes its version and the partition, 169 bytes). Margin asked for: 32 KiB.
+S1=$(stat -c %s "$OUT/sf-stage1.bin"); S2=$(stat -c %s "$OUT/boot.bin")
+SPAN=$(( (S2 + 512 + 4 + 16383) / 16384 * 16384 )); SF_FIT_MARGIN=$((32 << 10))
+[ $((SPAN + SF_FIT_MARGIN)) -le "$S1" ] || die "boot.bin does not fit behind stage 1's base: its span $SPAN + margin $SF_FIT_MARGIN > stage 1's $S1 bytes (stage 1 would refuse it: image span overlaps the live heap)"
+echo "boot.bin fits in stage 1's footprint: span $SPAN of $S1 bytes, $((S1 - SPAN)) to spare"
+[ "$(stat -c %s "$OUT/kernel.bin")" -le $((200 << 20)) ] || die "kernel.bin is larger than stage 2 reads (256 MiB) with room to spare"
 
 # ---- stage 1 as the installer writes it (asahi-installer src/m1n1.py build(): image, the variable
 # lines, four zero bytes), with a partition identifier that no partition has: the bench's fail-safe test
 { cat "$OUT/sf-stage1.bin"; printf 'chosen.asahi,efi-system-partition=%s\nchainload=%s;sf/boot.bin\n' \
     5f5f5f5f-0000-4000-8000-53465f544553 5f5f5f5f-0000-4000-8000-53465f544553; printf '\0\0\0\0'; } > "$OUT/sf-stage1-test.bin"
+rm -f "$OUT/sf-stage1-installed.bin"
+if [ -n "${SF_BOOT_PARTUUID:-}" ]; then
+  case "$SF_BOOT_PARTUUID" in *[!0-9a-f-]*) die "sf-part.env: SF_BOOT_PARTUUID is lower-case hexadecimal, as the installer writes it";; esac
+  { cat "$OUT/sf-stage1.bin"; printf 'chosen.asahi,efi-system-partition=%s\nchainload=%s;sf/boot.bin\n' \
+      "$SF_BOOT_PARTUUID" "$SF_BOOT_PARTUUID"; printf '\0\0\0\0'; } > "$OUT/sf-stage1-installed.bin"
+fi
 
 # ---- what goes to macOS -------------------------------------------------------------------
 K=$OUT/mac-kit; rm -rf "$K"; mkdir -p "$K/installer/boot" "$K/installer/os" "$WORK/pkg/esp/sf"
@@ -144,6 +184,7 @@ with zipfile.ZipFile(target, 'w', zipfile.ZIP_STORED) as z:
     for name in ('esp/', 'esp/sf/'):
         info = zipfile.ZipInfo(name); info.external_attr = (0o40755 << 16) | 0x10; z.writestr(info, b'')
     z.write(out + '/boot.bin', 'esp/sf/boot.bin')
+    z.write(out + '/kernel.bin', 'esp/sf/kernel.bin')
     z.write(out + '/siliconforest.icns', 'siliconforest.icns')
 PY
 cp "$HERE/mac/sf-install.sh" "$HERE/mac/sf-preflight.sh" "$HERE/mac/sf-uninstall.sh" "$K/"; chmod 755 "$K"/*.sh
@@ -154,7 +195,7 @@ python3 -B - "$OUT" "$PIN" "$INS_PIN" "$XNU_BASE" "$KC" <<'PY'
 import hashlib, json, pathlib, sys
 out, pin, ins, xnu, kc = pathlib.Path(sys.argv[1]), *sys.argv[2:]
 f = lambda n: dict(bytes=(out / n).stat().st_size, sha256=hashlib.sha256((out / n).read_bytes()).hexdigest())
-names = ['sf-stage1.bin', 'sf-stage2.bin', 'boot.bin', 'boot-bench.bin', 'sf-stage1-test.bin', 'siliconforest.icns', 'siliconforest-mac-kit.tar']
+names = ['sf-stage1.bin', 'sf-stage2.bin', 'boot.bin', 'kernel.bin', 'kernel-bench.bin', 'boot-bench.bin', 'sf-stage1-test.bin', 'siliconforest.icns', 'siliconforest-mac-kit.tar']
 record = dict(status='BUILT_ONLY', m1n1_base_commit=pin, asahi_installer_commit=ins, xnu_base=xnu, collection=kc,
               files={n: f(n) for n in names}, installed=False)
 (out / 'build.json').write_text(json.dumps(record, indent=1) + '\n')

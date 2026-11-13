@@ -7,11 +7,15 @@ filesystem, the table copies, unallocated space) a range must be equal before an
 the boot wrote on purpose (reported, not compared); in a filesystem Linux has mounted it may have
 moved under Linux itself (reported).
   dr_plain_ranges.py <before directory> <after directory> <our first block> <our blocks>
+SF_BOOT_LBA / SF_BOOT_BLOCKS in the environment (sf-part.env): the SiliconForest boot partition, FAT, which
+Linux never mounts and no boot writes (it is written from Linux between boots only): its ranges must be equal.
 Prints DR_PLAIN lines; exit 1 when a range Linux never writes changed or a SMART counter moved."""
 import re, sys
 from pathlib import Path
 
+import os
 before, after, first, blocks = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+boot_first, boot_blocks = int(os.environ.get('SF_BOOT_LBA') or 0), int(os.environ.get('SF_BOOT_BLOCKS') or 0)
 def hashes(d):
     return {(int(a), int(b)): h for a, b, h in re.findall(r'^NVT_HASH (\d+) (\d+) ([0-9a-f]{64})\s*$', (d / 'hashes').read_text(), re.M)}
 table = []
@@ -29,12 +33,12 @@ for (lba, n), h in sorted(ha.items()):
     same = hb.get((lba, n)) == h
     if lba >= first and lba + n <= first + blocks:
         ours += 1; ours_written += not same
-    elif fstype(lba, n) in ('apfs', 'none'):
+    elif fstype(lba, n) in ('apfs', 'none') or (boot_blocks and lba >= boot_first and lba + n <= boot_first + boot_blocks):
         quiet += 1; quiet_ok += same
         if not same: bad.append('range %d+%d, which Linux never writes, CHANGED' % (lba, n))
     else:
         linux += 1; linux_moved += not same
-print('DR_PLAIN ranges Linux never writes (table copies, APFS partitions, unallocated space): %d of %d unchanged; ours: %d (%d written in this boot); in filesystems Linux mounts: %d (%d moved under Linux)'
+print('DR_PLAIN ranges Linux never writes (table copies, APFS partitions, the boot partition, unallocated space): %d of %d unchanged; ours: %d (%d written in this boot); in filesystems Linux mounts: %d (%d moved under Linux)'
       % (quiet_ok, quiet, ours, ours_written, linux, linux_moved))
 if len(ha) != len(hb) or quiet == 0: bad.append('hash sets: %d before, %d after, %d never written by Linux' % (len(hb), len(ha), quiet))
 def smart(d, key):

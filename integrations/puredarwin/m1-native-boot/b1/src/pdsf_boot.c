@@ -12,7 +12,8 @@
  * enters XNU at EL1.
  *
  * Nothing here touches storage: no NVMe, no NVRAM. Every address comes from the boot
- * arguments and the device tree m1n1 was given.
+ * arguments and the device tree m1n1 was given. (The installed stage 2 reads its records from
+ * a file first: ../install/src/pdsf_file.c, not part of the bench's stage.)
  */
 
 #include "pdsf.h"
@@ -170,7 +171,11 @@ static void wdt_arm(u64 base, u32 seconds)
  * 1: no SiliconForest payload after this image (m1n1 goes on as always);
  * 0: next_stage is set; < 0: a SiliconForest payload that cannot be booted.
  */
-int pdsf_boot(void *payload)
+/*
+ * `payload`: the record list, `limit` bytes readable there. `appended`: it lies behind this
+ * image (the payload area); otherwise in m1n1's heap (a file the installed stage 2 read).
+ */
+int pdsf_boot_records(const u8 *payload, u64 limit, int appended)
 {
     static struct pdsf_config cfg;
     static u8 seed[PDSF_SEED_BYTES];
@@ -194,17 +199,15 @@ int pdsf_boot(void *payload)
     const u8 *kc;
     int ret, cpus, smp;
 
-    if ((u64)payload < cur_boot_args.phys_base || (u64)payload >= ram_end)
-        return 1;
-    ret = pdsf_scan(payload, ram_end - (u64)payload, &set);
+    ret = pdsf_scan(payload, limit, &set);
     if (ret == 1)
         return 1;
-    printf("\nPDSF: SiliconForest payload at %p\n", payload);
+    printf("\nPDSF: SiliconForest payload at %p%s\n", payload, appended ? "" : " (read from the boot partition)");
     if (ret)
         fail("damaged record list (%d)\n", ret);
     /* The heap starts at top_of_kernel_data: whoever loaded this image must have put that
      * after the payload, as m1n1's chainload and the lab's launcher do. */
-    if ((u64)set.end > cur_boot_args.top_of_kernel_data)
+    if (appended && (u64)set.end > cur_boot_args.top_of_kernel_data)
         fail("the payload reaches past top_of_kernel_data (0x%lx > 0x%lx)\n", (u64)set.end,
              cur_boot_args.top_of_kernel_data);
     if (chip_id != T8103)
@@ -520,4 +523,13 @@ int pdsf_boot(void *payload)
     next_stage.args[2] = next_stage.args[3] = next_stage.args[4] = 0;
     next_stage.restore_logo = true;
     return 0;
+}
+
+int pdsf_boot(void *payload)
+{
+    u64 ram_end = cur_boot_args.phys_base + cur_boot_args.mem_size;
+
+    if ((u64)payload < cur_boot_args.phys_base || (u64)payload >= ram_end)
+        return 1;
+    return pdsf_boot_records(payload, ram_end - (u64)payload, 1);
 }

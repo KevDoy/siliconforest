@@ -27,6 +27,7 @@ import pdsf_pack
 HERE = Path(__file__).resolve().parent
 IMAGE = 'm1n1-sf-stage.bin'
 BOOT_BIN, STAGE1_TEST = 'sf-boot.bin', 'sf-stage1-test.bin'      # ../install/build.sh
+STAGE1_KERNEL = 'sf-kernel.bin'         # word stage1go: a copy of the sf/kernel.bin that is on the boot partition
 # What a stage 1 appends behind the file it chainloads (m1n1 src/chainload.c: its variable
 # lines, here the one the installer gives every stage 1), so that the stage is entered with
 # the bytes behind its records that it will find there when it is installed.
@@ -259,6 +260,25 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         text, found, xnu_base = b'', [], None
         bootargs = '(stage 1 test: no kernel is entered)'
         prebuilt = dict(file=STAGE1_TEST, sha256=hashlib.sha256(image).hexdigest(), bytes=len(image))
+        if getattr(native, 'stage1_go', False):
+            # Stage 1 is expected to start the system from the boot partition by itself (sf/boot.bin, which
+            # reads sf/kernel.bin). Nothing of that is uploaded: the copy of the kernel file next to the
+            # launcher only says what was put there (its command line, and that its kernel is this boot's).
+            import zlib
+            data = (HERE / STAGE1_KERNEL).read_bytes()
+            found, end = pdsf_pack.parse(data, 0)
+            require([item[0] for item in found] == [pdsf_pack.CONFIG, pdsf_pack.KERNEL] and all(item[4] for item in found) and
+                    end == len(data), 'sf-kernel.bin is not configuration + kernel')
+            text = data[found[0][5]:found[0][5] + found[0][2]]
+            keys = dict(line.split('=', 1) for line in text.decode('ascii').splitlines())
+            bootargs = keys['bootargs']
+            require('rd=uuid' in bootargs.split() and 'sfmark=1' in bootargs.split() and 'pdsfstop=1' not in bootargs.split()
+                    and 'seed-hex' not in keys and 'wdt' not in keys, 'sf-kernel.bin: not a disk-root bench session')
+            require(keys.get('usb-nodes') in ('keep', 'remove%d' % index), 'sf-kernel.bin removes the nodes of another USB port than the proxy uses')
+            stored = data[found[1][5]:found[1][5] + found[1][2]]
+            require(found[1][1] & pdsf_pack.F_GZIP and zlib.decompress(stored, 31) == inputs.contents['kernel'],
+                    "sf-kernel.bin's kernel is not the collection of this boot")
+            prebuilt.update(kernel_file_on_the_boot_partition=dict(sha256=hashlib.sha256(data).hexdigest(), bytes=len(data)))
     elif getattr(native, 'boot_bin', False):
         # The file an installed stage 1 will read: nothing is packed here, and its own
         # configuration record decides everything, the kernel command line included.
@@ -303,10 +323,13 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     size = (len(image) + PAGE - 1) & ~(PAGE - 1)
     # A stage 1 chainloads: m1n1 copies the next image to its own base and refuses one that
     # reaches past top_of_kernel_data into its live heap (src/chainload.c; boot dr33). iBoot
-    # loads a stage 1 with the 64 MiB its Mach-O reserves for payloads behind the image
-    # (m1n1.ld _max_payload_size); the same room is given here, inside this allocation, so
-    # nothing else of the bench lies in it. The boot arguments page follows it.
-    reserve = STAGE1_PAYLOAD_ROOM if getattr(native, 'stage1', False) else 0
+    # starts the installed stage 1 as a raw object with top_of_kernel_data shortly behind the
+    # image and its variable lines: there is NO room of 64 MiB (the installed machine refused
+    # its 14 MB sf/boot.bin exactly as boot dr33 did). So a stage 1 is entered here as every
+    # other image is: the boot arguments page directly behind it, the top behind that. The
+    # word stage1room gives it the 64 MiB of m1n1.ld's _max_payload_size instead (boot dr34:
+    # a layout the installed machine does not have).
+    reserve = STAGE1_PAYLOAD_ROOM if getattr(native, 'stage1_room', False) else 0
     total = size + reserve + PAGE
     base = u.heap.memalign(ALIGN, total)
     require(base and base % ALIGN == 0 and backend.ba.phys_base <= base and
@@ -369,7 +392,7 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         # This is the last request of the boot: nothing is sent over the proxy afterwards.
         p.request(p.P_VECTOR, base + ENTRY, base + size + reserve, 0, 0, 0, 0)
         mark('native_vector_acknowledged')
-        if getattr(native, 'stage1', False):
+        if getattr(native, 'stage1', False) and not getattr(native, 'stage1_go', False):
             # The stage 1 test: it stops by itself (sf_stop prints SF_STOPPED) or the time runs out.
             limit = time.monotonic() + min(runtime, 90)
             while b'SF_STOPPED' not in bytes(console.proof.output) and time.monotonic() < limit:

@@ -59,7 +59,14 @@
 #               the file's, not this script's. The collection must be the one in the file.
 #   DR_STAGE1=<file>  (with DR_STAGE=disk) the install kit's sf-stage1-test.bin (stage 1 with a chainload line that
 #               names a partition that does not exist) is uploaded and entered, nothing else: it must find nothing
-#               and stop (SF_STOPPED). No kernel. Ends with one controller reset.
+#               and stop (SF_STOPPED). No kernel. Ends with one controller reset. Any stage 1 with its variable
+#               lines can be given (the kit's sf-stage1-installed.bin: the boot object that is in the stub). It
+#               is entered as iBoot enters it, top_of_kernel_data directly behind the image;
+#               DR_STAGE1_ROOM=1 gives it 64 MiB of room instead (boot dr34; the installed machine has none).
+#   DR_STAGE1_GO=<kernel file>  (with DR_STAGE1) stage 1 is expected to START THE SYSTEM from the boot partition
+#               it names: sf/boot.bin there, which reads sf/kernel.bin. Nothing but stage 1 is uploaded. The file
+#               is a copy of the sf/kernel.bin that is on the partition (the kit's kernel-bench.bin, whose session
+#               ends itself): its collection must be this boot's. The slot checks the session as DR_PLAIN's.
 # Run inside a slot (Linux before and after): tools/dr_desk_slot.sh.
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
@@ -96,6 +103,11 @@ if [ -n "$STAGE" ]; then
     [ -f "$DR_STAGE1" ] && [ "$STAGE" = disk ] && [ "${DR_PLAIN:-0}" != 1 ] && [ "${DR_STAGE_STOP:-0}" != 1 ] || { echo "DR_STAGE1=<file> needs DR_STAGE=disk and nothing else" >&2; exit 2; }
     grep -a -q 'SF_STOPPED' "$DR_STAGE1" || { echo "DR_STAGE1: not the installed variant (it would restart or fall back to the proxy)" >&2; exit 2; }
     WORDS="$WORDS stage1"
+    [ "${DR_STAGE1_ROOM:-0}" != 1 ] || WORDS="$WORDS stage1room"
+    if [ -n "${DR_STAGE1_GO:-}" ]; then
+      [ -f "$DR_STAGE1_GO" ] && grep -a -q 'sfmark=1' <(head -c 4096 "$DR_STAGE1_GO") || { echo "DR_STAGE1_GO=<kernel-bench.bin, as it is on the boot partition>" >&2; exit 2; }
+      WORDS="$WORDS stage1go"
+    fi
   fi
   [ "$STAGE" != disk ] || WORDS="$WORDS noramdisk multiuser"
   [ "${DR_STAGE_STOP:-0}" != 1 ] || WORDS="$WORDS stagestop"
@@ -127,6 +139,7 @@ FILES="$NB/native_boot.py=$B/native_boot.py;$NB/native_stub.py=$B/native_stub.py
 [ -z "$STAGE" ] || FILES="$FILES;$B1/native_stage.py=$B/native_stage.py;$B1/pdsf_pack.py=$B/pdsf_pack.py;$STAGE_IMAGE=$B/m1n1-sf-stage.bin"
 [ -z "${DR_BOOTBIN:-}" ] || FILES="$FILES;$DR_BOOTBIN=$B/sf-boot.bin"
 [ -z "${DR_STAGE1:-}" ] || FILES="$FILES;$DR_STAGE1=$B/sf-stage1-test.bin"
+[ -z "${DR_STAGE1_GO:-}" ] || FILES="$FILES;$DR_STAGE1_GO=$B/sf-kernel.bin"
 TTL=${DR_TTL:-$((LIMIT - 40))}
 DISK="rd=uuid boot-uuid=$SF_FSUUID launchdsuffix=sfro wdt=-1 pdnvme=3 pdnvme_ttl=$TTL pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0"
 [ -f "${DR_RANGES:-}" ] || { echo "DR_RANGES=<range file> is needed" >&2; exit 2; }
@@ -189,5 +202,6 @@ printf 'mode=%s\nprofile=%s\nkc=%s\nlimit=%s\nrw=%s\nhalt=%s\ninstall=%s\nauto=%
 [ -z "$STAGE" ] || printf 'stage=%s stop=%s plain=%s words=%s image_sha256=%s\n' "$STAGE" "${DR_STAGE_STOP:-0}" "${DR_PLAIN:-0}" "$WORDS" "$(sha256sum "$STAGE_IMAGE" | cut -d' ' -f1)" >> "$R/dr-config.txt"
 [ -z "${DR_BOOTBIN:-}" ] || printf 'bootbin_sha256=%s\n' "$(sha256sum "$DR_BOOTBIN" | cut -d' ' -f1)" >> "$R/dr-config.txt"
 [ -z "${DR_STAGE1:-}" ] || printf 'stage1_test_sha256=%s\n' "$(sha256sum "$DR_STAGE1" | cut -d' ' -f1)" >> "$R/dr-config.txt"
+[ -z "${DR_STAGE1_GO:-}" ] || printf 'stage1_go_kernel_file_sha256=%s\n' "$(sha256sum "$DR_STAGE1_GO" | cut -d' ' -f1)" >> "$R/dr-config.txt"
 [ -z "$STAGE" ] || { grep -a 'NATIVE_STAGE_START\|STAGE_READBACK' "$R/guest/worker.log" | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-700 || true; }
 grep -o '"status": *"[^"]*"' "$R/result.json" 2>/dev/null || echo "no result.json"
