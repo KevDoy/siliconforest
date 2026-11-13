@@ -33,9 +33,9 @@ SF_FORMULAE=${SF_FORMULAE:-bash git less nano grep gnu-sed gawk gnu-tar coreutil
 BASE=${SF_ROOT_IMAGE:-artifacts/m1-desktop-010/pcie-enum-candidate-sw01/ramdisk.img}
 SSH=(ssh -o UserKnownHostsFile="$SF_KNOWN" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o HostKeyAlias=m1-siliconforest
      -o PasswordAuthentication=no -o BatchMode=yes -o ConnectTimeout=6 -o ServerAliveInterval=10 "root@$SF_HOST")
-list() {  # <stage directory>: "sha256  path" of every regular file, "link target path" of every link
-  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sed 's|  \./|  |') > "$1.sha256"
-  (cd "$1" && find . -type l -printf '%l %P\n' | LC_ALL=C sort) > "$1.links"
+list() {  # <stage directory>: "sha256  path" of every regular file, "target<TAB>path" of every link
+  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sed 's|  \./|  |') > "$1.sha256"   # "sha256  path"
+  (cd "$1" && find . -type l -printf '%l\t%P\n' | LC_ALL=C sort) > "$1.links"
   echo "$1: $(grep -c . "$1.sha256") files, $(grep -c . "$1.links" || true) links, $(du -sm "$1" | cut -f1) MB"
 }
 case "${1:?stage|known|ssh|push|verify}" in
@@ -114,7 +114,9 @@ push|verify)
   cut -c67- "$D.sha256" | tr '\n' '\0' | "${SSH[@]}" 'cd / && xargs -0 sha256sum 2>&1' > "$W/$P.remote.sha256" || true
   if diff "$D.sha256" "$W/$P.remote.sha256" > "$W/$P.diff"; then echo "SFPUSH $P verified: $(grep -c . "$D.sha256") files equal on the target"
   else echo "SFPUSH $P DIFFERS: $(grep -c '^[<>]' "$W/$P.diff") lines, e.g. $(head -3 "$W/$P.diff" | cut -c1-160 | tr '\n' ' ')"; exit 1; fi
-  "${SSH[@]}" 'cd / && while read -r t f; do [ "$(readlink "$f")" = "$t" ] || echo "link $f"; done' < "$D.links" > "$W/$P.linkdiff" || true
-  [ ! -s "$W/$P.linkdiff" ] && echo "SFPUSH $P links: $(grep -c . "$D.links" || true) equal" || { echo "SFPUSH $P LINKS DIFFER: $(head -3 "$W/$P.linkdiff" | tr '\n' ' ')"; exit 1; };;
+  # every link's target, read there in one go (a loop of 26,000 readlink calls took a whole session in dr41)
+  cut -f2 "$D.links" | tr '\n' '\0' | "${SSH[@]}" 'cd / && xargs -0 readlink 2>&1' > "$W/$P.remote.links" || true
+  if diff <(cut -f1 "$D.links") "$W/$P.remote.links" > "$W/$P.linkdiff"; then echo "SFPUSH $P links: $(grep -c . "$D.links" || true) equal"
+  else echo "SFPUSH $P LINKS DIFFER: $(grep -c '^[<>]' "$W/$P.linkdiff") lines, e.g. $(head -3 "$W/$P.linkdiff" | cut -c1-120 | tr '\n' ' ')"; exit 1; fi;;
 *) echo "stage|known|ssh|push|verify" >&2; exit 2;;
 esac

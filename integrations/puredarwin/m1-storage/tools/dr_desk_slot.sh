@@ -12,6 +12,8 @@
 # reset. The desktop-state and clock checks of that mode are nv_verdict.py's.
 # DR_PLAIN=1 (with DR_STAGE=disk; dr_desk_boot.sh): a session without sfbench=. No verdict (the bench prints nothing in
 # such a boot); the slot's own checks are below.
+# DR_FSCK_OLD_SCAN=<output of tools/sf_freed_inode_repair.py scan, made from Linux before the boot> (plain boots):
+# e2fsck -fn returning 4 is accepted when it objects only to what the driver of before boot dr41 left (see below).
 # DR_STAGE=1|disk, DR_STAGE_STOP=1 (dr_desk_boot.sh): the boot goes through the SiliconForest stage. A read-back
 # boot (DR_STAGE_STOP=1) never enters the kernel: instead of the verdict the slot wants the stage's read-back
 # equal in every part, our partition clean and untouched (e2fsck -fn, the superblock's state, every range in it
@@ -126,7 +128,37 @@ if [ "${DR_PLAIN:-0}" = 1 ] || [ -n "${DR_STAGE1_GO:-}" ]; then
     grep -a 'SF_HALT processes\|SF_SESSION\|GPUDESK_\(NET\|LAN\|PING\|TOUCHBAR\|INPUT\|DESKTOP\|COREAUDIOD\)\|WMSTAT selected\|WMSCALE initial\|SF_BOOT' "$CON" | cut -c1-240 | head -40 | sed 's/^/DR_PLAIN line /'
   } | tee "runs/m1-storage/$N-verdict.txt"
   rm -f "$CON"; V=runs/m1-storage/$N-verdict.txt
-  grep -q '^DR_PLAIN SFL_FSCK_RC 0$' "$V" && grep -q '^DR_PLAIN SFL_SB_FIRST Filesystem state: *clean$' "$V" && grep -q '^DR_PLAIN linux_side=ok$' "$V" && grep -q '^DR_PLAIN reset_attempts=0$' "$V" \
+  if [ -n "${DR_FSCK_OLD_SCAN:-}" ] && grep -q '^DR_PLAIN SFL_FSCK_RC 4$' "$V"; then
+    # The disk still holds inodes the driver of before boot dr41 freed (extents flag over a zeroed i_block):
+    # e2fsck -fn returns 4 until they are reused or repaired. Accepted ONLY when a scan from Linux now finds no
+    # such inode that the scan of before (DR_FSCK_OLD_SCAN) does not list, every inode e2fsck calls garbage lies
+    # in an inode-table block that is more than half such inodes, and e2fsck says nothing else.
+    scp -q -o HostKeyAlias=10.1.1.127 -o BatchMode=yes "$HERE/tools/sf_freed_inode_repair.py" chrisk@10.1.1.211:/tmp/sf_freed_inode_repair.py \
+      && ssh -o HostKeyAlias=10.1.1.127 -o BatchMode=yes -o ConnectTimeout=8 chrisk@10.1.1.211 'sudo -n python3 -I -B /tmp/sf_freed_inode_repair.py scan /dev/nvme0n1p3' > "runs/m1-storage/$N-freed-inode-scan.txt" 2>&1 \
+      || stop "$N: the freed-inode scan could not be run from Linux; all storage boots stopped"
+    python3 -I -B - "$DR_FSCK_OLD_SCAN" "runs/m1-storage/$N-freed-inode-scan.txt" "runs/m1-storage/$N-wcheck.txt" <<'PY' | tee -a "$V"
+import re, sys
+def scan(path):
+    inodes, blocks = set(), []
+    for line in open(path):
+        if line.startswith('SFREPAIR inodes:') or line.startswith('SFREPAIR blocks over half:'):
+            for a, b in re.findall(r'(\d+)(?:-(\d+))?', line.split(':', 1)[1]):
+                if line.startswith('SFREPAIR inodes:'): inodes.update(range(int(a), int(b or a) + 1))
+                else: blocks.append((int(a), int(b or a)))
+    return inodes, blocks
+old, _ = scan(sys.argv[1]); new, blocks = scan(sys.argv[2])
+w = open(sys.argv[3], errors='replace').read()
+garbage = [int(n) for n in re.search(r'^SFL_FSCK_GARBAGE (.*)$', w, re.M).group(1).split()]
+other = re.findall(r'^SFL_FSCK_OTHER (.*)$', w, re.M)
+fresh = sorted(new - old); outside = [g for g in garbage if not any(a <= g <= b for a, b in blocks)]
+print('DR_PLAIN freed inodes of the old kind: %d before, %d now, %d of them not listed before%s' % (len(old), len(new), len(fresh), (': ' + ' '.join(map(str, fresh[:12]))) if fresh else ''))
+print('DR_PLAIN e2fsck calls %d inodes garbage; %d of them outside a block that is more than half old freed inodes%s' % (len(garbage), len(outside), (': ' + ' '.join(map(str, outside[:12]))) if outside else ''))
+print('DR_PLAIN e2fsck other complaints: %d%s' % (len(other), (': ' + ' | '.join(other[:3])) if other else ''))
+print('DR_PLAIN fsck_known_only=%s' % ('yes' if old and not fresh and not outside and not other else 'NO'))
+PY
+    grep -q '^DR_PLAIN fsck_known_only=yes$' "$V" && sed -i 's/^DR_PLAIN SFL_FSCK_RC 4$/DR_PLAIN SFL_FSCK_RC 0 (was 4: only the old driver'"'"'s freed inodes, none new; see the lines below)/' "$V"
+  fi
+  grep -q '^DR_PLAIN SFL_FSCK_RC 0' "$V" && grep -q '^DR_PLAIN SFL_SB_FIRST Filesystem state: *clean$' "$V" && grep -q '^DR_PLAIN linux_side=ok$' "$V" && grep -q '^DR_PLAIN reset_attempts=0$' "$V" \
     || stop "$N: after the plain boot our partition is not clean in Linux, a range Linux never writes or a SMART counter changed, or the controller had to reset; all storage boots stopped"
   if grep -q '^DR_PLAIN FAIL' "$V"; then echo "DR_PLAIN storage checks passed; $(grep -c '^DR_PLAIN FAIL' "$V") session line(s) FAILED (no stop file: not a storage matter)"; exit 1; fi
   echo "DR_PLAIN PASSED: the plain session came up, reached the network, ended in its own restart; our partition is clean and nothing outside it changed"

@@ -56,7 +56,11 @@ transform)
   e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}";;
 wcheck)
   dumpe2fs -h $P 2>/dev/null | grep -iE 'Filesystem state|features|Journal' | sed 's/^/SFL_SB_FIRST /'
-  e2fsck -fn $P 2>&1 | tail -4 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}"
+  e2fsck -fn $P > /tmp/sf-wcheck-fsck.txt 2>&1; frc=$?
+  tail -4 /tmp/sf-wcheck-fsck.txt | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC $frc"
+  # what e2fsck objects to, line by line (a count per kind, and the inodes it calls garbage)
+  grep -v '^$\|^Pass [1-5]\|^e2fsck \|could be narrower\|seems to contain garbage\|WARNING: Filesystem still has errors\|files (.*blocks$' /tmp/sf-wcheck-fsck.txt | head -20 | sed 's/^/SFL_FSCK_OTHER /'
+  echo "SFL_FSCK_GARBAGE $(sed -n 's/^Inode \([0-9]*\) seems to contain garbage.*/\1/p' /tmp/sf-wcheck-fsck.txt | tr '\n' ' ')"
   if [ "$REPLAY" = 1 ]; then
     e2fsck -fy $P 2>&1 | tail -6 | sed 's/^/SFL_REPLAY /'; echo "SFL_REPLAY_RC ${PIPESTATUS[0]}"
     e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK2 /'; echo "SFL_FSCK2_RC ${PIPESTATUS[0]}"
