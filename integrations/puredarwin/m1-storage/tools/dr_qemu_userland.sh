@@ -11,6 +11,8 @@
 # DR_QEMU_TIMEOUT (default 900 s) ends the guest; a full run needs about an hour of emulation.
 # DR_QEMU_GUEST=<script>   another guest script on the same root (guest/qemu-claude.sh: SF-X-claude-code.md)
 # DR_QEMU_ROOT_FILES="src=/dest ..."   further files written into the root image, mode 755 (the parent directory is made, its parent must exist)
+# DR_QEMU_PREFIX=<directory>   the /opt/homebrew to put on the second disk instead of the staged one (a copy of the M1's)
+# DR_QEMU_FS_SIZE=<size>       the root file system's size (default 2G)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
@@ -22,7 +24,7 @@ SSH=$(integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py m1-storage/user
 FS=$W/$N-fs.img; DISK=$W/$N-disk.img; PFX=$W/$N-prefix.img; GUID=5F1D0A7E-0000-4000-8000-0000000000A1
 GUEST=${DR_QEMU_GUEST:-$M/guest/qemu-userland.sh}
 mkdir -p "$W"; cp --reflink=auto "$SRC" "$FS"; chmod u+w "$FS"
-e2fsck -fy "$FS" > /dev/null 2>&1 || true; resize2fs "$FS" 2G > /dev/null 2>&1
+e2fsck -fy "$FS" > /dev/null 2>&1 || true; resize2fs "$FS" "${DR_QEMU_FS_SIZE:-2G}" > /dev/null 2>&1
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 tar -C "$ST/sys" --owner=0 --group=0 --numeric-owner --format=gnu -cf - . | gzip -1 > "$T/sys.tar.gz"
 sed 's|  | |' "$ST/sys.sha256" > "$T/sys.sha256"
@@ -47,10 +49,10 @@ CL=$(cd "$ST/claude" && find usr/local/lib -type f -name claude)
   echo "write $T/phase /etc/dr-phase"
 } | debugfs -w "$FS" > "$W/$N-inject.log" 2>&1
 python3 -B $M/tools/dr_qemu_disk.py "$FS" "$DISK" --guid "$GUID" > "$W/$N-disk.txt"
-python3 -B -c 'import sys; sys.path.insert(0, "integrations/puredarwin/homebrew"); import hb_pour; from pathlib import Path; print(hb_pour.make_image(Path(sys.argv[1]), Path(sys.argv[2]), 256, "501:20"))' "$ST/brew/opt/homebrew" "$PFX" > /dev/null
+python3 -B -c 'import sys; sys.path.insert(0, "integrations/puredarwin/homebrew"); import hb_pour; from pathlib import Path; print(hb_pour.make_image(Path(sys.argv[1]), Path(sys.argv[2]), 256, "501:20"))' "${DR_QEMU_PREFIX:-$ST/brew/opt/homebrew}" "$PFX" > /dev/null
 QD_BASE_IMAGE=$(ls "$BASE"/*.img | head -1) DR_QEMU_SINGLE=1 DR_QEMU_KERNEL=debug DR_QEMU_DISK2=$PFX \
   DR_QEMU_BOOTARGS="rd=uuid boot-uuid=$GUID -s" $M/tools/dr_qemu.sh "$N" "$GUEST" "$DISK" rw "${DR_QEMU_TIMEOUT:-900}" || true
-grep -a '^UL_\|^CJ_\|libxpc misuse\|QDDESK_PASS\|panic' "$W/$N/serial.log" | cut -c1-700 || true
+grep -a '^UL_\|^CJ_\|^COMPAT_\|libxpc misuse\|QDDESK_PASS\|panic' "$W/$N/serial.log" | cut -c1-700 || true
 FIRST=$((6 + 4096)); BLOCKS=$(( $(stat -c %s "$FS") / 4096 ))
 dd if="$DISK" of="$W/$N-after.img" bs=4096 skip=$FIRST count=$BLOCKS status=none
 e2fsck -fn "$W/$N-after.img" 2>&1 | tail -1 | sed 's/^/UL_HOST fsck: /'

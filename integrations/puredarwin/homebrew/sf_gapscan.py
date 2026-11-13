@@ -92,6 +92,13 @@ class Root:
             cands = [r.replace('@loader_path', here).replace('@executable_path', exed) + lib[len('@rpath'):] for r in rpaths]
         else:
             cands = [lib.replace('@loader_path', here).replace('@executable_path', exed)]
+        # dyld's fallback when the path as given has nothing: the leaf name in the default
+        # DYLD_FALLBACK_LIBRARY_PATH, a framework's partial path in DYLD_FALLBACK_FRAMEWORK_PATH
+        if '.framework/' in lib:
+            partial = lib[lib.rfind('/', 0, lib.index('.framework/')) + 1:]
+            cands += [d + '/' + partial for d in ('/Library/Frameworks', '/System/Library/Frameworks')]
+        else:
+            cands += [d + '/' + lib.rsplit('/', 1)[-1] for d in ('/usr/local/lib', '/lib', '/usr/lib')]
         for c in cands:
             if not c.startswith('/'):
                 continue
@@ -173,6 +180,21 @@ def closure_gaps(root, logical, host):
         lazy = not root.macho(h).chained
         for g in gaps:
             out[g].append((lg, lazy))
+        for d in deps:
+            if str(d[1]) not in seen:
+                seen.add(str(d[1]))
+                todo.append((d[0], d[1], search))
+    return out
+
+
+def closure_files(root, logical, host):
+    """[(logical, host)] of a program and every library dyld loads for it."""
+    m = root.macho(host)
+    out, todo, seen = [], [(logical, host, list(m.rpaths))], {str(host)}
+    while todo:
+        lg, h, rp = todo.pop()
+        out.append((lg, h))
+        _gaps, deps, search = image_gaps(root, lg, h, logical, rp)
         for d in deps:
             if str(d[1]) not in seen:
                 seen.add(str(d[1]))
@@ -312,6 +334,7 @@ def main():
     ap.add_argument('--brew', action='store_true', help='scan opt/homebrew/Cellar')
     ap.add_argument('--system', action='store_true', help="scan the root's own frameworks, libraries and programs")
     ap.add_argument('--binary', action='append', default=[], help='a logical path in the root, with its load closure; repeatable')
+    ap.add_argument('--closure', action='store_true', help='with --binary: list the files of the load closure (CLOSURE size path)')
     ap.add_argument('--name', default='scan')
     ap.add_argument('--out', default=str(LAB / 'runs/sf-gaps'))
     a = ap.parse_args()
@@ -342,6 +365,9 @@ def main():
             continue
         cg = closure_gaps(root, b, h)
         lines = ['## %s' % b, '']
+        if a.closure:
+            for lg, hp in sorted(closure_files(root, b, h)):
+                print('CLOSURE %9d %s' % (os.path.getsize(hp), lg))
         for (kind, lib, sym, weak), where in sorted(cg.items()):
             if kind == 'symbol-of-missing-library':
                 continue
