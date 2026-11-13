@@ -7,6 +7,9 @@
 # checks our partition (dr_linux_root.sh wcheck) and the verdict runs in its write mode for a
 # root (NV_WMODE=root). NV_PREV_CONSOLE=<console of the previous read-write boot>: the files and
 # the desktop state that boot wrote must be found by this one.
+# DR_HALT="<command>" (dr_desk_boot.sh): the boot is ended by the system's own command and the machine
+# restarts itself; the verdict runs with NV_WMODE=halt, and the slot stops unless the controller sent NO
+# reset. The desktop-state and clock checks of that mode are nv_verdict.py's.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; MODE=${2:?hv or native}; LIMIT=${3:-200}
@@ -25,10 +28,12 @@ if [ "${DR_RW:-0}" = 1 ]; then
   sleep 30
   export NV_WCHECK=$ROOT/runs/m1-storage/$N-wcheck.txt
   DR_OUT=$NV_WCHECK "$HERE/tools/dr_linux_root.sh" wcheck || stop "$N: our partition could not be checked from Linux after the read-write boot; all storage boots stopped"
-  NV_VERDICT_MODE=write NV_WMODE=root NV_PART_LBA=$SF_PART_LBA NV_PART_BLOCKS=$SF_PART_BLOCKS \
+  [ "${DR_HALT:-}" != menu ] || export NV_HALT_MENU=1
+  if [ -n "${DR_HALT:-}" ]; then export NV_RESETS=$(sed -n 's/.*"reset_attempts": *\([0-9]*\).*/\1/p' "$C/result.json" | head -1); fi
+  NV_VERDICT_MODE=write NV_WMODE=$([ -n "${DR_HALT:-}" ] && echo halt || echo root) NV_PART_LBA=$SF_PART_LBA NV_PART_BLOCKS=$SF_PART_BLOCKS \
     python3 -B "$HERE/tools/nv_verdict.py" "runs/m1-storage/$N-before" "runs/m1-storage/$N-after" "$C/guest/console.bin" any 3 | tee "runs/m1-storage/$N-verdict.txt"
 else
 NV_VERDICT_MODE=root NV_PART_LBA=$SF_PART_LBA NV_TREE_REF=${NV_TREE_REF:-$ROOT/runs/m1-storage/ref-tree-diskroot.txt} \
   python3 -B "$HERE/tools/nv_verdict.py" "runs/m1-storage/$N-before" "runs/m1-storage/$N-after" "$C/guest/console.bin" any 3 | tee "runs/m1-storage/$N-verdict.txt"
 fi
-strings -n 4 "$C/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|NV_EARLY' | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-260 | head -70 | tee "runs/m1-storage/$N-desktop.txt"
+strings -n 4 "$C/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|NV_EARLY\|WMSCALE\|WMSET\|WMAUTO\|SF_\|NV_CLOCK\|NV_DESKSTATE\|NV_LEFT\|NV_SF' | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-260 | head -150 | tee "runs/m1-storage/$N-desktop.txt"

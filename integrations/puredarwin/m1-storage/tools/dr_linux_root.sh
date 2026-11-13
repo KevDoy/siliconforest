@@ -64,6 +64,13 @@ wcheck)
   (cd $MNT && sha256sum bin/sh usr/lib/libSystem.B.dylib) 2>&1 | sed 's/^/SFL_OLDSHA /'
   (cd $MNT/private/var/sf-persist 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_PSHA /'
   (cd $MNT/private/var/db/desktop-state 2>/dev/null && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -r sha256sum) 2>&1 | sed 's/^/SFL_DSHA /'
+  # times: Linux's clock now, and the modification times Darwin gave the files it wrote (a clock that was never set gives 1970)
+  echo "SFL_NOW $(date +%s)"
+  (cd $MNT/private/var/sf-persist 2>/dev/null && find . -type f -printf '%T@ %P\n' | LC_ALL=C sort -k2 | sed 's/\.[0-9]* / /') 2>&1 | sed 's/^/SFL_PTIME /'
+  (cd $MNT/private/var/db/desktop-state 2>/dev/null && find . -type f -printf '%T@ %P\n' | LC_ALL=C sort -k2 | sed 's/\.[0-9]* / /') 2>&1 | sed 's/^/SFL_DTIME /'
+  (cd $MNT/private/var/db/desktop-state/chonkstep 2>/dev/null && for f in theme scale wallpaper; do [ -f $f ] && echo "$f=$(head -c 60 $f | tr -d '\n')"; done) 2>&1 | sed 's/^/SFL_DESKSTATE /'
+  (cd $MNT && ls -A private/var/run private/tmp 2>&1 | tr '\n' ' ') | sed 's/^/SFL_LEFT /'; echo
+  dumpe2fs -h $P 2>/dev/null | grep -iE 'Last (mount|write) time|Mount count' | sed 's/^/SFL_SBTIME /'
   echo "SFL_TREE entries=$(cd $MNT && find . | wc -l)"
   df -k $MNT | tail -1 | sed 's/^/SFL_DF /'
   umount $MNT || fail "umount";;

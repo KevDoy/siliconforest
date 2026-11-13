@@ -31,6 +31,8 @@ root_mode = os.environ.get('NV_VERDICT_MODE') == 'root'     # the root filesyste
 # NV_WCHECK is the output of tools/dr_linux_root.sh wcheck, made from Linux after the boot.
 write_mode = os.environ.get('NV_VERDICT_MODE') == 'write'
 wmode = os.environ.get('NV_WMODE', '') if write_mode else ''     # '', 'unclean' or 'downgrade' (step 3c, guest/darwin-disk-rw2.in), 'root' (3d, guest/darwin-diskroot-rw.in)
+halt = wmode == 'halt'      # 3d ended by the system's own command (guest/darwin-diskroot-halt.in: sf-halt prints the end's lines, the machine restarts itself)
+if halt: wmode = 'root'
 rootw = wmode == 'root'     # the ROOT was the fenced device, read-write; driver log lines may be absent from the console (noiolog)
 ours_lba = int(os.environ.get('NV_PART_LBA', '0'))
 level = int(sys.argv[5]) if len(sys.argv) > 5 else 2
@@ -224,8 +226,8 @@ if write_mode:
         check('rd=uuid boot-uuid=GUID' in ba and 'rd=md0' not in ba and 'pdnvme_write=1' in ba and 'launchdsuffix' not in ba, 'booted with rd=uuid boot-uuid=<filesystem UUID> pdnvme_write=1, no rd=md0, process 1 is launchd itself')
         sw = re.findall(r'^NV_STATEWRITE (\S+) rc=(\d+)', con, re.M)
         check(len(sw) == 5 and all(rc == '0' for _, rc in sw), 'writes to /var/run, /tmp, /private/var/tmp, /etc, /usr succeed on the disk root: %s' % ' '.join('%s=%s' % x for x in sw))
-        check('PD_BENCH_DONE' in con.split('NV_AFTER_STOP')[-1], 'the report after the stop came out complete (from memory)')
-        for l in re.findall(r'^(?:GPUDESK|WMSTAT|NV_DESKSET).*$', con, re.M)[:18]: print('NV_RESULT ' + l[:200])
+        check(('PD_BENCH_REBOOT' if halt else 'PD_BENCH_DONE') in con.split('NV_AFTER_STOP')[-1], 'the report after the stop came out complete (from memory)')
+        for l in re.findall(r'^(?:GPUDESK|WMSTAT|NV_DESKSET|NV_DESKSTATE|WMSCALE|WMSET|WMAUTO (?:armed|settings|check)).*$', con, re.M)[:30]: print('NV_RESULT ' + l[:200])
     else: check(len(mrw) == 1 and re.match(r'/dev/%s on /private/tmp/sf \(ext4' % kv(st, 'device'), mrw[0]) is not None and 'read-only' not in mrw[0], 'ext4 mounted read-write from the fenced device: %s' % ' | '.join(mrw))
     check(re.search(r'^NV_STOP_WHILE_MOUNTED rc=[1-9]\d* state=ready', con, re.M) is not None and (rootw or 'stop refused: the fenced device is open' in con), 'a stop request while the filesystem was mounted read-write was refused')
     wsha = lambda tag, text=con: dict((f, h) for h, f in re.findall(r'^NV_WSHA %s ([0-9a-f]{64})\s+(\S+)' % tag, text, re.M))
@@ -344,6 +346,56 @@ if root_mode:
     check('PD_BENCH_DONE' in con.split('NV_AFTER_STOP')[-1], 'the report after the stop came out complete (from memory)')
     print('NV_VERDICT note writes the ext4 driver tried and IOMedia refused ("privilege violation" lines): %d' % con.count('privilege violation'))
     for l in re.findall(r'^NV_DMESG .*$', con, re.M)[:30]: print('NV_RESULT ' + l[:200])
+if halt:
+    # The boot was ended by the system's own command; the machine restarted itself. Clock: the time the guest
+    # printed against the time its line arrived at the controller; a file made in the boot against both.
+    wc = Path(os.environ['NV_WCHECK']).read_text(errors='replace') if os.path.exists(os.environ.get('NV_WCHECK', '')) else ''
+    rawc = console.read_bytes()
+    try: arrivals = [(float(x), int(y)) for x, y in (l.split() for l in (console.parent / 'console-times.txt').read_text().splitlines())]
+    except OSError: arrivals = []
+    def arrived(pattern):
+        m = re.search(pattern, rawc)
+        return (next((t for t, count in arrivals if count > m.start()), None), m) if m else (None, None)
+    for tag in ('start', 'end'):
+        t, m = arrived(rb'NV_CLOCK %s epoch=(\d+)' % tag.encode())
+        d = None if t is None else int(m.group(1)) - t
+        check(d is not None and -6 <= d <= 3, 'clock at the %s of the session: Darwin says %s, its line reached the controller at %s (difference %s s; a UART line arrives up to some seconds late)' % (tag, m.group(1).decode() if m else '?', '%.1f' % t if t else '?', '%.1f' % d if d is not None else '?'))
+    check(re.search(r'^SF_CLOCK set utc=\d+ .*source=hardware-clock', con, re.M) is not None, 'the time came from the hardware clock: %s' % ' | '.join(re.findall(r'^SF_CLOCK .*$', con, re.M))[:200])
+    check(re.search(r'^NV_CLOCK kernel pdrtc=1 result=0 .*writes=none', con, re.M) is not None, 'the kernel read the SMC counter and the stored offset, wrote nothing: %s' % ' | '.join(re.findall(r'^NV_CLOCK kernel (.*)$', con, re.M))[:200])
+    ft = re.search(r'^NV_FTIME (\S+) mtime=(\d+) now=(\d+)', con, re.M)
+    lt = dict((f, int(t)) for t, f in re.findall(r'^SFL_PTIME (\d+) (\S+)', wc, re.M))
+    now = re.search(r'^SFL_NOW (\d+)', wc, re.M)
+    check(bool(ft) and abs(int(ft.group(2)) - int(ft.group(3))) <= 2 and lt.get(ft.group(1)) == int(ft.group(2)) and bool(now) and 0 <= int(now.group(1)) - int(ft.group(2)) < 3600,
+          'a file made in this boot carries the time of its making: Darwin mtime %s (its clock then %s), Linux reads mtime %s, Linux\'s clock at the check %s' % (ft.group(2) if ft else '?', ft.group(3) if ft else '?', lt.get(ft.group(1)) if ft else '?', now.group(1) if now else '?'))
+    old = [f for f, t in lt.items() if t < 1700000000]
+    print('NV_VERDICT note files under sf-persist dated before 2023 (written by boots without a clock): %s' % (' '.join(sorted(old)) or 'none'))
+    # the look the previous boot's menu choices left must be the look this session starts with (not only the files)
+    prev = os.environ.get('NV_PREV_CONSOLE')
+    if prev:
+        pcon = subprocess.run(['strings', '-n', '6', prev], capture_output=True, text=True, errors='replace').stdout
+        pt = re.findall(r'^WMSET theme=(\S+) .*persisted=1', pcon, re.M); ps = re.findall(r'^WMSET scale=\S+ scale120=(\d+) persisted=1', pcon, re.M)
+        init = re.search(r'^WMSCALE initial scale=(\S+) scale120=(\d+) source=(\S+) .* theme=(\S+) theme_source=(\S+)', con, re.M)
+        if pt or ps:
+            check(bool(init) and (not ps or (init.group(2) == ps[-1] and init.group(3) == 'persisted')) and (not pt or (init.group(4) == pt[-1] and init.group(5) == 'persisted')),
+                  'the session came up with what the previous boot chose in the desktop menu (theme %s, scale120 %s): %s' % (pt[-1] if pt else '-', ps[-1] if ps else '-', init.group(0)[:230] if init else 'no WMSCALE initial line'))
+            chk = re.search(r'^WMAUTO check phase=settle .*result=(\S+) frame_hash=(\S+) cpu_hash=(\S+) titlebar=(\S+)', con, re.M)
+            check(bool(chk) and chk.group(1) == 'equal', 'the frame on the panel in that look, read back from the renderer, equals the CPU render of the scene: %s' % (chk.group(0)[:200] if chk else 'no settle check'))
+        else:
+            print('NV_VERDICT note the previous boot chose no theme or scale in the menu')
+    # the end by the system's own command
+    if os.environ.get('NV_HALT_MENU') == '1':
+        check(re.search(r'^WMSET session_end=restart', con, re.M) is not None and re.search(r'^NV_SESSION_END request=restart$', con, re.M) is not None,
+              'the restart was asked for in the desktop menu (Session > Restart) and the session ended with that request: %s' % ' | '.join(re.findall(r'^(?:WMSET session_end|NV_SESSION_END).*$', con, re.M))[:200])
+    check(re.search(r'^NV_HALT the command of the system now: (reboot|shutdown -r now)$', con, re.M) is not None, 'the session was ended by the system\'s command: %s' % ' | '.join(re.findall(r'^NV_HALT (.*)$', con, re.M)))
+    check(re.search(r'^SF_HALT downgrade: mount rc=0, root is now read-only', con, re.M) is not None, 'sf-halt: the root downgraded to read-only')
+    check(re.search(r'^SF_HALT stop errno=0 state=stopped-clean', con, re.M) is not None, 'sf-halt: the controller stopped cleanly before the restart: %s' % ' | '.join(re.findall(r'^SF_HALT stop .*$', con, re.M))[:160])
+    check(re.search(r'^SF_HALT restarting now', con, re.M) is not None and 'SF_HALT reboot returned' not in con and 'SF_HALT FAILED' not in con, 'sf-halt asked the kernel to restart and did not come back')
+    hg = re.findall(r'^NV_HALTGATE (start|end) (.*)$', con, re.M)
+    check(len(hg) == 2 and all('sent=0 refused=0' in t.split('|')[0] and 'pdpmu=1' in t and 'sent=0 refused=0' in t.split('|')[1] for _, t in hg), 'before the restart no SMC or PMU write had been sent by the restart path, and the PMU is read-only in this boot (pdpmu=1): %s' % (hg[-1][1] if hg else ''))
+    check(os.environ.get('NV_RESETS') == '0', 'the controller sent no reset: the machine came back to Linux by itself (reset_attempts=%s)' % os.environ.get('NV_RESETS'))
+    sb = re.findall(r'^SF_BOOT .*$', con, re.M)
+    check(len(sb) == 1 and 'run_and_tmp=cleaned' in sb[0] and re.search(r'^NV_SFBOOT rc=0 stamp=this-boot', con, re.M) is not None, 'sf-boot ran once: %s' % ' | '.join(sb)[:200])
+    for l in re.findall(r'^(?:SF_HALT|SF_INSTALL|NV_SFINSTALL|NV_LEFT|NV_DMESG_CLOCK|SFL_DESKSTATE|SFL_LEFT|SFL_SBTIME).*$', con + wc, re.M)[:40]: print('NV_RESULT ' + l[:220])
 raws = dict(re.findall(r'^NV_SMARTRAW (\S+) ([0-9a-f]{1024})', con, re.M))
 order = [k for k in ('start', 'end', 'start2', 'end2') if k in raws]
 for a, b in zip(order, order[1:]):

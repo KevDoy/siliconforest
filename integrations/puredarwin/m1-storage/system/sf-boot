@@ -1,0 +1,35 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# /sbin/sf-boot: what a SiliconForest disk root does once at every boot, before a session:
+#   1. the time from the hardware clock (sf-clock; this kernel starts at 1970 otherwise);
+#   2. what the previous boot left in /private/var/run and /private/tmp is removed (on a RAM
+#      root these were empty at every boot; on a disk they hold the last boot's sockets, locks
+#      and process-id files, which a new session must not find).
+# It runs once a boot whoever calls it (the session's launchd job, the bench's typed command,
+# a person): the boot is recognised by kern.bootsessionuuid, kept in /private/var/run.
+# SF_CLOCK_WAIT: seconds to wait for the hardware clock (default 30; the SMC session that
+# reads it opens `pdthermal_delay` seconds into the boot).
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+id=$(sysctl -n kern.bootsessionuuid 2>/dev/null)
+stamp=/private/var/run/sf-boot.done
+if [ -n "$id" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$id" ]; then exit 0; fi
+/usr/sbin/sf-clock set "${SF_CLOCK_WAIT:-30}"; clock=$?
+if [ -z "$id" ]; then echo "SF_BOOT clock_rc=$clock; no kern.bootsessionuuid: this boot cannot be told from the last, /private/var/run and /private/tmp are left as they are"; exit 1; fi
+removed=0; state=skipped
+if ! mount | grep -q '^root_device on / (.*read-only'; then
+    if mount | grep -q ' on /private/\(tmp\|var/run\)/'; then
+        state="left alone: something is mounted below them"
+    else
+        state=cleaned
+        for d in /private/var/run /private/tmp; do
+            mkdir -p "$d"
+            for f in "$d"/* "$d"/.[!.]* "$d"/..?*; do
+                if [ -e "$f" ] || [ -L "$f" ]; then rm -rf "$f" < /dev/null && removed=$((removed + 1)); fi
+            done
+        done
+        chmod 755 /private/var/run; chmod 1777 /private/tmp
+        echo "$id" > "$stamp"
+    fi
+fi
+echo "SF_BOOT clock_rc=$clock run_and_tmp=$state removed=$removed date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+exit 0
