@@ -10,7 +10,7 @@
 
 #define NS 244276265ull
 #define FIRST 192633862ull
-#define LAST 209411077ull
+#define LAST 208800773ull
 static const struct pd_nvme_fence kFence = { FIRST, LAST, 1 };
 static unsigned cases, failures;
 
@@ -71,7 +71,7 @@ int main(void)
 	W("first block of the iBoot partition", 0, 6, 1);
 	W("first block of macOS", 0, 128006, 1);
 	W("last block of macOS (just before ours)", 0, FIRST - 1, 1);
-	W("the sliver after ours", 0, 209411078ull, 1);
+	W("the sliver after ours", 0, 208800774ull, 1);
 	W("first block of the Linux stub", 0, 209411119ull, 1);
 	W("EFI partition", 0, 210021423ull, 1);
 	W("Linux /boot", 0, 210149423ull, 1);

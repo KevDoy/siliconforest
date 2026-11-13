@@ -11,7 +11,7 @@
 
 #define NS 244276265ull
 #define FIRST 192633862ull
-#define BLOCKS 16777216ull
+#define BLOCKS 16166912ull
 #define LAST (FIRST + BLOCKS - 1)
 static unsigned cases, failures;
 #define CHECK(name, cond) do { cases++; if (!(cond)) { failures++; printf("WRINGHOST FAIL %s\n", name); } } while (0)
@@ -48,7 +48,7 @@ int main(void)
 	uint64_t lba = 0;
 
 	/* ---- the fence: only this machine's range, only verified, only with the argument, only once ---- */
-	CHECK("constants", PD_SF_FENCE_FIRST == 192633862ull && PD_SF_FENCE_BLOCKS == 16777216ull && LAST == 209411077ull);
+	CHECK("constants", PD_SF_FENCE_FIRST == 192633862ull && PD_SF_FENCE_BLOCKS == 16166912ull && LAST == 208800773ull);
 	CHECK("not verified", pd_wfence_open(&f, FIRST, BLOCKS, NS, 0, 1) != 0 && !f.open && !f.first && !f.last);
 	CHECK("verified = 2", pd_wfence_open(&f, FIRST, BLOCKS, NS, 2, 1) != 0 && !f.open);
 	CHECK("no write argument", pd_wfence_open(&f, FIRST, BLOCKS, NS, 1, 0) != 0 && !f.open);

@@ -60,7 +60,7 @@ check "rw: the probe has no data path" "$(awk '/case kCtlWProbe/,/case kCtlSeal/
 check "rw: the fence is opened in one place, after the verification" "$(grep -c 'pd_wfence_open(' "$RW/PDAppleNVMe.cpp" "$RW/pd_ans.cpp" | awk -F: '{n+=$2} END {print n}')" 1
 check "rw: the fence fields are assigned nowhere else" "$(grep -c 'fence\.\(first\|last\|open\) *= \|fence\.\(first\|last\|open\)++' "$RW/PDAppleNVMe.cpp" "$RW/pd_ans.cpp" | awk -F: '{n+=$2} END {print n}')" 0
 check "rw: the whole disk still always reports write protection" "$(grep -c 'reportWriteProtection.*\*isWriteProtected = true' "$RW/PDAppleNVMe.cpp")" 1
-check "rw: fence constants" "$(grep -c 'define PD_SF_FENCE_FIRST  192633862ULL\|define PD_SF_FENCE_BLOCKS 16777216ULL' "$RW/pd_nvme_wring.h")" 2
+check "rw: fence constants" "$(grep -c 'define PD_SF_FENCE_FIRST  192633862ULL\|define PD_SF_FENCE_BLOCKS 16166912ULL' "$RW/pd_nvme_wring.h")" 2
 check "rw: no boot argument reaches the fence but pdnvme_write and the three partition arguments" "$(grep -o 'PE_parse_boot_argn("[a-z_]*"' "$RW/PDAppleNVMe.cpp" | sort -u | tr '\n' ' ')" 'PE_parse_boot_argn("pdnvme" PE_parse_boot_argn("pdnvme_delay" PE_parse_boot_argn("pdnvme_part" PE_parse_boot_argn("pdnvme_part_blocks" PE_parse_boot_argn("pdnvme_part_lba" PE_parse_boot_argn("pdnvme_readfence" PE_parse_boot_argn("pdnvme_ttl" PE_parse_boot_argn("pdnvme_verbose" PE_parse_boot_argn("pdnvme_write" '
 check "rw: not in the default collection recipe" "$(grep -c 'PDAppleNVMeRW\|build-kext-rw' "$HERE/../../rebase/build-kc.nix" "$HERE/../../../../tools/default_kc.sh" | awk -F: '{n+=$2} END {print n}')" 0
 if [ -n "${1:-}" ]; then

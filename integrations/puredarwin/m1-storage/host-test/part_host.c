@@ -34,7 +34,7 @@ static void w32(uint8_t *p, uint32_t v) { for (int i = 0; i < 4; i++) p[i] = (ui
 static void w64(uint8_t *p, uint64_t v) { for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i)); }
 
 static const char *kOurs = "5f3a9c1e-7b24-4d86-a1f0-3c9e2b7d4a65";      /* made up for the test */
-static const uint64_t kFirst = 192633862ull, kBlocks = 16777216ull;
+static const uint64_t kFirst = 192633862ull, kBlocks = 16166912ull;
 static const uint8_t kLinux[16] = { 0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4 };
 static const uint8_t kApfs[16] = { 0xef, 0x57, 0x34, 0x7c, 0x00, 0x00, 0xaa, 0x11, 0xaa, 0x11, 0x00, 0x30, 0x65, 0x43, 0xec, 0xac };
 
