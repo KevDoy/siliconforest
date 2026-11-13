@@ -16,6 +16,7 @@
  */
 
 #include "pdsf.h"
+#include "pdsf_root.h" /* PDSF_ROOT_UUID: written by build.sh; "" unless a disk root was named */
 #include "adt.h"
 #include "fb.h"
 #include "heapblock.h"
@@ -188,6 +189,7 @@ int pdsf_boot(void *payload)
     struct pdsf_layout_in in;
     struct pdsf_layout lay;
     const char *err = "";
+    int root_kind = 0;
     u64 ram_end = cur_boot_args.phys_base + cur_boot_args.mem_size;
     const u8 *kc;
     int ret, cpus, smp;
@@ -230,10 +232,14 @@ int pdsf_boot(void *payload)
                           &cfg, &err))
         fail("config: %s\n", err);
     printf("PDSF: bootargs: %s\n", cfg.bootargs);
-    /* Every boot of this stage is from the RAM root: without rd=md0 the kernel would wait
-     * for a root device and then take its recovery path, which writes NVRAM variables. */
-    if (!pdsf_cmdline_has(cfg.bootargs, "rd=md0"))
-        fail("bootargs lack rd=md0\n");
+    /* The root: the RAM root record of this image (rd=md0), or the one disk filesystem this
+     * stage was built for (rd=uuid boot-uuid=<PDSF_ROOT_UUID>, pdsf_root.h, written by
+     * build.sh). Any other command line would have the kernel wait for a root device and
+     * then take its recovery path. */
+    if (pdsf_root_check(cfg.bootargs, set.item[PDSF_RAMDISK].present, PDSF_ROOT_UUID, &root_kind, &err))
+        fail("bootargs: %s\n", err);
+    printf("PDSF: root: %s\n", root_kind == 1 ? "the RAM root of this image (rd=md0)" :
+                                               "the disk filesystem this stage was built for (rd=uuid)");
 
     cpus = pdsf_cmdline_cpus(cfg.bootargs);
     if (cpus < 0)
@@ -458,16 +464,17 @@ int pdsf_boot(void *payload)
     ba->video.display = cfg.display;
     /*
      * The page as the kernel will read it: the command line at XNU's offset must be the one
-     * asked for and must name the RAM root. Without rd=md0 the kernel waits for a root
-     * device and then takes its recovery path. (Until a disk root replaces this with a check
-     * of the root's UUID.)
+     * asked for, and the root it names is checked once more on these bytes (the RAM root of
+     * this image, or the disk filesystem this stage was built for; nothing else).
      */
     {
         const char *seen = (const char *)lay.bootargs + XNU_BA_COMMAND_LINE;
+        int seen_kind = 0;
 
         if (strlen(seen) != strlen(cfg.bootargs) || memcmp(seen, cfg.bootargs, strlen(cfg.bootargs)) ||
-            !pdsf_cmdline_has(seen, "rd=md0"))
-            fail("the boot arguments page does not carry the command line with rd=md0 where XNU reads it\n");
+            pdsf_root_check(seen, set.item[PDSF_RAMDISK].present, PDSF_ROOT_UUID, &seen_kind, &err) ||
+            seen_kind != root_kind)
+            fail("the boot arguments page does not carry the command line with its root where XNU reads it\n");
         printf("PDSF: command line as XNU reads it (offset %d): %s\n", XNU_BA_COMMAND_LINE, seen);
     }
 

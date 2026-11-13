@@ -266,6 +266,87 @@ int pdsf_cmdline_has(const char *cmdline, const char *token)
     return cmdline_token(cmdline, token, 1, NULL);
 }
 
+/*
+ * The root a command line names, and whether this stage may boot it. A kernel that waits
+ * for a root which never appears is the one thing a stage must not start (it ends in the
+ * kernel's recovery path), so the rule is closed:
+ *   rd=md0                      only when the image carries a RAM root record;
+ *   rd=uuid boot-uuid=<U>       only when <U> is, character for character, the filesystem
+ *                               UUID this stage was built for (PDSF_ROOT_UUID; a build
+ *                               without one refuses every disk root);
+ * exactly one rd= token, and with rd=uuid exactly one boot-uuid= token (a second one would
+ * leave it to the kernel's parser which of them counts); nothing else.
+ * Returns 0 and the kind (1 RAM root, 2 disk root) or -1 with a reason.
+ */
+int pdsf_root_check(const char *cmdline, int have_ramdisk, const char *built_for, int *kind, const char **err)
+{
+    const char *p = cmdline, *rd = NULL, *uuid = NULL;
+    u64 rd_len = 0, uuid_len = 0;
+    int rds = 0, uuids = 0;
+
+    *err = "";
+    if (kind)
+        *kind = 0;
+    while (*p) {
+        const char *start;
+        u64 len;
+
+        while (*p == ' ')
+            p++;
+        start = p;
+        while (*p && *p != ' ')
+            p++;
+        len = (u64)(p - start);
+        if (len >= 3 && !memcmp(start, "rd=", 3)) {
+            rds++;
+            rd = start + 3;
+            rd_len = len - 3;
+        } else if (len >= 10 && !memcmp(start, "boot-uuid=", 10)) {
+            uuids++;
+            uuid = start + 10;
+            uuid_len = len - 10;
+        }
+    }
+    if (rds != 1) {
+        *err = rds ? "more than one rd= argument" : "no rd= argument: the kernel would wait for a root";
+        return -1;
+    }
+    if (rd_len == 3 && !memcmp(rd, "md0", 3)) {
+        if (uuids) {
+            *err = "rd=md0 together with boot-uuid=";
+            return -1;
+        }
+        if (!have_ramdisk) {
+            *err = "rd=md0 without a RAM root record in the image";
+            return -1;
+        }
+        if (kind)
+            *kind = 1;
+        return 0;
+    }
+    if (rd_len == 4 && !memcmp(rd, "uuid", 4)) {
+        u64 want = built_for ? strlen(built_for) : 0;
+
+        if (uuids != 1) {
+            *err = uuids ? "more than one boot-uuid= argument" : "rd=uuid without boot-uuid=";
+            return -1;
+        }
+        if (want == 0) {
+            *err = "rd=uuid, and this stage was built for no disk root";
+            return -1;
+        }
+        if (uuid_len != want || memcmp(uuid, built_for, want)) {
+            *err = "boot-uuid= is not the filesystem this stage was built for";
+            return -1;
+        }
+        if (kind)
+            *kind = 2;
+        return 0;
+    }
+    *err = "rd= is neither md0 nor uuid";
+    return -1;
+}
+
 /* ---- Mach-O ---- */
 
 #define MH_MAGIC_64    0xfeedfacfu

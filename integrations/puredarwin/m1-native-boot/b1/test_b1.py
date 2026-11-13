@@ -490,5 +490,49 @@ class Stage(unittest.TestCase):
         self.assertEqual(touched.stdout, '')      # --check changed nothing in the pinned tree
 
 
+class RootRule(Stage):
+    """src/pdsf.c pdsf_root_check: which root a command line may name."""
+    U = '0A1B2C3D-1111-2222-3333-444455556666'
+
+    def root(self, have_ramdisk, built_for, cmdline):
+        return self.run_c('root', 1 if have_ramdisk else 0, built_for, cmdline)[0].strip()
+
+    def test_ram_root_needs_the_record(self):
+        self.assertEqual(self.root(True, '', '-v rd=md0 cpus=8'), 'rc=0 kind=1')
+        self.assertEqual(self.root(True, self.U, 'rd=md0'), 'rc=0 kind=1')
+        self.assertTrue(self.root(False, '', '-v rd=md0 cpus=8').startswith('rc=-1 kind=0 rd=md0 without a RAM root record'))
+        self.assertTrue(self.root(True, self.U, 'rd=md0 boot-uuid=' + self.U).startswith('rc=-1'))
+
+    def test_disk_root_is_exactly_the_one_built_for(self):
+        ok = '-v rd=uuid boot-uuid=%s pdnvme=3 cpus=8' % self.U
+        self.assertEqual(self.root(False, self.U, ok), 'rc=0 kind=2')
+        self.assertEqual(self.root(True, self.U, ok), 'rc=0 kind=2')          # a RAM disk beside it changes nothing
+        other = self.U[:-1] + '7'
+        for built, cmdline, why in (
+                ('', ok, 'built for no disk root'),
+                (other, ok, 'not the filesystem this stage was built for'),
+                (self.U, ok.replace(self.U, self.U.lower()), 'not the filesystem'),          # compared as text
+                (self.U, ok.replace(self.U, self.U + '0'), 'not the filesystem'),
+                (self.U, ok.replace(self.U, self.U[:-1]), 'not the filesystem'),
+                (self.U, '-v rd=uuid cpus=8', 'without boot-uuid='),
+                (self.U, ok + ' boot-uuid=' + other, 'more than one boot-uuid='),
+                (self.U, 'boot-uuid=' + other + ' ' + ok, 'more than one boot-uuid='),
+                (self.U, ok + ' rd=md0', 'more than one rd='),
+                (self.U, 'rd=md0 ' + ok, 'more than one rd='),
+                (self.U, '-v boot-uuid=%s cpus=8' % self.U, 'no rd= argument'),
+                (self.U, '-v rd=disk0s3 boot-uuid=%s' % self.U, 'neither md0 nor uuid'),
+                (self.U, '-v rd=uuidx boot-uuid=%s' % self.U, 'neither md0 nor uuid'),
+                (self.U, '-v xrd=uuid xboot-uuid=%s' % self.U, 'no rd= argument'),
+                (self.U, '', 'no rd= argument')):
+            out = self.root(False, built, cmdline)
+            self.assertTrue(out.startswith('rc=-1 kind=0 ') and why in out, (built, cmdline, out))
+
+    def test_the_stage_uses_the_rule_twice_and_nothing_else(self):
+        source = (HERE / 'src/pdsf_boot.c').read_text()
+        self.assertEqual(source.count('pdsf_root_check('), 2)       # the configuration, and the page as XNU reads it
+        self.assertNotIn('pdsf_cmdline_has(cfg.bootargs, "rd=md0")', source)
+        self.assertIn('#include "pdsf_root.h"', source)
+
+
 if __name__ == '__main__':
     unittest.main()

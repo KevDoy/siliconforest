@@ -82,6 +82,14 @@ int main(int argc, char **argv)
                (unsigned long long)cfg.xnu_base);
         return 0;
     }
+    if (argc == 5 && !strcmp(argv[1], "root")) {
+        /* root <have ramdisk 0|1> <built for> <command line> */
+        const char *why = "";
+        int kind = 0, rc = pdsf_root_check(argv[4], argv[2][0] == '1', argv[3], &kind, &why);
+
+        printf("rc=%d kind=%d %s\n", rc, kind, why);
+        return 0;
+    }
     if (argc >= 3 && !strcmp(argv[1], "macho")) {
         u8 *kc = slurp(argv[2], &len);
         struct pdsf_macho m;

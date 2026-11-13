@@ -4,6 +4,7 @@
 # patches/ and src/ of this directory, in a scratch copy. The pinned tree is not modified.
 #   build.sh [output directory, default ./out]
 #   B1_WORK=<directory>   keep the scratch copy there (default: a temporary directory, removed)
+#   B1_ROOT_UUID=<filesystem UUID>  the one disk root the stage may boot (rd=uuid boot-uuid=<it>); unset: RAM roots only
 #   B1_KC=<collection directory>  also pack out/sf-stage-kc.bin (stage + configuration +
 #                         collection, no RAM disk) to show the size of an installable image
 # Output: m1n1-sf-stage.bin (raw m1n1 image, entry 0x800), its sha256, build.json.
@@ -22,6 +23,11 @@ rm -rf "$WORK/m1n1"; cp -a "$SRC" "$WORK/m1n1"; cd "$WORK/m1n1"
 find build -maxdepth 1 -type f ! -name librust.a -delete; rm -rf build/.deps build/chickens build/dcp build/hv build/math build/tinf build/minilzlib build/dlmalloc build/libfdt
 for p in "$HERE"/patches/*.patch; do git apply "$p"; done
 cp "$HERE"/src/pdsf.c "$HERE"/src/pdsf.h "$HERE"/src/pdsf_boot.c "$HERE"/src/pdsf_el2.S src/
+# The one disk root this stage may boot (src/pdsf.c pdsf_root_check): B1_ROOT_UUID=<filesystem UUID>,
+# compared as text with boot-uuid= on the command line. Unset: the stage boots RAM roots only.
+# The UUID identifies the owner's disk: it goes into the image (out/, never committed), not into build.json.
+case "${B1_ROOT_UUID:-}" in *[!0-9A-Fa-f-]*) echo "B1_ROOT_UUID is not a UUID" >&2; exit 2;; esac
+printf '#define PDSF_ROOT_UUID "%s"\n' "${B1_ROOT_UUID:-}" > src/pdsf_root.h
 # The resident EL2 page: assembled from the stream's stub, and required to be byte for byte
 # the page the native boots nb04..nb08 ran (native_stub.py STUB_SHA256).
 mkdir -p build

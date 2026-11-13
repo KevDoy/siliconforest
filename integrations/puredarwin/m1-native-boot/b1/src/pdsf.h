@@ -84,6 +84,9 @@ int pdsf_config_parse(const char *text, u64 len, struct pdsf_config *cfg, const 
 /* N of the last cpus=N token of a command line, 0 when there is none */
 int pdsf_cmdline_cpus(const char *cmdline);
 int pdsf_cmdline_has(const char *cmdline, const char *token);
+/* May this stage boot the root the command line names? 0 and kind 1 (RAM root) or 2 (the disk
+ * root it was built for), or -1 and a reason. See pdsf.c. */
+int pdsf_root_check(const char *cmdline, int have_ramdisk, const char *built_for, int *kind, const char **err);
 
 /* Mach-O (MH_FILESET kernel collection) */
 struct pdsf_macho {
