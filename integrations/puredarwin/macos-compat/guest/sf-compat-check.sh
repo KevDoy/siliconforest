@@ -86,7 +86,7 @@ if [ -x /opt/homebrew/opt/git/libexec/git-core/git-http-push ]; then
     step git-http-push 120 $E /opt/homebrew/opt/git/libexec/git-core/git-http-push
     ok "git-http-push loads (it prints its usage)" 'grep -qi "usage: git http-push" $W/step.err $W/step.out'
 fi
-for p in sf-expat-probe sf-curses-probe; do
+for p in sf-expat-probe sf-curses-probe sf-strxfrm-probe; do
     [ -x $T/$p ] || continue
     CUT=600 step $p 120 $E $T/$p
     ok "$p" '[ "$rc" = 0 ]'

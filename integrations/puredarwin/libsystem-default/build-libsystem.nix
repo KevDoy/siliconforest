@@ -18,6 +18,11 @@
 #       exit reason LIBXPC/2). Security's client describes its connection in every error
 #       it builds, so any program whose SecItemCopyMatching failed was killed (the Claude
 #       Code CLI: docs/roadmap/issues/SF-X-claude-code.md).
+#   + patches/strxfrm-without-directives.patch (GitHub issue 45):
+#       strxfrm_l()/wcsxfrm_l() called wcslen(NULL) in a locale whose collation table has no
+#       directives (en_US.UTF-8 as the tree's locale data has it): SIGSEGV in every program
+#       that calls strxfrm() there (perl at start). Now such a locale collates as C does.
+#       Also built and exported: timingsafe_bcmp (openssh, libfido2), ualarm.
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let
@@ -29,5 +34,6 @@ in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
     ../m1-userspace-diagnostics/fix-spawnattr/posix-spawnattr-init-zero.patch
     ./patches/macos-abi.patch
     ./patches/xpc-copy-description-never-aborts.patch
+    ./patches/strxfrm-without-directives.patch
   ];
 })

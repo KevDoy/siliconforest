@@ -1,6 +1,6 @@
 # Gap scan of the M1 disk root, 13 November 2026, before any fix
 
-Made by `../sf_gapscan.py --root <copy of the M1 trees> --brew --system` over a copy of `/opt/homebrew`, `/usr/lib`, `/System`, `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec`, `/libexec`, `/usr/local` read from the running system (71 formulae installed there).
+Made by `../sf_gapscan.py --root <copy of the M1 trees> --brew --system` over a copy of `/opt/homebrew`, `/usr/lib`, `/System`, `/lib`, `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/libexec`, `/libexec`, `/usr/local` read from the running system (71 formulae installed there).
 
 ## Homebrew prefix (/opt/homebrew/Cellar)
 
@@ -21,6 +21,28 @@ Made by `../sf_gapscan.py --root <copy of the M1 trees> --brew --system` over a 
 |---|---|---|
 | neovim | 1: nvim | symbol CoreServices.framework:_LocaleRefGetPartString |
 | vim | 1: vim | library AppKit.framework; library libperl.dylib; symbol CoreServices.framework:_CreateTextEncoding; symbol CoreServices.framework:_LocaleRefGetPartString … (8) |
+
+### Interpreters that scripts in the prefix name (outside the prefix)
+
+| Interpreter | In the root | Formulae | Scripts |
+|---|---|---|---|
+| `/usr/bin/env perl` | **no** | 5: git, jemalloc, ncurses, openssl@4, vim | 10 |
+| `/usr/bin/env python` | **no** | 4: git, libevent, libpsl, python@3.14 | 7 |
+| `/usr/bin/perl` | **no** | 2: git, vim | 17 |
+| `/usr/bin/python` | **no** | 2: python@3.14, vim | 2 |
+| `./python` | **no** | 1: python@3.14 | 1 |
+| `/bin/csh` | **no** | 1: vim | 1 |
+| `/usr/bin/awk` | **no** | 1: vim | 1 |
+| `/usr/bin/env python3.8` | **no** | 1: python@3.14 | 2 |
+| `/usr/bin/make` | **no** | 1: ncurses | 3 |
+| `/usr/bin/python3` | **no** | 1: git | 1 |
+| `/bin/sh` | yes | 18: bash, findutils, gawk, gettext, git, grep, icu4c@79, jemalloc, less, ncurses … | 172 |
+| `/bin/bash` | yes | 3: ca-certificates, node, python@3.14 | 6 |
+| `/usr/bin/env bash` | yes | 3: fzf, node, python@3.14 | 8 |
+| `/usr/bin/env python3` | yes | 2: node, python@3.14 | 39 |
+| `/usr/bin/env lua` | yes | 1: lpeg | 1 |
+| `/usr/bin/env node` | yes | 1: node | 12 |
+| `/usr/bin/env sh` | yes | 1: node | 2 |
 
 ## The root's own frameworks, libraries and programs
 

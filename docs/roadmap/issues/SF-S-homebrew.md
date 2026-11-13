@@ -338,12 +338,107 @@ Checked in the guest (`command -v`): `security` no, `open` no, `pbcopy`/`pbpaste
 6. For Claude Code and Codex: `/usr/bin/shasum`, `git` and `rg`, `pgrep`, `stty`, `tput`, `locale`; `/usr/bin/open` and `pbcopy`/`pbpaste` when there is something for them to talk to; `/usr/bin/security` (at least the generic-password subcommands over a file store) so credential storage does not depend on a fallback; `/dev/fd`; an 8-bit-clean console.
 7. For Codex: `LocalAuthentication` and `CFNetwork` built for arm64, the three Security constants, `NSPasteboardURLReadingFileURLsOnlyKey` in AppKit, `log2`/`exp2` reachable through CoreServices.
 
+## Framework gaps: the scanner, vim and neovim on the M1 (13 November, issues 45 and 47)
+Everything here is in `integrations/puredarwin/macos-compat/` (recipes, patches, probes, tools) and
+`integrations/puredarwin/homebrew/sf_gapscan.py`. "M1" below means the installed system on the
+M1's disk, reached over SSH while it ran; nothing was booted for this.
+
+### The scanner
+`sf_gapscan.py --root <copy of a root> [--overlay <candidate fix>] --brew --system [--binary <path>] [--kegs <unpacked bottles>]`
+reads Mach-O files on the workstation (3 s for the M1's prefix): every load command resolved as
+dyld resolves it (absolute path, `@rpath`, `@loader_path`, dyld's fallback directories), every
+import checked against the library its two-level ordinal binds it to, re-exports followed. It
+reports the gap in the image itself and, per program in a formula's `bin/`, the gaps of its whole
+load closure (the program does not start). Also: the interpreters scripts name. Static only.
+Summaries (the raw output stays in `runs/sf-gaps/`): `homebrew/gapscan/`.
+
+| Scan | Before | With the fixes below |
+|---|---|---|
+| The M1's own prefix: 71 formulae, 533 Mach-O files, 202 programs | 2 formulae with a program that does not start (vim, neovim) | 0 |
+| The M1 root's own frameworks, libraries and programs | 0 of 128 programs | 0 of 129 (332 images with the new frameworks and Perl's extensions) |
+| 138 unpacked bottles of the survey (not installed on the M1; static, not run) | 15 formulae | 10 (below; gone from the list: vim, neovim, starship, pinentry, libfido2) |
+| Interpreters scripts name, missing from the root | `/usr/bin/perl` and `env perl` (27 scripts of git, vim, openssl, ncurses, jemalloc), `/usr/bin/python`, `/usr/bin/python3`, `/usr/bin/awk`, `/bin/csh`, `/usr/bin/make` | perl is there; the others are not |
+
+What the first table missed and the programs then showed: a library that is present and exports
+nothing counts as a symbol gap only for images that import from it (libexpat, found that way);
+behaviour is never seen (strxfrm, below).
+
+### What was wrong and what was done
+| Gap | Who | Fix | Real or stub |
+|---|---|---|---|
+| CoreServices: `LocaleRefGetPartString`, `CreateTextEncoding`, `TECCreateConverter`, `TECConvertText`, `TECFlushText`, `TECDisposeConverter` | nvim (the first), vim (all six, called at every start) | `patches/coreservices-text-encoding-converter.patch` (`build-coreservices.nix`; the Homebrew overlay takes its CoreServices from there). Also `GetTextEncodingBase/Variant/Format`, `TECClearConverterContextInfo` | real: conversion between UTF-8/16/32 and any encoding CFString has, output in the canonical or HFS+ composed or decomposed form the target encoding's variant names (HFS+ leaves U+2000..2FFF, U+F900..FAFF, U+2F800..2FAFF alone), text that does not fit kept for the next call; a locale's language, script and region from its CoreFoundation identifier. Refused cleanly: an encoding CFString does not have (`kTextUnsupportedEncodingErr`), UTF-7, half a character at the end of the input (`kTECPartialCharErr`), a buffer too small for the locale string. 15 checks in `probe/sf-compat-probe.c` |
+| `AppKit.framework/Versions/C` absent | vim (`NSPasteboard`, `NSSound`, `NSPasteboardTypeString`) | `build-appkit.nix`: the Cocoa stream's stack (SF-U), not a second AppKit: the part of `cocoa/build-desktop-root.nix` that dyld loads for a program linking AppKit or Cocoa, selected by the scanner's walk (`tools/sf_closure_copy.py`): the bundles AppKit, Cocoa, CoreData, CoreGraphics, CoreText, CoreVideo, IOSurface, Onyx2D, OpenGL, QuartzCore, Carbon and `libWindowServer`, `libGL`, `libGLU`, `libgallium`, `libLLVM`, `libdrm`, `libwayland-client/-cursor`, `libfreetype`, `libfontconfig` (101 MB, all new paths) | real, with one limit: in a program without a window the pasteboard is that process's own (the WindowServer library joins the compositor's selection only once a window made it connect, and Wayland gives the selection to a client with keyboard focus). `"*y` then `"*p` inside one vim works; another program does not see it. `+[NSSound soundNamed:]` of an unknown name is nil |
+| `/System/Library/Perl/5.34/darwin-thread-multi-2level/CORE/libperl.dylib` absent (a hard load command of vim; not in the brief) | vim; every `#!/usr/bin/perl` script | `build-perl.nix`: Perl 5.34.1 from CPAN's source, built with perl-cross 1.3.7 in the nix sandbox (nothing is run on a target), threads and multiplicity, shared libperl with the install name macOS programs carry, `/usr/bin/perl`, `/System/Library/Perl/5.34` (1672 files, 51 MB). `perl/hints-darwin` is ours (type sizes asserted by `perl/sizes.c` with the cross compiler) | real. vim's `:perl` runs in it: Perl's own check of the interpreter layout a program was compiled with (`Perl_xs_handshake`) accepts vim. Not built: Apple's additions to its system Perl (its extra CPAN modules, dtrace probes). `%Config` names `cc`; there is no compiler on the system |
+| `/usr/lib/libexpat.1.dylib` exported nothing | python `pyexpat` (so `xml.etree`, `plistlib`), `git-http-push` | `homebrew/build-syslibs.nix`: expat hides its API unless told a shared library is made; the tree builds it static only since the tip. Rebuilt visible; the recipe now fails when a library exports nothing | real (upstream expat) |
+| `/usr/lib/libncurses.5.4.dylib` without the `name$NCURSES60` symbols | python `_curses`; cmake's `ccmake`, pinentry (static) | the same recipe: every function also under the name macOS's `<curses.h>` gives it (ld's `-alias_list`); the library is ncurses 6 with that ABI | real. Proven with python's curses on a terminal. The root's terminfo database has `xterm-256color` only (not `tmux-256color`, `screen`) |
+| libSystem: `strxfrm()`/`wcsxfrm()` in `en_US.UTF-8` end the caller with SIGSEGV (`wcslen(NULL)`: the locale's collation table has no directives) | found by `/usr/bin/perl` (dies at start in a UTF-8 locale), the same in python's `locale.strxfrm` | `libsystem-default/patches/strxfrm-without-directives.patch`: such a locale collates as the C locale does. Also built and exported: `timingsafe_bcmp`, `ualarm` | real fix; collation in UTF-8 locales is by code point, not by language rules (the tree's locale data has no usable collation table) |
+
+Not stubs anywhere above. `dyld: dyld cache load error: shared cache file open() failed` is not
+printed by every program: dyld prints it only together with a real load failure (there is no
+shared cache). Nothing to silence.
+
+### Proof
+`guest/sf-compat-check.sh` runs the programs and prints `COMPAT_VERDICT ok|FAIL`; the same file
+is the QEMU guest's and the M1's check.
+
+| Where | What | Result |
+|---|---|---|
+| QEMU, the M1's root image + `sys` part + the M1's `/opt/homebrew` (run k1) | CoreServices replaced in the running guest by `sf-lib-install.sh` | probe 15 of 15; `nvim --version`, `nvim --headless` writes a file, nvim on a tmux terminal: typed text is in the file |
+| QEMU, a fresh boot of that root (k1-2) | nothing installed | the same |
+| QEMU (k2) | the new files sent as the M1 gets them (tar stream, unpacked in the guest: 30 minutes there) | 1784 files hashed in the guest, 0 differ |
+| QEMU (k3), new files put in by the host; libexpat and libncurses replaced in the guest | vim, python, git | `vim --version`, `vim -es` writes a file, vim on a terminal; `pyexpat`/ElementTree/plistlib; python curses draws at 80x24 with 256 colours; `git-http-push` loads. `/usr/bin/perl` and `:perl` fail in `en_US.UTF-8` (the strxfrm defect; they run under `LC_ALL=C`) |
+| M1 | CoreServices replaced (guarded), then the 1784 new files + 12 links (sent in 9 s, every file hashed there before anything loaded it: equal) | probe 15 of 15; AppKit probe (pasteboard set and read back) in 27 ms; **nvim: starts, writes headless, edits on a terminal; vim: `--version` in 88 ms, `-es` writes a file, edits on a terminal, `:perl` prints "perl says 42 version v5.34.1"** |
+| M1, the fixed libSystem tried through `DYLD_LIBRARY_PATH` from a scratch directory (not installed by that) | perl and python in `en_US.UTF-8` | `perl v5.34.1 in en_US.UTF-8 strxfrm=5`; python `locale.strxfrm` works (dies with the library in use) |
+| QEMU (k3-2) | a fresh boot of k3's root (libexpat, libncurses replaced) | all 18 checks ok |
+| QEMU (k7) | CoreServices, libexpat, libncurses and libSystem replaced in the running guest, in that order (the guest starts with the libSystem the M1 had) | each `SFLIB 3 installed`; all 18 checks ok, `QDDESK_PASS`; `e2fsck -fn` of the image afterwards clean |
+| QEMU (k7-2) | a fresh boot of the root k7 left, nothing installed or injected | all 18 checks ok, `QDDESK_PASS` |
+| M1, after that | libexpat, libncurses, then libSystem replaced (guarded: hash before load, the probe and node, claude, python3, bash, git, vim, nvim with the new file first) | **all 18 checks ok on the M1** (`COMPAT_CHECK failed=0`): the rows above plus `:perl` and `"*` in vim under `en_US.UTF-8` (`perl=1 clipboard=1 … perl says 42 version v5.34.1 star=[to the pasteboard]`), `/usr/bin/perl` with POSIX, List::Util, Digest::SHA, Encode, Socket, Time::HiRes, threads, fork and a pipe, a `#!/usr/bin/perl` script, python's `pyexpat`/ElementTree/plistlib and curses on a terminal, `git-http-push` |
+
+Runs that taught something about the tools, not the system: k4, k5, k6 stopped in my own
+`sf-lib-install.sh` (a program list with `sha256sum --version` and `tmux --version`, which never
+end with 0; then a comparison that refused a program the new library repairs). Each stopped before
+changing anything, as designed. The rule now: with the new library a program ends with 0 or as it
+does with the library in use.
+
+### On the M1's disk, and the way back
+| Path | State | Back |
+|---|---|---|
+| `/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices` | the new build (sha256 `4bf90de0…`) | `CoreServices.old` beside it is the file of before (hard link): `ln X.old X.back && mv -f X.back X` |
+| 1784 files and 12 links under `/System/Library/Frameworks/{AppKit,Cocoa,CoreData,CoreGraphics,CoreText,CoreVideo,IOSurface,Onyx2D,OpenGL,QuartzCore,Carbon}.framework`, `/usr/lib/lib{WindowServer,GL.1,GLU.1,gallium-26.1.6,LLVM}.dylib` and five links, `/lib/lib{drm.2,fontconfig.1,freetype.6.20.6,wayland-client.0,wayland-cursor.0}.dylib`, `/usr/bin/perl` and Perl's tools, `/System/Library/Perl`, `/Library/Perl` | new paths; nothing that existed was touched (`/usr/bin/shasum` stayed the system's) | delete them: the list is `runs/sf-compat/stage/new.sha256` and `new.links` of the push (regenerate with `tools/sf_compat_stage.sh`) |
+| `/usr/lib/libexpat.1.dylib` | the new build (`1d521e1a…`) | `libexpat.1.dylib.old` |
+| `/usr/lib/libncurses.5.4.dylib` | the new build (`62f5e76b…`) | `libncurses.5.4.dylib.old` |
+| `/usr/lib/libSystem.B.dylib` | the new build (`20e7a056…`, store path `mdnirx5x…`) | `libSystem.B.dylib.old2` is the file of before (`bebd667b…`, the xpc fix); `libSystem.B.dylib.old` is still the one before that (`09b83541…`) |
+Scratch files left in `/private/tmp` there (`sfcompat/`, `sf-test/`, `sfls/`, `sfpc/`, `libhbcrash.dylib`): gone at the next boot or by hand.
+
+### In the root build
+- `homebrew/build-overlay.nix` (QEMU install, Homebrew runs, the disk root's `sys` part): CoreServices from `macos-compat/build-coreservices.nix`; `build-syslibs.nix` with the libexpat and libncurses repairs.
+- `m1-storage/tools/sf_userland_push.sh stage`: the `sys` part also carries `macos-compat/build-compat-root.nix` (AppKit/Cocoa + Perl; `SF_COMPAT=0` leaves it out), so a newly installed disk root has them.
+- `libsystem-default/build-libsystem.nix`: the strxfrm patch is in the lab's default libSystem recipe, and `artifacts/m1-desktop-010/apcie-port-candidate-003/mapping.json` (not in git) names the new store path since 13 November (copy of before: `mapping.json.before-strxfrm-fix-20261113`; `libsystem-default/DEFAULT.txt`). No RAM-root boot has used that mapping yet.
+- For a system that runs: `macos-compat/tools/sf_compat_stage.sh` (builds, compares with a copy of the target's trees, stages only what the target lacks or must have replaced), `sf_compat_push.sh new|replace|check`, `sf_compat_qemu.sh <name> [second]` (the rehearsal; `SF_COMPAT_HOST_NEW=1` puts the new files in by the host, 12 minutes instead of 40).
+
+### Remaining gaps (wide scan, `homebrew/gapscan/wide-after.md`; none of these formulae is installed on the M1)
+| Gap | Programs stopped | What it needs | Estimate |
+|---|---|---|---|
+| Kerberos; for `sshd` also libSystem `login`, `logout`, `logwtmp`, `innetgr`, `libpam.2`, `libsandbox.1` | the openssh bottle's `ssh` and `sshd` (its other six programs resolve now, with `timingsafe_bcmp`). The lab's own OpenSSH is what the system uses | Kerberos (below); utmpx-backed login records (small), an OpenPAM port (medium) | 2 to 3 days without Kerberos |
+| `Kerberos.framework` (39 GSS symbols), `LDAP.framework` (38) | curl bottle, gnupg's `dirmngr`, openssh | Heimdal's GSS-API and OpenLDAP's client library built as those frameworks; no source in the tree | a week each; the tree's own curl covers curl |
+| Security: `SecKeychainCopyDefault`, `SecKeychainItemFreeContent` | rust's `cargo` | a keychain; a pair that answers "no default keychain" would let cargo start (not done: not run here) | 1 day with a QEMU proof |
+| CoreServices: `LocaleStringToLangAndRegionCodes`, the Apple Event calls (`AEBuildAppleEvent`, `AESendMessage` …) | cmake's `cpack`; python's "Python Launcher.app" | the classic language/region code tables (small); Apple Events are a subsystem | 1 day; Apple Events: weeks |
+| `libxcselect.dylib` (`xcselect_host_sdk_path`) | llvm's clang (27 programs) | one function; useful only with an SDK and a linker on the system | 1 day for the start; the SDK is the project |
+| `libpcap.A.dylib` | `ldns-dpa` | libpcap over the kernel's BPF devices | 2 days |
+| `libhvf.dylib` | imagemagick (through the freetype bottle) | Apple-proprietary, no open implementation | not possible; a freetype without it |
+| AVFoundation, CoreMedia, VideoToolbox, CoreImage, Metal, ApplicationServices, CoreVideo's Metal calls | ffmpeg (20 programs) | the media frameworks for arm64 (SF-U, m1-avd) | weeks |
+| `GLUT.framework`; `OpenGL.framework` by its unversioned path | webp's `vwebp` | freeglut over the WindowServer; a link | 3 days |
+| The pasteboard of a windowless program reaching the desktop's clipboard | vim's `"*`, `pbcopy`/`pbpaste` | a data-control protocol in the compositor and in the WindowServer library | 3 to 5 days |
+| A full terminfo database in `/usr/share/terminfo` | programs on the system ncurses under `TERM=tmux-256color`, `screen` | ncurses' database compiled for the root | half a day |
+Known and not looked at in this job: sftp-server's SIGBUS, `dlopen()` in a child of `fork()`, the other `xpc_api_misuse` sites (SF-X).
+
 ## Open gaps, in order of formulae unblocked
 | Gap | Unblocks | Kind |
 |---|---|---|
-| `$NCURSES60`-suffixed entry points in libncurses (Apple's header renames the curses calls) | python's curses module, ccmake, other full-curses programs | aliases onto ncurses 6.6 functions; ABI to be checked first |
-| CoreServices: `LocaleRefGetPartString`, text-encoding converter calls | neovim, vim | tree work in `src/Libraries/CoreServices` |
-| AppKit at `Versions/C` and the media frameworks for arm64 | starship, vim, ffmpeg | GUI stream |
+| `$NCURSES60`-suffixed entry points in libncurses | python's curses module, ccmake | **done 13 November** (section above) |
+| CoreServices: `LocaleRefGetPartString`, text-encoding converter calls | neovim, vim | **done 13 November** |
+| AppKit at `Versions/C` | starship, vim | **done 13 November** (the Cocoa stream's stack on the disk; starship not run) |
+| The media frameworks for arm64 | ffmpeg | GUI stream |
 | Kerberos, LDAP frameworks | curl bottle, gnupg's dirmngr | no source; Heimdal/OpenLDAP shims or keep the tree's curl |
 | libhvf | freetype bottle, imagemagick | proprietary; substitute is a freetype without it |
 | libxcselect, SDK, linker | llvm's clang, source builds | separate project |

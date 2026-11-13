@@ -16,7 +16,11 @@ N=${1:?name}; C=integrations/puredarwin/macos-compat; ST=runs/sf-compat/stage; T
 [ -s "$ST/replace.list" ] || { echo "run $C/tools/sf_compat_stage.sh first" >&2; exit 2; }
 LS=$(cd integrations/puredarwin/libsystem-default && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix 2>/dev/null | tail -1)
 W=runs/sf-compat/qemu-$N; rm -rf "$W"; mkdir -p "$W"
-FILES="$LS/usr/lib/libSystem.B.dylib=/usr/lib/libSystem.B.dylib $C/sf-lib-install.sh=$T/sf-lib-install.sh $C/guest/sf-compat-check.sh=$T/sf-compat-check.sh"
+# SF_COMPAT_LIBSYSTEM: the libSystem the root starts with (default: the lab's default build; to rehearse
+# a libSystem replacement, the build the M1 has at that moment)
+FILES="$C/sf-lib-install.sh=$T/sf-lib-install.sh $C/guest/sf-compat-check.sh=$T/sf-compat-check.sh"
+# (a second boot keeps every library the first run left, libSystem included)
+[ "${2:-}" = second ] || FILES="${SF_COMPAT_LIBSYSTEM:-$LS/usr/lib/libSystem.B.dylib}=/usr/lib/libSystem.B.dylib $FILES"
 for f in "$ST"/test/*; do FILES="$FILES $f=$T/$(basename "$f")"; done
 if [ "${2:-}" = second ]; then
     export DR_QEMU_ROOT_IMAGE=runs/m1-storage/qemu-dr/$N-after.img; N=$N-2

@@ -28,6 +28,13 @@ for e in libexpat.1.dylib:sf-expat-probe libncurses.5.4.dylib:sf-curses-probe; d
   cp "$SL/usr/lib/$l" "$ST/replace/$l.new"
   echo "/usr/lib/$l $(sha256sum "$ST/replace/$l.new" | cut -c1-64) /usr/share/sf-test/$pr /opt/homebrew/bin/python3 /opt/homebrew/bin/git /opt/homebrew/bin/htop /opt/homebrew/bin/nano" >> "$ST/replace.list"
 done
+# ---- replaced: libSystem (strxfrm in a UTF-8 locale, timingsafe_bcmp, ualarm)
+LS=$(cd integrations/puredarwin/libsystem-default && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix 2>/dev/null | tail -1)
+if cmp -s "$LS/usr/lib/libSystem.B.dylib" "$BASE0/usr/lib/libSystem.B.dylib"; then echo "replace: the target's libSystem is this build already"
+else
+  cp "$LS/usr/lib/libSystem.B.dylib" "$ST/replace/libSystem.B.dylib.new"
+  echo "/usr/lib/libSystem.B.dylib $(sha256sum "$ST/replace/libSystem.B.dylib.new" | cut -c1-64) /usr/share/sf-test/sf-strxfrm-probe /opt/homebrew/bin/node /usr/local/bin/claude /opt/homebrew/bin/python3 /opt/homebrew/bin/bash /opt/homebrew/bin/git /opt/homebrew/bin/vim /opt/homebrew/bin/nvim /opt/homebrew/bin/tmux" >> "$ST/replace.list"
+fi
 # ---- new files. A path the target has already (SF_BASE: a copy of its trees, default the one
 # sf_gapscan.py reads) stays the target's: it is named here and left out.
 BASE=${SF_BASE:-runs/sf-gaps/m1root}

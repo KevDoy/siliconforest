@@ -10,18 +10,21 @@
 #   2. it LOADS here: the probe, which the library in use fails (dyld refuses it or it exits
 #      non-zero), runs with status 0 when DYLD_LIBRARY_PATH / DYLD_FRAMEWORK_PATH points at a
 #      hard link of the new file, so the programs demonstrably get the new file; then ls, sh
-#      and every <program> (run as `<program> --version`) with it;
+#      and every <program>, run as `<program> --version`: with the new library it must end
+#      with status 0 or with the status it has with the library in use (not every program
+#      knows --version; a program the library in use cannot start is one the new one may fix);
 #   3. only then: the file in use gets the second name <path>.old (a hard link: the same
-#      inode, bit for bit), the new one takes the name by rename(2) (running programs keep the
-#      old file), sync, and the probe and the programs are started without any DYLD variable.
+#      inode, bit for bit; <path>.old2, .old3 ... when an earlier replacement left a .old),
+#      the new one takes the name by rename(2) (running programs keep the old file), sync,
+#      and the probe and the programs are started without any DYLD variable: the same statuses.
 # A failure before 3 changes nothing (SFLIB FAIL, status 1); a failed confirmation renames the
 # old file back at once. Run again with the new library in use: "already installed".
 # Way back by hand: ln <path>.old <path>.back && mv -f <path>.back <path>
 L=$1; NEW=$2; WANT=$3; PROBE=$4; [ $# -ge 4 ] && shift 4
 sum() { sha256sum "$1" 2>/dev/null | cut -c1-64; }
 [ -n "$WANT" ] && [ -x "$PROBE" ] && [ "$(dirname "$L")" = "$(dirname "$NEW")" ] || { echo "SFLIB usage: <installed path> <new file beside it> <sha256> <probe> [program ...]"; exit 2; }
-TRY=$(dirname "$L")/.sf-lib-try
-fail() { echo "SFLIB FAIL $1"; rm -rf "$TRY"; rm -f "$NEW"; exit 1; }
+TRY=$(dirname "$L")/.sf-lib-try; ST=/private/tmp/sflib.status.$$
+fail() { echo "SFLIB FAIL $1"; rm -rf "$TRY"; rm -f "$NEW" "$ST"; exit 1; }
 [ -r "$L" ] || fail "cannot read $L"
 if "$PROBE" > /dev/null 2>&1; then echo "SFLIB already installed: the probe runs with $L as it is ($(ls -l "$L" | awk '{print $5}') bytes)"; rm -f "$NEW"; exit 0; fi
 [ "$(sum "$NEW")" = "$WANT" ] || fail "$NEW is not the file expected (sha256 $(sum "$NEW"))"
@@ -39,15 +42,23 @@ echo "SFLIB 2 the probe with the new library ($V): status $rc: $(echo "$out" | t
 [ "$rc" = 0 ] || { echo "$out" | sed 's/^/SFLIB   /'; fail "the probe did not run with the new library: nothing was changed"; }
 try() { env $V="$TRY" "$@" > /dev/null 2>&1; r=$?; echo "SFLIB 2 with the new library: $1 status $r"; [ "$r" = 0 ] || fail "$1 does not run with the new library: nothing was changed"; }
 try /bin/ls /; try /bin/sh -c 'echo x | cat'
-for p in "$@"; do [ ! -x "$p" ] || try "$p" --version; done
+: > "$ST"
+for p in "$@"; do
+    [ -x "$p" ] || continue
+    "$p" --version > /dev/null 2>&1; was=$?
+    env $V="$TRY" "$p" --version > /dev/null 2>&1; r=$?
+    echo "SFLIB 2 with the new library: $p status $r (with the library in use: $was)"
+    [ "$r" = 0 ] || [ "$r" = "$was" ] || fail "$p does not run with the new library as it does with the one in use: nothing was changed"
+    echo "$r $p" >> "$ST"
+done
 rm -rf "$TRY"
-K=$L.old; ino=$(ls -i "$NEW" | awk '{print $1}'); oldino=$(ls -i "$L" | awk '{print $1}')
-[ ! -e "$K" ] || fail "$K exists already: look at it first (nothing was changed)"
+K=$L.old; n=2; while [ -e "$K" ]; do K=$L.old$n; n=$((n + 1)); done   # an earlier replacement's .old stays; this one's is .old2, ...
+ino=$(ls -i "$NEW" | awk '{print $1}'); oldino=$(ls -i "$L" | awk '{print $1}')
 ln "$L" "$K" && [ "$(ls -i "$K" | awk '{print $1}')" = "$oldino" ] && sync || fail "could not keep the file in use as $K"
 mv -f "$NEW" "$L" || fail "rename"
 sync
 now=$(ls -i "$L" | awk '{print $1}'); "$PROBE" > /private/tmp/sflib.probe 2>&1; rc=$?; /bin/ls / > /dev/null 2>&1; rl=$?; rp=0
-for p in "$@"; do [ ! -x "$p" ] || "$p" --version > /dev/null 2>&1 || rp=1; done
+while read -r want p; do "$p" --version > /dev/null 2>&1 < /dev/null; [ "$?" = "$want" ] || rp=1; done < "$ST"; rm -f "$ST"
 echo "SFLIB 3 installed: $L is now inode $now (the verified file: $ino), the file of before is $K (inode $oldino); new processes: probe status $rc ($(tail -n 1 /private/tmp/sflib.probe)), ls status $rl, programs status $rp"
 if [ "$now" != "$ino" ] || [ "$rc" != 0 ] || [ "$rl" != 0 ] || [ "$rp" != 0 ]; then
     ln "$K" "$L.sf-back" && mv -f "$L.sf-back" "$L"; sync

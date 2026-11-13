@@ -40,7 +40,7 @@ in pkgs.stdenv.mkDerivation {
       ${appkit}/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit -lobjc -lCoreFoundation -lSystem -o sf-appkit-probe
     ${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-otool -L sf-appkit-probe
     # sf-expat-probe, sf-curses-probe: the /usr/lib libraries of ../homebrew/build-syslibs.nix
-    for t in expat:expat.1 curses:ncurses.5.4; do
+    for t in expat:expat.1 curses:ncurses.5.4 strxfrm:System; do
       ${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang \
         -std=c11 -Wall -Wextra -O1 -isystem "$DARWIN_SDK_ROOT/usr/include" \
         ${./probe}/sf-''${t%%:*}-probe.c \
@@ -53,7 +53,7 @@ in pkgs.stdenv.mkDerivation {
   '';
   installPhase = ''
     mkdir -p "$out/usr/share/sf-test"
-    cp sf-compat-probe sf-appkit-probe sf-expat-probe sf-curses-probe "$out/usr/share/sf-test/"
+    cp sf-compat-probe sf-appkit-probe sf-expat-probe sf-curses-probe sf-strxfrm-probe "$out/usr/share/sf-test/"
     chmod 755 "$out"/usr/share/sf-test/*
   '';
   dontFixup = true;

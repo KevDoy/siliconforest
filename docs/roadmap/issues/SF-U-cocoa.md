@@ -64,6 +64,32 @@ Next, in this order:
 7. Electron blank window (remote layers; the WindowServer already has
    `_windowServerExportSurface`/`_windowServerImportSubsurface` over `pd_surface_host_v1`).
 
+## 13 November: part of this stack is on the M1's disk (for terminal programs)
+The gap job of issue 45 (`SF-S-homebrew.md`, "Framework gaps") needed `AppKit.framework/Versions/C`
+for Homebrew's vim and did not write a second AppKit: it took this stream's root.
+- What: `integrations/puredarwin/macos-compat/build-appkit.nix` = the files of
+  `build-desktop-root.nix` (the pin with patches 0001 to 0018) that dyld loads for a program linking
+  AppKit or Cocoa: the bundles AppKit, Cocoa, CoreData, CoreGraphics, CoreText, CoreVideo, IOSurface,
+  Onyx2D, OpenGL, QuartzCore, Carbon, and `libWindowServer`, `libGL`, `libGLU`, `libgallium`,
+  `libLLVM`, `libdrm`, `libwayland-client`, `libwayland-cursor`, `libfreetype`, `libfontconfig`
+  (101 MB). Not taken: the applications, launchd jobs, fonts, fontconfig's files, the rest of Mesa,
+  the Swift runtime, and this root's CoreFoundation, Foundation, CoreServices and IOKit (the disk
+  root keeps its own, built from the tip).
+- Evidence for the route: the scanner (`homebrew/sf_gapscan.py`) finds every import of AppKit's
+  whole load closure (35 images) on the M1's tip-built base; in QEMU on the M1's root image and on
+  the M1 itself a windowless program gets `+[NSPasteboard generalPasteboard]`, sets and reads a
+  string in 27 ms, and vim starts in 88 ms with the stack loaded (libLLVM and Mesa included: they
+  cost no visible time). So pin-built frameworks on the tip-built base load and run for this use.
+- What this is not: nothing with a window was run from the disk. No application, no launchd job
+  and no font was installed, the compositor on the disk is not this stream's branch, and
+  AppKit's own resources were not exercised. The M1 plan below still stands; the frameworks are
+  now already where it needs them.
+- Found on the way: in a process that never opened a window the general pasteboard is private to
+  the process (`_windowServerSelectionGeneration()` and friends return at `!ws.connected`), so
+  vim's `"*` register does not reach the desktop's clipboard. A real connection needs a
+  data-control protocol in the compositor (a Wayland client without keyboard focus gets no
+  selection).
+
 ## Goal
 Mac GUI applications run on the SiliconForest desktop (Chonkstep) using PureDarwin's open
 reimplementation of Apple's application frameworks: first a trivial AppKit application, then
