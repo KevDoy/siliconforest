@@ -15,12 +15,14 @@
 #                          without journal replay and the SHA-256 of everything under
 #                          /private/sf-wtest. DR_REPLAY=1 (an unclean stop was intended): after
 #                          the first e2fsck -fn, e2fsck -fy replays the journal, then -fn again.
+#   netlog                 mount read-only (noload), the last lines of the root's /private/var/log/pd-netd.log
+#                          (network names not printed), unmount: what the disk's own session reached
 #   DR_OUT=<file>          where the output goes (default below)
 # Output: runs/m1-storage/linux-root-<cmd>-<time>.txt
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 . private/disk-root/sf-part.env
-CMD=${1:?check|transform|tree|wcheck|untransform}; INIT=${2:-}
+CMD=${1:?check|transform|tree|wcheck|untransform|netlog}; INIT=${2:-}
 M1="ssh -o HostKeyAlias=10.1.1.127 -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 chrisk@10.1.1.211"
 OUT=${DR_OUT:-runs/m1-storage/linux-root-$CMD-$(date +%Y%m%d-%H%M%S).txt}
 for i in $(seq 1 36); do $M1 true 2>/dev/null && break; sleep 5; done
@@ -82,6 +84,12 @@ untransform)
   sync; umount $MNT || fail "umount"; rm -rf $T
   echo "SFL_UNTRANSFORM_RC $rc"
   e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}";;
+netlog)
+  mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
+  ls -l --time-style=+%s $MNT/private/var/log/pd-netd.log 2>&1 | awk '{print "SFL_NETLOG file bytes=" $5 " mtime=" $6}'
+  tail -n 25 $MNT/private/var/log/pd-netd.log 2>&1 | sed -e 's/ssid=[^ ]*/ssid=(not printed)/g' -e 's/[0-9a-fA-F:]\{17\}/(address)/g' | cut -c1-160 | sed 's/^/SFL_NETLOG /'
+  echo "SFL_NOW $(date +%s)"
+  umount $MNT || fail "umount";;
 tree)
   mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
   echo "SFL_TREE entries=$(cd $MNT && find . | wc -l) listing=$(cd $MNT && find . -printf '%y %p %s %l\n' | grep -v '^d ' | LC_ALL=C sort | sha256sum | cut -c1-64)"

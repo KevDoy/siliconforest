@@ -401,7 +401,10 @@ if halt:
     hg = re.findall(r'^NV_HALTGATE (start|end) (.*)$', con, re.M)
     check(len(hg) == 2 and all('sent=0 refused=0' in t.split('|')[0] and 'pdpmu=1' in t and 'sent=0 refused=0' in t.split('|')[1] for _, t in hg), 'before the restart no SMC or PMU write had been sent by the restart path, and the PMU is read-only in this boot (pdpmu=1): %s' % (hg[-1][1] if hg else ''))
     check(os.environ.get('NV_RESETS') == '0', 'the controller sent no reset: the machine came back to Linux by itself (reset_attempts=%s)' % os.environ.get('NV_RESETS'))
-    sb = re.findall(r'^SF_BOOT .*$', con, re.M)
+    # In a multi-user boot the console's login shell shares the console: its prompt's escape sequences can
+    # stand in front of the line on the same console line (dr27: `ESC[?2004hSF_BOOT ...`, and the check, then
+    # anchored at the line's start, failed on a line that was there). After a CSI sequence counts as a start.
+    sb = re.findall(r'(?:^|\[[0-9;?]*[A-Za-z])(SF_BOOT clock_rc=.*)$', con, re.M)
     check(len(sb) == 1 and 'run_and_tmp=cleaned' in sb[0] and re.search(r'^NV_SFBOOT rc=0 stamp=this-boot', con, re.M) is not None, 'sf-boot ran once: %s' % ' | '.join(sb)[:200])
     for l in re.findall(r'^(?:SF_HALT|SF_INSTALL|NV_SFINSTALL|NV_LEFT|NV_DMESG_CLOCK|SFL_DESKSTATE|SFL_LEFT|SFL_SBTIME).*$', con + wc, re.M)[:40]: print('NV_RESULT ' + l[:220])
 raws = dict(re.findall(r'^NV_SMARTRAW (\S+) ([0-9a-f]{1024})', con, re.M))
