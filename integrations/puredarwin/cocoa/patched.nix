@@ -34,6 +34,16 @@
 #         without a nib, NSPathControl's delegate
 #   0022  WindowServer: PD_WS_DUMP_DIR writes the picture a window presents (a diagnostic where the
 #         compositor has no screen capture)
+#   0023  CoreText: Menlo, Monaco, SF Mono and any family whose name says it is fixed-pitch resolve to
+#         an installed fixed-pitch face (a terminal measured its cells from the proportional
+#         default); the fixed-pitch UI font comes from the registry; CTFontDrawGlyphsWithAdvances
+#         and CTFontShouldAntiAlias (private, imported by Terminal.app)
+#   0024  AppKit: +[NSFont fontWithName:size:] asks CoreText for a name no installed face carries;
+#         a selection naming rows the content does not have selects nothing (it ended the program);
+#         a binding whose key is missing is reported once and does not stop the change that
+#         notified it
+#   0025  CoreGraphics: the context getters for anti-aliasing and font smoothing and the private
+#         CGS/CPS window-server calls Terminal.app imports (answers of a Wayland client)
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -66,6 +76,7 @@ let
     ./patches/0019-tip-appkit-stackview-accessibilityelement.patch
     ./patches/0020-appkit-macos26-additions.patch
     ./patches/0021-appkit-fixes-found-with-terminal.patch
+    ./patches/0024-appkit-fonts-bindings-found-with-terminal.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -80,6 +91,14 @@ let
     ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
   ];
   onyx2d = pd."onyx2d-arm64".override { src = onyx2dSrc; };
+  coretextSrc = patchedDir "src/Frameworks/CoreText" [
+    ./patches/0023-coretext-fixed-pitch-families-private-draw.patch
+  ];
+  coretext = pd."coretext-arm64".override { src = coretextSrc; };
+  coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [
+    ./patches/0025-coregraphics-private-additions.patch
+  ];
+  coregraphics = pd."coregraphics-arm64".override { src = coregraphicsSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
   # upstream's recipe names every protocol and object file; the three protocols the patch
   # uses are generated and linked the same way
@@ -112,4 +131,5 @@ let
   });
 in {
   inherit appkitSrc windowserverSrc authenticationServicesSrc onyx2dSrc windowserver appkit appFrameworks onyx2d security;
+  inherit coretextSrc coretext coregraphicsSrc coregraphics;
 }

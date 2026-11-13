@@ -1,21 +1,23 @@
 --- a/src/Frameworks/WindowServer/rpc_wayland.c
 +++ b/src/Frameworks/WindowServer/rpc_wayland.c
-@@ -1067,7 +1067,45 @@
+@@ -1067,7 +1067,47 @@
  /* Puts a frame on the surface. The surface's size is the frame's size in points whatever the
   * buffer's size in pixels: the viewport says so, and a compositor at the same scale shows the
   * buffer pixel for pixel. Without a viewport only whole scales are possible (buffer scale). */
 +/* PD_WS_DUMP_DIR=<directory>: the picture a window hands to the compositor, written there as
-+ * window-<number>.ppm (at most once a second per window; the newest replaces the last). This
++ * window-<number>.ppm (at most twenty times a second per window; the newest replaces the last). This
 + * is what the application presented, pixel for pixel, not what the compositor showed: a
 + * diagnostic for systems whose compositor has no screen capture. */
 +static void windowDumpFrame(struct wsWindow *window, struct wsFrame *frame) {
 +    static const char *dir;
 +    static int asked;
-+    static time_t last[64];
++    static int64_t last[64];
 +    if (!asked) { dir = getenv("PD_WS_DUMP_DIR"); asked = 1; }
 +    if (dir == NULL || frame->pixels == NULL || frame->w <= 0 || frame->h <= 0)
 +        return;
-+    time_t now = time(NULL);
++    struct timespec ts;
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    int64_t now = (int64_t)ts.tv_sec * 20 + ts.tv_nsec / 50000000;      /* twentieths of a second */
 +    unsigned slot = (unsigned)window->windowID % 64;
 +    if (last[slot] == now)
 +        return;

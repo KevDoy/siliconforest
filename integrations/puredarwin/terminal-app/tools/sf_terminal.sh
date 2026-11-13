@@ -6,8 +6,8 @@
 #   sf_terminal.sh stage          build everything and lay out runs/sf-terminal/stage:
 #                                   root/   the libraries the application loads instead of the system's
 #                                           (DYLD_FRAMEWORK_PATH / DYLD_LIBRARY_PATH): dyld's and libSystem's
-#                                           additions, libFoundation, AppKit, libWindowServer, the compat
-#                                           wrappers and private frameworks, ApplicationServices and ImageIO
+#                                           additions, libFoundation, AppKit, CoreText, CoreGraphics, libWindowServer,
+#                                           the compat wrappers and private frameworks, ApplicationServices and ImageIO
 #                                           of the Cocoa stream, the Swift runtime
 #                                   pd/     copies of the real libraries the wrappers re-export (<name>.pd)
 #                                   run.sh, show.sh, sf-catch, sf-nibprobe
@@ -30,13 +30,14 @@ SF_HOST=${SF_HOST:-10.1.1.211}; SF_KNOWN=${SF_KNOWN:-$HOME/.ssh/known_hosts_m1_s
 SSH=(ssh -o UserKnownHostsFile="$SF_KNOWN" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o HostKeyAlias=m1-siliconforest
      -o PasswordAuthentication=no -o BatchMode=yes -o ConnectTimeout=6 "root@$SF_HOST")
 nb() { (cd "$1" && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link "${@:2}" 2>/dev/null | tail -1); }
-WRAPPED="CoreGraphics CoreText QuartzCore Carbon CoreServices AudioToolbox"
+WRAPPED="QuartzCore Carbon CoreServices AudioToolbox"
 case "${1:?stage|push|run|shot|scan}" in
 stage)
   LS=$(nb $T build-libsystem.nix); FN=$(nb $T build-foundation.nix); SW=$(nb $T build-swift-runtime.nix)
   AK=$(nb integrations/puredarwin/cocoa patched.nix -A appkit); WS=$(nb integrations/puredarwin/cocoa patched.nix -A windowserver)
+  CT=$(nb integrations/puredarwin/cocoa patched.nix -A coretext); CG=$(nb integrations/puredarwin/cocoa patched.nix -A coregraphics)
   FF=$(nb integrations/puredarwin/cocoa build-firefox-root.nix)
-  for v in LS FN SW AK WS FF; do [ -n "${!v}" ] || { echo "a build failed ($v)" >&2; exit 2; }; done
+  for v in LS FN SW AK WS CT CG FF; do [ -n "${!v}" ] || { echo "a build failed ($v)" >&2; exit 2; }; done
   eval "$(cd integrations/puredarwin/cocoa && nix-instantiate --extra-experimental-features 'nix-command flakes' --eval --strict --json -E 'let a = import ./arm64.nix; in { CC = "${a.common.darwinCrossToolchain}/bin/arm64-apple-darwin20.4-clang"; LD = "${a.common.nativeLd}/bin/ld"; SDK = "${a.common.appleSdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"; I1 = "${a.common.libSystem}/usr/include"; I2 = "${a.base.libobjc}/usr/include"; I3 = "${a.base.corefoundation}/include"; I4 = "${a.base.foundation}/usr/include"; }' 2>/dev/null | python3 -c 'import json,sys; [print("export %s=%s" % kv) for kv in json.load(sys.stdin).items()]')"
   export INC="-I$I1 -I$I2 -I$I3 -I$I4" PY=python3 HB=$ROOT/integrations/puredarwin/homebrew
   # the link root: the target's root as it is, with this job's libSystem, Foundation and Swift runtime
@@ -45,6 +46,7 @@ stage)
   [ -d runs/sf-compat/stage/new ] && cp -a --reflink=auto runs/sf-compat/stage/new/. $W/linkroot/ && chmod -R u+w $W/linkroot
   [ -f runs/sf-compat/stage/replace/CoreServices.new ] && cp runs/sf-compat/stage/replace/CoreServices.new $W/linkroot/$F/CoreServices.framework/Versions/A/CoreServices
   cp $LS/usr/lib/libSystem.B.dylib $W/linkroot/usr/lib/; cp $FN/usr/lib/libFoundation.dylib $W/linkroot/usr/lib/
+  for n in CoreText:$CT CoreGraphics:$CG; do cp ${n#*:}/$F/${n%%:*}.framework/Versions/A/${n%%:*} $W/linkroot/$F/${n%%:*}.framework/Versions/A/${n%%:*}; done
   mkdir -p $W/linkroot/usr/lib/swift; cp $SW/usr/lib/swift/*.dylib $W/linkroot/usr/lib/swift/; chmod -R u+w $W/linkroot
   export LINKROOT=$ROOT/$W/linkroot
   bash $T/compat/build.sh $ROOT/$ST/root > $W/compat-build.log 2>&1 || { tail -5 $W/compat-build.log >&2; exit 2; }
@@ -56,6 +58,7 @@ stage)
   chmod -R u+w $ST; ln -sfn ../A/AppKit $ST/root/$F/AppKit.framework/Versions/C/AppKit
   ln -sfn Versions/A/Resources $ST/root/$F/AppKit.framework/Resources
   cp -a $FF/$F/ApplicationServices.framework $FF/$F/ImageIO.framework $ST/root/$F/
+  for n in CoreText:$CT CoreGraphics:$CG; do mkdir -p $ST/root/$F/${n%%:*}.framework/Versions/A; cp ${n#*:}/$F/${n%%:*}.framework/Versions/A/${n%%:*} $ST/root/$F/${n%%:*}.framework/Versions/A/; done
   cp $LS/usr/lib/libSystem.B.dylib $LS/usr/lib/dyld $FN/usr/lib/libFoundation.dylib $WS/usr/lib/libWindowServer.dylib $ST/root/usr/lib/
   cp $SW/usr/lib/swift/*.dylib $ST/root/usr/lib/swift/; chmod -R u+w $ST
   CCF="-isysroot $SDK -mmacosx-version-min=26.5 -O1 -fno-objc-arc -fobjc-exceptions -fblocks -Wno-nullability-completeness -Wno-objc-root-class -Wno-objc-method-access $INC"

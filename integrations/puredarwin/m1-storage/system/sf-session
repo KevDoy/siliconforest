@@ -121,10 +121,24 @@ printf 'GPUDESK_INPUT kbd=%s mouse=%s\n' "$([ -c /dev/usb_hid_kbd ] && echo yes 
 records=$runtime/session-$session
 mkdir -m 0700 "$records"
 rm -f "$runtime/desktop.rc" "$runtime/session-end-request"
-printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s\n' "$seconds" "$(date +%s)"
+# A compositor to try: /usr/bin/chonkstep-darwin-desktop.next runs instead of the installed one in
+# the one boot that finds /private/var/db/desktop-next-try (the mark is taken away before the
+# compositor starts, so a build that does not come up is not tried a second time).
+desktop=/usr/bin/chonkstep-darwin-desktop
+if [ -e /private/var/db/desktop-next-try ] && [ -x "$desktop.next" ]; then
+    mv /private/var/db/desktop-next-try /private/var/db/desktop-next-tried && desktop=$desktop.next
+fi
+# Requested test input and screen captures (the compositor's inject module, where it has one):
+# only where root made /private/var/db/desktop-inject. Requests are files in a directory of the
+# session's own; what they inject is labelled synthetic by the compositor.
+if [ -e /private/var/db/desktop-inject ]; then
+    mkdir -p "$runtime/inject" && chmod 0700 "$runtime/inject"
+    CHONKSTEP_DARWIN_INJECT_DIR=$runtime/inject; export CHONKSTEP_DARWIN_INJECT_DIR
+fi
+printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s\n' "$seconds" "$(date +%s)" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}"
 # The desktop's own exit status, not that of the filter it is piped through.
 {
-    /usr/bin/chonkstep-darwin-desktop --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
+    "$desktop" --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
     echo "$?" > "$runtime/desktop.rc"
 } | grep -v 'chonkstep-gl: step:'
 printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"

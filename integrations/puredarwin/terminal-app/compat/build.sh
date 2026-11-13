@@ -59,8 +59,7 @@ lib $F/CoreFoundation.framework/Versions/A/CoreFoundation 150:1338 $S/CoreFounda
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/libCoreFoundation.dylib -lobjc -licucore
 lib $F/Foundation.framework/Versions/C/Foundation 300:5026.5.4 $S/Foundation.m -- \
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/swift/libswiftFoundation.dylib -lobjc -lCoreFoundation
-wrap CoreGraphics A 64:1889 $S/CoreGraphics.c -- -lCoreFoundation
-wrap CoreText A 1:1 $S/CoreText.c -- $LINKROOT$F/CoreGraphics.framework/Versions/A/CoreGraphics -lCoreFoundation
+# (CoreGraphics' and CoreText's additions are in those frameworks themselves: ../../cocoa/patches 0023, 0025)
 wrap QuartzCore A 1:1 $S/QuartzCore.m -- $OBJC
 wrap Carbon A 2:170 $S/Carbon.c --
 wrap CoreServices A 1:1226 $S/CoreServices.c -- -lCoreFoundation

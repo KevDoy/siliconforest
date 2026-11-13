@@ -116,7 +116,7 @@
 +@end
 --- a/src/Frameworks/AppKit/NSMacOS26Additions.m
 +++ b/src/Frameworks/AppKit/NSMacOS26Additions.m
-@@ -0,0 +1,501 @@
+@@ -0,0 +1,504 @@
 +// NSMacOS26Additions.m - see the header. SPDX-License-Identifier: MIT
 +#import <AppKit/NSMacOS26Additions.h>
 +#import <AppKit/NSAccessibility.h>
@@ -547,6 +547,9 @@
 +// the Help menu's search field does not exist here: handlers are accepted and never asked
 +- (void)registerUserInterfaceItemSearchHandler:(id)handler { }
 +- (void)unregisterUserInterfaceItemSearchHandler:(id)handler { }
++// private, sent by Terminal at launch: whether the Help menu's search also searches help books.
++// There are no help books and no search field here: nothing to switch.
++- (void)setDefaultHelpBookSearchEnabled:(BOOL)flag { }
 +- (BOOL)searchString:(NSString *)searchString inUserInterfaceItemString:(NSString *)stringToSearch searchRange:(NSRange)searchRange foundRange:(NSRange *)foundRange
 +{
 +    NSRange found = [stringToSearch rangeOfString:searchString options:NSCaseInsensitiveSearch range:searchRange];
