@@ -44,6 +44,10 @@
 #               which must have been installed by an earlier boot with DR_INSTALL=1. The boot arguments name the
 #               boot to the disk's session (sfbench=<name> sfsession_seconds=<DR_SECONDS>, sfbench_auto=<DR_AUTO_ONLY>):
 #               it prints the bench's facts and ends by the system's own `reboot`. DR_HALT must be reboot.
+#   DR_PLAIN=1  (with DR_STAGE=disk) the boot arguments do NOT name the boot to the disk's session (no sfbench=):
+#               nothing of the bench runs on the M1, the session is the one an installed system has and ends in its
+#               plain `reboot`. Only sfsession_seconds=<DR_SECONDS> (else the session lasts four hours) and sfmark=1
+#               (sf-halt's last line, so that the capture ends when the machine restarts itself) are added.
 #   DR_STAGE_STOP=1  (with DR_STAGE) read-back boot: the stage places everything, does NOT enter the kernel and
 #               returns to its proxy; the launcher compares what it placed (b1/native_stage.py readback). The
 #               first boot after any change to the stage or to what it is given. Ends with one controller reset.
@@ -78,7 +82,8 @@ if [ -n "$STAGE" ]; then
   WORDS="$WORDS stage ${DR_STAGE_WORDS:-}"
   [ "$STAGE" != disk ] || WORDS="$WORDS noramdisk multiuser"
   [ "${DR_STAGE_STOP:-0}" != 1 ] || WORDS="$WORDS stagestop"
-elif [ "${DR_STAGE_STOP:-0}" = 1 ]; then echo "DR_STAGE_STOP needs DR_STAGE" >&2; exit 2
+  [ "${DR_PLAIN:-0}" != 1 ] || { [ "$STAGE" = disk ] && [ "${DR_STAGE_STOP:-0}" != 1 ] && [ -z "${DR_AUTO_ONLY:-}" ]; } || { echo "DR_PLAIN needs DR_STAGE=disk, no read-back and no autopilot" >&2; exit 2; }
+elif [ "${DR_STAGE_STOP:-0}" = 1 ] || [ "${DR_PLAIN:-0}" = 1 ]; then echo "DR_STAGE_STOP and DR_PLAIN need DR_STAGE" >&2; exit 2
 fi
 if [ -n "$HALT" ]; then
   [ "$RW" = 1 ] && [ "$MODE" = native ] || { echo "DR_HALT needs DR_RW=1 and a native boot" >&2; exit 2; }
@@ -151,7 +156,8 @@ fi
 case "$MODE" in native) ARGS="$ARGS pdcpuheld=1";; esac
 if [ "$STAGE" = disk ]; then
   case "$N${DR_AUTO_ONLY:-}" in *[!a-z0-9,]*) echo "DR_STAGE=disk: the name and DR_AUTO_ONLY travel as boot arguments (a-z, 0-9, comma)" >&2; exit 2;; esac
-  ARGS="$ARGS sfbench=$N sfsession_seconds=${DR_SECONDS:-30}${DR_AUTO_ONLY:+ sfbench_auto=$DR_AUTO_ONLY}"
+  if [ "${DR_PLAIN:-0}" = 1 ]; then ARGS="$ARGS sfsession_seconds=${DR_SECONDS:-30} sfmark=1"
+  else ARGS="$ARGS sfbench=$N sfsession_seconds=${DR_SECONDS:-30}${DR_AUTO_ONLY:+ sfbench_auto=$DR_AUTO_ONLY}"; fi
 fi
 R=runs/m1-desktop-010/pcie-enum-attempt-$N
 env PCIE_LAB_PATCH="$QD/launcher.patch" PCIE_LAB_FILES="$FILES" \
@@ -161,6 +167,6 @@ env PCIE_LAB_PATCH="$QD/launcher.patch" PCIE_LAB_FILES="$FILES" \
   tools/pcie_iterate.sh "$N" "$LIMIT" 2>&1 | grep -a '"status"\|rror\|delivered\|No space\|BENCH_TIMES' | cut -c1-240 || true
 [ -f "$R/times.txt" ] || { echo "no boot was recorded in $R" >&2; exit 1; }
 printf 'mode=%s\nprofile=%s\nkc=%s\nlimit=%s\nrw=%s\nhalt=%s\ninstall=%s\nauto=%s keep=%s\n' "$MODE" "${DR_PROFILE:-desktop}" "$KC" "$LIMIT" "$RW" "$HALT" "${DR_INSTALL:-0}" "${DR_AUTO_ONLY:-}" "${DR_AUTO_KEEP:-0}" > "$R/dr-config.txt"
-[ -z "$STAGE" ] || printf 'stage=%s stop=%s words=%s image_sha256=%s\n' "$STAGE" "${DR_STAGE_STOP:-0}" "$WORDS" "$(sha256sum "$STAGE_IMAGE" | cut -d' ' -f1)" >> "$R/dr-config.txt"
+[ -z "$STAGE" ] || printf 'stage=%s stop=%s plain=%s words=%s image_sha256=%s\n' "$STAGE" "${DR_STAGE_STOP:-0}" "${DR_PLAIN:-0}" "$WORDS" "$(sha256sum "$STAGE_IMAGE" | cut -d' ' -f1)" >> "$R/dr-config.txt"
 [ -z "$STAGE" ] || { grep -a 'NATIVE_STAGE_START\|STAGE_READBACK' "$R/guest/worker.log" | sed 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' | cut -c1-700 || true; }
 grep -o '"status": *"[^"]*"' "$R/result.json" 2>/dev/null || echo "no result.json"

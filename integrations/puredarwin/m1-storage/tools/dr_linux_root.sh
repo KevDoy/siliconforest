@@ -86,8 +86,21 @@ untransform)
   e2fsck -fn $P 2>&1 | tail -3 | sed 's/^/SFL_FSCK /'; echo "SFL_FSCK_RC ${PIPESTATUS[0]}";;
 netlog)
   mkdir -p $MNT && mount -t ext4 -o ro,noload $P $MNT || fail "mount"
-  ls -l --time-style=+%s $MNT/private/var/log/pd-netd.log 2>&1 | awk '{print "SFL_NETLOG file bytes=" $5 " mtime=" $6}'
-  tail -n 25 $MNT/private/var/log/pd-netd.log 2>&1 | sed -e 's/ssid=[^ ]*/ssid=(not printed)/g' -e 's/[0-9a-fA-F:]\{17\}/(address)/g' | cut -c1-160 | sed 's/^/SFL_NETLOG /'
+  # /var and /private/var are two directories on this root (no link between them): the
+  # launchd jobs write below /var, the session's own files are below /private/var
+  mask() { sed -e 's/ssid=[^ ]*/ssid=(not printed)/g' -e 's/[0-9a-fA-F:]\{17\}/(address)/g' | cut -c1-160; }
+  for d in var/run var/log private/var/run private/var/log Library/Preferences Library/Preferences/SystemConfiguration; do
+    if [ -d $MNT/$d ] && [ ! -L $MNT/$d ]; then echo "SFL_NETDIR /$d: $(ls -A $MNT/$d | tr '\n' ' ' | cut -c1-300)"
+    else echo "SFL_NETDIR /$d: $(ls -ld $MNT/$d 2>&1 | awk '{print $1, $(NF-1), $NF}')"; fi
+  done
+  K=$MNT/Library/Preferences/SystemConfiguration/org.puredarwin.wifi.known
+  if [ -f $K ]; then echo "SFL_NETKNOWN remembered networks: $(wc -l < $K) (names and keys not printed) mode=$(stat -c %a $K)"; else echo "SFL_NETKNOWN no file of remembered networks"; fi
+  for f in var/log/pd-netd.log var/log/wifi-autojoin.log var/log/mdnsd.log var/run/pd-netd.en0.status; do
+    if [ -f $MNT/$f ]; then
+      echo "SFL_NETLOG /$f bytes=$(stat -c %s $MNT/$f) mtime=$(stat -c %Y $MNT/$f)"
+      tail -n 25 $MNT/$f | mask | sed "s|^|SFL_NETLOG $(basename $f): |"
+    else echo "SFL_NETLOG /$f: not there"; fi
+  done
   echo "SFL_NOW $(date +%s)"
   umount $MNT || fail "umount";;
 tree)

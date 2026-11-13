@@ -9,10 +9,12 @@
 > Linux's EFI partition), which is dropped: nothing is written to Linux's EFI partition, to
 > Linux's stub, or to any file of the Linux install.
 >
-> **Decided since (12 November 2026):** the room for the stub volume comes from the END of the
-> SiliconForest partition. That part is done (section 2): the partition was shrunk from Linux by
-> the coordinator and blocks 208,800,774 to 209,411,118 are unallocated. The question "which
-> source" is closed and is no longer among the decisions of section 11. Everything from
+> **Decided since (12 and 13 November 2026):** the room for the stub volume AND for a boot
+> partition comes from the END of the SiliconForest partition, and the design is **two stages**
+> (the owner will not go to recovery for a kernel update). That part is done (section 2): the
+> partition was shrunk from Linux by the coordinator, twice, and blocks 208,669,702 to
+> 209,411,118 are unallocated. The questions "which source" and "where the kernel lives" (the
+> former D2) are closed and are no longer among the decisions of section 11. Everything from
 > section 5 step B on is still not authorised and not executed.
 
 The model is the Asahi installer, which made the Linux entry on this machine. Its source was
@@ -24,15 +26,14 @@ packing: `DESIGN.md`. State of the disk root: `docs/roadmap/issues/SF-R-storage.
 
 | Thing | Where | Made by | Size |
 |---|---|---|---|
-| APFS container "SiliconForest" (the stub): volumes System (`SiliconForest`), Data, Preboot, Recovery | a new GPT partition **in the unallocated space after `p3`: blocks 208,800,774 to 209,411,077** (section 2) | the owner, in macOS, with `diskutil` | 610,304 blocks = 2,499,805,184 bytes (the installer's `STUB_SIZE`, 2.5 GB rounded down to a MiB; the same size as Linux's stub `p4`; the paired recoveryOS image alone is about 1 GB) |
-| the stub's boot object, built with our logo. D2 = one object: **the stage itself with its configuration and the kernel collection in it** (the image the bench boots from RAM in step 4 of `SF-R-storage.md`). D2 = two stages: **our stage-1 m1n1** carrying one configuration line (`chainload=<PARTUUID of the boot partition>;sf/boot.bin`) | inside the stub (Preboot, placed by `kmutil configure-boot`) | the owner, in the stub's recoveryOS | 14.4 MB (one object) or about 1 MB (stage 1) |
+| APFS container "SiliconForest" (the stub): volumes System (`SiliconForest`), Data, Preboot, Recovery | a new GPT partition **in the unallocated space after `p3`** (proposed: blocks 208,669,702 to 209,280,005; section 2) | the owner, in macOS, with `diskutil` | 610,304 blocks = 2,499,805,184 bytes (the installer's `STUB_SIZE`, 2.5 GB rounded down to a MiB; the same size as Linux's stub `p4`; the paired recoveryOS image alone is about 1 GB) |
+| the stub's boot object, built with our logo: **our stage-1 m1n1** carrying one configuration line (`chainload=<PARTUUID of the boot partition>;sf/boot.bin`) | inside the stub (Preboot, placed by `kmutil configure-boot`) | the owner, in the stub's recoveryOS | about 1 MB |
 | the picker's icon | `.VolumeIcon.icns` on the stub's System volume | the owner (the stub script) | under 1 MB |
-| **only with decision D2 = two stages:** the SiliconForest boot partition: FAT32, one file `sf/boot.bin` = our stage-2 m1n1 (`m1n1-sf-stage.bin`) + configuration + the kernel collection (`pdsf_pack.py`), 14.4 MB today (stage 4.3 MB, the collection 10.2 MB compressed; 33.8 MB in memory), limit 60 MiB (`DESIGN.md` section 1) | a new GPT partition, **for which no space has been set aside** (section 2) | the owner creates it; the file is copied by the owner from Linux or macOS | 64 to 512 MiB |
-| the root: the SiliconForest partition as it is (ext4, label `SiliconForest`) | `p3`, blocks 192,633,862 to 208,800,773 | unchanged in content | 16,166,912 blocks (61.67 GiB) |
+| the SiliconForest boot partition (SFBOOT): FAT32, one file `sf/boot.bin` = our stage-2 m1n1 (`m1n1-sf-stage.bin`) + configuration + the kernel collection (`pdsf_pack.py`), 14.4 MB today (stage 4.3 MB, the collection 10.2 MB compressed; 33.8 MB in memory), limit 60 MiB (`DESIGN.md` section 1) | a new GPT partition **in the same unallocated space, after the stub** (proposed: blocks 209,280,006 to 209,411,077; section 2) | the owner creates it in macOS; the file is copied by the owner from Linux or macOS | 131,072 blocks = 512 MiB |
+| the root: the SiliconForest partition as it is (ext4, label `SiliconForest`) | `p3`, blocks 192,633,862 to 208,669,701 | unchanged in content | 16,035,840 blocks (61.17 GiB) |
 
 The Linux install's four pieces (its stub container, its EFI partition, `/boot`, the btrfs root)
-and macOS's containers are not opened for writing by anything in this procedure (the one
-exception would be decision D2's variant (b), a resize of macOS's container by macOS itself).
+and macOS's containers are not opened for writing by anything in this procedure.
 
 ### Why two stages and a boot partition
 The boot object in the stub can only be replaced from the stub's own recoveryOS
@@ -40,54 +41,77 @@ The boot object in the stub can only be replaced from the stub's own recoveryOS
 kernel), every new kernel would need a trip to recovery. As with Linux, stage 1 therefore
 stays fixed and loads the changing part from a FAT partition. m1n1 reads FAT only, so that
 part cannot live on the ext4 root; and it must not live on Linux's EFI partition. Hence a
-small FAT partition of our own, or no second stage at all: the space that was freed holds the
-stub and nothing more, so this is now decision D2 (section 11).
+small FAT partition of our own. The owner decided for it on 13 November 2026 (he will not go
+to recovery for a kernel update) and gave it 512 MiB from the end of `p3` (section 2).
 
-## 2. Where the space is (decided and done)
+## 2. Where the space is (decided and done), and what goes where in it (proposed)
 
-The owner chose the end of the SiliconForest partition. On 12 November 2026 the coordinator did
-this from the M1's Linux, with `p3` unmounted (backups of both table copies and of the old
-listing are in `private/disk-root/gpt-backup/`, never in git):
+The owner chose the end of the SiliconForest partition, twice. The coordinator did both shrinks
+from the M1's Linux, with `p3` unmounted (backups of both table copies and of the listings are
+in `private/disk-root/gpt-backup/`, never in git):
 
 | | first block | last block | blocks of 4 KiB |
 |---|---|---|---|
-| `p3` before | 192,633,862 | 209,411,077 | 16,777,216 |
-| `p3` now (ext4 shrunk first, then the entry; identifier and start unchanged) | 192,633,862 | 208,800,773 | 16,166,912 |
-| **unallocated** | **208,800,774** | **209,411,118** | **610,345** (2,499,973,120 bytes) |
+| `p3` at first | 192,633,862 | 209,411,077 | 16,777,216 |
+| `p3` after 12 November 2026 (610,304 blocks given up for the stub) | 192,633,862 | 208,800,773 | 16,166,912 |
+| `p3` now, since 13 November 2026 (131,072 more for the boot partition; ext4 shrunk first, then the entry; identifier and start unchanged both times) | 192,633,862 | 208,669,701 | 16,035,840 |
+| **unallocated** | **208,669,702** | **209,411,118** | **741,417** (3,036,844,032 bytes) |
 | next entry, unchanged (Linux's stub container `p4`) | 209,411,119 | 210,021,422 | 610,304 |
 
-Of the 610,345 free blocks, 610,304 came from `p3`; the last 41 (209,411,078 to 209,411,118)
-were already free between `p3` and `p4` (macOS aligned `p4` when the installer made it).
+Of the 741,417 free blocks, 741,376 came from `p3` (610,304 + 131,072); the last 41
+(209,411,078 to 209,411,118) were already free between `p3` and `p4` (macOS aligned `p4` when
+the installer made it).
 
-What followed in this lab, all done: the write fence's compiled-in length is 16,166,912
-(`m1-storage/kernel-rw/pd_nvme_wring.h`, commit `18490a9b6`; host tests against the new range),
-the collections are rebuilt, and boot dr24 proved the layout (`SF-R-storage.md`, "The shrunk
-partition"): the driver finds the entry in both table copies at the new length, admits writes
-only in 192,633,862 to 208,800,773, refuses 208,800,774, the old last block 209,411,077 and
-209,411,118; the four watched ranges in the free space did not change; Linux `e2fsck -fn` clean.
-**The fence does not move again**: nothing below may need another block of `p3`.
+What followed in this lab: the write fence's compiled-in length is 16,035,840
+(`m1-storage/kernel-rw/pd_nvme_wring.h`, commit `92c390cb0`; host tests against the new range),
+the three read-write collections are rebuilt, and the state of the proof boot on this layout
+is in `SF-R-storage.md` ("The second shrink"). A collection built before that commit must not
+boot the disk root. **The fence does not move again**: nothing below may need another block of `p3`.
 
-**What the stub takes.** One APFS container of 2,499,805,184 bytes (610,304 blocks), created by
-`diskutil addPartition` in that free space, as the installer's `action_install_into_free` does
-(`self.dutil.addPartition(free_part.name, "apfs", name, STUB_SIZE)`). Expected placement:
-**blocks 208,800,774 to 209,411,077**, leaving the same 41 blocks free before `p4` as before.
-`diskutil` chooses the placement itself; what must hold afterwards, read from Linux (read-only)
-before anything else is done:
-- the new entry's first block is at least 208,800,774 and its last block at most 209,411,118;
+**What goes into the free space (proposal; `diskutil` decides the real placement).** Two new
+entries, both made by the owner in macOS, 741,376 blocks together, which is what was freed:
+
+| | proposed first block | proposed last block | blocks | bytes |
+|---|---|---|---|---|
+| the stub: one APFS container "SiliconForest" | 208,669,702 | 209,280,005 | 610,304 | 2,499,805,184 (the installer's `STUB_SIZE`) |
+| SFBOOT: FAT32 | 209,280,006 | 209,411,077 | 131,072 | 536,870,912 (512 MiB) |
+| left free, as today | 209,411,078 | 209,411,118 | 41 | |
+
+Order proposed: **the stub first, with its exact size; SFBOOT second, taking what is left.**
+Reasons: the stub's size is the one that matters (it is the installer's, the same as Linux's
+stub `p4`; a smaller stub that still pairs with its recoveryOS is not known here), while SFBOOT
+holds one file of 14.4 MB and does not care about a few blocks. The free space has 41 blocks to
+spare in all, and it starts at a block that is a multiple of neither 256 nor 2,048 (block
+208,669,702 = 256 x 815,116 + 6): if `diskutil` aligns a partition's start or rounds a size,
+the second partition is the one that absorbs it, and it should be the one that can. So the
+stub is asked for with `diskutil addPartition` and 2,499,805,184 bytes (as the installer's
+`action_install_into_free` does: `self.dutil.addPartition(free_part.name, "apfs", name, STUB_SIZE)`),
+and SFBOOT with the same command, FAT32, and the size word that means "the rest". The other
+order (SFBOOT in blocks 208,669,702 to 208,800,773, the 131,072 blocks freed for it, and the
+stub where the first plan had it, 208,800,774 to 209,411,077) is equally acceptable to
+everything in this lab; it only leaves the alignment risk with the stub.
+Not known here, to be read from the table afterwards and not assumed: where `diskutil` really
+puts each partition; whether it aligns; **whether it renumbers the table's entries into disk
+order** (new entries between `p3` and `p4` would then make Linux's `nvme0n1p4` and later into
+`p6` and later: before step B the owner should look, in Linux, that nothing of the Linux
+install names a partition by number (`/etc/fstab`, the boot loader's configuration; m1n1's own
+`chainload=` line names a PARTUUID). The lab's tools identify partitions by identifier and,
+where they name `nvme0n1p3`, check its identifier first and stop if it is not ours.)
+
+What must hold afterwards, read from Linux (read-only) before anything else is done:
+- both new entries lie wholly inside blocks 208,669,702 to 209,411,118 and do not overlap;
+- the stub's entry has 610,304 blocks; SFBOOT's has at least 126,976 (496 MiB: the proposal
+  minus the most an alignment to 1 MiB at both ends can cost, with room to spare) and at most 131,113;
 - the entry of `p3` is byte for byte what it is now (type, identifier, first block
-  192,633,862, last block 208,800,773), and so is every other existing entry, in both copies;
+  192,633,862, last block 208,669,701), and so is every other existing entry apart from its
+  position in the table, in both copies;
 - both table copies are valid and identical (the fenced driver checks exactly this at every
   boot and refuses to open its fence otherwise: one disk-root boot afterwards is the test).
 If any of these does not hold: stop, nothing of ours boots from the disk, the saved tables are
-the reference. New entries get new index numbers; Linux's `nvme0n1pN` names of the existing
-partitions do not change as long as the entry is added after the last used one (the lab's tools
-identify partitions by identifier, never by number). After the step the lab's range list needs
-a successor to `runs/m1-storage/linux-c/ranges` (the free space becomes a partition Linux
-never writes: its ranges stay in the "must not change" class).
-
-**What the freed space does not hold.** The earlier draft of this page asked for 3 GiB: the stub
-plus a 512 MiB FAT partition for the second stage. The freed space is the stub's size and no
-more. A second-stage partition therefore has no place unless the owner gives it one (D2).
+the reference. After the step the lab's range list needs a successor to
+`runs/m1-storage/linux-d/ranges` (the free space becomes two partitions Linux never mounts:
+their ranges stay in the "must not change" class), and SFBOOT's PARTUUID goes into stage 1's
+configuration line and into `private/` (never into git).
 
 ## 3. What the stub needs from Apple
 
@@ -115,32 +139,34 @@ firmware SiliconForest loads is already on its root.
    `install_files`, `collect_installer_data` without the firmware collection) with our name,
    icon, boot object and `step2.sh`; no distribution, no EFI partition, no questions about
    resizing. To be reviewed line by line against `stub.py` and run by the owner.
-2. Stage 1 (D2 = two stages only): the pinned m1n1 with `BUILTIN_LOGO=siliconforest` (the Makefile takes
+2. Stage 1: the pinned m1n1 with `BUILTIN_LOGO=siliconforest` (the Makefile takes
    `data/<name>_128.bin` and `_256.bin`, made from PNGs by `data/makelogo.sh`) and the
    release configuration (no USB proxy wait), and the configuration line appended the way the
    installer's `m1n1.build()` appends `chainload=`. It reads one file from one partition named
    by PARTUUID and writes nothing.
-3. The stage for installation (stage 2, or the one boot object): `m1n1-sf-stage.bin` with our logo, in the variant that restarts the machine when
+3. The stage for installation (stage 2, the file `sf/boot.bin` on SFBOOT): `m1n1-sf-stage.bin` with our logo, in the variant that restarts the machine when
    it refuses or fails (today's falls back to the USB proxy), packed with the collection
    (`m1-storage/build-kc-native-rw-halt.nix`) and the boot arguments of section 6.
 4. Proof from RAM first, as for every stage so far. Done for the stage and the kernel: the
    bench uploads the stage with its configuration and the collection and nothing else, and it
    boots the desktop from `p3` and restarts into Linux by itself (boot dr27, read-back dr26;
-   `SF-R-storage.md`, "Step 4", with what is still open there: the network in the disk's own
-   session, and one checker failure that waits for the reviewer). Not done: stage 1, the logo,
+   `SF-R-storage.md`, "Step 4" and what follows it). Not done: stage 1, the logo,
    the variant that restarts instead of falling back to the proxy, anything loaded from a disk.
 
 ## 5. The steps, and who does them
 
 A. **Linux: done** (section 2). Before step B, once more, read-only: the listing of the table
-   (`sgdisk -p`, or the lab's `linux_m1.sh`) shows blocks 208,800,774 to 209,411,118 free and
-   `p3` ending at 208,800,773.
-B. **macOS (owner, admin):** `diskutil addPartition` once: APFS, name "SiliconForest",
-   2,499,805,184 bytes, into the free space after the SiliconForest partition (expected blocks
-   208,800,774 to 209,411,077). Then the checks of section 2 from Linux, and one disk-root boot
-   from the bench. Only then: run `sf-stub-install` (section 3's files, the icon, the boot
-   object as `boot.bin` inside `Finish Installation.app`, `step2.sh`). With D2 = two stages
-   also: create SFBOOT where the owner decided, copy `sf/boot.bin` to it. Then
+   (`sgdisk -p`, or the lab's `linux_m1.sh`) shows blocks 208,669,702 to 209,411,118 free and
+   `p3` ending at 208,669,701; and nothing of the Linux install names a partition by number
+   (section 2).
+B. **macOS (owner, admin):** `diskutil addPartition` twice, in the order of section 2:
+   first APFS, name "SiliconForest", 2,499,805,184 bytes, into the free space after the
+   SiliconForest partition (proposed blocks 208,669,702 to 209,280,005); then FAT32, name
+   "SFBOOT", the rest of that free space (proposed blocks 209,280,006 to 209,411,077). Then the
+   checks of section 2 from Linux, and one disk-root boot from the bench. Only then: copy
+   `sf/boot.bin` to SFBOOT and run `sf-stub-install` (section 3's files, the icon, the boot
+   object, stage 1 with SFBOOT's PARTUUID in its configuration line, as `boot.bin` inside
+   `Finish Installation.app`, `step2.sh`). Then
    `bless --setBoot --mount <the stub's System volume>`: **from here until step D the default
    boot entry is SiliconForest's stub.**
 C. **Recovery (owner, at the machine):** shut down; hold the power button until "Loading
@@ -150,10 +176,9 @@ C. **Recovery (owner, at the machine):** shut down; hold the power button until 
    - `bputil -nc -v <volume group id>`: Permissive Security **for this entry only**; macOS's and
      Linux's policies are separate objects and are not changed;
    - `kmutil configure-boot -c boot.bin --raw --entry-point 2048 --lowest-virtual-address 0 -v <System volume>`:
-     our boot object (the stage with the kernel, or stage 1) becomes this entry's boot object.
+     our boot object (stage 1) becomes this entry's boot object.
    It then renames `.IAPhysicalMedia` away and restarts: our logo, then the kernel with the
-   root on `p3` (D2 = one object: the boot object is the stage with the kernel in it; D2 = two
-   stages: stage 1 loads `sf/boot.bin`, stage 2 boots the kernel from it).
+   root on `p3` (stage 1 loads `sf/boot.bin` from SFBOOT, stage 2 boots the kernel from it).
 D. **Linux back as the default (owner):** at the next start hold the power button, select the
    Linux entry while holding Option ("Always Use"); or in macOS `bless --setBoot` on Linux's
    stub. Check: a plain restart lands in Linux.
@@ -161,7 +186,7 @@ D. **Linux back as the default (owner):** at the next start hold the power butto
 ## 6. Boot arguments in the stage's configuration record
 
 `rd=uuid boot-uuid=<filesystem UUID of p3> pdnvme=3 pdnvme_part=<PARTUUID> pdnvme_part_lba=192633862
-pdnvme_part_blocks=16166912 pdnvme_write=1 pdnvme_readfence=1 pdnvme_ttl=0 pdcpuheld=1 cpus=8
+pdnvme_part_blocks=16035840 pdnvme_write=1 pdnvme_readfence=1 pdnvme_ttl=0 pdcpuheld=1 cpus=8
 pdthermal_delay=4 pd_quiet_wait=0 pd_rtc_wait=0` and the display/GPU words of the desktop
 boots (`m1-storage/tools/dr_desk_boot.sh`). The stage refuses any command line whose root is
 not exactly that filesystem UUID (`b1/src/pdsf_boot.c`, `PDSF_ROOT_UUID`). Decisions inside:
@@ -182,10 +207,10 @@ compositor's bound); `sfbench=` is the bench's and is not given.
 
 ## 8. Removal
 
-In macOS: `diskutil apfs deleteContainer <the stub's container>` (and, if D2 made one,
-`diskutil eraseVolume free none <SFBOOT>`); blocks 208,800,774 to 209,411,118 are unallocated
+In macOS: `diskutil apfs deleteContainer <the stub's container>` and
+`diskutil eraseVolume free none <SFBOOT>`; blocks 208,669,702 to 209,411,118 are unallocated
 again, as they are today. They are not given back to `p3` by this procedure: that would be a
-second rewrite of the table and a second change of the write fence, and is a decision of its
+third rewrite of the table and a third change of the write fence, and is a decision of its
 own. The entry disappears from the picker with the container. Its local boot
 policy is stored in the system's own `iSCPreboot` under the volume group's id and becomes
 unreferenced; what cleans it up, and when, is not known to this lab (the Asahi project
@@ -203,7 +228,7 @@ not affected by removal as long as step D was done.
 | our logo, then nothing | stage 1 could not read `sf/boot.bin` (missing, damaged, over 60 MiB) | hold power off, power on: the default (Linux after step D; **before step D this entry is the default: use the picker**) |
 | stage 2 prints `PDSF: …` and restarts | it refused the image or the command line (wrong root UUID, checksum) | Linux; fix the file on SFBOOT from Linux |
 | kernel starts, no desktop | as on the bench | hold power off, on: Linux. The root is then not clean: the journal is replayed at the next mount (proven: dr12 to dr16) |
-| after step B the table is not as section 2 demands (an existing entry changed, the new one outside 208,800,774 to 209,411,118, the copies differ) | `diskutil` did something else than expected | stop; nothing of SiliconForest boots from the disk (the fenced driver refuses by itself); the tables saved before the shrink and the listing after it are in `private/disk-root/gpt-backup/` as the reference; what to restore, and with which tool, is decided with the owner then, not in advance |
+| after step B the table is not as section 2 demands (an existing entry changed, a new one outside 208,669,702 to 209,411,118 or of the wrong size, the copies differ) | `diskutil` did something else than expected | stop; nothing of SiliconForest boots from the disk (the fenced driver refuses by itself); the tables saved before each shrink and the listing after the second are in `private/disk-root/gpt-backup/` as the reference; what to restore, and with which tool, is decided with the owner then, not in advance |
 
 Not covered by any of this: a mistake inside macOS's own `diskutil` is Apple's code on a
 table every system on the disk depends on; a current backup of macOS and of the Linux home is
@@ -219,19 +244,9 @@ the first thing to have.
 
 ## 11. Decisions asked of the owner
 
-- **D2** where the kernel lives (the question "which source for the space" is closed, section 2;
-  the freed space holds the stub only):
-  - **(a) one boot object**: the stage with its configuration and the collection in it
-    (14.4 MB today) is what `kmutil configure-boot` installs. No further partition, nothing
-    more to free. Cost: every new kernel or boot argument is a trip to recovery. Not known:
-    whether `kmutil configure-boot --raw` accepts an object of that size (the installer's is
-    about 1 MB); to be tried by the owner in step C, and harmless if refused.
-  - **(b) two stages, SFBOOT taken from macOS's container**: `diskutil apfs resizeContainer`
-    by 64 to 512 MiB and one more `addPartition` (FAT32). Kernel updates are then a file copy.
-    Cost: one live resize of macOS's container, Apple's own operation.
-  - **(c) two stages, SFBOOT inside the freed space, the stub made smaller**: not
-    recommended; the smallest stub that still pairs with its recoveryOS is not known here.
-  Taking it from `p3` again is not offered: the fence does not move again.
+- **D2** is decided (13 November 2026): two stages, SFBOOT of 512 MiB in the space freed from
+  `p3`, beside the stub (section 2). What is left of it for the owner is the order and
+  placement proposed there: his word on it, or the other order.
 - **D3** when: this needs him at the machine for steps C and D, about half an hour, and a
   backup first.
 - **D4** `pdpmu=2`: let SiliconForest write the three PMU boot-state bytes Linux writes
@@ -249,5 +264,4 @@ the first thing to have.
 - No write by SiliconForest or by this lab's tools outside `p3`: the GPT, the new partitions,
   the stub and the boot policy are made by the owner's hands with Apple's tools and one
   script he has read.
-- No change to Linux's stub, EFI partition, `/boot` or root, to macOS's volumes (beyond the
-  one resize of D2 (b), if chosen), to NVRAM by us, or to the security policy of any other entry.
+- No change to Linux's stub, EFI partition, `/boot` or root, to macOS's volumes, to NVRAM by us, or to the security policy of any other entry.

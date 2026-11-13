@@ -158,9 +158,9 @@ static int set_one(const char *name)
  * revokes the console, the report of the rest
  * of the halt would be lost, and launchd starts the next thing on the console in the middle
  * of the halt. It ignores SIGTERM, writes nothing, and goes with the machine.
- * sig 0: count only.
+ * sig 0: count only. names: when not NULL, "pid(command) ..." of the processes counted.
  */
-static int others(int sig)
+static int others_named(int sig, char *names, size_t size)
 {
 	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
 	static struct kinfo_proc list[2048];
@@ -196,9 +196,19 @@ static int others(int sig)
 			continue;
 		if (sig != 0)
 			kill(pid, sig);
+		if (names != NULL && size > 0) {
+			size_t used = strlen(names);
+			if (used + 1 < size)
+				snprintf(names + used, size - used, "%s%d(%.16s)", used ? " " : "", (int)pid, list[i].kp_proc.p_comm);
+		}
 		n++;
 	}
 	return n;
+}
+
+static int others(int sig)
+{
+	return others_named(sig, NULL, 0);
 }
 
 /* The block device node of the root filesystem: "/dev/diskN[sM]" whose number is "/"'s. */
@@ -348,13 +358,16 @@ int main(int argc, char **argv)
 		say("SF_HALT processes: SIGTERM to %d", rc);
 		for (n = 0; n < 50 && others(0) > 0; n++)
 			usleep(100000);
-		rc = others(0);
-		say("SF_HALT processes: %d left after %d ms", rc, n * 100);
+		text[0] = 0;
+		rc = others_named(0, text, 300);
+		say("SF_HALT processes: %d left after %d ms%s%s", rc, n * 100, rc ? ": " : "", text);
 		if (rc != 0) {
 			others(SIGKILL);
 			for (n = 0; n < 20 && others(0) > 0; n++)
 				usleep(100000);
-			say("SF_HALT processes: SIGKILL sent, %d left", others(0));
+			text[0] = 0;
+			rc = others_named(0, text, 300);
+			say("SF_HALT processes: SIGKILL sent, %d left%s%s", rc, rc ? ": " : "", text);
 		}
 	}
 

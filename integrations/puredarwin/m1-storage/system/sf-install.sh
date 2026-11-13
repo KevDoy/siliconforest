@@ -17,6 +17,10 @@ put() {  # <source> <destination>: by way of a new name, so a running program's 
     cp "$S/$1" "$R/$2.sf-new" && chmod 755 "$R/$2.sf-new" && mv -f "$R/$2.sf-new" "$R/$2"
 }
 mkdir -p "$R/usr/libexec" "$R/private/var/run" "$R/private/tmp" "$R/private/ram"
+# where wifiutil keeps the networks it has joined (org.puredarwin.wifi.known). The image this root was copied
+# from has no such directory, wifiutil does not make it and says nothing when it cannot write the file: without
+# it no network is remembered, and pd-netd, which joins remembered networks only, never has one to join.
+mkdir -p "$R/Library/Preferences/SystemConfiguration"
 put sf-halt sbin/sf-halt
 put sf-clock usr/sbin/sf-clock
 put sf-boot sbin/sf-boot

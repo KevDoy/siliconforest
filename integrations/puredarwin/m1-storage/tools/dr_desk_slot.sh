@@ -10,6 +10,8 @@
 # DR_HALT="<command>" (dr_desk_boot.sh): the boot is ended by the system's own command and the machine
 # restarts itself; the verdict runs with NV_WMODE=halt, and the slot stops unless the controller sent NO
 # reset. The desktop-state and clock checks of that mode are nv_verdict.py's.
+# DR_PLAIN=1 (with DR_STAGE=disk; dr_desk_boot.sh): a session without sfbench=. No verdict (the bench prints nothing in
+# such a boot); the slot's own checks are below.
 # DR_STAGE=1|disk, DR_STAGE_STOP=1 (dr_desk_boot.sh): the boot goes through the SiliconForest stage. A read-back
 # boot (DR_STAGE_STOP=1) never enters the kernel: instead of the verdict the slot wants the stage's read-back
 # equal in every part, our partition clean and untouched (e2fsck -fn, the superblock's state, every range in it
@@ -17,7 +19,7 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 N=${1:?name}; MODE=${2:?hv or native}; LIMIT=${3:-200}
-R=${NV_RANGE_FILE:-runs/m1-storage/linux-c/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
+R=${NV_RANGE_FILE:-runs/m1-storage/linux-d/ranges}; [ -s "$R" ] || { echo "no $R" >&2; exit 2; }
 [ ! -e runs/m1-storage/STOP ] || { echo "runs/m1-storage/STOP exists: $(cat runs/m1-storage/STOP)" >&2; exit 3; }
 stop() { echo "$1" | tee runs/m1-storage/STOP; exit 3; }
 . private/disk-root/sf-part.env || exit 2
@@ -35,7 +37,7 @@ if [ "${DR_STAGE_STOP:-0}" = 1 ]; then
     grep -a 'SFL_FSCK_RC\|SFL_SB_FIRST Filesystem state\|SFL_SB_FIRST Journal start' "runs/m1-storage/$N-wcheck.txt" | sed 's/^/DR_STOP /'
     # every range from our partition's first block to the next partition (ours and the unallocated space) must be unchanged
     join -j1 <(awk '/^NVT_HASH/ {print $2"+"$3, $4}' "runs/m1-storage/$N-before/hashes" | sort) <(awk '/^NVT_HASH/ {print $2"+"$3, $4}' "runs/m1-storage/$N-after/hashes" | sort) |
-      awk -v first="$SF_PART_LBA" -v blocks="$SF_PART_BLOCKS" '{ split($1, r, "+"); ours = (r[1] >= first && r[1] < first + blocks + 610345); if ($2 == $3) { e++; oe += ours } else { d++; od += ours; print "DR_STOP changed in Linux between before and after:", $1, (ours ? "OURS OR THE FREED SPACE" : "") } }
+      awk -v first="$SF_PART_LBA" -v blocks="$SF_PART_BLOCKS" '{ split($1, r, "+"); ours = (r[1] >= first && r[1] < first + blocks + 741417); if ($2 == $3) { e++; oe += ours } else { d++; od += ours; print "DR_STOP changed in Linux between before and after:", $1, (ours ? "OURS OR THE FREED SPACE" : "") } }
         END { printf "DR_STOP ranges equal=%d different=%d; in our partition and the space behind it equal=%d different=%d\n", e, d, oe, od }'
     grep -a 'STAGE_READBACK' "$C/guest/worker.log" | grep -a -o '"[a-z_]*": {"bytes": [0-9]*, "equal": [a-z]*\|"equal_to_the_launchers": [a-z]*\|"cmdline_at_108": "[^"]*"' | sed -e 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' -e 's/^/DR_STOP readback /'
     strings -n 6 "$C/guest/console.bin" | grep -a 'PDSF: ' | sed -e 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' -e 's/^/DR_STOP console /' | cut -c1-300
@@ -45,6 +47,42 @@ if [ "${DR_STAGE_STOP:-0}" = 1 ]; then
     && ! grep -q '"equal": false' "$V" && grep -q 'DR_STOP console PDSF: stop requested' "$V" && ! grep -a -q 'Darwin Kernel Version' "$C/guest/console.bin" \
     || stop "$N: the stage read-back boot did not pass; all storage boots stopped"
   echo "DR_STOP PASSED: the stage placed what the launcher would have placed, the kernel was not entered, our partition is untouched"
+  exit 0
+fi
+if [ "${DR_PLAIN:-0}" = 1 ]; then
+  # A session without sfbench= prints none of the bench's lines: no verdict. Storage (these stop the stream): the
+  # machine came back by itself, our partition is clean in Linux, every range Linux never writes is as before. The rest is
+  # reported line by line (PLAIN ok / PLAIN FAIL) from what the session and sf-halt themselves print.
+  sleep 30
+  DR_OUT=$ROOT/runs/m1-storage/$N-wcheck.txt "$HERE/tools/dr_linux_root.sh" wcheck > /dev/null || stop "$N: our partition could not be checked from Linux after the plain boot; all storage boots stopped"
+  CON=$(mktemp); strings -n 4 "$C/guest/console.bin" | sed -e 's/[0-9A-Fa-f]\{8\}-[0-9A-Fa-f-]\{27\}/GUID/g' > "$CON"
+  {
+    grep -a 'SFL_FSCK\|SFL_SB_FIRST Filesystem state\|SFL_SB_FIRST Journal start' "runs/m1-storage/$N-wcheck.txt" | sed 's/^/DR_PLAIN /'
+    python3 -B "$HERE/tools/dr_plain_ranges.py" "runs/m1-storage/$N-before" "runs/m1-storage/$N-after" "$SF_PART_LBA" "$SF_PART_BLOCKS" || true
+    echo "DR_PLAIN reset_attempts=$(sed -n 's/.*"reset_attempts": *\([0-9]*\).*/\1/p' "$C/result.json" | head -1)"
+    want() { if grep -a -q -- "$2" "$CON"; then echo "DR_PLAIN ok   $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-200)"; else echo "DR_PLAIN FAIL $1"; fi; }
+    wantnot() { if grep -a -q -- "$2" "$CON"; then echo "DR_PLAIN FAIL $1: $(grep -a -- "$2" "$CON" | head -1 | cut -c1-160)"; else echo "DR_PLAIN ok   $1"; fi; }
+    wantnot "the boot arguments carry no sfbench=" 'sfbench='
+    wantnot "nothing of the bench ran (no NV_ line)" '^NV_[A-Z]'
+    want "the session is the disk's own, started by launchd, without the bench" 'SF_SESSION begin seconds=[0-9]* bench=no started_by=launchd'
+    want "sf-boot ran" 'SF_BOOT clock_rc=0 run_and_tmp=cleaned'
+    want "the renderer" 'WMSTAT selected renderer='
+    want "the network came up by pd-netd" 'GPUDESK_NET_UP_RC=0 by=pd-netd'
+    want "a host on the local network answered" 'GPUDESK_LAN_PING_RC=0'
+    want "a host beyond it answered" 'GPUDESK_PING_RC=0'
+    want "the desktop ended with 0" 'GPUDESK_DESKTOP_RC=0'
+    want "the session's end" 'SF_SESSION end request='
+    want "sf-halt: the root downgraded" 'SF_HALT downgrade: mount rc=0, root is now read-only'
+    want "sf-halt: the controller stopped cleanly" 'SF_HALT stop errno=0 state=stopped-clean'
+    want "sf-halt asked for the restart" 'SF_HALT restarting now'
+    wantnot "no panic" 'panic(cpu'
+    grep -a 'SF_HALT processes\|SF_SESSION\|GPUDESK_\(NET\|LAN\|PING\|TOUCHBAR\|INPUT\|DESKTOP\|COREAUDIOD\)\|WMSTAT selected\|WMSCALE initial\|SF_BOOT' "$CON" | cut -c1-240 | head -40 | sed 's/^/DR_PLAIN line /'
+  } | tee "runs/m1-storage/$N-verdict.txt"
+  rm -f "$CON"; V=runs/m1-storage/$N-verdict.txt
+  grep -q '^DR_PLAIN SFL_FSCK_RC 0$' "$V" && grep -q '^DR_PLAIN SFL_SB_FIRST Filesystem state: *clean$' "$V" && grep -q '^DR_PLAIN linux_side=ok$' "$V" && grep -q '^DR_PLAIN reset_attempts=0$' "$V" \
+    || stop "$N: after the plain boot our partition is not clean in Linux, a range Linux never writes or a SMART counter changed, or the controller had to reset; all storage boots stopped"
+  if grep -q '^DR_PLAIN FAIL' "$V"; then echo "DR_PLAIN storage checks passed; $(grep -c '^DR_PLAIN FAIL' "$V") session line(s) FAILED (no stop file: not a storage matter)"; exit 1; fi
+  echo "DR_PLAIN PASSED: the plain session came up, reached the network, ended in its own restart; our partition is clean and nothing outside it changed"
   exit 0
 fi
 if [ "${DR_RW:-0}" = 1 ]; then

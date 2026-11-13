@@ -21,6 +21,13 @@
 #                                  the storage facts and then runs `reboot` itself). Without the
 #                                  argument, or without those files, nothing of the bench runs.
 #   sfbench_auto=<phases>          with sfbench: the compositor's autopilot phases (e.g. settle)
+#   sfmark=1                       without sfbench: one line more on the console (PD_BENCH_REBOOT, printed
+#                                  by sf-halt once everything is stopped) so that a bench capturing the
+#                                  console knows the machine restarts itself. Nothing else changes.
+# The network: pd-netd (job org.puredarwin.pd-netd) joins the networks wifiutil remembers in
+# /Library/Preferences/SystemConfiguration/org.puredarwin.wifi.known (a network is remembered when it is
+# joined once with `wifiutil join`). Its files are /var/run/pd-netd.en0.status and
+# /var/log/pd-netd.log: on this root /var is a directory of its own, not a link to /private/var.
 nonce=${1:-none}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 arg() { sysctl -n kern.bootargs 2>/dev/null | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
@@ -31,6 +38,7 @@ bench=$(arg sfbench); B=/private/var/db/sf-bench
 case "$bench" in ''|*[!a-z0-9]*) bench=;; esac
 [ -n "$bench" ] && [ -r "$B/prelude.in" ] && [ -r "$B/end.in" ] || bench=
 auto=$(arg sfbench_auto); case "$auto" in *[!a-z,]*) auto=;; esac
+mark=$(arg sfmark)
 lba=$(arg pdnvme_part_lba); blocks=$(arg pdnvme_part_blocks)
 case "$lba$blocks" in ''|*[!0-9]*) lba=0; blocks=0;; esac
 fill() {
@@ -69,8 +77,16 @@ ls -l /dev/dri 2>&1 | head -6
 # The network is not this script's: it only says what pd-netd reached within a minute.
 (
     until_ok 600 net_online; rc=$?
-    printf 'GPUDESK_NET_UP_RC=%s by=pd-netd %s\n' "$rc" "$(cat /var/run/pd-netd.en0.status 2>/dev/null | sed 's/ssid=[^ ]*/ssid=(not printed)/' | cut -c1-120)"
-    [ "$rc" -eq 0 ] && { ping -c 2 1.1.1.1 >/dev/null 2>&1; printf 'GPUDESK_PING_RC=%s\n' "$?"; }
+    st=$(cat /var/run/pd-netd.en0.status 2>/dev/null)
+    known=$(grep -c . /Library/Preferences/SystemConfiguration/org.puredarwin.wifi.known 2>/dev/null)
+    printf 'GPUDESK_NET_UP_RC=%s by=pd-netd remembered_networks=%s %s\n' "$rc" "${known:-0}" \
+        "$(printf '%s\n' "$st" | sed -e 's/ssid=.* addr=/ssid=(not printed) addr=/' -e '/ addr=/!s/ssid=.*/ssid=(not printed)/' | cut -c1-160)"
+    if [ "$rc" -eq 0 ]; then
+        # a host on the local network (the router the lease names), then one beyond it
+        gw=$(printf '%s\n' "$st" | sed -n 's/.* router=\([0-9.]*\).*/\1/p')
+        if [ -n "$gw" ]; then ping -c 2 "$gw" >/dev/null 2>&1; printf 'GPUDESK_LAN_PING_RC=%s host=%s (the router of the lease)\n' "$?" "$gw"; fi
+        ping -c 2 1.1.1.1 >/dev/null 2>&1; printf 'GPUDESK_PING_RC=%s\n' "$?"
+    fi
 ) &
 # Sound: the audio server. The speakers stay 20 dB under the protection model's limit (hold_probe=1).
 if [ -x /usr/sbin/coreaudiod ]; then
@@ -118,4 +134,5 @@ fi
 case "$request" in
     poweroff) /bin/shutdown -h now; printf 'SF_SESSION the power-off was refused (rc=%s); restarting instead\n' "$?";;
 esac
+[ "$mark" = 1 ] && { SF_HALT_MARKER=PD_BENCH_REBOOT; export SF_HALT_MARKER; }
 exec /bin/reboot

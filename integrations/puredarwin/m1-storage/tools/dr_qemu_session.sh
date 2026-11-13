@@ -3,7 +3,7 @@
 # QEMU rehearsal of a disk root's OWN session (system/sf-session started by launchd's job
 # org.siliconforest.desktop, no RAM root, nothing typed) and of its end by the system's own
 # command from that job, on the M1's root image as a read-write root on a 4096-byte-sector
-# GPT disk. Two boots:
+# GPT disk. Three boots:
 #   a  single-user, typed (guest/qemu-halt.sh phase a): sf-install.sh puts the tools, the
 #      session, the launchd job and the bench's pieces (tools/dr_bench_templates.sh, a stand-in
 #      range list) on the root; ended by `reboot`
@@ -11,6 +11,7 @@
 #      runs sf-boot and the disk's session, the session runs the bench's prelude, the desktop
 #      (which cannot start on this machine: no GPU, the script must survive that), the bench's
 #      end script and `reboot`: sf-halt from a launchd job, with launchd's other jobs running.
+#   p  multi-user WITHOUT sfbench= (sfsession_seconds=11 sfmark=1): the plain session and its plain `reboot`
 # After each the host checks the partition: e2fsck -fn, the superblock, what the boots wrote.
 # The machine has no fenced NVMe driver, no SMC and no GPU: the storage facts print empty.
 # The virt machine does not reset on `reboot`; qd_run.py ends its own QEMU. No M1, no bench.
@@ -63,3 +64,11 @@ dd if="$W/$N-after-a.img" of="$DISK" bs=4096 seek=$((6 + 4096)) conv=notrunc sta
 QD_BASE_IMAGE=$(ls "$BASE"/*.img | head -1) DR_QEMU_KERNEL=debug DR_QEMU_UP=PD_BENCH_REBOOT \
   DR_QEMU_BOOTARGS="rd=uuid boot-uuid=$GUID sfbench=qs sfsession_seconds=11" $M/tools/dr_qemu.sh "$N-s" "$T/idle" "$DISK" rw "${DR_QEMU_TIMEOUT:-900}" || true
 show s 120; check s
+# p: the same root once more WITHOUT sfbench= (the session an installed system has): no prelude, no end script,
+# the plain `exec /bin/reboot` at the session's end; sfmark=1 only adds sf-halt's last line for this capture
+dd if="$W/$N-after-s.img" of="$DISK" bs=4096 seek=$((6 + 4096)) conv=notrunc status=none
+QD_BASE_IMAGE=$(ls "$BASE"/*.img | head -1) DR_QEMU_KERNEL=debug DR_QEMU_UP=PD_BENCH_REBOOT \
+  DR_QEMU_BOOTARGS="rd=uuid boot-uuid=$GUID sfsession_seconds=11 sfmark=1" $M/tools/dr_qemu.sh "$N-p" "$T/idle" "$DISK" rw "${DR_QEMU_TIMEOUT:-900}" || true
+show p 120; check p
+echo "DRS_HOST p bench lines in the plain boot (must be 0): $(grep -a -c '^NV_' "$W/$N-p/serial.log" || true)"
+echo "DRS_HOST p $(debugfs -R 'ls -l /Library/Preferences' "$W/$N-after-p.img" 2>/dev/null | awk '$NF == "SystemConfiguration" {print "the directory of the remembered networks is there, mode " $2}')"

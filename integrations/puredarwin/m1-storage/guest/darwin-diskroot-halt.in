@@ -39,8 +39,10 @@ for d in /dev/rdisk[0-9]; do [ "$d" != "/dev/r$fenced" ] && gpt -r show "$d" 2>/
 ps -ax 2>/dev/null | wc -l | sed 's/^ */NV_PROCESSES /'
 
 # the range check at the fence's ends, by absolute block (kern.pd_nvme.wprobe: nothing is written, whatever
-# the answer). The 610,345 blocks after the partition were given up for the startup-picker volume: the first
-# of them, the partition's last block before that (+610,304) and the last of them must all be refused.
+# the answer). The 741,417 blocks after the partition are unallocated (41 always were; 610,304 were given up
+# for the startup-picker volume, 131,072 more for the boot partition): the first of them, the partition's
+# last block before the second shrink (+131,072) and before the first (+741,376) and the last of them
+# (+741,417) must all be refused.
 phase fence
 probe() { sysctl -w kern.pd_nvme.wprobe="$2 $3" > /dev/null 2>&1; printf 'NV_WPROBE %s lba=%s blocks=%s rc=%s\n' "$1" "$2" "$3" "$?"; }
 F=@PART_LBA@; L=$((@PART_LBA@ + @PART_BLOCKS@ - 1))
@@ -50,8 +52,9 @@ probe in-last-256 $((L - 255)) 256
 probe out-before $((F - 1)) 1
 probe out-after $((L + 1)) 1
 probe out-across-end $L 2
-probe out-old-last $((L + 610304)) 1
-probe out-freed-last $((L + 610345)) 1
+probe out-old-last $((L + 131072)) 1
+probe out-older-last $((L + 741376)) 1
+probe out-freed-last $((L + 741417)) 1
 probe out-block0 0 1
 printf 'NV_WPROBE_TOTAL %s\n' "$(get kern.pd_nvme.wprobe)"
 wstats probed
@@ -92,6 +95,9 @@ ls -l /bin/reboot /bin/shutdown /sbin/sf-halt 2>&1 | sed 's/^/NV_LS /'
 # how the session was asked to end: the desktop menu's Session rows leave the word in the session's runtime directory
 req=$(cat /private/var/run/gpu-desktop/session-end-request 2>/dev/null)
 printf 'NV_SESSION_END request=%s\n' "${req:-none}"
+# the networks wifiutil remembers on this root (pd-netd joins these in a boot where nothing is typed); names and keys are not printed
+nk=$(grep -c . /Library/Preferences/SystemConfiguration/org.puredarwin.wifi.known 2>/dev/null)
+printf 'NV_NETKNOWN remembered_networks=%s directory=%s\n' "${nk:-0}" "$([ -d /Library/Preferences/SystemConfiguration ] && echo there || echo MISSING)"
 cmd='@HALT_COMMAND@'
 if [ "$cmd" = menu ]; then
     case "$req" in
