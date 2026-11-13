@@ -31,6 +31,13 @@ Static analysis only: it predicts dyld's verdict, not behaviour; dlopen()ed name
   sf_gapscan.py --root R --kegs runs/homebrew/kegs/arm64_tahoe --brew --name wide
                                                   # unpacked bottles (hb_fetch.py) as the prefix: a formula
                                                   # set wider than what a machine has installed
+  sf_gapscan.py --root R --overlay DIR --app private/.../Terminal.app=/Applications/Utilities/Terminal.app --name terminal
+                                                  # an application bundle that is not in the root: mounted at the
+                                                  # logical path, its executable (Info.plist) scanned with its load
+                                                  # closure; a per-library table of every import, the Objective-C
+                                                  # classes it imports, the selectors it sends that nothing in the
+                                                  # closure implements, and what its chained fixups ask of dyld
+                                                  # (arm64e: authenticated binds and rebases). --arch picks the slice.
 writes runs/sf-gaps/<name>.json (everything) and <name>.md (the ranked summary).
 """
 import argparse
@@ -54,6 +61,7 @@ class Root:
         self.roots = [(Path(m[1]), m[0].rstrip('/')) for m in mounts] + [(Path(o), '') for o in overlays] + [(Path(root), '')]
         self.machos = {}
         self.exp = {}
+        self.prefer = None          # slice of a universal file: 'arm64e' or 'arm64'
 
     def resolve(self, name, depth=0):
         """Host file for the logical absolute path `name`, following links inside the root."""
@@ -85,7 +93,7 @@ class Root:
             try:
                 with open(host, 'rb') as fh:
                     head = fh.read(8)
-                self.machos[host] = hb_macho.load(host) if hb_macho.is_macho(head) else None
+                self.machos[host] = hb_macho.load(host, self.prefer) if hb_macho.is_macho(head) else None
             except (ValueError, OSError, IndexError, Exception):   # a damaged or foreign file is not a Mach-O for us
                 self.machos[host] = None
         return self.machos[host]
@@ -209,6 +217,86 @@ def closure_files(root, logical, host):
                 seen.add(str(d[1]))
                 todo.append((d[0], d[1], search))
     return out
+
+
+def app_report(root, logical, host):
+    """The table for one application executable: every import by library, what is missing,
+    Objective-C classes and selectors, fixup facts. Returns (markdown, json)."""
+    m = root.macho(host)
+    files = closure_files(root, logical, host)
+    cg = closure_gaps(root, logical, host)
+    own = {g for g, where in cg.items() if any(i == logical for i, _l in where)}
+    st = m.fixup_stats() if m.fixups else None
+    per = collections.OrderedDict()
+    for i, d in enumerate(m.dylibs):
+        per[i + 1] = dict(name=d['name'], kind=d['kind'], present=root.find(d['name'], logical, logical, m.rpaths) is not None,
+                          n=0, weak=0, classes=0, swift=0, missing=[], missing_weak=[])
+    imps = m.imports()
+    for idx, (sym, o, weak) in enumerate(imps):
+        e = per.get(o)
+        if e is None:
+            continue
+        e['n'] += 1
+        e['weak'] += weak
+        e['classes'] += sym.startswith(('_OBJC_CLASS_$_', '_OBJC_METACLASS_$_'))
+        e['swift'] += sym.startswith(('_$s', '_swift_'))
+    for kind, lib, sym, weak in own:
+        if not sym:
+            continue
+        for e in per.values():
+            if e['name'] == lib:
+                (e['missing_weak'] if weak or e['kind'] == 'weak' else e['missing']).append(sym)
+    # Objective-C: selectors sent by the application that neither it nor any image of the closure implements
+    sent = m.objc_selrefs()
+    impl, classes_have = set(), set()
+    for lg, h in files:
+        cl, cats = root.macho(h).objc_defined()
+        for c, ms in cl.items():
+            classes_have.add(c)
+            impl.update(x[1:] for x in ms)
+        impl.update(x[1:] for x in cats)
+    nobody = sorted(sent - impl)
+    cls_imp = sorted({s[len('_OBJC_CLASS_$_'):] for s, _o, _w in imps if s.startswith('_OBJC_CLASS_$_')})
+    cls_missing = [c for c in cls_imp if c not in classes_have]
+    tot = sum(e['n'] for e in per.values())
+    miss = sum(len(e['missing']) for e in per.values())
+    out = ['## %s' % logical, '',
+           'Slices: %s; scanned: %s (ptrauth ABI byte 0x%02x), %s, minos %s, sdk %s. %d load commands for libraries (%d weak), %d of them not in the root.'
+           % (', '.join(m.slices) or 'thin', 'arm64e' if m.arm64e else 'arm64', m.pac_abi, 'chained fixups' if m.chained else 'dyld-info opcodes',
+              m.minos, m.sdk, len(m.dylibs), sum(d['kind'] == 'weak' for d in m.dylibs), sum(not e['present'] for e in per.values())), '']
+    if st:
+        keys = collections.Counter()
+        for o, ks in st['auth_imports'].items():
+            for k in ks:
+                keys[('IA', 'IB', 'DA', 'DB')[k[0]] + (' address-diversified' if k[1] else '')] += 1
+        out += ['Fixups dyld must apply: pointer format %s; %d rebases (%d authenticated), %d binds (%d authenticated) of %d imports; '
+                '%d imports are bound authenticated at least once (%s), %d plain at least once.'
+                % (', '.join(map(str, sorted(st['formats']))), st['rebase'] + st['auth_rebase'], st['auth_rebase'], st['bind'] + st['auth_bind'],
+                   st['auth_bind'], len(imps), len(st['auth_imports']), ', '.join('%s: %d' % kv for kv in sorted(keys.items())), len(st['plain_imports'])), '']
+    out += ['**%d imports, %d missing (not counting weak ones: %d).** Objective-C: %d classes imported, %d not defined by any image of the closure; '
+            '%d selectors sent, %d of them implemented by no image of the closure (a message with one of those cannot be answered; '
+            'a selector that some class implements may still be missing on the class it is sent to: that is not visible statically).'
+            % (tot, miss, sum(len(e['missing_weak']) for e in per.values()), len(cls_imp), len(cls_missing), len(sent), len(nobody)), '',
+            '| Library | In the root | Imports | of them classes | Swift | Missing | Missing (weak) |', '|---|---|---|---|---|---|---|']
+    for e in sorted(per.values(), key=lambda e: -e['n']):
+        out.append('| %s%s | %s | %d | %d | %d | %d | %d |' % (short(e['name']), ' (weak)' if e['kind'] == 'weak' else '', 'yes' if e['present'] else '**no**',
+                                                         e['n'], e['classes'], e['swift'], len(e['missing']), len(e['missing_weak'])))
+    out += ['', '### Missing symbols by library', '']
+    for e in sorted(per.values(), key=lambda e: -len(e['missing'])):
+        if e['missing'] or e['missing_weak']:
+            out.append('- **%s**%s: %s%s' % (short(e['name']), '' if e['present'] else ' (library absent)', ', '.join('`%s`' % x for x in sorted(e['missing'])),
+                                           ('; weak: ' + ', '.join('`%s`' % x for x in sorted(e['missing_weak']))) if e['missing_weak'] else ''))
+    deeper = sorted({(short(lib), sym, os.path.basename(where[0][0])) for (kind, lib, sym, weak), where in cg.items()
+                     if (kind, lib, sym, weak) not in own and not weak and kind != 'symbol-of-missing-library'})
+    if deeper:
+        out += ['', '### Gaps in the libraries it loads (not its own imports)', ''] + ['- %s `%s` (in %s)' % d for d in deeper]
+    out += ['', '### Objective-C classes imported and not defined in the closure (%d)' % len(cls_missing), '', ', '.join('`%s`' % c for c in cls_missing) or 'none',
+            '', '### Selectors sent that no image of the closure implements (%d of %d)' % (len(nobody), len(sent)), '', ', '.join('`%s`' % x for x in nobody) or 'none', '']
+    js = dict(libraries=[dict(e, name=short(e['name'])) for e in per.values()], classes_missing=cls_missing, selectors_unimplemented=nobody,
+              selectors_sent=len(sent), imports=tot, missing=miss, closure=[lg for lg, _h in files])
+    if st:
+        js['fixups'] = dict(formats=sorted(st['formats']), rebase=st['rebase'], auth_rebase=st['auth_rebase'], bind=st['bind'], auth_bind=st['auth_bind'])
+    return '\n'.join(out) + '\n', js
 
 
 def walk(root, sub):
@@ -393,6 +481,8 @@ def main():
     ap.add_argument('--binary', action='append', default=[], help='a logical path in the root, with its load closure; repeatable')
     ap.add_argument('--kegs', help='a directory of unpacked bottles (<formula>/<version>/...) to scan as the prefix instead of the root\'s')
     ap.add_argument('--closure', action='store_true', help='with --binary: list the files of the load closure (CLOSURE size path)')
+    ap.add_argument('--app', action='append', default=[], help='<bundle on the host>[=<logical path>]: an application outside the root; repeatable')
+    ap.add_argument('--arch', choices=('arm64e', 'arm64'), help='slice of a universal file (default: arm64, else arm64e)')
     ap.add_argument('--name', default='scan')
     ap.add_argument('--out', default=str(LAB / 'runs/sf-gaps'))
     a = ap.parse_args()
@@ -418,8 +508,29 @@ def main():
                 if lib.name.endswith('.dylib') and not os.path.lexists(view / 'opt/homebrew/lib' / lib.name):
                     os.symlink('/opt/homebrew/Cellar/%s/%s/lib/%s' % (keg.name, versions[-1], lib.name), view / 'opt/homebrew/lib' / lib.name)
         overlays.insert(0, str(view))
+    apps = []
+    for spec in a.app:
+        import plistlib
+        hostdir, _, lg = spec.partition('=')
+        hostdir = Path(hostdir).resolve()
+        lg = (lg or '/Applications/' + hostdir.name).rstrip('/')
+        with open(hostdir / 'Contents/Info.plist', 'rb') as fh:
+            exe = plistlib.load(fh)['CFBundleExecutable']
+        mounts.append((lg, hostdir))
+        apps.append(lg + '/Contents/MacOS/' + exe)
     root = Root(a.root, overlays, mounts)
+    root.prefer = a.arch
     md, js = [], {}
+    for b in apps:
+        h = root.resolve(b)
+        if h is None or root.macho(h) is None:
+            print('%s: not a Mach-O' % b)
+            continue
+        t, j = app_report(root, b, h)
+        md.append(t)
+        js.setdefault('apps', {})[b] = j
+        print('%s: %d imports, %d missing; %d classes missing; %d of %d selectors implemented by nobody'
+              % (b, j['imports'], j['missing'], len(j['classes_missing']), len(j['selectors_unimplemented']), j['selectors_sent']))
     if a.brew:
         images = list(walk(root, 'opt/homebrew/Cellar'))
         programs = [(lg, h) for lg, h in images if is_program(lg) and root.macho(h).filetype == 2]

@@ -12,8 +12,13 @@ Editing, as `brew` does after unpacking a bottle:
     `codesign --sign - --force`): the page hashes of every CodeDirectory are recomputed in
     place. Nothing else of the signature changes (identifier, flags, special slots stay).
 
-Only 64-bit little-endian images; a universal file is read through its arm64 slice and is
-refused for editing.
+Only 64-bit little-endian images; a universal file is read through its arm64 slice (arm64e
+when that is the only arm64 one, or when asked for) and is refused for editing.
+
+For chained-fixup images: the import table of LC_DYLD_CHAINED_FIXUPS (what dyld binds, with
+library ordinal and weakness) and the chains themselves (which binds are authenticated, with
+which key and diversity: arm64e). Objective-C metadata: classes and categories an image
+defines with the selectors they implement, and the selectors an image sends (__objc_selrefs).
 """
 import hashlib
 import struct
@@ -66,9 +71,12 @@ def uleb(data, off):
 
 
 class MachO:
-    def __init__(self, data, path=''):
+    def __init__(self, data, path='', prefer=None):
+        """prefer: 'arm64e' or 'arm64' picks that slice of a universal file when both are there
+        (default: plain arm64 first, as a SiliconForest dyld without arm64e would)."""
         self.path = path
         self.fat = False
+        self.slices = []
         self.base = 0
         if struct.unpack_from('>I', data)[0] in (FAT_MAGIC, FAT_MAGIC_64):
             self.fat = True
@@ -77,10 +85,12 @@ class MachO:
             found = None
             for i in range(n):
                 if wide:
-                    cpu, _, off, size = struct.unpack_from('>iiQQ', data, 8 + i * 32)
+                    cpu, sub, off, size = struct.unpack_from('>iiQQ', data, 8 + i * 32)
                 else:
-                    cpu, _, off, size = struct.unpack_from('>iiII', data, 8 + i * 20)
-                if cpu == CPU_ARM64:
+                    cpu, sub, off, size = struct.unpack_from('>iiII', data, 8 + i * 20)
+                name = {CPU_ARM64: 'arm64e' if sub & 0xff == 2 else 'arm64', 0x01000007: 'x86_64'}.get(cpu, hex(cpu & 0xffffffff))
+                self.slices.append(name)
+                if cpu == CPU_ARM64 and (found is None or name == (prefer or 'arm64')):
                     found = (off, size)
             if not found:
                 raise ValueError('no arm64 slice')
@@ -91,6 +101,11 @@ class MachO:
         if magic != MH_MAGIC_64:
             raise ValueError('not a 64-bit Mach-O')
         self.twolevel = bool(self.flags & 0x80)     # MH_TWOLEVEL; Go links flat: a symbol may come from any linked library
+        self.arm64e = self.cputype == CPU_ARM64 and (self.cpusubtype & 0xff) == 2
+        self.pac_abi = (self.cpusubtype >> 24) & 0xff      # 0x80 | ptrauth ABI version on arm64e
+        self.segments = []          # (name, vmaddr, vmsize, fileoff, filesize)
+        self.sections = {}          # (segname, sectname) -> (addr, size, offset)
+        self.fixups = None          # (dataoff, datasize) of LC_DYLD_CHAINED_FIXUPS
         self.commands = []          # (cmd, offset, size)
         self.dylibs = []            # dict(kind, name, compat, current) in ordinal order
         self.id = None
@@ -126,6 +141,7 @@ class MachO:
                 self.dysymtab = struct.unpack_from('<IIIIII', data, off + 8)
             elif cmd == LC_DYLD_CHAINED_FIXUPS:
                 self.chained = True
+                self.fixups = struct.unpack_from('<II', data, off + 8)
             elif cmd == LC_DYLD_EXPORTS_TRIE:
                 self.exports = struct.unpack_from('<II', data, off + 8)
             elif cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY):
@@ -135,9 +151,14 @@ class MachO:
                     self.exports = (f[8], f[9])
             elif cmd == LC_SEGMENT_64:
                 nsects = struct.unpack_from('<I', data, off + 64)[0]
+                vmaddr, vmsize, fileoff, filesize = struct.unpack_from('<QQQQ', data, off + 24)
+                segname = data[off + 8:off + 24].rstrip(b'\0').decode()
+                self.segments.append((segname, vmaddr, vmsize, fileoff, filesize))
                 for i in range(nsects):
                     s = off + 72 + i * 80
                     ssize, soff = struct.unpack_from('<QI', data, s + 40)
+                    self.sections[(data[s + 16:s + 32].rstrip(b'\0').decode(), data[s:s + 16].rstrip(b'\0').decode())] = (
+                        struct.unpack_from('<Q', data, s + 32)[0], ssize, soff)
                     stype = struct.unpack_from('<I', data, s + 64)[0] & 0xff
                     if soff and ssize and stype not in (1, 12, 18):      # zerofill kinds have no file bytes
                         self.first_section = soff if self.first_section is None else min(self.first_section, soff)
@@ -147,6 +168,8 @@ class MachO:
     def imports(self):
         """[(symbol, ordinal, weak)]: undefined external symbols. ordinal 1.. indexes
         self.dylibs; 0 self, 254 flat lookup, 255 main executable."""
+        if self.fixups:
+            return [(n, o, w) for n, o, w, _a in self.chained_imports()]
         if not self.symtab or not self.dysymtab:
             return []
         symoff, nsyms, stroff, _strsize = self.symtab
@@ -158,6 +181,190 @@ class MachO:
                 continue
             out.append((cstr(self.data, stroff + strx), (desc >> 8) & 0xff, bool(desc & 0x40)))
         return out
+
+    # ---- chained fixups ----------------------------------------------------------------
+    def chained_imports(self):
+        """[(symbol, ordinal, weak, addend)] of the LC_DYLD_CHAINED_FIXUPS import table, in bind
+        ordinal order. ordinal as imports(): 1.. a library, 0 self, 253 weak lookup, 254 flat,
+        255 main executable."""
+        if not self.fixups:
+            return []
+        base = self.fixups[0]
+        _ver, _starts, imp_off, sym_off, count, fmt, _sfmt = struct.unpack_from('<7I', self.data, base)
+        out = []
+        for i in range(count):
+            if fmt == 1:
+                v = struct.unpack_from('<I', self.data, base + imp_off + i * 4)[0]
+                o, weak, noff, addend = v & 0xff, bool(v >> 8 & 1), v >> 9, 0
+            elif fmt == 2:
+                v, addend = struct.unpack_from('<Ii', self.data, base + imp_off + i * 8)
+                o, weak, noff = v & 0xff, bool(v >> 8 & 1), v >> 9
+            else:
+                v, addend = struct.unpack_from('<QQ', self.data, base + imp_off + i * 16)
+                o, weak, noff = v & 0xffff, bool(v >> 16 & 1), v >> 32
+                o = o & 0xff if o >= 0xfffd else o
+            out.append((cstr(self.data, base + sym_off + noff), o, weak, addend))
+        return out
+
+    def chain_starts(self):
+        """[(segment index, pointer format, page size, segment file offset, [page start ...])]"""
+        if not self.fixups:
+            return []
+        base = self.fixups[0]
+        starts = base + struct.unpack_from('<I', self.data, base + 4)[0]
+        out = []
+        for i in range(struct.unpack_from('<I', self.data, starts)[0]):
+            so = struct.unpack_from('<I', self.data, starts + 4 + i * 4)[0]
+            if not so:
+                continue
+            at = starts + so
+            _size, page, fmt, segoff, _maxp, npages = struct.unpack_from('<IHHQIH', self.data, at)
+            pages = struct.unpack_from('<%dH' % npages, self.data, at + 22)
+            out.append((i, fmt, page, self.off_of(next((va for n, va, _vs, _fo, _fs in self.segments if n == '__TEXT'), 0) + segoff) if fmt else 0, list(pages), segoff))
+        return out
+
+    def fixup_stats(self):
+        """dict: pointer formats seen, rebases, binds, authenticated rebases and binds, and per
+        import ordinal whether any bind of it is authenticated (key, address diversity, diversity)."""
+        st = dict(formats=set(), rebase=0, bind=0, auth_rebase=0, auth_bind=0, auth_imports={}, plain_imports=set())
+        for _i, fmt, page, fileoff, pages, _so in self.chain_starts():
+            st['formats'].add(fmt)
+            e = fmt in (1, 9, 12)
+            stride = 8 if e else 4
+            for pi, start in enumerate(pages):
+                if start == 0xffff:
+                    continue
+                off = fileoff + pi * page + start
+                while True:
+                    raw = struct.unpack_from('<Q', self.data, off)[0]
+                    if e:
+                        auth, bind, nxt = raw >> 63, raw >> 62 & 1, raw >> 51 & 0x7ff
+                        if bind:
+                            o = raw & (0xffffff if fmt == 12 else 0xffff)
+                            if auth:
+                                st['auth_bind'] += 1
+                                st['auth_imports'].setdefault(o, set()).add((raw >> 49 & 3, raw >> 48 & 1, raw >> 32 & 0xffff))
+                            else:
+                                st['bind'] += 1
+                                st['plain_imports'].add(o)
+                        else:
+                            st['auth_rebase' if auth else 'rebase'] += 1
+                    else:
+                        bind, nxt = raw >> 63, raw >> 51 & 0xfff
+                        st['bind' if bind else 'rebase'] += 1
+                        if bind:
+                            st['plain_imports'].add(raw & 0xffffff)
+                    if not nxt:
+                        break
+                    off += nxt * stride
+        return st
+
+    # ---- addresses and pointers ----------------------------------------------------------
+    def off_of(self, vmaddr):
+        for _n, va, vs, fo, fs in self.segments:
+            if va <= vmaddr < va + vs and vmaddr - va < fs:
+                return fo + vmaddr - va
+        return None
+
+    def _ptr_format(self):
+        if not hasattr(self, '_pf'):
+            self._pf = {fo: fmt for _i, fmt, _p, fo, _pg, _so in self.chain_starts()}
+            self._segfmt = [(fo, fs, self._pf.get(fo, 0)) for _n, _va, _vs, fo, fs in self.segments]
+            self._imgbase = next((va for n, va, _vs, _fo, _fs in self.segments if n == '__TEXT'), 0)
+        return self._segfmt
+
+    def pointer(self, off):
+        """The vmaddr a pointer stored at file offset `off` holds once dyld has rebased it (0 for
+        null or a bind)."""
+        raw = struct.unpack_from('<Q', self.data, off)[0]
+        fmt = next((f for fo, fs, f in self._ptr_format() if fo <= off < fo + fs), 0)
+        if fmt == 0 or raw == 0:
+            return raw & 0x0000ffffffffffff if not self.fixups else raw
+        if fmt in (1, 9, 12):
+            if raw >> 62 & 1:
+                return 0
+            t = raw & 0xffffffff if raw >> 63 else raw & ((1 << 43) - 1)
+            return t + self._imgbase if fmt != 1 or raw >> 63 else t
+        if raw >> 63:
+            return 0
+        t = raw & ((1 << 36) - 1)
+        return t + self._imgbase if fmt == 6 else t
+
+    # ---- Objective-C -----------------------------------------------------------------------
+    def _section(self, sect):
+        for seg in ('__DATA_CONST', '__DATA', '__AUTH_CONST', '__AUTH', '__DATA_DIRTY', '__TEXT'):
+            if (seg, sect) in self.sections:
+                return self.sections[(seg, sect)]
+        return None
+
+    def objc_selrefs(self):
+        """{selector}: every selector this image names for a message send."""
+        s = self._section('__objc_selrefs')
+        out = set()
+        if s:
+            for off in range(s[2], s[2] + s[1], 8):
+                o = self.off_of(self.pointer(off))
+                if o is not None:
+                    out.add(cstr(self.data, o))
+        return out
+
+    def _methods(self, list_va):
+        o = self.off_of(list_va) if list_va else None
+        if o is None:
+            return []
+        ent, count = struct.unpack_from('<II', self.data, o)
+        out, size = [], ent & 0xffff
+        if count > 100000 or size not in (12, 24):
+            return []
+        for i in range(count):
+            at = o + 8 + i * size
+            if ent & 0x80000000:                       # relative method list
+                rel = struct.unpack_from('<i', self.data, at)[0]
+                if ent & 0x40000000:                   # names are direct
+                    out.append(cstr(self.data, at + rel))
+                else:
+                    so = self.off_of(self.pointer(at + rel))
+                    out.append(cstr(self.data, so) if so is not None else '?')
+            else:
+                so = self.off_of(self.pointer(at))
+                out.append(cstr(self.data, so) if so is not None else '?')
+        return out
+
+    def _class(self, va, meta=False):
+        o = self.off_of(va)
+        if o is None:
+            return None, []
+        ro = self.off_of(self.pointer(o + 32) & ~7)
+        if ro is None:
+            return None, []
+        no = self.off_of(self.pointer(ro + 24))
+        methods = self._methods(self.pointer(ro + 32))
+        return (cstr(self.data, no) if no is not None else None), methods
+
+    def objc_defined(self):
+        """({class: {'-sel' | '+sel'}}, {'-sel' | '+sel' from categories}): what this image
+        implements. Category methods are kept apart because the class they extend may be
+        another image's."""
+        classes, cats = {}, set()
+        s = self._section('__objc_classlist')
+        if s:
+            for off in range(s[2], s[2] + s[1], 8):
+                va = self.pointer(off)
+                name, inst = self._class(va)
+                if name is None:
+                    continue
+                co = self.off_of(va)
+                _mn, cls = self._class(self.pointer(co)) if co is not None else (None, [])
+                classes.setdefault(name, set()).update(['-' + m for m in inst] + ['+' + m for m in cls])
+        s = self._section('__objc_catlist')
+        if s:
+            for off in range(s[2], s[2] + s[1], 8):
+                o = self.off_of(self.pointer(off))
+                if o is None:
+                    continue
+                cats.update('-' + m for m in self._methods(self.pointer(o + 16)))
+                cats.update('+' + m for m in self._methods(self.pointer(o + 24)))
+        return classes, cats
 
     def exported(self):
         """({symbol}, {symbol: (ordinal, imported name)}) from the export trie: symbols this
@@ -219,9 +426,9 @@ class MachO:
         return out
 
 
-def load(path):
+def load(path, prefer=None):
     with open(path, 'rb') as f:
-        return MachO(f.read(), str(path))
+        return MachO(f.read(), str(path), prefer)
 
 
 # ---- editing -------------------------------------------------------------------------
