@@ -12,6 +12,11 @@
 #   sf_userland_push.sh push <part>        send one part (gtar first, then sys, brew, claude) as a tar stream, unpack it at /,
 #                                          then compare the SHA-256 of every file there with the list made here
 #   sf_userland_push.sh verify <part>      the comparison alone
+#   sf_userland_push.sh libsystem <new libSystem.B.dylib> <sf-xpc-probe>
+#                                          replace /usr/lib/libSystem.B.dylib (a build of ../../libsystem-default/build-libsystem.nix):
+#                                          the file is sent beside it, and userland/sf-libsystem-install.sh checks its SHA-256
+#                                          there, proves that programs run with it (the probe of userland/jit), keeps the file
+#                                          in use as libSystem.B.dylib.old and only then renames. The one file in use this tool replaces.
 #
 #   sys     what macOS programs expect of a system and this root lacks (../../homebrew/build-overlay.nix:
 #           libraries in /usr/lib, three frameworks, /usr/bin/curl, locale data), the SSH client programs,
@@ -38,7 +43,14 @@ list() {  # <stage directory>: "sha256  path" of every regular file, "target<TAB
   (cd "$1" && find . -type l -printf '%l\t%P\n' | LC_ALL=C sort) > "$1.links"
   echo "$1: $(grep -c . "$1.sha256") files, $(grep -c . "$1.links" || true) links, $(du -sm "$1" | cut -f1) MB"
 }
-case "${1:?stage|known|ssh|push|verify}" in
+case "${1:?stage|known|ssh|push|verify|libsystem}" in
+libsystem)
+  F=${2:?the new libSystem.B.dylib}; PR=${3:?sf-xpc-probe (userland/jit/build-jit-test.nix)}; I=integrations/puredarwin/m1-storage/userland/sf-libsystem-install.sh
+  [ "$(head -c 4 "$F" | od -An -tx1 | tr -d ' ')" = cffaedfe ] || { echo "$F is not a 64-bit Mach-O" >&2; exit 2; }
+  S=$(sha256sum "$F" | cut -c1-64)
+  "${SSH[@]}" 'cat > /private/tmp/sf-xpc-probe && chmod 755 /private/tmp/sf-xpc-probe' < "$PR"
+  "${SSH[@]}" 'cat > /usr/lib/libSystem.B.dylib.sf-new && sync' < "$F"
+  "${SSH[@]}" "sh -s /usr/lib/libSystem.B.dylib.sf-new $S /private/tmp/sf-xpc-probe" < "$I";;
 stage)
   mkdir -p "$ST"; chmod -R u+w "$ST" 2>/dev/null || true; rm -rf "$ST/sys" "$ST/claude"
   # ---- gtar: GNU tar from its bottle, the one file, as fetched (it links libSystem and libiconv only).

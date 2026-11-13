@@ -4,11 +4,10 @@
 
   sf_cs_runtime.py <program> <output>        prints the flags of every CodeDirectory before and after
 
-A diagnostic, and it did not help: on the M1 the Claude Code CLI (a Bun program, signed with a
-Developer ID and the hardened runtime, CS_RUNTIME 0x10000) is killed as soon as its JavaScript
-engine starts its JIT (boots dr42, dr44: exit 137; with BUN_JSC_useJIT=0 it is not killed).
-The copy this makes has the status of an ad-hoc program in the kernel (0x20000000, as node,
-whose JIT runs) and is killed all the same (boot dr45). docs/roadmap/issues/SF-X-claude-code.md.
+A diagnostic, and it did not help, because the hardened runtime was never the cause: the
+Claude Code CLI was ended on SiliconForest by libxpc (xpc_copy_description of a connection,
+reached from Security.framework's SecItemCopyMatching), not by the kernel, and a copy made by
+this tool was ended the same way (boot dr45). docs/roadmap/issues/SF-X-claude-code.md.
 The change: bit 0x10000 cleared in the flags word of each CodeDirectory (big-endian u32 at
 offset 12 of the blob). Nothing else: not the code, not the page hashes. The vendor's CMS
 signature no longer matches (it covered that word); this kernel does not check it, macOS would.
