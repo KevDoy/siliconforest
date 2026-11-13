@@ -30,6 +30,7 @@ BOOT_BIN, STAGE1_TEST = 'sf-boot.bin', 'sf-stage1-test.bin'      # ../install/bu
 # What a stage 1 appends behind the file it chainloads (m1n1 src/chainload.c: its variable
 # lines, here the one the installer gives every stage 1), so that the stage is entered with
 # the bytes behind its records that it will find there when it is installed.
+STAGE1_PAYLOAD_ROOM = 64 << 20                                   # m1n1.ld: _max_payload_size
 CHAINLOAD_TAIL = b'chosen.asahi,efi-system-partition=00000000-0000-0000-0000-000000000000\n'
 ALIGN, ENTRY, PAGE = 0x10000, 0x800, 0x4000
 BOOTARGS_TOP = 32                       # struct boot_args: top_of_kernel_data (m1n1 src/startup.c)
@@ -300,7 +301,13 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
     # a copy of this m1n1's boot arguments that differs in one field: top_of_kernel_data is
     # put behind the image, which is where the stage's heap then starts.
     size = (len(image) + PAGE - 1) & ~(PAGE - 1)
-    total = size + PAGE
+    # A stage 1 chainloads: m1n1 copies the next image to its own base and refuses one that
+    # reaches past top_of_kernel_data into its live heap (src/chainload.c; boot dr33). iBoot
+    # loads a stage 1 with the 64 MiB its Mach-O reserves for payloads behind the image
+    # (m1n1.ld _max_payload_size); the same room is given here, inside this allocation, so
+    # nothing else of the bench lies in it. The boot arguments page follows it.
+    reserve = STAGE1_PAYLOAD_ROOM if getattr(native, 'stage1', False) else 0
+    total = size + reserve + PAGE
     base = u.heap.memalign(ALIGN, total)
     require(base and base % ALIGN == 0 and backend.ba.phys_base <= base and
             base + total <= backend.ba.phys_base + backend.ba.mem_size, 'No place for the stage image')
@@ -319,15 +326,15 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         iface.writemem(base + offset, image[offset:offset + CHUNK])
     if size > len(image):
         iface.writemem(base + len(image), bytes(size - len(image)))
-    iface.writemem(base + size, entered)
+    iface.writemem(base + size + reserve, entered)
     mark('stage_upload_end')
     # The stage checks every record's CRC itself; the code that does it is read back here.
-    require(iface.readmem(base, len(m1n1)) == m1n1 and iface.readmem(base + size, PAGE) == entered,
+    require(iface.readmem(base, len(m1n1)) == m1n1 and iface.readmem(base + size + reserve, PAGE) == entered,
             'Stage image readback differs')
     p.dc_cvau(base, total)
     p.ic_ivau(base, len(m1n1))
 
-    record = dict(stage=True, hypervisor=False, base=base, entry=base + ENTRY, bootargs=base + size,
+    record = dict(stage=True, hypervisor=False, base=base, entry=base + ENTRY, bootargs=base + size + reserve,
                   image_bytes=len(image), image_sha256=hashlib.sha256(image).hexdigest(),
                   m1n1_sha256=hashlib.sha256(m1n1).hexdigest(),
                   records=[dict(type=pdsf_pack.NAMES[kind], gzip=bool(flags & pdsf_pack.F_GZIP), stored=stored, raw=raw)
@@ -360,7 +367,7 @@ def start(native, backend, inputs, bootargs, raw_bootargs, layout, directory, ru
         mark('native_vector')
         # m1n1 replies, shuts its USB, display console and MMU down and jumps (src/main.c).
         # This is the last request of the boot: nothing is sent over the proxy afterwards.
-        p.request(p.P_VECTOR, base + ENTRY, base + size, 0, 0, 0, 0)
+        p.request(p.P_VECTOR, base + ENTRY, base + size + reserve, 0, 0, 0, 0)
         mark('native_vector_acknowledged')
         if getattr(native, 'stage1', False):
             # The stage 1 test: it stops by itself (sf_stop prints SF_STOPPED) or the time runs out.

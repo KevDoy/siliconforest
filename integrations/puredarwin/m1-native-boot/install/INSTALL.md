@@ -264,12 +264,15 @@ documentation, and the script's way of finding the container has never met a rea
   `pdnvme_ttl=0`, no controller reset, Linux finds the root clean and everything else unchanged.
   dr32: stage 1 as the installer writes it, with a PARTUUID nobody has: `Chainload failed:
   PartitionNotFound`, `SiliconForest: stopped`, no proxy, no kernel, disk unchanged.
+  dr34: the same stage 1 with `chainload=<Linux's EFI partition>;m1n1/boot.bin` (read-only)
+  finds the partition, reads the file, copies it to its own base and jumps: Linux came up by
+  itself, its file and every watched range unchanged.
 - **Proven on the workstation.** `test_kit.py`: the installer's own code with our data asks
   for exactly one EFI-typed 500 MiB partition after the stub, puts `sf/boot.bin` on it and
   builds the boot object from our stage 1 and the two variable lines. `sf-gpt-check.py`
   against the real table copies and altered ones.
-- **First proven at install.** Stage 1 reading the FAT file and chainloading it (stage 2
-  copied to stage 1's base); iBoot starting our stage 1; picker name and icon; the installer's
+- **First proven at install.** Stage 1 chainloading *our* `sf/boot.bin` from *our* FAT
+  partition (dr34 did it with Linux's file from Linux's partition); iBoot starting our stage 1; picker name and icon; the installer's
   run on macOS and `diskutil`'s placement; the three macOS scripts and the Linux update
   script (never run); a start without the bench's cable; a session longer than 150 s.
   If any of the first three fails, the machine shows the stop message or Apple's recovery
