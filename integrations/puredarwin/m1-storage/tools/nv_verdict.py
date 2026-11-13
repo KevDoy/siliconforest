@@ -114,8 +114,13 @@ recov = [l for l in klog.splitlines() if 'raid6' not in l and (re.search(r'recov
          (re.search(r'nvme|sart|BTRFS|EXT4|FAT-fs', l) and re.search(r'error|warn|fail|timeout|crash', l, re.I)))]
 check(not recov, 'Linux kernel log after the boot: %d recovery/replay/error line(s)%s' % (len(recov), ''.join('\n    ' + l[:150] for l in recov[:5])))
 mounts = (after / 'mounts.txt').read_text()
-linux_fs = [('nvme0n1' + n, fs) for n, st, _, fs in table if fs in ('vfat', 'ext4', 'btrfs') and st != ours_lba]
+# SiliconForest's own boot partition (FAT, SF_BOOT_LBA from sf-part.env; there since the install) is not
+# one of Linux's filesystems: Linux never mounts it, and it must not be mounted now
+boot_lba = int(os.environ.get('SF_BOOT_LBA') or 0)
+linux_fs = [('nvme0n1' + n, fs) for n, st, _, fs in table if fs in ('vfat', 'ext4', 'btrfs') and st != ours_lba and not (boot_lba and st == boot_lba)]
 check(len(linux_fs) == 3, 'Linux has its three filesystems (EFI, /boot, root): %s' % linux_fs)
+if boot_lba:
+    check(not re.search(r'/dev/nvme0n1%s\b' % next((n for n, st, _, _ in table if st == boot_lba), 'pX'), mounts), 'the SiliconForest boot partition is not mounted in Linux')
 if ours_lba:
     check(not re.search(r'/dev/nvme0n1%s\b' % next((n for n, st, _, _ in table if st == ours_lba), 'pX'), mounts), 'the SiliconForest partition is not mounted in Linux')
 for dev, fs in linux_fs:

@@ -187,6 +187,13 @@ class Kit(unittest.TestCase):
         self.assertEqual(hashlib.sha256(ka).digest(), hashlib.sha256(kb).digest())
         ta, tb = a[fa[0][5]:fa[0][5] + fa[0][2]].decode(), b[fb[0][5]:fb[0][5] + fb[0][2]].decode()
         self.assertEqual(tb, ta.replace(' pdapciebridge=1\n', ' pdapciebridge=1 sfsession_seconds=150 sfmark=1\n'))
+        # sf_bench_kernel.py (a bench copy with another session length) makes the same file for 150 s,
+        # and refuses a file that already ends its session
+        sys.path.insert(0, str(HERE)); import sf_bench_kernel
+        self.assertEqual(sf_bench_kernel.bench_copy(a, 150), b)
+        self.assertNotEqual(sf_bench_kernel.bench_copy(a, 470), b)
+        self.assertRaises(ValueError, sf_bench_kernel.bench_copy, b, 150)
+        self.assertRaises(ValueError, sf_bench_kernel.bench_copy, a, 600)
         args = ta.splitlines()[0].split()
         self.assertIn('pdnvme_ttl=0', args); self.assertIn('rd=uuid', args); self.assertIn('pdnvme_write=1', args)
         for word in args:

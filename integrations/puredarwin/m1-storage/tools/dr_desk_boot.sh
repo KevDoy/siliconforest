@@ -28,6 +28,9 @@
 #               comes back by itself), guests ../guest/diskroot-halt-prelude.sh and ../guest/darwin-diskroot-halt.in
 #   DR_INSTALL=1  (with DR_HALT) the boot carries ../system and tools/staged.sh's compositor (DR_COMPOSITOR=<file>:
 #               another) in its RAM root and its script installs them on the disk root (through the fenced driver)
+#   DR_USERLAND=1  (with DR_INSTALL=1) the boot also carries ../userland (the SSH server and its job, the Homebrew
+#               account's wrapper, DR_TERMINAL=<file>: the terminal, DR_USERLAND_KEY=<public key file>, default
+#               ~/.ssh/id_rsa.pub: who may log in as root) and userland/sf-userland-install.sh puts them on the disk root
 #   DR_AUTO_ONLY=<phases>  the compositor's autopilot runs these phases (e.g. settle,settings); DR_AUTO_KEEP=1:
 #               its settings phase picks another theme and display scale from the menu and leaves them
 #               With DR_INSTALL=1 the boot also carries the session of a boot without a RAM root (../system/sf-session,
@@ -161,6 +164,19 @@ if [ -n "$HALT" ] && [ "${DR_INSTALL:-0}" = 1 ]; then
   X="$X;$SYS/sbin/sf-halt=/usr/share/sf-system/sf-halt;$SYS/usr/sbin/sf-clock=/usr/share/sf-system/sf-clock;$COMP=/usr/bin/chonkstep-darwin-desktop"
   for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk sf-session; do X="$X;$HERE/system/$f=/usr/share/sf-system/$f"; done
   X="$X;$NB/guest/org.siliconforest.desktop.plist=/usr/share/sf-system/org.siliconforest.desktop.plist"
+  if [ "${DR_USERLAND:-0}" = 1 ]; then
+    # daily use (../userland): the SSH server (upstream's OpenSSH; the client and the rest follow over SSH,
+    # tools/sf_userland_push.sh), its configuration and launchd job, the Homebrew account's wrapper, the
+    # terminal (DR_TERMINAL=<file>), and ONE public key that may log in as root (DR_USERLAND_KEY, public half only)
+    U=$HERE/userland; SSH=$(env -u SF_PD $NP m1-storage/userland build-openssh.nix); [ -x "$SSH/sbin/sshd" ] || { echo "no OpenSSH" >&2; exit 2; }
+    KEY=${DR_USERLAND_KEY:-$HOME/.ssh/id_rsa.pub}
+    case "$KEY" in *.pub) ;; *) echo "DR_USERLAND_KEY must be a public key file (*.pub)" >&2; exit 2;; esac
+    [ "$(grep -c . "$KEY")" = 1 ] && ! grep -q 'PRIVATE KEY' "$KEY" || { echo "DR_USERLAND_KEY: not one public key" >&2; exit 2; }
+    for f in sf-userland-install.sh sshd_config sf-sshd org.siliconforest.sshd.plist brew sf-environment shasum; do X="$X;$U/$f=/usr/share/sf-userland/$f"; done
+    for f in sbin/sshd libexec/sshd-session libexec/sshd-auth bin/ssh-keygen; do X="$X;$SSH/$f=/usr/share/sf-userland/ssh/$f"; done
+    X="$X;$KEY=/usr/share/sf-userland/authorized_key.pub"
+    if [ -n "${DR_TERMINAL:-}" ]; then [ -x "$DR_TERMINAL" ] || { echo "no terminal at $DR_TERMINAL" >&2; exit 2; }; X="$X;$DR_TERMINAL=/usr/share/sf-userland/chonk-terminal-darwin"; fi
+  fi
   # the bench's own pieces for a boot without a RAM root: this boot's prelude and end script as templates
   # (system/sf-session fills them in at boot), reading from the disk what they read from the memory disk here
   "$HERE/tools/dr_bench_templates.sh" "$QD"

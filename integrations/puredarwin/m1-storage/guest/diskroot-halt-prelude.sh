@@ -22,6 +22,10 @@ if [ "@INSTALL@" = 1 ]; then
         cp /private/ram/usr/bin/chonkstep-darwin-desktop /usr/bin/chonkstep-darwin-desktop.sf-new && chmod 755 /usr/bin/chonkstep-darwin-desktop.sf-new && mv -f /usr/bin/chonkstep-darwin-desktop.sf-new /usr/bin/chonkstep-darwin-desktop
         printf 'NV_SFINSTALL compositor rc=%s %s\n' "$?" "$(sha256sum /usr/bin/chonkstep-darwin-desktop | cut -c1-64)"
     fi
+    # what daily use needs besides the desktop (userland/: the SSH server, the Homebrew account, the terminal, the desktop's picture)
+    if [ -r /private/ram/usr/share/sf-userland/sf-userland-install.sh ]; then
+        sh /private/ram/usr/share/sf-userland/sf-userland-install.sh /private/ram/usr/share/sf-userland / 2>&1 | sed 's/^/NV_SFINSTALL /'
+    fi
 fi
 # ---- once a boot: the clock from the hardware, the last boot's leftovers removed (a no-op when the disk's own darwin-desktop-test already ran it)
 ls -A /private/var/run /private/tmp 2>&1 | tr '\n' ' ' | sed 's/^/NV_LEFT before sf-boot (or after it, when the dispatcher ran it): /'; echo

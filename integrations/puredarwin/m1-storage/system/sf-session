@@ -11,8 +11,11 @@
 #   $XDG_RUNTIME_DIR/session-end-request; anything else (the session's time is up, the
 #   compositor ended by itself) restarts. /bin/reboot and /bin/shutdown are system/sf-command.
 # Boot arguments it reads:
-#   sfsession_seconds=<11..14400>  the session's length (the compositor's own bound is four
-#                                  hours, which is also the default: an open wart)
+#   sfsession_seconds=<11..limit>  the session's length; bench boots give it. Without it (an installed
+#                                  system) the session does not end by itself: it gets the longest time the
+#                                  desktop accepts, a hundred years with the installed build of the compositor
+#                                  and the terminal (their --seconds stays a number; nothing else bounds it),
+#                                  four hours with the builds of before, which refuse anything longer
 #   sfbench=<name>                 a bench boot of that name: when /private/var/db/sf-bench holds
 #                                  the bench's own pieces (prelude.in, end.in, pdnvme-test, the range
 #                                  list; put there by a boot with a RAM root, tools/dr_desk_boot.sh
@@ -31,9 +34,13 @@
 nonce=${1:-none}
 PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 arg() { sysctl -n kern.bootargs 2>/dev/null | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+# the longest session the installed desktop accepts: both programs say so themselves (a compositor
+# asked for more than its bound does not start, and a terminal given more than its own refuses)
+limit=14400
+if grep -a -q 'seconds 11\.\.3153600000 ' /usr/bin/chonkstep-darwin-desktop 2>/dev/null && grep -a -q 'HOME=/var/root' /usr/bin/chonk-terminal-darwin 2>/dev/null; then limit=3153600000; fi
 seconds=$(arg sfsession_seconds)
-case "$seconds" in ''|*[!0-9]*|0*) seconds=14400;; esac
-[ "$seconds" -ge 11 ] && [ "$seconds" -le 14400 ] || seconds=14400
+case "$seconds" in ''|*[!0-9]*|0*) seconds=$limit;; esac
+[ "$seconds" -ge 11 ] && [ "$seconds" -le "$limit" ] || seconds=$limit
 bench=$(arg sfbench); B=/private/var/db/sf-bench
 case "$bench" in ''|*[!a-z0-9]*) bench=;; esac
 [ -n "$bench" ] && [ -r "$B/prelude.in" ] && [ -r "$B/end.in" ] || bench=
