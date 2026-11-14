@@ -43,6 +43,7 @@
 #   sf_terminal.sh revert direct  undo `install direct` and `install new` (the core files: see the installers)
 # SF_TERMINAL_APP: the application bundle (default private/terminal-app/m5-26.5.2/Terminal.app; never committed).
 # SF_BASE: a copy of the target's root (default runs/sf-gaps/m1root, with runs/sf-compat/stage laid over it).
+# SF_DYLD (install-stage): the dyld to stage instead of the recipe's (see there).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
@@ -129,7 +130,9 @@ install-stage)
     leaf=$(basename $f); cp $R/$f $IN/core/replace/$leaf.new
     echo "/$f $(sha256sum $IN/core/replace/$leaf.new | cut -c1-64) /usr/share/sf-test/$(probe_of $f) $PROGRAMS" >> $IN/core/replace.list
   done
-  cp $R/usr/lib/dyld $IN/core/dyld.new; sha256sum $IN/core/dyld.new | cut -c1-64 > $IN/core/dyld.sha256
+  # SF_DYLD: a dyld that a rehearsal passed with, where the recipe's rebuild of the same source differs
+  # only in its debug map (object file times) and code signature
+  cp ${SF_DYLD:-$R/usr/lib/dyld} $IN/core/dyld.new; sha256sum $IN/core/dyld.new | cut -c1-64 > $IN/core/dyld.sha256
   # everything else; the wrappers that stand in front of a library the system has
   (cd $R && find . -type f -not -path './usr/share/sf-test/*' -not -path './nix-support/*' -printf '%P\n' | LC_ALL=C sort) | while read -r f; do
     case " $CORE usr/lib/dyld " in *" $f "*) continue;; esac

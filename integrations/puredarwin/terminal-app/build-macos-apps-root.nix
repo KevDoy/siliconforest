@@ -17,6 +17,9 @@
 #   usr/bin/login                                ./system/login.c: `login -pf <user>` (a terminal's session)
 #   usr/share/terminfo                           ./build-terminfo.nix (ncurses' whole database:
 #                                                tmux-256color, screen-*, vt*, ...)
+#   System/Library/FeatureFlags/Domain/Terminal.plist   ./system/FeatureFlags/Terminal.plist
+#                                                (libSystem's os_feature_enabled reads it:
+#                                                DirectColor on, as on macOS 26)
 #   usr/share/sf-test/sf-*-probe                 ./probe: what the installer proves each of
 #                                                dyld, libSystem, libFoundation and the two
 #                                                wrappers with before it replaces the file in use
@@ -57,6 +60,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   cp -a ${compat}/System ${compat}/usr $out/ 2>/dev/null || { cp -a ${compat}/System $out/; cp -a ${compat}/usr/. $out/usr/; }
   chmod -R u+w $out
   mkdir -p $out/usr/share; cp -r ${terminfo}/usr/share/terminfo $out/usr/share/; chmod -R u+w $out/usr/share/terminfo
+  mkdir -p $out/System/Library/FeatureFlags/Domain; cp ${./system/FeatureFlags/Terminal.plist} $out/System/Library/FeatureFlags/Domain/Terminal.plist
 
   # ---- /usr/bin/open (./system/open.c): start an application bundle on the desktop
   mkdir -p $out/usr/bin

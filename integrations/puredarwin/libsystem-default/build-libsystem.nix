@@ -35,6 +35,10 @@
 #       strnvis: what programs built against the macOS 26 SDK import.
 #     See docs/roadmap/issues/SF-Y-terminal-app.md (rehearsed in QEMU and replaced on the M1 by
 #     the guarded procedure, ../terminal-app/tools/sf_terminal.sh).
+#   + patches/feature-flags.patch (GitHub issue 52): os_feature_enabled() reads the property lists
+#       under /System/Library/FeatureFlags and /Library/Preferences/FeatureFlags as macOS does
+#       (Finch's reader, MIT OR Apache-2.0, kept with its notice in stub/pd_featureflags.c);
+#       before, every feature was off (Terminal's DirectColor: true colour drawn as bands).
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let
@@ -50,5 +54,6 @@ in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
     ./patches/dyld-arm64e-keys-off.patch
     ./patches/dyld-objc-writes-data-const.patch
     ./patches/macos26-sdk-imports.patch
+    ./patches/feature-flags.patch
   ];
 })
