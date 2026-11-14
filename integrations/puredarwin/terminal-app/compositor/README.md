@@ -56,4 +56,5 @@ Base: the source of `terminal-application-build-008`.
 
 | Patch | What | Built as |
 |---|---|---|
-| `terminal-application-daily.patch` | no end after 8 MiB of output or 1 MiB of input, `PATH`, `HOME=/var/root`, `LANG` for the shell (storage stream, step 7) | `terminal-application-daily-build-001` (installed on the M1) |
+| `terminal-application-daily.patch` | no end after 8 MiB of output or 1 MiB of input, `PATH`, `HOME=/var/root`, `LANG` for the shell (storage stream, step 7) | `terminal-application-daily-build-001` |
+| `terminal-click-no-highlight.patch` (on top of the daily source) | a click no longer leaves a one-cell white block: a press that has not left its cell selects nothing (the motion events that came with a press made a selection of that cell); a drag still highlights | `terminal-click-build-001` (installed on the M1 since 14 November; the binary of before is `/usr/bin/chonk-terminal-darwin.pre-y2`; source `runs/m1-desktop-010/terminal-click-src`) |
