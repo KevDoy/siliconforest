@@ -573,7 +573,7 @@
  }
 --- a/src/Frameworks/AppKit/NSWindow-Private.h
 +++ b/src/Frameworks/AppKit/NSWindow-Private.h
-@@ -47,4 +47,12 @@
+@@ -47,4 +47,13 @@
  - (BOOL)validateMenuItem:(NSMenuItem *)item;
  - (void)dirtyRect:(NSRect)rect;
  - (int)_resizeEdgesAtPoint:(NSPoint)point;
@@ -582,22 +582,25 @@
 +
 +// the main menu as a strip at the top of a standard window: NSWindowMenuStrip.m
 +@interface NSWindow (PDMenuStrip)
+++ (BOOL)_pdMenuStripsEnabled;
 +- (NSView *)_pdMenuStripView;
 +- (void)_pdUpdateMenuStrip;
 +- (BOOL)_pdMenuStripTakesKeyEvent:(NSEvent *)event;
  @end
 --- a/src/Frameworks/AppKit/NSApplication.m
 +++ b/src/Frameworks/AppKit/NSApplication.m
-@@ -110,6 +110,8 @@
+@@ -110,6 +110,10 @@
  static BOOL pdMenuLoggedWaitingForMenu;
  static BOOL pdMenuLoggedWaitingForServer;
  
 +static BOOL pdMenuStripsStale;
++static BOOL pdLastWindowCheckPending;
++static BOOL pdHadWindow;
 +
  static NSDictionary *pdSerializeMenu(NSMenu *menu)
  {
      NSMutableArray *serializedItems = [NSMutableArray array];
-@@ -996,6 +998,8 @@
+@@ -996,6 +1000,8 @@
      if(![window isKindOfClass:[NSPanel class]])
       [window setMenu:_mainMenu];
     }
@@ -606,7 +609,7 @@
  
      [self sendMenusToWindowServer];
      pdMenuNeedsPublish = YES;
-@@ -1107,6 +1111,15 @@
+@@ -1107,6 +1113,15 @@
  // an item's title, state or enabled flag changed, the menu bar gets the menu again
  -(void)_pdMenuItemChanged {
      pdMenuNeedsPublish = YES;
@@ -622,7 +625,72 @@
  }
  
  - (oneway void)requestMenuUpdateForWindow:(NSNumber *)windowId
-@@ -1601,6 +1614,10 @@
+@@ -1511,19 +1526,60 @@
+ -(void)_checkForTerminate {
+    int  count=[_windows count];
+ 
+-   // as on macOS an app outlives its last window unless its delegate asks otherwise
+-   if(![_delegate respondsToSelector:@selector(applicationShouldTerminateAfterLastWindowClosed:)])
++   /* As on macOS an app outlives its last window unless its delegate asks otherwise - where
++    * there is a menu bar or a Dock to reach it by. On a desktop whose windows carry the menu
++    * (NSWindowMenuStrip.m) an application without a window can never be reached again: there it
++    * ends once its last window has been closed (the default PDQuitsWithLastWindow=NO keeps it),
++    * through -terminate:, so its delegate is still asked. */
++   BOOL asks=[_delegate respondsToSelector:@selector(applicationShouldTerminateAfterLastWindowClosed:)];
++   BOOL unreachable=[self _pdEndsWithLastWindow];
++
++   if(!asks && !unreachable)
+     return;
+ 
+    while(--count>=0){
+     NSWindow *check=[_windows objectAtIndex:count];
+ 
+-    if(![check isKindOfClass:[NSPanel class]] && [check isVisible]){
++    if(![check isKindOfClass:[NSPanel class]] && ([check isVisible] || [check isMiniaturized])){
++     pdHadWindow=YES;
+      return;
+     }
+    }
++   // (this runs after every event: an application that has not shown its first window yet is not without windows)
++   if(!pdHadWindow)
++    return;
++
++   if(asks && [_delegate applicationShouldTerminateAfterLastWindowClosed:self]){
++    [self terminate:self];
++    return;
++   }
++   if(unreachable && !pdLastWindowCheckPending){
++    // not at once: an application may close one window to open the next
++    pdLastWindowCheckPending=YES;
++    [self performSelector:@selector(_pdLastWindowClosed) withObject:nil afterDelay:0.7];
++   }
++}
++
++-(BOOL)_pdEndsWithLastWindow {
++   static int allowed=-1;   // asked after every event
++
++   if(allowed<0){
++    id value=[[NSUserDefaults standardUserDefaults] objectForKey:@"PDQuitsWithLastWindow"];
++
++    allowed=(value!=nil && ![value boolValue]) ? 0 : 1;
++   }
++   if(!allowed)
++    return NO;
++   return [NSWindow _pdMenuStripsEnabled] && _windowServerServerDecorations() && [_mainMenu numberOfItems]>0;
++}
+ 
+-   if(![_delegate applicationShouldTerminateAfterLastWindowClosed:self])
++-(void)_pdLastWindowClosed {
++   pdLastWindowCheckPending=NO;
++   for(NSWindow *check in _windows){
++    if(![check isKindOfClass:[NSPanel class]] && ([check isVisible] || [check isMiniaturized]))
++     return;
++   }
++   if([self modalWindow]!=nil)
+     return;
+    [self terminate:self];
+ }
+@@ -1601,6 +1657,10 @@
     if([event type]==NSKeyDown){
      unsigned modifierFlags=[event modifierFlags];
  

@@ -1,6 +1,6 @@
-diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:36:45.977257047 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -32,9 +32,9 @@ diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/
 +}
 +- (BOOL)requiresSecureCoding { return NO; }
 +@end
-diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:21:40.944630498 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
 @@ -13,7 +13,8 @@
  
  @class NSData, NSMutableArray, NSError;
@@ -64,9 +64,9 @@ diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/F
  - (void)finishDecoding;
  
  - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length;
-diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:36:45.977407737 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
 @@ -6,6 +6,8 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -393,9 +393,9 @@ diff -ruN a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/F
  - (void)finishDecoding {
  }
  
-diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:33:52.014119091 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
 @@ -472,6 +472,8 @@
   * from each element, which is what callers use to pluck a field out. */
  - (id)valueForKey:(NSString *)key {
@@ -432,9 +432,9 @@ diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Framew
 +}
 +
 +@end
-diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:36:29.471136542 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
 @@ -398,3 +398,41 @@
  }
  
@@ -477,9 +477,9 @@ diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Fra
 +    free(copy);
 +}
 +@end
-diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:16:53.432324537 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:36:45.977728582 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -498,9 +498,9 @@ diff -ruN a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Framewor
 +    return [[[self alloc] initWithArray:set != nil ? [set allObjects] : [NSArray array]] autorelease];
 +}
 +@end
-diff -ruN a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
---- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:16:53.434019832 -0800
-+++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:36:45.978142073 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -534,9 +534,9 @@ diff -ruN a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/
 +    return [urls objectEnumerator];
 +}
 +@end
-diff -ruN a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
---- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:16:53.434448999 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:36:45.975985919 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
 @@ -189,3 +189,15 @@
  }
  
@@ -553,13 +553,80 @@ diff -ruN a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src
 +- (void)setFormatterBehavior:(NSUInteger)behavior { }
 +- (NSUInteger)formatterBehavior { return 1040; }
 +@end
-diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 13:16:53.434729533 -0800
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 14:32:50.470935519 -0800
-@@ -177,6 +177,10 @@
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
+@@ -61,7 +61,17 @@
+     if (ivar != NULL) {
+         return ivar;
+     }
+-    return class_getInstanceVariable([self class], name);
++    ivar = class_getInstanceVariable([self class], name);
++    if (ivar != NULL || name[0] == 0) {
++        return ivar;
++    }
++    // _isKey, isKey
++    snprintf(buffer, sizeof(buffer), "_is%c%s", toupper(name[0]), name + 1);
++    ivar = class_getInstanceVariable([self class], buffer);
++    if (ivar != NULL) {
++        return ivar;
++    }
++    return class_getInstanceVariable([self class], buffer + 1);
+ }
+ 
+ /* Boxes whatever the getter returns, based on its encoded return type. */
+@@ -177,6 +187,58 @@
      return YES;
  }
  
++/* An instance variable that is not an object, read and written in place: key-value coding reaches
++ * `_key` and `key` of any type where the class has no accessor (macOS does; an application that
++ * binds a scalar property it only declares as an instance variable depends on it). */
++static id boxedIvar(id self, Ivar ivar, const char *type) {
++    const void *at = (const char *)self + ivar_getOffset(ivar);
++
++    switch (type[0]) {
++        case 'c': return [NSNumber numberWithChar:*(const char *)at];
++        case 'C': return [NSNumber numberWithUnsignedChar:*(const unsigned char *)at];
++        case 's': return [NSNumber numberWithShort:*(const short *)at];
++        case 'S': return [NSNumber numberWithUnsignedShort:*(const unsigned short *)at];
++        case 'i': return [NSNumber numberWithInt:*(const int *)at];
++        case 'I': return [NSNumber numberWithUnsignedInt:*(const unsigned *)at];
++        case 'l': return [NSNumber numberWithLong:*(const long *)at];
++        case 'L': return [NSNumber numberWithUnsignedLong:*(const unsigned long *)at];
++        case 'q': return [NSNumber numberWithLongLong:*(const long long *)at];
++        case 'Q': return [NSNumber numberWithUnsignedLongLong:*(const unsigned long long *)at];
++        case 'f': return [NSNumber numberWithFloat:*(const float *)at];
++        case 'd': return [NSNumber numberWithDouble:*(const double *)at];
++        case 'B': return [NSNumber numberWithBool:*(const BOOL *)at];
++        case '{': return [NSValue valueWithBytes:at objCType:type];
++        default: return nil;
++    }
++}
++
++// NO: a type that is not kept in place this way (a bit field, a pointer, a union)
++static BOOL setIvarUnboxed(id self, Ivar ivar, const char *type, id value) {
++    void *at = (char *)self + ivar_getOffset(ivar);
++
++    switch (type[0]) {
++        case 'c': *(char *)at = [value charValue]; return YES;
++        case 'C': *(unsigned char *)at = [value unsignedCharValue]; return YES;
++        case 's': *(short *)at = [value shortValue]; return YES;
++        case 'S': *(unsigned short *)at = [value unsignedShortValue]; return YES;
++        case 'i': *(int *)at = [value intValue]; return YES;
++        case 'I': *(unsigned *)at = [value unsignedIntValue]; return YES;
++        case 'l': *(long *)at = [value longValue]; return YES;
++        case 'L': *(unsigned long *)at = [value unsignedLongValue]; return YES;
++        case 'q': *(long long *)at = [value longLongValue]; return YES;
++        case 'Q': *(unsigned long long *)at = [value unsignedLongLongValue]; return YES;
++        case 'f': *(float *)at = [value floatValue]; return YES;
++        case 'd': *(double *)at = [value doubleValue]; return YES;
++        case 'B': *(BOOL *)at = [value boolValue]; return YES;
++        case '{': [value getValue:at]; return YES;
++        default: return NO;
++    }
++}
++
 +@interface NSObject (NSKeyValueCollectionOperators)
 +- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath;
 +@end
@@ -567,7 +634,20 @@ diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frame
  @implementation NSObject (NSKeyValueCoding)
  
  + (BOOL)accessInstanceVariablesDirectly {
-@@ -210,14 +214,17 @@
+@@ -199,6 +261,12 @@
+             if (type != NULL && (type[0] == '@' || type[0] == '#')) {
+                 return object_getIvar(self, ivar);
+             }
++            if (type != NULL) {
++                id boxed = boxedIvar(self, ivar, type);
++
++                if (boxed != nil)
++                    return boxed;
++            }
+         }
+     }
+     return [self valueForUndefinedKey:key];
+@@ -210,14 +278,17 @@
      /* No isa-swizzling here, so this is where automatic KVO notification
       * happens: anything routed through KVC notifies its observers. */
      BOOL notifies = [[self class] automaticallyNotifiesObserversForKey:key];
@@ -588,7 +668,27 @@ diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frame
      if ([self respondsToSelector:setter]) {
          if (!setThroughSetter(self, setter, value, key))
              ((void (*)(id, SEL, id))objc_msgSend)(self, setter, value);
-@@ -260,7 +267,13 @@
+@@ -246,6 +317,19 @@
+                 }
+                 return;
+             }
++            if (type != NULL && boxedIvar(self, ivar, type) != nil) {
++                if (value == nil) {
++                    if (notifies)
++                        [self didChangeValueForKey:key];
++                    [self setNilValueForKey:key];
++                    return;
++                }
++                if (setIvarUnboxed(self, ivar, type, value)) {
++                    if (notifies)
++                        [self didChangeValueForKey:key];
++                    return;
++                }
++            }
+         }
+     }
+     if (notifies) {
+@@ -260,7 +344,13 @@
      id current = self;
  
      for (NSUInteger i = 0; i < count && current != nil; i++) {
@@ -603,7 +703,7 @@ diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frame
      }
      return current;
  }
-@@ -320,3 +333,131 @@
+@@ -320,3 +410,131 @@
  }
  
  @end
@@ -735,9 +835,9 @@ diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frame
 +@implementation NSSet (NSKeyValueCollectionOperators)
 +- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath { return kvcOperate(self, name, keyPath); }
 +@end
-diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-13 13:16:53.434729533 -0800
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-13 14:32:50.470542026 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
 @@ -16,6 +16,13 @@
  #import <Foundation/NSLock.h>
  #import <Foundation/NSSet.h>
@@ -1351,9 +1451,9 @@ diff -ruN a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m b/src/Fr
  @implementation NSArray (NSKeyValueObserverRegistration)
  
  - (void)addObserver:(NSObject *)observer
-diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 15:06:18.964138854 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
 @@ -11,6 +11,11 @@
  #import <Foundation/NSDictionary.h>
  #import <Foundation/NSString.h>
@@ -1366,7 +1466,21 @@ diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Framework
  #include <CoreFoundation/CFBundle.h>
  #include <CoreFoundation/CFString.h>
  #include <CoreFoundation/CFURL.h>
-@@ -347,12 +352,65 @@
+@@ -284,7 +289,12 @@
+                                                     &kCFTypeArrayCallBacks);
+     for (CFIndex i = 0; i < count; i++) {
+         CFURLRef url = (CFURLRef)CFArrayGetValueAtIndex(urls, i);
+-        CFStringRef path = CFURLCopyFileSystemPath(url, kCFURLPOSIXPathStyle);
++        // the URLs are relative to the bundle: a path is the whole path (the leaf alone came back,
++        // and nothing that was then opened by it existed)
++        CFURLRef absolute = CFURLCopyAbsoluteURL(url);
++        CFStringRef path = CFURLCopyFileSystemPath(absolute != NULL ? absolute : url, kCFURLPOSIXPathStyle);
++        if (absolute != NULL)
++            CFRelease(absolute);
+         if (path != NULL) {
+             CFArrayAppendValue(paths, path);
+             CFRelease(path);
+@@ -347,12 +357,65 @@
      if ([tableName length] == 0)
          tableName = @"Localizable";
  
@@ -1432,9 +1546,9 @@ diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Framework
  
  /* The bundle's classes all live in the one image here, so this is a lookup by
   * name rather than a per-bundle class table. */
-diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:53:53.870421956 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
 @@ -6,6 +6,11 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -1481,9 +1595,9 @@ diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Framew
      @throw self;
  }
  
-diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:41:04.042310718 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
 @@ -110,8 +110,15 @@
  "   .globl _NSForwardingTrampoline          \n"
  "   .p2align 2                              \n"
@@ -1559,9 +1673,9 @@ diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frame
  __attribute__((constructor))
  static void _NSInstallForwardHandler(void) {
  #if defined(NS_HAVE_FORWARDING_TRAMPOLINE) && ARGON_LIBOBJC2
-diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:16:53.438324457 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:28:47.364980906 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
 @@ -289,3 +289,17 @@
  }
  
@@ -1580,26 +1694,70 @@ diff -ruN a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Fra
 +}
 +
 +@end
-diff -ruN a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
---- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:52:36.909610945 -0800
-@@ -39,6 +39,13 @@
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
++++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
+@@ -39,6 +39,19 @@
  
  @implementation NSAttributedString
  
 +// +alloc gives a shell that an initializer replaces by the CoreFoundation object. A plain -init
 +// (or +new) must do the same: without it the shell itself was handed out, and the methods below
 +// read it as a CoreFoundation attributed string.
++// A subclass with storage of its own (an application's, NSTextStorage) keeps its object: the
++// replacement left the caller writing its instance variables into a CoreFoundation string.
 +- (instancetype)init {
++    Class cls = object_getClass(self);
++
++    if (cls != [NSAttributedString class] && cls != [NSMutableAttributedString class])
++        return [super init];
 +    return [self initWithString:@"" attributes:nil];
 +}
 +
  - (instancetype)initWithString:(NSString *)string {
      return [self initWithString:string attributes:nil];
  }
-diff -ruN a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
---- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:36:45.977053117 -0800
+@@ -58,6 +71,9 @@
+ }
+ 
+ - (NSUInteger)length {
++    // a subclass answers -string and -attributesAtIndex:effectiveRange:; its length is its string's
++    if (!isCFInstance(self))
++        return [[self string] length];
+     return (NSUInteger)CFAttributedStringGetLength((CFAttributedStringRef)self);
+ }
+ 
+@@ -208,16 +224,27 @@
+                                                    (CFAttributedStringRef)self);
+ }
+ 
++// A subclass with storage of its own (NSTextStorage, an application's) is an ordinary object: only
++// the CoreFoundation instances are counted by CoreFoundation. (Every instance was: releasing the
++// last reference to a subclass's object ended the program in CFRelease.)
+ - (id)retain {
++    if (!isCFInstance(self))
++        return [super retain];
+     CFRetain((CFTypeRef)self);
+     return self;
+ }
+ 
+ - (oneway void)release {
++    if (!isCFInstance(self)) {
++        [super release];
++        return;
++    }
+     CFRelease((CFTypeRef)self);
+ }
+ 
+ - (NSUInteger)retainCount {
++    if (!isCFInstance(self))
++        return [super retainCount];
+     return (NSUInteger)CFGetRetainCount((CFTypeRef)self);
+ }
+ 
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
+--- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
++++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -1608,12 +1766,13 @@ diff -ruN a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Fram
  #import <Foundation/NSCharacterSet.h>
  #include <CoreFoundation/CFCharacterSet.h>
  #include <CoreFoundation/ForFoundationOnly.h>
-@@ -218,3 +219,14 @@
+@@ -218,3 +219,15 @@
  }
  
  @end
 +
-+@implementation NSMutableCharacterSet (NSMacOSSDKAdditions)
++// on NSCharacterSet: every CoreFoundation character set, mutable or not, carries that class
++@implementation NSCharacterSet (NSMacOSSDKAdditions)
 +- (void)formUnionWithCharacterSet:(NSCharacterSet *)other {
 +    if (other != nil)
 +        CFCharacterSetUnion((CFMutableCharacterSetRef)self, (CFCharacterSetRef)other);
@@ -1623,9 +1782,9 @@ diff -ruN a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Fram
 +        CFCharacterSetIntersect((CFMutableCharacterSetRef)self, (CFCharacterSetRef)other);
 +}
 +@end
-diff -ruN a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks/Foundation/String.subproj/NSString.m
---- a/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:56:11.786892112 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks/Foundation/String.subproj/NSString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSString.m
++++ b/src/Frameworks/Foundation/String.subproj/NSString.m
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -1835,9 +1994,9 @@ diff -ruN a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks
 +}
 +
 +@end
-diff -ruN a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
---- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:16:53.441146971 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:36:45.976783726 -0800
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.m
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */

@@ -55,6 +55,14 @@
 #         the application's own NSMenu in a horizontal NSMenuView, each title's menu an ordinary
 #         popup; pointer and keyboard (Control-F2, arrows); counted as frame, not content. Menu rows
 #         are measured once and only the rows whose highlight changed are drawn again
+#         (0028 also: on such a desktop an application ends when its last window is closed, as it
+#         could not be reached again; PDQuitsWithLastWindow=NO keeps it)
+#   0029  AppKit: more faults found with Terminal.app: removing the selected NSTabViewItem selected
+#         item -1 (closing a window ended the program); -[NSAttributedString URLAtIndex:effectiveRange:];
+#         a nib's toolbar kept no items (visibility classes; emptied when its delegate was
+#         connected); -[NSWorkspace typeOfFile:error:] answers the type the application declares
+#   0030  WindowServer: a window of a program without a bundle identifier gets the program's name as
+#         its app id
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -90,11 +98,13 @@ let
     ./patches/0024-appkit-fonts-bindings-found-with-terminal.patch
     ./patches/0027-appkit-layout-once-per-resize.patch
     ./patches/0028-appkit-window-menu-strip.patch
+    ./patches/0029-appkit-fixes-found-with-terminal-2.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
     ./patches/0018-windowserver-popup-placement.patch
     ./patches/0022-windowserver-presented-frame-dump.patch
+    ./patches/0030-windowserver-app-id-without-bundle-identifier.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
