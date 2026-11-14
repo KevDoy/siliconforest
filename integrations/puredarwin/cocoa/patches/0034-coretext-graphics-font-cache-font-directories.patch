@@ -90,25 +90,29 @@
  }
 --- a/src/Frameworks/CoreText/CTRegistry.m
 +++ b/src/Frameworks/CoreText/CTRegistry.m
-@@ -228,6 +228,8 @@
+@@ -228,6 +228,10 @@
  static CFIndex recordCount;
  static bool registryBuilt;
  static CFMutableDictionaryRef fallbackCache;
 +// the record a name no face carries was aliased to (kCFNull: none), until the registry changes
 +static CFMutableDictionaryRef aliasCache;
++// the record CTFontCreateWithName gets for a name (kCFNull: none), until the registry changes
++static CFMutableDictionaryRef nameCache;
  
  static void initRegistryLock(void) {
      pthread_mutexattr_t attr;
-@@ -408,6 +410,8 @@
+@@ -408,6 +412,10 @@
      registryBuilt = false;
      if (fallbackCache != NULL)
          CFDictionaryRemoveAllValues(fallbackCache);
 +    if (aliasCache != NULL)
 +        CFDictionaryRemoveAllValues(aliasCache);
++    if (nameCache != NULL)
++        CFDictionaryRemoveAllValues(nameCache);
  }
  
  static bool CTRegistryAddFileUnlocked(const char *path) {
-@@ -630,7 +634,17 @@
+@@ -630,7 +638,17 @@
      }
      // names no installed face carries go through fontconfig's aliases, Helvetica to Nimbus Sans and so on
      if (count == 0 && name != NULL && family == NULL && !hasPath) {
@@ -127,11 +131,10 @@
  
          if (alias != NULL) {
              matches[0].record = alias;
-@@ -767,6 +781,21 @@
-     CTRegistryUnlock();
+@@ -768,6 +786,21 @@
      return ok;
  }
-+
+ 
 +/* Every font file of a directory, through fontconfig's cache of that directory: a font file
 + * added alone is scanned each time (a variable font: every glyph of every named instance, for
 + * its spacing; the fonts Apple's Terminal carries took a second per configuration at each
@@ -146,16 +149,53 @@
 +    CTRegistryUnlock();
 +    return ok;
 +}
- 
++
  bool CTRegistryRemoveFile(const char *path) {
      bool ok;
+ 
+@@ -786,6 +819,34 @@
+     return n;
+ }
+ 
++/* The best record for a font name alone (CTFontCreateWithName), found once per name until the
++ * registry changes: a match scores every installed face, and Apple's Terminal makes a font by
++ * name for each line it draws. */
++const CTFontRecord *CTRegistryRecordForFontName(CFStringRef name) {
++    const CTFontRecord *record = NULL;
++    const void *cached;
++
++    CTRegistryLock();
++    cached = nameCache ? CFDictionaryGetValue(nameCache, name) : NULL;
++    if (cached != NULL)
++        record = cached == (const void *)kCFNull ? NULL : cached;
++    else {
++        const void *key = kCTFontNameAttribute;
++        CFDictionaryRef attributes = CFDictionaryCreate(NULL, &key, (const void **)&name, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++        const CTFontRecord **matches = NULL;
++
++        if (CTRegistryCopyMatchesUnlocked(attributes, &matches) > 0)
++            record = matches[0];
++        free(matches);
++        CFRelease(attributes);
++        if (nameCache == NULL)
++            nameCache = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, NULL);
++        CFDictionarySetValue(nameCache, name, record ? (const void *)record : (const void *)kCFNull);
++    }
++    CTRegistryUnlock();
++    return record;
++}
++
+ const CTFontRecord *CTRegistryDefaultRecord(bool bold) {
+     const CTFontRecord *r;
+ 
 --- a/src/Frameworks/CoreText/CTInternal.h
 +++ b/src/Frameworks/CoreText/CTInternal.h
-@@ -57,6 +57,7 @@
+@@ -57,6 +57,8 @@
  const CTFontRecord *CTRegistryRecordForPath(const char *path, long index);
  void CTRegistryInvalidate(void);
  bool CTRegistryAddFile(const char *path);
 +bool CTRegistryAddDirectory(const char *path);
++const CTFontRecord *CTRegistryRecordForFontName(CFStringRef name);
  bool CTRegistryRemoveFile(const char *path);
  
  // records matching a descriptor's attributes, best first, the caller frees the array
@@ -173,3 +213,19 @@
      else if (!CTFontManagerIsSupportedFont(fontURL))
          code = kCTFontManagerErrorInvalidFontData;
      else if (!CTRegistryAddFile(path))
+--- a/src/Frameworks/CoreText/CTFont.m
++++ b/src/Frameworks/CoreText/CTFont.m
+@@ -46,7 +46,12 @@
+    if(name==NULL)
+     return createWithAttributes(NULL,size,matrix);
+    attributes=CFDictionaryCreate(NULL,&key,(const void **)&name,1,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
+-   font=createWithAttributes(attributes,size,matrix);
++   // the record for a name is remembered by the registry (a match scores every installed face)
++   const CTFontRecord *record=CTRegistryRecordForFontName(name);
++
++   if(record==NULL)
++    record=CTRegistryDefaultRecord(false);
++   font=record ? CTFontCreateWithRecord(record,size,matrix,attributes) : NULL;
+    CFRelease(attributes);
+    return font;
+ }
