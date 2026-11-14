@@ -135,6 +135,40 @@ SPDX notice kept in the file that carries it:
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
 
+## Seventh round (14 November, night; COCOA4): the owner's findings, leaks attributed
+The owner used Terminal by hand on the M1 (20:38Z to 20:55Z) and reported; seen and checked here with synthetic input
+through the inject module (captures `runs/sf-cocoa4/shots`, not committed):
+- **Terminal > Settings did not open a second time** (Command-W, then Command-,: nothing). `-[NSWindow close]`
+  destroyed the window-server window even of a window kept after closing (releasedWhenClosed NO), so the next
+  `-makeKeyAndOrderFront:` had no surface. Fixed (cocoa 0116): the window-server window goes with the object.
+  `p3-prefs2`, `c4k-2prefs-again`.
+- **The pointer vanished over Terminal**: `+[NSCursor setHiddenUntilMouseMoves:YES]` (Terminal, at each key typed)
+  hid it and nothing showed it again. Now +hide/+unhide are counted and libWindowServer shows a pointer hidden until
+  it moves at its next motion or entry, on its input thread (0116, 0117; `PD_CURSOR_TRACE=1`). `p3-moved`.
+- **Profiles > colour wells opened nothing** (no NSColorPanel nib): the panel is built in code, with an opacity slider
+  when the application does not ignore alpha (Terminal's profile colours). `c4k-5colors`. Not yet walked: changing a
+  profile's background opacity and seeing the window become translucent (the compositor composites ARGB with alpha).
+- Also on the way: NSPathCell called `-[NSURL initWithScheme:host:path:]` and `-[NSFileManager displayNameAtPath:]`,
+  which this Foundation lacked (the first is added in core round c4b, the cell no longer needs either).
+- **Marks drawn pure blue and a red line around the window** (owner; DESK3 found the red edge in Terminal's own
+  buffer, `dump`): one root cause. AppKit's HSB conversions (`NSColor.subproj/conversions.h`) took `float *` and
+  NSColor_CGColor passed `CGFloat *`: each wrote 4 bytes into an 8-byte variable, so `-getHue:saturation:brightness:
+  alpha:` answered denormals and `+colorWithCalibratedHue:...` built colours from stack garbage. Terminal derives its
+  mark colour and its window's edge stroke from the profile colours through those calls. Fixed (0116); seen in the
+  window's own buffer: edges (25,29,38) next to the background (24,28,37) where they were (189,28,37); a marked
+  prompt line's bracket faint grey-blue (70,82,109) where it was (7,7,250) (`c4redline-7`, `c4mark-7`).
+- **The desk's title-bar menu** (DESK3's socket `$XDG_RUNTIME_DIR/app-menu/<pid>`): AppKit answers `menu 1` (the
+  main menu validated, 196 lines for Terminal with key equivalents and disabled flags), `invoke <id>` (Preferences
+  opened through it) and `menubar show|hide` (the strip hidden and shown again on every window). Checked over the
+  socket from SSH; the compositor's own menu was not opened here.
+- **Translucency**: Terminal's default profile here is Clear Dark, whose background has alpha 0.95 (242): what is
+  behind shows through, sharp because the desk has no blur (macOS blurs behind a translucent profile). Opaque profiles
+  draw opaque; the opacity slider of the new colour panel changes it.
+- Leaks (sf-heap, `probe/sf-heap.c`): the window-server thread's autoreleased objects (0116), and libFoundation's
+  shells and +1 returns (core round c4b; SF-AA). Terminal idle: +0.33 MB/min before, +0.1 MB/min with c4b's files.
+- Installed (direct, the files of before as `.pre-c4`): AppKit 335c15a4, libWindowServer 2e251bb1, Onyx2D e5497009,
+  CoreGraphics b5a1f9b4. Revert: `ln -f <path>.pre-c4 <path>.back && mv -f <path>.back <path>`.
+
 ## Sixth round (14 November, evening; COCOA3): the leak every program had, toolbar, scrollers, symbols
 Seen on the M1 (synthetic input through the inject module while DESK2's test compositor ran; captures
 `runs/sf-am3/shots/c3-t-*`, `c3-ts-*`, not committed):

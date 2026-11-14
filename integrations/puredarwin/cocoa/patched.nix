@@ -247,7 +247,11 @@
 #         colorWithRed:green:blue:alpha:] (Activity Monitor's CPU windows raised on it); the window server
 #         thread drains a pool per message (every NSEvent it made stayed); NSColorPanel built in code when its
 #         nib is missing (colour swatch, palette, red/green/blue sliders and fields, opacity slider and field shown
-#         unless +[NSColor ignoresAlpha]): Terminal's colour wells opened nothing
+#         unless +[NSColor ignoresAlpha]): Terminal's colour wells opened nothing; the HSB conversions in CGFloat
+#         (they wrote floats into doubles: -getHue:... answered denormals and +colorWithCalibratedHue:... stack
+#         garbage: Terminal's marks pure blue, a red line around its window); the desk's per-application menu
+#         socket ($XDG_RUNTIME_DIR/app-menu/<pid>: the main menu, invoke, the menu strip on/off); Terminal's
+#         Window Groups symbol (rectangle.3.offgrid, our drawing)
 #   0117  WindowServer: a pointer hidden until it moves is shown at its next motion or entry, on the input
 #         thread; PD_CURSOR_TRACE=1
 #   0118  CoreGraphics: CGColorSpaceCreateWithICCData/ICCProfile/ICCBased keep the profile (CGColorSpaceCopyICCData),

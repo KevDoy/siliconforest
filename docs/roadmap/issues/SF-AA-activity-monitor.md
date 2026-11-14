@@ -10,6 +10,19 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, seventh round (COCOA4; on the M1 booted from its disk; synthetic input through the inject module,
+  nobody at the panel except the owner by hand between 20:38Z and 20:55Z; captures in `runs/sf-cocoa4/shots`, not
+  committed). **The growth is attributed, not guessed**: `probe/sf-heap.c` (a sampling recorder on libmalloc's
+  `malloc_logger`: live allocations by stack and by Objective-C class or CF type, reports on demand) on the installed
+  Activity Monitor and Terminal for 10 minutes. What grew (4 minutes after a mark, Activity Monitor): libFoundation's
+  `+alloc` of NSArray/NSDictionary/NSSet made an instance per call that nothing could free (`[[NSMutableArray alloc]
+  init...]`: Onyx2D at each save of the graphics state, about 2.2 MB); Onyx2D's gradient fill under a clip path left
+  its VGPath (1.2 MB); NSStringFromClass (key-value observing, per observation), the path-appending methods and
+  `-[NSBundle resourcePath]` returned +1 strings nobody released; AppKit's window-server thread never drained a pool
+  (every NSEvent it made stayed: Terminal). Fixed: cocoa 0116 (pool), 0119 (VGPath), libFoundation and
+  libCoreFoundation in core round c4b (placeholders, +0 returns, CFAutorelease of CF objects into the pool, CF -O2:
+  PureDarwin built CoreFoundation with no optimisation at all). Closing CPU Usage/History with Command-W no longer ends
+  the application (apps outlive their last window; `a2-*`). Measurements: table "Performance", seventh round.
 - 14 November, sixth round (COCOA3; on the M1 booted from its disk; synthetic input through the inject module
   while DESK2's test compositor ran, nobody looked at the panel; captures in `runs/sf-am3/shots/c3-*`, crops in
   `runs/sf-cocoa3/`, not committed). **A leak every program had is gone**: PureDarwin's CoreFoundation's
@@ -256,6 +269,23 @@ Found with `probe/sf-prof.c` (main thread samples) and `sf-trace` (calls and tim
 row views rebuilt and drawn at every reload, colour lookups, key-value observing's affecting keys,
 a getenv per frame change. What is left: drawing text through the text system for each changed
 label, the layout solve after a label's length changes, Activity Monitor's own formatting.
+
+Seventh round, 10 minutes on the M1 (`runs/sf-cocoa4/measure2.sh`, `m2.txt`): both columns with cocoa 0116/0119
+installed; A = the installed core files (libFoundation e77c9824, PureDarwin's -O0 CoreFoundation), B = the new
+libFoundation and libCoreFoundation of round c4b from a test prefix (`DYLD_LIBRARY_PATH`), the four programs side by
+side, no input, about 34 processes. Both Activity Monitors grew 5-6 MB at the same moment (t=330 s: an outside event,
+not a trend); the rates are over the rest of the run.
+
+| | AM RSS | AM CPU | Terminal RSS | Terminal CPU |
+|---|---|---|---|---|
+| sixth round (COCOA3) | +0.8 MB/min | 13.0 % | +0.33 MB/min | 1.1 % |
+| A: 0116/0119, core files of before | 81 -> 81 MB over 330 s, 87 -> 90 MB over the last 270 s (+0.7 MB/min) | 14.7 % | 60 -> 63 MB (+0.33 MB/min) | 1.1 % |
+| B: and the new libFoundation + CoreFoundation | 80 -> 80 MB, 85 -> 85 MB (flat) | 10.6 % | 58 -> 59 MB (+0.1 MB/min) | 0.83 % |
+
+Where Activity Monitor's time goes now (`probe/sf-prof.c`, main thread, B, 60 s): 88 % waiting; of the rest, malloc/
+calloc/free and their clears (libSystem's libmalloc is built `CMAKE_BUILD_TYPE=Debug`, -O0, as are libdispatch and
+dyld), CF object creation, drawing (paths, strings), and `getenv` inside libobjc's autorelease pool on every push/pop.
+The next lever is libSystem with optimisation (a separate core round), then libobjc's getenv.
 
 ## Still wrong (in the order a person meets it)
 - The dock tile does not start Activity Monitor (`open -a` and the session's listener do).
