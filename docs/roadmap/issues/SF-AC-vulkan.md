@@ -118,6 +118,21 @@ The bench cable is back (14 November ~21:50Z) and the disk-booted kernel's conso
 wrapper. Next step: reproduce deliberately (submit and exit at once) in a RAM-root bench boot,
 where a panic costs no disk, read the panic, then fix in one kernel change.
 
+Bench attempt (14 November 22:11-22:18Z, gui.lock, logged): the guest script is
+`m1-vulkan/test/bench-teardown.in` (a baseline triangle, then (a) `_exit` right after 200 submits,
+(b) the DRM files closed after 200 submits with the process alive, (c) `kill -9` while rendering,
+each followed by 130 s of "alive" lines and new kernel log; `vk-tri` has the modes
+`VKTRI_EXIT_AFTER_SUBMIT`/`VKTRI_CLOSE_AFTER_SUBMIT`). **Nothing was booted:** `tools/agx_boot.sh
+vkb01` failed at RAM-root staging (the 480 MiB image was full: agx_boot stages the GL test's 31 MB
+of libraries, the stage added 63 MB), `vkb02` with only the seven files the test needs failed the
+stager's "at least 16 MiB free" rule; a third attempt through `tools/pcie_iterate.sh` without the GL
+files was not run (refused by the session's permissions; the coordinator's one-retry rule). The M1
+went SiliconForest -> Linux (clean `reboot`) -> SiliconForest (`e2fsck -fn` rc 4, the unrepaired
+21:06Z state) with the daily compositor as DESK3 had left it. Whether the bench path works since the
+disk install is therefore still unknown. A next attempt needs a RAM root with room (a base image
+without the desktop payload, or the slim stager `m1-boot-speed/tools/stage_ramdisk_slim.py` that
+`tools/gpu_desktop.sh` uses) and `PCIE_EXTRA_FILES` with the seven files.
+
 ### Open items
 
 - The teardown/timeout panic above (kernel).

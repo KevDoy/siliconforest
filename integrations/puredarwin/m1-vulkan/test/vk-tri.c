@@ -23,6 +23,8 @@
 //   VKTRI_HOLD_S=<s>       after a failure, stay alive s seconds before exiting
 //   VKTRI_EXIT_AFTER_SUBMIT=<n>  submit the frame n times without waiting, then _exit(0): a
 //                          process dying with GPU work in flight (kernel teardown test)
+//   VKTRI_CLOSE_AFTER_SUBMIT=<n>  the same, but close the /dev/dri files explicitly and stay
+//                          alive VKTRI_HOLD_S seconds (Darwin: F_GETPATH finds them)
 // Last line: "VKTRI PASS" or "VKTRI FAIL <reason>"; exit status 0 only for PASS.
 #include <stdint.h>
 #include <stdio.h>
@@ -30,6 +32,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <vulkan/vulkan.h>
 
 #include "tri_vert.h"
@@ -368,6 +371,31 @@ int main(int argc, char **argv)
 		fflush(stdout);
 		for (int i = 0; i < atoi(dying); i++)
 			CK(vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE));
+		_exit(0);
+	}
+	const char *closing = getenv("VKTRI_CLOSE_AFTER_SUBMIT");
+	if (closing && atoi(closing) > 0) {
+		// the same, but the DRM device files are closed explicitly while the process lives on
+		printf("VKTRI submitting %d times, then closing the DRM files without waiting\n", atoi(closing));
+		fflush(stdout);
+		for (int i = 0; i < atoi(closing); i++)
+			CK(vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE));
+#ifdef F_GETPATH
+		for (int f = 3; f < 256; f++) {
+			char path[1024];
+			if (fcntl(f, F_GETPATH, path) == 0 && !strncmp(path, "/dev/dri/", 9)) {
+				printf("VKTRI close(%d) %s\n", f, path);
+				close(f);
+			}
+		}
+#else
+		printf("VKTRI no F_GETPATH here: files not closed\n");
+#endif
+		const char *hold = getenv("VKTRI_HOLD_S");
+		printf("VKTRI files closed; alive for %d s\n", hold ? atoi(hold) : 0);
+		fflush(stdout);
+		if (hold)
+			sleep(atoi(hold));
 		_exit(0);
 	}
 	printf("VKTRI submit\n");
