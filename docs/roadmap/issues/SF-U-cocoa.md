@@ -194,6 +194,32 @@ a second menu bar, which is what the owner does not want.
   window context enlarges it: correct size, soft), NSOpenGLView, the pointer image an
   application sets, cached image representations made at 1x.
 
+## 13 November: what the Terminal.app stream changed in this stack (SF-Y, issue 52)
+One stack: the changes are patches 0019 to 0026 of `cocoa/patches` on top of this stream's 0001 to
+0018 (`patched.nix` lists what each does), made in the same patchwork tree (`d/` = this stream as
+parked, `b/` = now; `mkpatches.sh`'s `mkterm` lines). They were run with Apple's Terminal on the M1
+only; this stream's own checks (popups, Firefox, the scorecard) were NOT re-run on them.
+- AppKit: 0019 (tip's NSStackView, NSAccessibilityElement), 0020 (names the macOS 26 SDK imports),
+  0021 (nib loading, exceptions from run-loop callouts, an application's own fonts registered from
+  `ATSApplicationFontsPath`), 0024 (`+[NSFont fontWithName:size:]` asks CoreText for names no
+  installed face carries; a selection beyond the content; a failing binding is reported once).
+- CoreText 0023: fixed-pitch names resolve to an installed fixed-pitch face (item 4 of "Next" above
+  is touched: the alias table now holds several families per name, tried in order); the fixed-pitch
+  UI font comes from the registry; two private functions Terminal imports.
+- CoreGraphics 0025, Onyx2D 0026 (`-copyBitsInRect:toPoint:gState:` for the bitmap context:
+  `-[NSView scrollRect:by:]` works), WindowServer 0022 (a diagnostic dump, size limits in the trace).
+- Found and NOT fixed here: the layout solver of 0011 runs over the whole tree once per resized
+  view (388 solves, 4.8 s, while Terminal's preferences nib is decoded: SF-Y's table).
+- Foundation (not this stack, but every AppKit program sees it): key-value observing now follows
+  key paths and hears setters called directly (`terminal-app/patches/foundation-macos-applications.patch`).
+  Bindings that silently did nothing before now fire.
+- Instruments that this stream can use: `terminal-app/probe/sf-trace.c` (methods of chosen classes
+  as they are called, with arguments, results and times), the compositor's inject module
+  (`terminal-app/compositor/wm-darwin-inject.patch`: requested key and pointer records and a capture
+  of the real screen, on the M1 and in QEMU alike) with `terminal-app/tools/sf_inject.sh`.
+- Menus: nothing built. Key equivalents of the main menu were seen working in Terminal
+  (Command-C, Command-V).
+
 ### Menus (proposal; nothing built, key equivalents work today)
 AppKit already serialises an application's menu bar (titles, enabled and checked state, key
 equivalents, submenus) for upstream's MenuBar.app and takes "item at this index path chosen"

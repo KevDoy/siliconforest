@@ -31,7 +31,8 @@
 #   0021  AppKit: faults found with Terminal.app: an undeclared variadic call in nib loading, a nil
 #         window title, exceptions from run-loop callouts reported instead of ending the program,
 #         nib objects replaced before they were collected, +removeFrameUsingName:, NSViewController
-#         without a nib, NSPathControl's delegate
+#         without a nib, NSPathControl's delegate; an application's own fonts (ATSApplicationFontsPath)
+#         registered for the process; a nib window without a maximum size has none (it was 0 by 0)
 #   0022  WindowServer: PD_WS_DUMP_DIR writes the picture a window presents (a diagnostic where the
 #         compositor has no screen capture)
 #   0023  CoreText: Menlo, Monaco, SF Mono and any family whose name says it is fixed-pitch resolve to
@@ -41,7 +42,7 @@
 #   0024  AppKit: +[NSFont fontWithName:size:] asks CoreText for a name no installed face carries;
 #         a selection naming rows the content does not have selects nothing (it ended the program);
 #         a binding whose key is missing is reported once and does not stop the change that
-#         notified it
+#         notified it; a font archived without a size has the system font size (labels were dots)
 #   0025  CoreGraphics: the context getters for anti-aliasing and font smoothing and the private
 #         CGS/CPS window-server calls Terminal.app imports (answers of a Wayland client)
 #   0026  Onyx2D: -copyBitsInRect:toPoint:gState: for the bitmap context (-[NSView scrollRect:by:]

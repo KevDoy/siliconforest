@@ -23,6 +23,21 @@
     }
  }
  
+--- a/src/Frameworks/AppKit/nib.subproj/NSWindowTemplate.m
++++ b/src/Frameworks/AppKit/nib.subproj/NSWindowTemplate.m
+@@ -60,7 +60,11 @@
+    defer=(_wtFlags&0x20000000)?YES:NO;
+    result=[[class alloc] initWithContentRect:_windowRect styleMask:_windowStyleMask backing:_windowBacking defer:defer];
+    [result setMinSize:_minSize];
+-   [result setMaxSize:_maxSize];
++   // a nib that sets no maximum size has no NSMaxSize key and decodes {0, 0}: that is "none",
++   // not a window that may be no larger than nothing (its frame was clamped to 0 by 0 the next
++   // time its toolbar changed height: Terminal's preferences window came up empty)
++   if(_maxSize.width>0 && _maxSize.height>0)
++    [result setMaxSize:_maxSize];
+    [result setOneShot:(_wtFlags&0x10000000)?YES:NO];
+    [result setReleasedWhenClosed:(_wtFlags&0x40000000)?NO:YES];
+    [result setHidesOnDeactivate:(_wtFlags&0x80000000)?YES:NO];
 --- a/src/Frameworks/AppKit/NSApplication.m
 +++ b/src/Frameworks/AppKit/NSApplication.m
 @@ -14,6 +14,9 @@

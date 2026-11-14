@@ -1,6 +1,18 @@
 --- a/src/Frameworks/AppKit/NSFont.m
 +++ b/src/Frameworks/AppKit/NSFont.m
-@@ -407,7 +407,26 @@
+@@ -349,6 +349,11 @@
+        NSString *fontName = [keyed decodeObjectForKey:@"NSName"];
+     NSString          *name=[[NSFont nibFontTranslator] translateFromNibFontName: fontName];
+     CGFloat              size=[keyed decodeFloatForKey:@"NSSize"];
++
++    // current nibs archive the system font of a control without a size ("the size this control
++    // has by default"): drawn at size 0 a label is a row of dots
++    if(size<=0)
++     size=[NSFont systemFontSize];
+     // int                flags=[keyed decodeIntForKey:@"NSfFlags"]; // ?
+ 
+     [self dealloc];
+@@ -407,7 +412,26 @@
      [NSException raise:NSInvalidArgumentException format:@"-[%@ %s] name==nil",self,sel_getName(_cmd)];
  
          // Name can be PS name or a display name - internally we want a PS name - that's what Cocoa is doing

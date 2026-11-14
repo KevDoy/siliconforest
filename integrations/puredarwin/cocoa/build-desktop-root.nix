@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 # The Cocoa system root for the SiliconForest desktop: ./build-cocoa-root.nix with our patched
-# WindowServer and AppKit (./patched.nix: compositor-drawn frames, display scale, glyphs at the device scale) laid over
+# WindowServer, AppKit, Onyx2D, CoreText and CoreGraphics (./patched.nix: compositor-drawn frames, display scale,
+# glyphs at the device scale, and what Apple's Terminal.app needed: patches 0019 to 0027) laid over
 # upstream's, and the test application.
 let
   p = import ./patched.nix;
 in import ./build-cocoa-root.nix {
   # upstream's own desktop session job belongs to its compositor, not ours
   remove = [ "System/Library/LaunchDaemons/org.puredarwin.wayland-session.plist" ];
-  extra = [ p.onyx2d p.windowserver p.appkit (import ./build-hello.nix) (import ./build-popups.nix) ];
+  extra = [ p.onyx2d p.windowserver p.appkit p.coretext p.coregraphics (import ./build-hello.nix) (import ./build-popups.nix) ];
 }

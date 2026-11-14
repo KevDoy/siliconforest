@@ -17,7 +17,7 @@ in import ./build-cocoa-root.nix {
     p.security
     a.pd."systemConfiguration-arm64"
     (import ./build-own-frameworks.nix)
-    p.onyx2d p.windowserver p.appkit
+    p.onyx2d p.windowserver p.appkit p.coretext p.coregraphics
     (import ./build-hello.nix)
   ];
 }
