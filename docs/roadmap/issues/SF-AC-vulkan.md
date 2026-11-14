@@ -67,8 +67,13 @@ syncs, streams the kernel log off the machine every second).
 
 ### What is on the M1 and how to revert
 
-Only `/private/var/db/sfvk` (and `sfvk.prev`, the previous stage) and `/private/tmp/sfvk-*`. No
-installed file was replaced; no kernel was installed. Revert: `rm -rf /private/var/db/sfvk*`.
+- `/private/var/db/sfvk` (the stage: Honeykrisp, loader, vulkaninfo, vkcube, vk-tri, probes, the GL
+  off-screen test; `zink/` holds the dev-build GL libraries and gl-bench) and `/private/tmp/sfvk-*`.
+  No installed file of the system was replaced by the Vulkan work. Revert: `rm -rf /private/var/db/sfvk*`.
+- **The kernel:** `sf/kernel.bin` on SFBOOT is `56759b9f…` (the taskqueue fix) since 22:43Z;
+  `sf/kernel.bin.old` is `821cb932…`. Revert from the M1's Linux:
+  `sudo bash ./sf-bootbin-install.sh <PARTUUID of SFBOOT> --rollback` (SF-R).
+- On the M5: `~/vk-serial/` (the UART capture script and its captures).
 
 ### UAPI: kernel `asahi_drm.h` (linux-aurora `6a08a08e`) against Mesa
 
@@ -87,7 +92,7 @@ All of the Mesa-only items are chosen from kernel feature bits or are G17/M5 pat
 reports `features = 0x1` (SOFT_FAULTS only; `agx-params` on the M1), so Honeykrisp takes the
 legacy G13 paths: 240-byte render commands, 128-byte compute commands, no exact-prior barriers.
 
-### The crash of 21:06Z (open: a kernel bug)
+### The crash of 21:06Z (found and fixed below)
 
 What happened (runs/sfvk/vk-tri-00*.txt, runs/m1-coord/log.txt):
 
@@ -186,16 +191,56 @@ the same GPU faults are expected on Linux for a process killed with work in flig
 firmware recovery handles them. What must be robust is the recovery path, which the fix is about.
 Bringing `VmLifetime` to G13 would avoid the faults; not attempted.
 
+### GL, zink, conformance, Metal (after the milestones)
+
+**Native GL vs zink on Honeykrisp** (`m1-vulkan/test/gl-bench.c`: surfaceless EGL, 1024x1024 FBO, 64
+opaque rectangles a frame, `glFinish` per frame, exact-image hash against a CPU reference; runs
+`gl-zink-compare-00*`, 200 frames, the M1 otherwise idle):
+
+| Driver | ms per frame | fps | image |
+|---|---|---|---|
+| installed GL Mesa 147a62f (asahi, `/usr/local/lib/mesa-asahi`) | 2.350 | 425.6 | `0x727f9a62` = reference |
+| Mesa b7b03c5 asahi (dev build of this stage) | 2.293 | 436.1 | `0x727f9a62` = reference |
+| Mesa b7b03c5 zink on Honeykrisp | **does not run** | | |
+
+Zink needed a build change for Darwin without MoltenVK (`m1-vulkan/patches/experimental/0201`, applied by
+no recipe; it builds). On the M1, `MESA_LOADER_DRIVER_OVERRIDE=zink` makes EGL's DRM screen fail
+("DRI2: failed to load driver") and EGL falls back to surfaceless swrast (softpipe, minutes per run);
+why zink refuses the device was not established. So the comparison is native GL only for now; no
+change to the compositor's renderer was considered.
+
+**Conformance:** no dEQP-VK / CTS run. Building VK-GL-CTS for arm64 Darwin needs a non-Cocoa platform
+target (Vulkan-only, no WSI) and its third-party tree (glslang, SPIRV-Tools, amber) in the cross
+toolchain; not attempted in this session. The driver reports conformance 1.4.6.2, which is Omacom's
+claim for its own Linux build, not a result on this system.
+
+**What the Metal experiment (Darling's Indium: Vulkan 1.3, timeline semaphores, dma-buf import)
+would find here:** Vulkan 1.4.363 reported; `timelineSemaphore` and `VK_KHR_timeline_semaphore`
+reported, and the kernel's timeline syncobj ioctls work (`sync-probe`), but no Vulkan-level timeline
+semaphore test was run; `VK_EXT_external_memory_dma_buf` and `VK_KHR_external_memory_fd` reported,
+PRIME import of a dma-buf received over a socket works at the kernel level (`sync-probe`), and the
+compositor imports Honeykrisp's dma-bufs, but importing a foreign dma-buf into a `VkDeviceMemory`
+was not tested. Those two tests are what to write first.
+
 ### Open items
 
-- `/dev/pdavd` absent on the disk kernel (Codex's finding): the next, separate kernel change.
+- `/dev/pdavd` absent on the disk kernel (Codex's finding, `runs/m1-coord/requests-for-VK.md`): PDAppleAVD is in
+  the collection but its `start` returns early without the boot-arg `pdavd`; the installed kernel.bin's
+  configuration has none. The next, separate kernel change: append `pdavd=1` to the final `ARGS` of
+  `m1-native-boot/install/build.sh` (or `SF_EXTRA_BOOTARGS=pdavd=1`), install with the rollback kept;
+  the first open then needs `/Library/Firmware/apple/avd-fw-v2-t0.bin` (MIT, aurora-silicon/avd-fw).
+  Not done here.
 - Install the GL Mesa with the clock and `ETIME` fixes (147a62f + 0011 + `pd-etime.h`); not done.
 - A test that would catch a missing implicit-sync fence (a heavy frame per present), and the
   compositor's fence counters; `wp_linux_drm_syncobj_v1` in Chonkstep (explicit sync) would be the
   better protocol, request to DESK3 when wanted.
 - vkcube's pacing at 60 Hz is FIFO through frame callbacks; `VK_PRESENT_MODE_MAILBOX/IMMEDIATE`
   not tried.
-- Conformance: no CTS run yet (see below if added).
+- Conformance: no CTS run (see above).
+- Zink on Honeykrisp does not start (EGL falls back to swrast); patch 0201 is experimental.
+- Mappings dropped under in-flight jobs on G13 (GPU faults + recovery when a client dies with work
+  queued): bring linux-aurora's `VmLifetime` to G13 VMs, or keep it as Linux does.
+- vkcube waits while the display sleeps (no frame callbacks); a compositor policy question for DESK3.
 - `memory_limit = 0` from our kernel's GET_PARAMS (newer kernels report it); Honeykrisp falls back
   to the machine's memory for its heap (7.02 GiB).
 - The ray-query render path (`drm_asahi_cmd_render_with_ray_query`, 448 bytes) depends on the kernel

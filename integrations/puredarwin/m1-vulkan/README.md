@@ -33,6 +33,8 @@ compositor's `/usr/local/lib/mesa-asahi/` libraries (`libgallium-26.3.0-devel.dy
 `libEGL.1.dylib`, `libGLESv2.2.dylib`, from 12 November; `libdrm.2.dylib` is not affected) would change when it is next rebuilt and installed; that has
 not been done (SF-AC).
 
+`patches/experimental/` is applied by no recipe (zink without MoltenVK; it builds, it does not run yet).
+
 | Patch | Why |
 |---|---|
 | `0101-vulkan-image-drm-format-modifier-on-darwin` | `vk_image.drm_format_mod` exists only for Linux/BSD; PureDarwin is a DRM system (patch 0001), Honeykrisp and the WSI need it |
@@ -102,6 +104,9 @@ name) and puts `bin/` first in `PATH`. Removing the stage: `rm -rf /private/var/
 - `vk-tri` options (all in its header): `VKTRI_MODE=copy|linear|fill`, `VKTRI_TIMEOUT_MS`,
   `VKTRI_HOLD_S` (stay alive after a failure), `VKTRI_EXIT_AFTER_SUBMIT=<n>` (submit n times and
   `_exit` without waiting: a process dying with GPU work in flight, for the kernel teardown bug).
+- `gl-bench [frames]`: an off-screen GLES2 fill-rate workload with an exact-image check, to compare GL
+  drivers (native asahi against zink) on the M1; built by hand against the dev tree for the 14 November
+  comparison (`SF-AC`), not by a recipe.
 - `wait-probe`: finite syncobj waits with deadlines from `CLOCK_MONOTONIC` and from `CLOCK_UPTIME_RAW`
   (no GPU work); prints the clocks. On the M1 before patch 0011: 0.0 ms and 302 ms for a 300 ms wait.
 - `agx-params`: `GET_PARAMS` group 0, every field and the feature bits (read-only).
