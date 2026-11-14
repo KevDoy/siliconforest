@@ -12,6 +12,17 @@
 #   NSUnrecognizedSelectorBacktrace=1 / NSExceptionRaiseBacktrace=1: where a failure comes from
 #   key-value observing remembers +keyPathsForValuesAffectingValueForKey: per class and key (it was
 #     asked for each observation at every change; Apple's Activity Monitor, GitHub issue 53)
+#   (14 November, evening) CFAutorelease reaches the autorelease pool (Runtime.subproj/PDAutoreleaseCF.h,
+#     put in front of every source: PureDarwin's CoreFoundation returned its own objects without
+#     autoreleasing them, so every convenience constructor here leaked); from Finch (MIT OR
+#     Apache-2.0, notices in the files): NSHashTable's and NSMapTable's object API, NSPointerArray and
+#     NSPointerFunctions (Collections.subproj/NSPointerCollections.m), NSDecimalNumber and the NSDecimal
+#     functions (Numeric.subproj/NSDecimal.m), NSPersonNameComponents and its formatter
+#     (Formatters.subproj/NSPersonNameComponents.m); -[NSData rangeOfData:options:range:], NSCalendar's
+#     identifier, NSDateComponents' calendar and time zone, -[NSSet setByAddingObject:] (the Finch
+#     frameworks' requests, runs/m1-coord/requests-for-CLAUDE.md); NSIndexPath (Collections.subproj/
+#     NSIndexPath.m, from the Foundation wrapper: AppKit's collection view needs it). The four new sources
+#     are compiled after NSHashTable.m (upstream's recipe names its sources).
 # A file every Objective-C program loads: QEMU pass and the guarded procedure before it replaces
 # the disk root's; until then it is tried from a scratch prefix (DYLD_LIBRARY_PATH).
 #
@@ -22,4 +33,12 @@ in pd.packages.x86_64-linux."foundation-arm64".overrideAttrs (old: {
   pname = "siliconforest-foundation-macos-apps";
   patches = (old.patches or []) ++ [ ./patches/foundation-macos-applications.patch ];
   patchFlags = [ "-p4" ];
+  buildPhase = let
+    r = builtins.replaceStrings
+      [ "Collections.subproj/NSHashTable " ''CFLAGS="-x objective-c '' ]
+      [ "Collections.subproj/NSHashTable Collections.subproj/NSPointerCollections Collections.subproj/NSIndexPath Numeric.subproj/NSDecimal Formatters.subproj/NSPersonNameComponents "
+        ''CFLAGS="-include Runtime.subproj/PDAutoreleaseCF.h -x objective-c '' ]
+      old.buildPhase;
+    has = n: builtins.length (builtins.split n r) > 1;
+  in assert has "NSPointerCollections" && has "PDAutoreleaseCF"; r;
 })

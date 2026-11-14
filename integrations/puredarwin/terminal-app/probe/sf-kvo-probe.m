@@ -10,10 +10,16 @@
 // values read through it stay right. The fourth: +[NSURL fileURLWithPath:] of a directory ends in
 // "/", as on macOS (Terminal opens a folder's parent otherwise), and of a file does not. The fifth:
 // +keyPathsForValuesAffectingValueForKey: is remembered per class and key (the symbol
-// PDFoundationKVOAffectingKeysCache).
+// PDFoundationKVOAffectingKeysCache). The sixth (the Finch-frameworks requests,
+// runs/m1-coord/requests-for-CLAUDE.md): NSDecimalNumber, NSHashTable's and NSMapTable's object API
+// with weak entries, NSPointerArray, NSPersonNameComponents and its formatter, -[NSData
+// rangeOfData:options:range:], +[NSCalendar calendarWithIdentifier:], -[NSSet setByAddingObject:],
+// NSIndexPath in this library (it was in the Foundation wrapper);
+// the C map table API keeps working beside them.
 #include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
+#include <stdlib.h>
 #import <objc/runtime.h>
 
 @interface SFLeaf : NSObject { NSString *_name; }
@@ -107,6 +113,65 @@ static int fifth_build(void)
     return dlsym(RTLD_DEFAULT, "PDFoundationKVOAffectingKeysCache") == NULL ? 2 : 0;
 }
 
+// the sixth build's additions; 0 when they hold, else the bits of the checks that failed
+static int sixth_checks(void);
+static int sixth_build(void)
+{
+    @try { return sixth_checks(); }
+    @catch (id e) { return 256; }          // a build without them raises (unrecognized selectors)
+}
+static int sixth_checks(void)
+{
+    int bad = 0;
+    NSAutoreleasePool *pool = [NSAutoreleasePool new];
+    Class dn = NSClassFromString(@"NSDecimalNumber");
+    if (!dn) bad |= 1;
+    else {
+        NSDecimalNumber *a = [dn decimalNumberWithString:@"1.25"], *b = [dn decimalNumberWithString:@"2.5"];
+        NSDecimalNumber *sum = [a decimalNumberByAdding:b], *quot = [[dn one] decimalNumberByDividingBy:[dn decimalNumberWithString:@"8"]];
+        if (![[sum stringValue] isEqual:@"3.75"] || ![[quot stringValue] isEqual:@"0.125"] || [[dn zero] doubleValue] != 0.0
+            || [sum compare:b] != NSOrderedDescending)
+            bad |= 1;
+    }
+    NSHashTable *weak = [NSHashTable weakObjectsHashTable];
+    NSObject *o1 = [NSObject new], *o2 = [NSObject new];
+    NSAutoreleasePool *inner = [NSAutoreleasePool new];  // (reading a weak entry autoreleases its object)
+    [weak addObject:o1]; [weak addObject:o2]; [weak addObject:o1];
+    NSUInteger before = [[weak allObjects] count];
+    [inner release];
+    [o2 release];                          // a weak entry goes with its object
+    NSUInteger after = [[weak allObjects] count];
+    [weak removeObject:o1];
+    if (before != 2 || after != 1 || [[weak allObjects] count] != 0) bad |= 2;
+    if (getenv("SF_PROBE_VERBOSE")) fprintf(stderr, "weak: %lu %lu %lu (%s)\n", (unsigned long)before, (unsigned long)after, (unsigned long)[[weak allObjects] count], object_getClassName(weak));
+    [o1 release];
+    NSMapTable *map = [NSMapTable strongToStrongObjectsMapTable];
+    [map setObject:@"v" forKey:@"k"];
+    NSMapTable *legacy = NSCreateMapTable(NSObjectMapKeyCallBacks, NSObjectMapValueCallBacks, 4);
+    NSMapInsert(legacy, @"k", @"w");
+    if (![[map objectForKey:@"k"] isEqual:@"v"] || [map count] != 1 || ![(id)NSMapGet(legacy, @"k") isEqual:@"w"] || NSCountMapTable(legacy) != 1)
+        bad |= 4;
+    NSFreeMapTable(legacy);
+    NSPointerArray *pa = [NSClassFromString(@"NSPointerArray") strongObjectsPointerArray];
+    [pa addPointer:@"x"]; [pa addPointer:NULL]; [pa compact];
+    if ([pa count] != 1) bad |= 8;
+    NSPersonNameComponents *n = [[[NSClassFromString(@"NSPersonNameComponents") alloc] init] autorelease];
+    n.givenName = @"Ada"; n.familyName = @"Lovelace";
+    NSString *full = [NSClassFromString(@"NSPersonNameComponentsFormatter") localizedStringFromPersonNameComponents:n style:NSPersonNameComponentsFormatterStyleDefault options:0];
+    if (![full isEqual:@"Ada Lovelace"]) bad |= 16;
+    NSData *hay = [NSData dataWithBytes:"abcabc" length:6], *needle = [NSData dataWithBytes:"bc" length:2];
+    NSRange f = [hay rangeOfData:needle options:0 range:NSMakeRange(0, 6)];
+    NSRange r = [hay rangeOfData:needle options:NSDataSearchBackwards range:NSMakeRange(0, 6)];
+    NSRange e = [hay rangeOfData:[NSData data] options:0 range:NSMakeRange(0, 6)];
+    if (f.location != 1 || r.location != 4 || e.location != NSNotFound) bad |= 32;
+    if (![[[NSCalendar calendarWithIdentifier:@"iso8601"] calendarIdentifier] isEqual:@"iso8601"]) bad |= 64;
+    if ([[[NSSet setWithObject:@"a"] setByAddingObject:@"b"] count] != 2) bad |= 128;
+    NSIndexPath *ip = [NSClassFromString(@"NSIndexPath") indexPathForItem:2 inSection:1];
+    if ([ip item] != 2 || [ip section] != 1 || [ip length] != 2) bad |= 512;
+    [pool release];
+    return bad;
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -123,7 +188,7 @@ int main(void)
     int end = root->heard;
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
-    int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12);
+    int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16);
     BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0;
     printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, ok ? "ok" : "FAIL");
     [pool release];

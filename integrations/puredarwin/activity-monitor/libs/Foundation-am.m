@@ -2,7 +2,6 @@
 // What Apple's Activity Monitor needs from Foundation beyond what Terminal.app needed
 // (docs/roadmap/issues/SF-AA-activity-monitor.md); built into the Foundation wrapper with
 // ../../terminal-app/compat/Foundation.m.
-//   NSIndexPath (and AppKit's item/section form of it)
 //   NSDateComponentsFormatter (positional, abbreviated, short, full and spell-out-less styles of a
 //     time interval in hours, minutes and seconds; what Activity Monitor formats: CPU time, uptime)
 //   methods the libFoundation here lacks: -[NSString enumerateLinesUsingBlock:],
@@ -17,97 +16,8 @@
 
 #define EXPORT __attribute__((visibility("default")))
 
-/* ---- NSIndexPath ---- */
-
-EXPORT
-@interface NSIndexPath : NSObject <NSCopying, NSCoding> {
-    NSUInteger *_indexes;
-    NSUInteger _length;
-}
-@end
-
-@implementation NSIndexPath
-
-+ (id)indexPathWithIndex:(NSUInteger)index { return [[[self alloc] initWithIndexes:&index length:1] autorelease]; }
-+ (id)indexPathWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length { return [[[self alloc] initWithIndexes:indexes length:length] autorelease]; }
-+ (id)indexPathForItem:(NSInteger)item inSection:(NSInteger)section {
-    NSUInteger ix[2] = { (NSUInteger)section, (NSUInteger)item };
-    return [self indexPathWithIndexes:ix length:2];
-}
-+ (id)indexPathForRow:(NSInteger)row inSection:(NSInteger)section { return [self indexPathForItem:row inSection:section]; }
-
-- (id)init { return [self initWithIndexes:NULL length:0]; }
-- (id)initWithIndex:(NSUInteger)index { return [self initWithIndexes:&index length:1]; }
-- (id)initWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length {
-    if ((self = [super init]) != nil) {
-        _length = length;
-        _indexes = length ? malloc(length * sizeof(NSUInteger)) : NULL;
-        if (length)
-            memcpy(_indexes, indexes, length * sizeof(NSUInteger));
-    }
-    return self;
-}
-- (void)dealloc { free(_indexes); [super dealloc]; }
-- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
-- (NSUInteger)length { return _length; }
-- (NSUInteger)indexAtPosition:(NSUInteger)position { return position < _length ? _indexes[position] : NSNotFound; }
-- (void)getIndexes:(NSUInteger *)indexes { if (_length) memcpy(indexes, _indexes, _length * sizeof(NSUInteger)); }
-- (void)getIndexes:(NSUInteger *)indexes range:(NSRange)range {
-    for (NSUInteger i = 0; i < range.length; i++)
-        indexes[i] = [self indexAtPosition:range.location + i];
-}
-- (NSIndexPath *)indexPathByAddingIndex:(NSUInteger)index {
-    NSUInteger *ix = malloc((_length + 1) * sizeof(NSUInteger));
-    if (_length) memcpy(ix, _indexes, _length * sizeof(NSUInteger));
-    ix[_length] = index;
-    NSIndexPath *p = [NSIndexPath indexPathWithIndexes:ix length:_length + 1];
-    free(ix);
-    return p;
-}
-- (NSIndexPath *)indexPathByRemovingLastIndex { return [NSIndexPath indexPathWithIndexes:_indexes length:_length ? _length - 1 : 0]; }
-- (NSInteger)item { return _length > 1 ? (NSInteger)_indexes[1] : NSNotFound; }
-- (NSInteger)row { return [self item]; }
-- (NSInteger)section { return _length > 0 ? (NSInteger)_indexes[0] : NSNotFound; }
-- (NSComparisonResult)compare:(NSIndexPath *)other {
-    NSUInteger n = MIN(_length, [other length]);
-    for (NSUInteger i = 0; i < n; i++) {
-        NSUInteger a = _indexes[i], b = [other indexAtPosition:i];
-        if (a != b)
-            return a < b ? NSOrderedAscending : NSOrderedDescending;
-    }
-    return _length == [other length] ? NSOrderedSame : (_length < [other length] ? NSOrderedAscending : NSOrderedDescending);
-}
-- (BOOL)isEqual:(id)other { return other == self || ([other isKindOfClass:[NSIndexPath class]] && [self compare:other] == NSOrderedSame); }
-- (NSUInteger)hash {
-    NSUInteger h = _length;
-    for (NSUInteger i = 0; i < _length; i++)
-        h = h * 31 + _indexes[i];
-    return h;
-}
-- (void)encodeWithCoder:(NSCoder *)coder {
-    [coder encodeInteger:(NSInteger)_length forKey:@"NSIndexPathLength"];
-    if (_length == 1)
-        [coder encodeInteger:(NSInteger)_indexes[0] forKey:@"NSIndexPathValue"];
-    else if (_length > 1)
-        [coder encodeObject:[NSData dataWithBytes:_indexes length:_length * sizeof(NSUInteger)] forKey:@"NSIndexPathData"];
-}
-- (id)initWithCoder:(NSCoder *)coder {
-    NSUInteger n = (NSUInteger)[coder decodeIntegerForKey:@"NSIndexPathLength"];
-    if (n == 1) {
-        NSUInteger v = (NSUInteger)[coder decodeIntegerForKey:@"NSIndexPathValue"];
-        return [self initWithIndexes:&v length:1];
-    }
-    NSData *d = [coder decodeObjectForKey:@"NSIndexPathData"];
-    return [self initWithIndexes:[d bytes] length:MIN(n, [d length] / sizeof(NSUInteger))];
-}
-- (NSString *)description {
-    NSMutableString *s = [NSMutableString stringWithFormat:@"<NSIndexPath %p> {length = %lu, path = ", self, (unsigned long)_length];
-    for (NSUInteger i = 0; i < _length; i++)
-        [s appendFormat:i ? @" - %lu" : @"%lu", (unsigned long)_indexes[i]];
-    [s appendString:@"}"];
-    return s;
-}
-@end
+/* (NSIndexPath moved into libFoundation on 14 November, evening: terminal-app/patches/
+   foundation-macos-applications.patch, Collections.subproj/NSIndexPath.m) */
 
 /* ---- NSDateComponentsFormatter ---- */
 

@@ -17,3 +17,5 @@ ba8013eb292f0deb429b1b157284b62fde2c2026e5b4babe7edda4145ca2f3f4  /usr/lib/libSy
 d25ed0b1a235c60c2de685668fca2d57267769a34f5c73d69c2386fd0f64eeda  /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation am1, am1-2 2026-11-14
 b5a239e7fddd448c944db0d928fc5d44bf44caad22427bfd37a5b77dd88b9fae  /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit am1, am1-2 2026-11-14
 bed36b5d7c71cacfd30da4021ece623baf6334a673d681a70101eb4c88970fcc  /usr/lib/libFoundation.dylib am2, am2-2 2026-11-14
+e77c98248ba595cab4ab71c1dccdad70796de40ef583830eeeb8a6eac0db6491  /usr/lib/libFoundation.dylib c3b, c3b-2 2026-11-14
+a660d7509392f2175eee967b6add4741e783213aa64ca16dc81faa2366d7  /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation c3b, c3b-2 2026-11-14

@@ -1,6 +1,27 @@
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSCoder.h b/src/Frameworks/Foundation/Coding.subproj/NSCoder.h
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-14 10:29:13.147892744 -0800
+@@ -14,7 +14,7 @@
+ 
+ /* NSCoding and NSSecureCoding are declared in NSObject.h, where Apple puts them. */
+ 
+-@class NSString, NSData;
++@class NSString, NSData, NSSet;
+ 
+ /* Abstract: every method here raises. Concrete archivers override them. */
+ @interface NSCoder : NSObject
+@@ -39,6 +39,8 @@
+ - (void)encodeBytes:(const uint8_t *)bytes length:(NSUInteger)length forKey:(NSString *)key;
+ 
+ - (id)decodeObjectForKey:(NSString *)key;
++- (id)decodeObjectOfClass:(Class)cls forKey:(NSString *)key;
++- (id)decodeObjectOfClasses:(NSSet *)classes forKey:(NSString *)key;
+ - (BOOL)decodeBoolForKey:(NSString *)key;
+ - (int)decodeIntForKey:(NSString *)key;
+ - (int32_t)decodeInt32ForKey:(NSString *)key;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:36:45.977257047 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -33,8 +54,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
 +- (BOOL)requiresSecureCoding { return NO; }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:21:40.944630498 -0800
 @@ -13,7 +13,8 @@
  
  @class NSData, NSMutableArray, NSError;
@@ -65,8 +86,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  
  - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:16:53.431656493 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:36:45.977407737 -0800
 @@ -6,6 +6,8 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -394,8 +415,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:33:52.014119091 -0800
 @@ -472,6 +472,8 @@
   * from each element, which is what callers use to pluck a field out. */
  - (id)valueForKey:(NSString *)key {
@@ -432,9 +453,274 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +}
 +
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.h b/src/Frameworks/Foundation/Collections.subproj/NSData.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-14 10:29:31.478135606 -0800
+@@ -37,8 +37,15 @@
+     NSDataWritingWithoutOverwriting = 1 << 1
+ };
+ 
++typedef NS_OPTIONS(NSUInteger, NSDataSearchOptions) {
++    NSDataSearchBackwards = 1UL << 0,
++    NSDataSearchAnchored = 1UL << 1,
++};
++
+ @interface NSData : NSObject <NSCopying, NSMutableCopying>
+ 
++- (NSRange)rangeOfData:(NSData *)dataToFind options:(NSDataSearchOptions)mask range:(NSRange)searchRange;
++
+ + (instancetype)data;
+ + (instancetype)dataWithBytes:(const void *)bytes length:(NSUInteger)length;
+ + (instancetype)dataWithBytesNoCopy:(void *)bytes length:(NSUInteger)length;
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.m b/src/Frameworks/Foundation/Collections.subproj/NSData.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-14 10:29:31.478443410 -0800
+@@ -110,6 +110,39 @@
+ 
+ @implementation NSData
+ 
++/* SiliconForest: as requested by the Finch frameworks stream (runs/m1-coord/requests-for-CLAUDE.md;
++ * Finch's Security encryption test). An empty needle, or one longer than the range, is not found
++ * (swift-corelibs-foundation's answer); a backwards anchored search must end at the range's end. */
++- (NSRange)rangeOfData:(NSData *)data options:(NSDataSearchOptions)options range:(NSRange)range
++{
++    NSUInteger length = [self length], count = [data length];
++    if (!data)
++        [NSException raise:NSInvalidArgumentException format:@"-[NSData rangeOfData:options:range:]: nil data argument"];
++    if (range.location > length || range.length > length - range.location)
++        [NSException raise:NSRangeException format:@"-[NSData rangeOfData:options:range:]: range {%lu, %lu} out of bounds; length %lu",
++            (unsigned long)range.location, (unsigned long)range.length, (unsigned long)length];
++    if (!count || count > range.length)
++        return NSMakeRange(NSNotFound, 0);
++    const unsigned char *bytes = [self bytes], *needle = [data bytes];
++    NSUInteger first = range.location, last = first + range.length - count;
++    if (options & NSDataSearchAnchored) {
++        NSUInteger pos = (options & NSDataSearchBackwards) ? last : first;
++        return memcmp(bytes + pos, needle, count) ? NSMakeRange(NSNotFound, 0) : NSMakeRange(pos, count);
++    }
++    if (options & NSDataSearchBackwards) {
++        for (NSUInteger pos = last;; --pos) {
++            if (!memcmp(bytes + pos, needle, count)) return NSMakeRange(pos, count);
++            if (pos == first) break;
++        }
++    } else {
++        for (NSUInteger pos = first;; ++pos) {
++            if (!memcmp(bytes + pos, needle, count)) return NSMakeRange(pos, count);
++            if (pos == last) break;
++        }
++    }
++    return NSMakeRange(NSNotFound, 0);
++}
++
+ + (instancetype)data
+ {
+ 	return __NSDataAutorelease(CFDataCreate(kCFAllocatorDefault, NULL, 0));
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-14 10:26:11.046730089 -0800
+@@ -13,10 +13,42 @@
+ #import <Foundation/NSObjCRuntime.h>
+ #import <Foundation/NSZone.h>
+ 
+-@class NSString, NSArray;
++#import <Foundation/NSEnumerator.h>
++#import <Foundation/NSPointerFunctions.h>
+ 
+-/* The set half of NSMapTable's C API, same shape and callback style. */
+-@interface NSHashTable : NSObject
++@class NSString, NSArray, NSSet;
++
++/* The set half of NSMapTable's C API, same shape and callback style. The object API
++ * (SiliconForest: Finch's NSPointerCollections.m) is declared from macOS's public names. */
++typedef NSUInteger NSHashTableOptions;
++static const NSHashTableOptions NSHashTableStrongMemory = 0;
++static const NSHashTableOptions NSHashTableZeroingWeakMemory = 1;
++static const NSHashTableOptions NSHashTableCopyIn = 1UL << 16;
++static const NSHashTableOptions NSHashTableObjectPointerPersonality = 2UL << 8;
++static const NSHashTableOptions NSHashTableWeakMemory = 5;
++
++@interface NSHashTable : NSObject <NSCopying, NSCoding, NSFastEnumeration>
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options capacity:(NSUInteger)initialCapacity;
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions capacity:(NSUInteger)initialCapacity;
+++ (NSHashTable *)hashTableWithOptions:(NSPointerFunctionsOptions)options;
+++ (NSHashTable *)weakObjectsHashTable;
++@property (readonly, copy) NSPointerFunctions *pointerFunctions;
++@property (readonly) NSUInteger count;
++- (id)member:(id)object;
++- (NSEnumerator *)objectEnumerator;
++- (void)addObject:(id)object;
++- (void)removeObject:(id)object;
++- (void)removeAllObjects;
++@property (readonly, copy) NSArray *allObjects;
++@property (readonly) id anyObject;
++- (BOOL)containsObject:(id)anObject;
++- (BOOL)intersectsHashTable:(NSHashTable *)other;
++- (BOOL)isEqualToHashTable:(NSHashTable *)other;
++- (BOOL)isSubsetOfHashTable:(NSHashTable *)other;
++- (void)intersectHashTable:(NSHashTable *)other;
++- (void)unionHashTable:(NSHashTable *)other;
++- (void)minusHashTable:(NSHashTable *)other;
++@property (readonly, copy) NSSet *setRepresentation;
+ @end
+ 
+ typedef struct {
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-14 10:26:34.625574634 -0800
+@@ -9,6 +9,7 @@
+ #import <Foundation/NSHashTable.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSString.h>
++#import <objc/runtime.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -91,7 +92,7 @@
+ 
+ NSHashTable *NSCreateHashTableWithZone(NSHashTableCallBacks callBacks,
+                                        NSUInteger capacity, NSZone *zone) {
+-    NSHashTable *table = [[NSHashTable alloc] init];
++    NSHashTable *table = class_createInstance([NSHashTable class], 0); /* not +alloc: that makes the object API's table (NSPointerCollections.m) */
+ 
+     table->_callBacks = callBacks;
+     table->_capacity = (capacity < 8) ? 8 : capacity * 2;
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h	2026-11-14 10:55:19.075446401 -0800
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSIndexPath, declared from macOS's public names (no SDK header copied).
++ */
++#ifndef NSIndexPath_h
++#define NSIndexPath_h
++#import <Foundation/NSObject.h>
++#import <Foundation/NSRange.h>
++
++@interface NSIndexPath : NSObject <NSCopying, NSCoding> {
++    NSUInteger *_indexes;
++    NSUInteger _length;
++}
+++ (instancetype)indexPathWithIndex:(NSUInteger)index;
+++ (instancetype)indexPathWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length;
++- (instancetype)initWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length;
++- (instancetype)initWithIndex:(NSUInteger)index;
++- (NSIndexPath *)indexPathByAddingIndex:(NSUInteger)index;
++- (NSIndexPath *)indexPathByRemovingLastIndex;
++- (NSUInteger)indexAtPosition:(NSUInteger)position;
++@property (readonly) NSUInteger length;
++- (void)getIndexes:(NSUInteger *)indexes range:(NSRange)positionRange;
++- (void)getIndexes:(NSUInteger *)indexes;
++- (NSComparisonResult)compare:(NSIndexPath *)otherObject;
++/* AppKit's and UIKit's form (NSCollectionView, NSTableView) */
+++ (instancetype)indexPathForItem:(NSInteger)item inSection:(NSInteger)section;
+++ (instancetype)indexPathForRow:(NSInteger)row inSection:(NSInteger)section;
++@property (readonly) NSInteger item;
++@property (readonly) NSInteger section;
++@property (readonly) NSInteger row;
++@end
++
++#endif /* NSIndexPath_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m	2026-11-14 10:55:19.075361120 -0800
+@@ -0,0 +1,94 @@
++// SPDX-License-Identifier: MIT
++// SiliconForest: NSIndexPath, with AppKit's item/section form of it (it was in the Foundation wrapper,
++// integrations/puredarwin/activity-monitor/libs/Foundation-am.m, since Activity Monitor; here AppKit's
++// collection view and programs that link only this library find it too).
++#import <Foundation/NSIndexPath.h>
++#import <Foundation/NSData.h>
++#import <Foundation/NSString.h>
++#import <Foundation/NSCoder.h>
++#include <stdlib.h>
++#include <string.h>
++
++@implementation NSIndexPath
++
+++ (id)indexPathWithIndex:(NSUInteger)index { return [[[self alloc] initWithIndexes:&index length:1] autorelease]; }
+++ (id)indexPathWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length { return [[[self alloc] initWithIndexes:indexes length:length] autorelease]; }
+++ (id)indexPathForItem:(NSInteger)item inSection:(NSInteger)section {
++    NSUInteger ix[2] = { (NSUInteger)section, (NSUInteger)item };
++    return [self indexPathWithIndexes:ix length:2];
++}
+++ (id)indexPathForRow:(NSInteger)row inSection:(NSInteger)section { return [self indexPathForItem:row inSection:section]; }
++
++- (id)init { return [self initWithIndexes:NULL length:0]; }
++- (id)initWithIndex:(NSUInteger)index { return [self initWithIndexes:&index length:1]; }
++- (id)initWithIndexes:(const NSUInteger *)indexes length:(NSUInteger)length {
++    if ((self = [super init]) != nil) {
++        _length = length;
++        _indexes = length ? malloc(length * sizeof(NSUInteger)) : NULL;
++        if (length)
++            memcpy(_indexes, indexes, length * sizeof(NSUInteger));
++    }
++    return self;
++}
++- (void)dealloc { free(_indexes); [super dealloc]; }
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++- (NSUInteger)length { return _length; }
++- (NSUInteger)indexAtPosition:(NSUInteger)position { return position < _length ? _indexes[position] : NSNotFound; }
++- (void)getIndexes:(NSUInteger *)indexes { if (_length) memcpy(indexes, _indexes, _length * sizeof(NSUInteger)); }
++- (void)getIndexes:(NSUInteger *)indexes range:(NSRange)range {
++    for (NSUInteger i = 0; i < range.length; i++)
++        indexes[i] = [self indexAtPosition:range.location + i];
++}
++- (NSIndexPath *)indexPathByAddingIndex:(NSUInteger)index {
++    NSUInteger *ix = malloc((_length + 1) * sizeof(NSUInteger));
++    if (_length) memcpy(ix, _indexes, _length * sizeof(NSUInteger));
++    ix[_length] = index;
++    NSIndexPath *p = [NSIndexPath indexPathWithIndexes:ix length:_length + 1];
++    free(ix);
++    return p;
++}
++- (NSIndexPath *)indexPathByRemovingLastIndex { return [NSIndexPath indexPathWithIndexes:_indexes length:_length ? _length - 1 : 0]; }
++- (NSInteger)item { return _length > 1 ? (NSInteger)_indexes[1] : NSNotFound; }
++- (NSInteger)row { return [self item]; }
++- (NSInteger)section { return _length > 0 ? (NSInteger)_indexes[0] : NSNotFound; }
++- (NSComparisonResult)compare:(NSIndexPath *)other {
++    NSUInteger n = MIN(_length, [other length]);
++    for (NSUInteger i = 0; i < n; i++) {
++        NSUInteger a = _indexes[i], b = [other indexAtPosition:i];
++        if (a != b)
++            return a < b ? NSOrderedAscending : NSOrderedDescending;
++    }
++    return _length == [other length] ? NSOrderedSame : (_length < [other length] ? NSOrderedAscending : NSOrderedDescending);
++}
++- (BOOL)isEqual:(id)other { return other == self || ([other isKindOfClass:[NSIndexPath class]] && [self compare:other] == NSOrderedSame); }
++- (NSUInteger)hash {
++    NSUInteger h = _length;
++    for (NSUInteger i = 0; i < _length; i++)
++        h = h * 31 + _indexes[i];
++    return h;
++}
++- (void)encodeWithCoder:(NSCoder *)coder {
++    [coder encodeInteger:(NSInteger)_length forKey:@"NSIndexPathLength"];
++    if (_length == 1)
++        [coder encodeInteger:(NSInteger)_indexes[0] forKey:@"NSIndexPathValue"];
++    else if (_length > 1)
++        [coder encodeObject:[NSData dataWithBytes:_indexes length:_length * sizeof(NSUInteger)] forKey:@"NSIndexPathData"];
++}
++- (id)initWithCoder:(NSCoder *)coder {
++    NSUInteger n = (NSUInteger)[coder decodeIntegerForKey:@"NSIndexPathLength"];
++    if (n == 1) {
++        NSUInteger v = (NSUInteger)[coder decodeIntegerForKey:@"NSIndexPathValue"];
++        return [self initWithIndexes:&v length:1];
++    }
++    NSData *d = [coder decodeObjectForKey:@"NSIndexPathData"];
++    return [self initWithIndexes:[d bytes] length:MIN(n, [d length] / sizeof(NSUInteger))];
++}
++- (NSString *)description {
++    NSMutableString *s = [NSMutableString stringWithFormat:@"<NSIndexPath %p> {length = %lu, path = ", self, (unsigned long)_length];
++    for (NSUInteger i = 0; i < _length; i++)
++        [s appendFormat:i ? @" - %lu" : @"%lu", (unsigned long)_indexes[i]];
++    [s appendString:@"}"];
++    return s;
++}
++@end
++
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:36:29.471136542 -0800
 @@ -398,3 +398,41 @@
  }
  
@@ -477,9 +763,1101 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +    free(copy);
 +}
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-14 10:26:28.052435551 -0800
+@@ -12,13 +12,42 @@
+ #import <Foundation/NSObject.h>
+ #import <Foundation/NSObjCRuntime.h>
+ 
++#import <Foundation/NSEnumerator.h>
++#import <Foundation/NSPointerFunctions.h>
++
+ @class NSString, NSArray, NSDictionary;
+ 
++/* The object API (SiliconForest: Finch's NSPointerCollections.m) is declared from macOS's
++ * public names. */
++typedef NSUInteger NSMapTableOptions;
++static const NSMapTableOptions NSMapTableStrongMemory = 0;
++static const NSMapTableOptions NSMapTableZeroingWeakMemory = 1;
++static const NSMapTableOptions NSMapTableCopyIn = 1UL << 16;
++static const NSMapTableOptions NSMapTableObjectPointerPersonality = 2UL << 8;
++static const NSMapTableOptions NSMapTableWeakMemory = 5;
++
+ /* The legacy C map table: keys and values are void *, and the callback structs
+  * decide whether they are retained, compared as objects, or treated as plain
+  * integers. NSMapTable is a real class as on Darwin, so `@class NSMapTable;` in
+  * ported code stays valid. */
+-@interface NSMapTable : NSObject
++@interface NSMapTable : NSObject <NSCopying, NSCoding, NSFastEnumeration>
++- (instancetype)initWithKeyOptions:(NSPointerFunctionsOptions)keyOptions valueOptions:(NSPointerFunctionsOptions)valueOptions capacity:(NSUInteger)initialCapacity;
++- (instancetype)initWithKeyPointerFunctions:(NSPointerFunctions *)keyFunctions valuePointerFunctions:(NSPointerFunctions *)valueFunctions capacity:(NSUInteger)initialCapacity;
+++ (NSMapTable *)mapTableWithKeyOptions:(NSPointerFunctionsOptions)keyOptions valueOptions:(NSPointerFunctionsOptions)valueOptions;
+++ (NSMapTable *)strongToStrongObjectsMapTable;
+++ (NSMapTable *)weakToStrongObjectsMapTable;
+++ (NSMapTable *)strongToWeakObjectsMapTable;
+++ (NSMapTable *)weakToWeakObjectsMapTable;
++@property (readonly, copy) NSPointerFunctions *keyPointerFunctions;
++@property (readonly, copy) NSPointerFunctions *valuePointerFunctions;
++- (id)objectForKey:(id)aKey;
++- (void)removeObjectForKey:(id)aKey;
++- (void)setObject:(id)anObject forKey:(id)aKey;
++@property (readonly) NSUInteger count;
++- (NSEnumerator *)keyEnumerator;
++- (NSEnumerator *)objectEnumerator;
++- (void)removeAllObjects;
++- (NSDictionary *)dictionaryRepresentation;
+ @end
+ 
+ typedef struct {
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-14 10:26:34.627900296 -0800
+@@ -9,6 +9,7 @@
+ #import <Foundation/NSMapTable.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSString.h>
++#import <objc/runtime.h>
+ #import <Foundation/NSZone.h>
+ #include <CoreFoundation/CFString.h>
+ #include <stdlib.h>
+@@ -140,7 +141,7 @@
+ NSMapTable *NSCreateMapTableWithZone(NSMapTableKeyCallBacks keyCallBacks,
+                                      NSMapTableValueCallBacks valueCallBacks,
+                                      NSUInteger capacity, NSZone *zone) {
+-    NSMapTable *table = [[NSMapTable alloc] init];
++    NSMapTable *table = class_createInstance([NSMapTable class], 0); /* not +alloc: that makes the object API's table (NSPointerCollections.m) */
+ 
+     table->keyCallBacks = keyCallBacks;
+     table->valueCallBacks = valueCallBacks;
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h b/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h	2026-11-14 10:25:55.143992643 -0800
+@@ -0,0 +1,36 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSPointerArray, declared from the public names of macOS's Foundation
++ * (no SDK header copied). Implemented in NSPointerCollections.m (Finch's, MIT OR Apache-2.0).
++ */
++#ifndef NSPointerArray_h
++#define NSPointerArray_h
++
++#import <Foundation/NSObject.h>
++#import <Foundation/NSEnumerator.h>
++#import <Foundation/NSPointerFunctions.h>
++
++@class NSArray;
++
++@interface NSPointerArray : NSObject <NSFastEnumeration, NSCopying, NSCoding>
++
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options;
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions;
+++ (NSPointerArray *)pointerArrayWithOptions:(NSPointerFunctionsOptions)options;
+++ (NSPointerArray *)pointerArrayWithPointerFunctions:(NSPointerFunctions *)functions;
+++ (NSPointerArray *)strongObjectsPointerArray;
+++ (NSPointerArray *)weakObjectsPointerArray;
++
++@property (readonly, copy) NSPointerFunctions *pointerFunctions;
++@property NSUInteger count;
++@property (readonly, copy) NSArray *allObjects;
++
++- (void *)pointerAtIndex:(NSUInteger)index;
++- (void)addPointer:(void *)pointer;
++- (void)removePointerAtIndex:(NSUInteger)index;
++- (void)insertPointer:(void *)item atIndex:(NSUInteger)index;
++- (void)replacePointerAtIndex:(NSUInteger)index withPointer:(void *)item;
++- (void)compact;
++
++@end
++
++#endif /* NSPointerArray_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m b/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m	2026-11-14 10:27:27.977630721 -0800
+@@ -0,0 +1,920 @@
++/*
++ * Copyright (c) 2026 The Finch Project contributors.
++ * SPDX-License-Identifier: MIT OR Apache-2.0
++ *
++ * NSPointerFunctions, NSHashTable, NSMapTable and NSPointerArray, with the C
++ * functions of <Foundation/NSHashTable.h> and <Foundation/NSMapTable.h>, and
++ * NSCache (docs/design/FOUNDATION.md), against the SDK's headers.
++ *
++ * Every table keeps its entries in malloc'd nodes, so weak slots never move
++ * (objc_storeWeak/objc_loadWeak work on them in place) and entries whose
++ * weak key or value has been reclaimed are purged as they are found. The
++ * behaviour of an item comes from its pointer functions: memory (strong:
++ * retained if an object; weak; opaque; malloc: freed), personality (object:
++ * -hash/-isEqual:; pointer identity; C string; struct by size; integer) and
++ * copy-in. The C API's callback structs drive the same tables.
++ *
++ * SiliconForest (docs/roadmap/issues/SF-AA-activity-monitor.md, "Taken from Finch"): taken from
++ * Finch's userland/Foundation/NSPointerCollections.m at 2d9b1bb up to its C API. Changed here:
++ * PureDarwin's C API (NSHashTable.m, NSMapTable.m) stays as it is, with its own tables and
++ * enumerator layout, which our AppKit and Onyx2D are built against; NSHashTable's and NSMapTable's
++ * object API is a category on PureDarwin's classes (+alloc makes Finch's concrete tables, the C
++ * API makes its own with class_createInstance); Foundation_Finch.h is ../Runtime.subproj/PDFinch.h.
++ */
++#import <Foundation/Foundation.h>
++#import <objc/runtime.h>
++
++#import <Foundation/NSPointerFunctions.h>
++#import <Foundation/NSPointerArray.h>
++#import <Foundation/NSHashTable.h>
++#import <Foundation/NSMapTable.h>
++#include "../Runtime.subproj/PDFinch.h"
++
++id objc_loadWeak(id *location);
++id objc_storeWeak(id *location, id obj);
++
++/* MARK: - Item behaviour */
++
++typedef struct Funcs {
++    NSPointerFunctionsOptions options;
++    BOOL weak, copyIn;
++    NSUInteger (*hash)(const void *, NSUInteger (*)(const void *));
++    BOOL (*equal)(const void *, const void *, NSUInteger (*)(const void *));
++    NSUInteger (*size)(const void *);
++    NSString *(*describe)(const void *);
++    void (*relinquish)(const void *, NSUInteger (*)(const void *));
++    void *(*acquire)(const void *, NSUInteger (*)(const void *), BOOL);
++    /* The C API's callbacks, called with the table. */
++    BOOL legacy;
++    NSUInteger (*lhash)(id, const void *);
++    BOOL (*lequal)(id, const void *, const void *);
++    void (*lretain)(id, const void *);
++    void (*lrelease)(id, void *);
++    NSString *(*ldescribe)(id, const void *);
++} Funcs;
++
++static NSUInteger object_hash(const void *p, NSUInteger (*s)(const void *)) { return [(id)p hash]; }
++static BOOL object_equal(const void *a, const void *b, NSUInteger (*s)(const void *)) { return a == b || [(id)a isEqual:(id)b]; }
++static NSString *object_describe(const void *p) { return [(id)p description]; }
++static NSUInteger pointer_hash(const void *p, NSUInteger (*s)(const void *)) { return (NSUInteger)(uintptr_t)p >> 2; }
++static BOOL pointer_equal(const void *a, const void *b, NSUInteger (*s)(const void *)) { return a == b; }
++static NSString *pointer_describe(const void *p) { return [NSString stringWithFormat:@"%p", p]; }
++static NSUInteger cstring_hash(const void *p, NSUInteger (*s)(const void *))
++{
++    NSUInteger h = 5381;
++    for (const unsigned char *c = p; *c; c++) h = h * 33 + *c;
++    return h;
++}
++static BOOL cstring_equal(const void *a, const void *b, NSUInteger (*s)(const void *)) { return a == b || (a && b && !strcmp(a, b)); }
++static NSString *cstring_describe(const void *p) { return [NSString stringWithUTF8String:p]; }
++static NSUInteger cstring_size(const void *p) { return strlen(p) + 1; }
++static NSUInteger struct_hash(const void *p, NSUInteger (*s)(const void *))
++{
++    NSUInteger n = s ? s(p) : 0, h = 5381;
++    for (NSUInteger i = 0; i < n; i++) h = h * 33 + ((const unsigned char *)p)[i];
++    return h;
++}
++static BOOL struct_equal(const void *a, const void *b, NSUInteger (*s)(const void *))
++{
++    if (a == b) return YES;
++    NSUInteger n = s ? s(a) : 0;
++    return n == (s ? s(b) : 0) && !memcmp(a, b, n);
++}
++static NSString *struct_describe(const void *p) { return [NSString stringWithFormat:@"<struct %p>", p]; }
++static NSUInteger integer_hash(const void *p, NSUInteger (*s)(const void *)) { return (NSUInteger)(uintptr_t)p; }
++static NSString *integer_describe(const void *p) { return [NSString stringWithFormat:@"%ld", (long)(intptr_t)p]; }
++static void release_object(const void *p, NSUInteger (*s)(const void *)) { [(id)p release]; }
++static void free_memory(const void *p, NSUInteger (*s)(const void *)) { free((void *)p); }
++static void *retain_object(const void *p, NSUInteger (*s)(const void *), BOOL copy)
++{
++    return copy ? (void *)[(id)p copy] : (void *)[(id)p retain];
++}
++static void *copy_memory(const void *p, NSUInteger (*s)(const void *), BOOL copy)
++{
++    if (!copy || !s) return (void *)p;
++    NSUInteger n = s(p);
++    void *m = malloc(n);
++    memcpy(m, p, n);
++    return m;
++}
++
++static Funcs
++funcs_for(NSPointerFunctionsOptions options)
++{
++    Funcs f;
++    memset(&f, 0, sizeof(f));
++    f.options = options;
++    NSUInteger memory = options & 0xFF, personality = options & 0xFF00;
++    f.copyIn = (options & NSPointerFunctionsCopyIn) != 0;
++    switch (personality) {
++    case NSPointerFunctionsOpaquePersonality: f.hash = pointer_hash; f.equal = pointer_equal; f.describe = pointer_describe; break;
++    case NSPointerFunctionsObjectPointerPersonality: f.hash = pointer_hash; f.equal = pointer_equal; f.describe = object_describe; break;
++    case NSPointerFunctionsCStringPersonality: f.hash = cstring_hash; f.equal = cstring_equal; f.describe = cstring_describe; f.size = cstring_size; break;
++    case NSPointerFunctionsStructPersonality: f.hash = struct_hash; f.equal = struct_equal; f.describe = struct_describe; break;
++    case NSPointerFunctionsIntegerPersonality: f.hash = integer_hash; f.equal = pointer_equal; f.describe = integer_describe; break;
++    default: f.hash = object_hash; f.equal = object_equal; f.describe = object_describe; break;
++    }
++    BOOL objects = personality == NSPointerFunctionsObjectPersonality || personality == NSPointerFunctionsObjectPointerPersonality;
++    switch (memory) {
++    case NSPointerFunctionsWeakMemory:
++        f.weak = YES;
++        break;
++    case NSPointerFunctionsMallocMemory:
++        f.relinquish = free_memory;
++        f.acquire = copy_memory;
++        break;
++    case NSPointerFunctionsOpaqueMemory:
++    case NSPointerFunctionsZeroingWeakMemory:
++    case NSPointerFunctionsMachVirtualMemory:
++        break;
++    default:
++        if (objects) {
++            f.acquire = retain_object;
++            f.relinquish = release_object;
++        }
++        break;
++    }
++    return f;
++}
++
++static NSUInteger
++f_hash(Funcs *f, id table, const void *p)
++{
++    if (f->legacy) return f->lhash ? f->lhash(table, p) : (NSUInteger)(uintptr_t)p >> 2;
++    return f->hash ? f->hash(p, f->size) : (NSUInteger)(uintptr_t)p >> 2;
++}
++
++static BOOL
++f_equal(Funcs *f, id table, const void *a, const void *b)
++{
++    if (f->legacy) return f->lequal ? f->lequal(table, a, b) : a == b;
++    return f->equal ? f->equal(a, b, f->size) : a == b;
++}
++
++static void *
++f_acquire(Funcs *f, id table, const void *p)
++{
++    if (f->legacy) {
++        if (f->lretain) f->lretain(table, p);
++        return (void *)p;
++    }
++    return f->acquire ? f->acquire(p, f->size, f->copyIn) : (void *)p;
++}
++
++static void
++f_relinquish(Funcs *f, id table, void *p)
++{
++    if (!p) return;
++    if (f->legacy) {
++        if (f->lrelease) f->lrelease(table, p);
++        return;
++    }
++    if (f->relinquish) f->relinquish(p, f->size);
++}
++
++static NSString *
++f_describe(Funcs *f, id table, const void *p)
++{
++    NSString *s = f->legacy ? (f->ldescribe ? f->ldescribe(table, p) : pointer_describe(p)) : (f->describe ? f->describe(p) : pointer_describe(p));
++    return s ? s : @"(null)";
++}
++
++/* A slot holds an item, weakly if the functions say so. */
++static void *
++slot_get(Funcs *f, void **slot)
++{
++    return f->weak ? (void *)objc_loadWeak((id *)slot) : *slot;
++}
++
++static void
++slot_set(Funcs *f, id table, void **slot, const void *p)
++{
++    if (f->weak) {
++        objc_storeWeak((id *)slot, (id)p);
++    } else {
++        *slot = f_acquire(f, table, p);
++    }
++}
++
++static void
++slot_clear(Funcs *f, id table, void **slot)
++{
++    if (f->weak) {
++        objc_storeWeak((id *)slot, nil);
++    } else {
++        void *old = *slot;
++        *slot = NULL;
++        f_relinquish(f, table, old);
++    }
++}
++
++/* MARK: - NSPointerFunctions */
++
++@interface NSPointerFunctions () {
++@public
++    Funcs _f;
++}
++@end
++
++/* (Apple's instances are NSConcretePointerFunctions) */
++@interface NSConcretePointerFunctions : NSPointerFunctions
++@end
++
++@implementation NSPointerFunctions
++
+++ (instancetype)allocWithZone:(NSZone *)zone
++{
++    if (self == [NSPointerFunctions class]) return [NSConcretePointerFunctions allocWithZone:zone];
++    return [super allocWithZone:zone];
++}
++
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options
++{
++    if ((self = [super init])) _f = funcs_for(options);
++    return self;
++}
++
++- (instancetype)init { return [self initWithOptions:0]; }
+++ (NSPointerFunctions *)pointerFunctionsWithOptions:(NSPointerFunctionsOptions)options { return [[[self alloc] initWithOptions:options] autorelease]; }
++
++- (id)copyWithZone:(NSZone *)zone
++{
++    NSPointerFunctions *c = [[[self class] allocWithZone:zone] initWithOptions:_f.options];
++    c->_f = _f;
++    return c;
++}
++
++- (NSUInteger (*)(const void *, NSUInteger (*)(const void *)))hashFunction { return _f.hash; }
++- (void)setHashFunction:(NSUInteger (*)(const void *, NSUInteger (*)(const void *)))fn { _f.hash = fn; }
++- (BOOL (*)(const void *, const void *, NSUInteger (*)(const void *)))isEqualFunction { return _f.equal; }
++- (void)setIsEqualFunction:(BOOL (*)(const void *, const void *, NSUInteger (*)(const void *)))fn { _f.equal = fn; }
++- (NSUInteger (*)(const void *))sizeFunction { return _f.size; }
++- (void)setSizeFunction:(NSUInteger (*)(const void *))fn { _f.size = fn; }
++- (NSString *(*)(const void *))descriptionFunction { return _f.describe; }
++- (void)setDescriptionFunction:(NSString *(*)(const void *))fn { _f.describe = fn; }
++- (void (*)(const void *, NSUInteger (*)(const void *)))relinquishFunction { return _f.relinquish; }
++- (void)setRelinquishFunction:(void (*)(const void *, NSUInteger (*)(const void *)))fn { _f.relinquish = fn; }
++- (void *(*)(const void *, NSUInteger (*)(const void *), BOOL))acquireFunction { return _f.acquire; }
++- (void)setAcquireFunction:(void *(*)(const void *, NSUInteger (*)(const void *), BOOL))fn { _f.acquire = fn; }
++- (BOOL)usesStrongWriteBarrier { return !_f.weak; }
++- (void)setUsesStrongWriteBarrier:(BOOL)flag { }
++- (BOOL)usesWeakReadAndWriteBarriers { return _f.weak; }
++- (void)setUsesWeakReadAndWriteBarriers:(BOOL)flag { _f.weak = flag; }
++
++@end
++
++@implementation NSConcretePointerFunctions
++@end
++
++static NSPointerFunctions *
++pointer_functions(Funcs f)
++{
++    NSPointerFunctions *p = [[[NSPointerFunctions alloc] initWithOptions:f.options] autorelease];
++    p->_f = f;
++    return p;
++}
++
++/* MARK: - The hash table under NSHashTable and NSMapTable */
++
++typedef struct Node {
++    struct Node *next;
++    NSUInteger hash;
++    void *key, *value;
++} Node;
++
++typedef struct {
++    Node **buckets;
++    NSUInteger capacity, count;
++    unsigned long mutations;
++} Table;
++
++static void
++table_init(Table *t, NSUInteger capacity)
++{
++    t->capacity = 8;
++    while (t->capacity < capacity * 2) t->capacity *= 2;
++    t->buckets = calloc(t->capacity, sizeof(Node *));
++    t->count = 0;
++}
++
++static void
++table_grow(Table *t)
++{
++    NSUInteger cap = t->capacity * 2;
++    Node **b = calloc(cap, sizeof(Node *));
++    for (NSUInteger i = 0; i < t->capacity; i++) {
++        for (Node *n = t->buckets[i], *next; n; n = next) {
++            next = n->next;
++            n->next = b[n->hash & (cap - 1)];
++            b[n->hash & (cap - 1)] = n;
++        }
++    }
++    free(t->buckets);
++    t->buckets = b;
++    t->capacity = cap;
++}
++
++static void
++node_free(Node *n, Funcs *kf, Funcs *vf, id table)
++{
++    slot_clear(kf, table, &n->key);
++    if (vf) slot_clear(vf, table, &n->value);
++    free(n);
++}
++
++/* Drop entries whose weak key or value is gone. */
++static void
++table_purge(Table *t, Funcs *kf, Funcs *vf, id table)
++{
++    if (!kf->weak && !(vf && vf->weak)) return;
++    for (NSUInteger i = 0; i < t->capacity; i++) {
++        for (Node **p = &t->buckets[i]; *p;) {
++            Node *n = *p;
++            BOOL dead = (kf->weak && !slot_get(kf, &n->key)) || (vf && vf->weak && !slot_get(vf, &n->value));
++            if (dead) {
++                *p = n->next;
++                node_free(n, kf, vf, table);
++                t->count--;
++                t->mutations++;
++            } else {
++                p = &n->next;
++            }
++        }
++    }
++}
++
++static Node *
++table_find(Table *t, Funcs *kf, id table, const void *key, NSUInteger hash)
++{
++    for (Node *n = t->buckets[hash & (t->capacity - 1)]; n; n = n->next) {
++        if (n->hash != hash) continue;
++        void *k = slot_get(kf, &n->key);
++        if (k && f_equal(kf, table, k, key)) return n;
++    }
++    return NULL;
++}
++
++static void
++table_remove(Table *t, Funcs *kf, Funcs *vf, id table, const void *key)
++{
++    NSUInteger h = f_hash(kf, table, key);
++    for (Node **p = &t->buckets[h & (t->capacity - 1)]; *p; p = &(*p)->next) {
++        Node *n = *p;
++        if (n->hash != h) continue;
++        void *k = slot_get(kf, &n->key);
++        if (k && f_equal(kf, table, k, key)) {
++            *p = n->next;
++            node_free(n, kf, vf, table);
++            t->count--;
++            t->mutations++;
++            return;
++        }
++    }
++}
++
++/* Insert or replace; returns the node. */
++static Node *
++table_set(Table *t, Funcs *kf, Funcs *vf, id table, const void *key, const void *value, BOOL replaceKey)
++{
++    NSUInteger h = f_hash(kf, table, key);
++    Node *n = table_find(t, kf, table, key, h);
++    if (n) {
++        if (vf) {
++            void *old = vf->weak ? NULL : n->value;
++            if (vf->weak) slot_set(vf, table, &n->value, value);
++            else {
++                n->value = f_acquire(vf, table, value);
++                f_relinquish(vf, table, old);
++            }
++        }
++        if (replaceKey) {
++            slot_clear(kf, table, &n->key);
++            slot_set(kf, table, &n->key, key);
++        }
++        t->mutations++;
++        return n;
++    }
++    if (t->count + 1 > t->capacity * 3 / 4) table_grow(t);
++    n = calloc(1, sizeof(Node));
++    n->hash = h;
++    slot_set(kf, table, &n->key, key);
++    if (vf) slot_set(vf, table, &n->value, value);
++    n->next = t->buckets[h & (t->capacity - 1)];
++    t->buckets[h & (t->capacity - 1)] = n;
++    t->count++;
++    t->mutations++;
++    return n;
++}
++
++static void
++table_clear(Table *t, Funcs *kf, Funcs *vf, id table)
++{
++    for (NSUInteger i = 0; i < t->capacity; i++) {
++        for (Node *n = t->buckets[i], *next; n; n = next) {
++            next = n->next;
++            node_free(n, kf, vf, table);
++        }
++        t->buckets[i] = NULL;
++    }
++    t->count = 0;
++    t->mutations++;
++}
++
++/* Each live entry's key and value, with its bucket. */
++static void
++table_each(Table *t, Funcs *kf, Funcs *vf, void (^fn)(NSUInteger bucket, void *key, void *value, BOOL *stop))
++{
++    BOOL stop = NO;
++    for (NSUInteger i = 0; i < t->capacity && !stop; i++) {
++        for (Node *n = t->buckets[i]; n && !stop; n = n->next) {
++            void *k = slot_get(kf, &n->key);
++            void *v = vf ? slot_get(vf, &n->value) : NULL;
++            if (!k || (vf && vf->weak && !v)) continue;
++            fn(i, k, v, &stop);
++        }
++    }
++}
++
++/* Fast enumeration over a snapshot kept alive by the autorelease pool. */
++static NSUInteger
++enumerate_snapshot(NSFastEnumerationState *state, id __unsafe_unretained buffer[], NSUInteger len, NSPointerArray *(^snapshot)(void))
++{
++    if (state->state == 0) {
++        NSMutableData *d = [NSMutableData data];
++        for (id o in [snapshot() allObjects]) [d appendBytes:&o length:sizeof(o)];
++        /* autoreleased: it lasts the enumeration, as the loop runs in this pool */
++        state->extra[1] = (unsigned long)(uintptr_t)d;
++        state->mutationsPtr = &state->extra[0];
++        state->state = 1;
++        state->extra[2] = 0;
++    }
++    NSData *d = (NSData *)(uintptr_t)state->extra[1];
++    NSUInteger total = [d length] / sizeof(id), at = state->extra[2], k = 0;
++    const id *items = [d bytes];
++    for (; at < total && k < len; at++, k++) buffer[k] = items[at];
++    state->extra[2] = at;
++    state->itemsPtr = buffer;
++    return k;
++}
++
++/* MARK: - NSHashTable */
++
++@interface NSConcreteHashTable : NSHashTable {
++@public
++    Funcs _f;
++    Table _t;
++}
++@end
++
++@implementation NSHashTable (PDObjectAPI)
++
+++ (instancetype)allocWithZone:(NSZone *)zone
++{
++    if (self == [NSHashTable class]) return [NSConcreteHashTable allocWithZone:zone];
++    return [super allocWithZone:zone];
++}
++
+++ (NSHashTable *)hashTableWithOptions:(NSPointerFunctionsOptions)options { return [[[self alloc] initWithOptions:options capacity:0] autorelease]; }
+++ (id)hashTableWithWeakObjects { return [self hashTableWithOptions:NSPointerFunctionsWeakMemory]; }
+++ (NSHashTable *)weakObjectsHashTable { return [self hashTableWithOptions:NSPointerFunctionsWeakMemory]; }
+++ (BOOL)supportsSecureCoding { return YES; }
++
++- (instancetype)init { return [self initWithOptions:0 capacity:0]; }
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options capacity:(NSUInteger)initialCapacity { return [super init]; }
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions capacity:(NSUInteger)initialCapacity { return [super init]; }
++
++- (void)encodeWithCoder:(NSCoder *)coder { [coder encodeObject:[self allObjects] forKey:@"NS.objects"]; }
++- (instancetype)initWithCoder:(NSCoder *)coder
++{
++    NSArray *a = [coder decodeObjectForKey:@"NS.objects"];
++    if ((self = [self initWithOptions:0 capacity:[a count]])) for (id o in a) [self addObject:o];
++    return self;
++}
++
++@end
++
++@implementation NSConcreteHashTable
++
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options capacity:(NSUInteger)initialCapacity
++{
++    if ((self = [super initWithOptions:options capacity:initialCapacity])) {
++        _f = funcs_for(options);
++        table_init(&_t, initialCapacity);
++    }
++    return self;
++}
++
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions capacity:(NSUInteger)initialCapacity
++{
++    if ((self = [super initWithOptions:0 capacity:initialCapacity])) {
++        _f = functions->_f;
++        table_init(&_t, initialCapacity);
++    }
++    return self;
++}
++
++- (void)dealloc
++{
++    table_clear(&_t, &_f, NULL, self);
++    free(_t.buckets);
++    [super dealloc];
++}
++
++- (NSPointerFunctions *)pointerFunctions { return pointer_functions(_f); }
++- (NSUInteger)count { table_purge(&_t, &_f, NULL, self); return _t.count; }
++
++- (id)member:(id)object
++{
++    if (!object) return nil;
++    Node *n = table_find(&_t, &_f, self, object, f_hash(&_f, self, object));
++    return n ? (id)slot_get(&_f, &n->key) : nil;
++}
++
++- (void)addObject:(id)object { if (object) table_set(&_t, &_f, NULL, self, object, NULL, NO); }
++- (void)removeObject:(id)object { if (object) table_remove(&_t, &_f, NULL, self, object); }
++- (void)removeAllObjects { table_clear(&_t, &_f, NULL, self); }
++- (BOOL)containsObject:(id)anObject { return [self member:anObject] != nil; }
++
++- (NSArray *)allObjects
++{
++    NSMutableArray *a = [NSMutableArray array];
++    table_each(&_t, &_f, NULL, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [a addObject:(id)k]; });
++    return a;
++}
++
++- (id)anyObject
++{
++    __block id any = nil;
++    table_each(&_t, &_f, NULL, ^(NSUInteger b, void *k, void *v, BOOL *stop) { any = (id)k; *stop = YES; });
++    return any;
++}
++
++- (NSEnumerator *)objectEnumerator { return [[self allObjects] objectEnumerator]; }
++- (NSSet *)setRepresentation { return [NSSet setWithArray:[self allObjects]]; }
++
++- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state objects:(id __unsafe_unretained [])buffer count:(NSUInteger)len
++{
++    return enumerate_snapshot(state, buffer, len, ^NSPointerArray *(void) {
++        NSPointerArray *p = [NSPointerArray pointerArrayWithOptions:NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality];
++        table_each(&_t, &_f, NULL, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [p addPointer:k]; });
++        return p;
++    });
++}
++
++- (BOOL)intersectsHashTable:(NSHashTable *)other
++{
++    for (id o in [self allObjects]) if ([other containsObject:o]) return YES;
++    return NO;
++}
++- (BOOL)isEqualToHashTable:(NSHashTable *)other { return [self count] == [other count] && [self isSubsetOfHashTable:other]; }
++- (BOOL)isSubsetOfHashTable:(NSHashTable *)other
++{
++    for (id o in [self allObjects]) if (![other containsObject:o]) return NO;
++    return YES;
++}
++- (void)intersectHashTable:(NSHashTable *)other { for (id o in [self allObjects]) if (![other containsObject:o]) [self removeObject:o]; }
++- (void)unionHashTable:(NSHashTable *)other { for (id o in [other allObjects]) [self addObject:o]; }
++- (void)minusHashTable:(NSHashTable *)other { for (id o in [other allObjects]) [self removeObject:o]; }
++- (BOOL)isEqual:(id)object { return object == self || ([object isKindOfClass:[NSHashTable class]] && [self isEqualToHashTable:object]); }
++- (NSUInteger)hash { return [self count]; }
++
++- (id)copyWithZone:(NSZone *)zone
++{
++    NSConcreteHashTable *c = [[NSConcreteHashTable allocWithZone:zone] initWithPointerFunctions:[self pointerFunctions] capacity:_t.count];
++    table_each(&_t, &_f, NULL, ^(NSUInteger b, void *k, void *v, BOOL *stop) { table_set(&c->_t, &c->_f, NULL, c, k, NULL, NO); });
++    return c;
++}
++
++/* Apple's: "NSHashTable {\n[bucket] item\n}\n". */
++- (NSString *)description
++{
++    NSMutableString *s = [NSMutableString stringWithString:@"NSHashTable {\n"];
++    table_each(&_t, &_f, NULL, ^(NSUInteger b, void *k, void *v, BOOL *stop) {
++        [s appendFormat:@"[%lu] %@\n", (unsigned long)b, f_describe(&_f, self, k)];
++    });
++    [s appendString:@"}\n"];
++    return s;
++}
++
++@end
++
++/* MARK: - NSMapTable */
++
++@interface NSConcreteMapTable : NSMapTable {
++@public
++    Funcs _kf, _vf;
++    Table _t;
++}
++@end
++
++@implementation NSMapTable (PDObjectAPI)
++
+++ (instancetype)allocWithZone:(NSZone *)zone
++{
++    if (self == [NSMapTable class]) return [NSConcreteMapTable allocWithZone:zone];
++    return [super allocWithZone:zone];
++}
++
+++ (BOOL)supportsSecureCoding { return YES; }
++
+++ (NSMapTable *)mapTableWithKeyOptions:(NSPointerFunctionsOptions)k valueOptions:(NSPointerFunctionsOptions)v
++{
++    return [[[self alloc] initWithKeyOptions:k valueOptions:v capacity:0] autorelease];
++}
+++ (id)mapTableWithStrongToStrongObjects { return [self mapTableWithKeyOptions:NSPointerFunctionsStrongMemory valueOptions:NSPointerFunctionsStrongMemory]; }
+++ (id)mapTableWithWeakToStrongObjects { return [self mapTableWithKeyOptions:NSPointerFunctionsWeakMemory valueOptions:NSPointerFunctionsStrongMemory]; }
+++ (id)mapTableWithStrongToWeakObjects { return [self mapTableWithKeyOptions:NSPointerFunctionsStrongMemory valueOptions:NSPointerFunctionsWeakMemory]; }
+++ (id)mapTableWithWeakToWeakObjects { return [self mapTableWithKeyOptions:NSPointerFunctionsWeakMemory valueOptions:NSPointerFunctionsWeakMemory]; }
+++ (NSMapTable *)strongToStrongObjectsMapTable { return [self mapTableWithStrongToStrongObjects]; }
+++ (NSMapTable *)weakToStrongObjectsMapTable { return [self mapTableWithWeakToStrongObjects]; }
+++ (NSMapTable *)strongToWeakObjectsMapTable { return [self mapTableWithStrongToWeakObjects]; }
+++ (NSMapTable *)weakToWeakObjectsMapTable { return [self mapTableWithWeakToWeakObjects]; }
++
++- (instancetype)init { return [self initWithKeyOptions:0 valueOptions:0 capacity:0]; }
++- (instancetype)initWithKeyOptions:(NSPointerFunctionsOptions)k valueOptions:(NSPointerFunctionsOptions)v capacity:(NSUInteger)c { return [super init]; }
++- (instancetype)initWithKeyPointerFunctions:(NSPointerFunctions *)k valuePointerFunctions:(NSPointerFunctions *)v capacity:(NSUInteger)c { return [super init]; }
++
++- (void)encodeWithCoder:(NSCoder *)coder
++{
++    NSDictionary *d = [self dictionaryRepresentation];
++    [coder encodeObject:[d allKeys] forKey:@"NS.keys"];
++    [coder encodeObject:[d allValues] forKey:@"NS.objects"];
++}
++
++- (instancetype)initWithCoder:(NSCoder *)coder
++{
++    NSArray *k = [coder decodeObjectForKey:@"NS.keys"];
++    NSArray *v = [coder decodeObjectForKey:@"NS.objects"];
++    if ((self = [self initWithKeyOptions:0 valueOptions:0 capacity:[k count]]))
++        for (NSUInteger i = 0; i < [k count] && i < [v count]; i++) [self setObject:[v objectAtIndex:i] forKey:[k objectAtIndex:i]];
++    return self;
++}
++
++@end
++
++@implementation NSConcreteMapTable
++
++- (instancetype)initWithKeyOptions:(NSPointerFunctionsOptions)k valueOptions:(NSPointerFunctionsOptions)v capacity:(NSUInteger)c
++{
++    if ((self = [super initWithKeyOptions:k valueOptions:v capacity:c])) {
++        _kf = funcs_for(k);
++        _vf = funcs_for(v);
++        table_init(&_t, c);
++    }
++    return self;
++}
++
++- (instancetype)initWithKeyPointerFunctions:(NSPointerFunctions *)k valuePointerFunctions:(NSPointerFunctions *)v capacity:(NSUInteger)c
++{
++    if ((self = [super initWithKeyOptions:0 valueOptions:0 capacity:c])) {
++        _kf = k->_f;
++        _vf = v->_f;
++        table_init(&_t, c);
++    }
++    return self;
++}
++
++- (void)dealloc
++{
++    table_clear(&_t, &_kf, &_vf, self);
++    free(_t.buckets);
++    [super dealloc];
++}
++
++- (NSPointerFunctions *)keyPointerFunctions { return pointer_functions(_kf); }
++- (NSPointerFunctions *)valuePointerFunctions { return pointer_functions(_vf); }
++- (NSUInteger)count { table_purge(&_t, &_kf, &_vf, self); return _t.count; }
++
++- (id)objectForKey:(id)aKey
++{
++    if (!aKey) return nil;
++    Node *n = table_find(&_t, &_kf, self, aKey, f_hash(&_kf, self, aKey));
++    return n ? (id)slot_get(&_vf, &n->value) : nil;
++}
++
++- (void)setObject:(id)anObject forKey:(id)aKey
++{
++    if (!aKey) return;
++    if (!anObject) { [self removeObjectForKey:aKey]; return; }
++    table_set(&_t, &_kf, &_vf, self, aKey, anObject, NO);
++}
++
++- (void)removeObjectForKey:(id)aKey { if (aKey) table_remove(&_t, &_kf, &_vf, self, aKey); }
++- (void)removeAllObjects { table_clear(&_t, &_kf, &_vf, self); }
++
++- (NSArray *)allKeys
++{
++    NSMutableArray *a = [NSMutableArray array];
++    table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [a addObject:(id)k]; });
++    return a;
++}
++
++- (NSArray *)allValues
++{
++    NSMutableArray *a = [NSMutableArray array];
++    table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [a addObject:(id)v]; });
++    return a;
++}
++
++- (NSEnumerator *)keyEnumerator { return [[self allKeys] objectEnumerator]; }
++- (NSEnumerator *)objectEnumerator { return [[self allValues] objectEnumerator]; }
++
++- (NSDictionary *)dictionaryRepresentation
++{
++    NSMutableDictionary *d = [NSMutableDictionary dictionary];
++    table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [d setObject:(id)v forKey:(id)k]; });
++    return d;
++}
++
++- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state objects:(id __unsafe_unretained [])buffer count:(NSUInteger)len
++{
++    return enumerate_snapshot(state, buffer, len, ^NSPointerArray *(void) {
++        NSPointerArray *p = [NSPointerArray pointerArrayWithOptions:NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality];
++        table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) { [p addPointer:k]; });
++        return p;
++    });
++}
++
++- (id)copyWithZone:(NSZone *)zone
++{
++    NSConcreteMapTable *c = [[NSConcreteMapTable allocWithZone:zone] initWithKeyPointerFunctions:[self keyPointerFunctions]
++                                                                           valuePointerFunctions:[self valuePointerFunctions] capacity:_t.count];
++    table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) { table_set(&c->_t, &c->_kf, &c->_vf, c, k, v, NO); });
++    return c;
++}
++
++/* Apple's: "NSMapTable {\n[bucket] key -> value\n}\n". */
++- (NSString *)description
++{
++    NSMutableString *s = [NSMutableString stringWithString:@"NSMapTable {\n"];
++    table_each(&_t, &_kf, &_vf, ^(NSUInteger b, void *k, void *v, BOOL *stop) {
++        [s appendFormat:@"[%lu] %@ -> %@\n", (unsigned long)b, f_describe(&_kf, self, k), f_describe(&_vf, self, v)];
++    });
++    [s appendString:@"}\n"];
++    return s;
++}
++
++@end
++
++/* MARK: - NSPointerArray */
++
++@interface NSConcretePointerArray : NSPointerArray {
++@public
++    Funcs _f;
++    void ***_cells;   /* each a malloc'd slot, so weak slots never move */
++    NSUInteger _n, _cap;
++    unsigned long _mutations;
++}
++@end
++
++@implementation NSPointerArray
++
+++ (instancetype)allocWithZone:(NSZone *)zone
++{
++    if (self == [NSPointerArray class]) return [NSConcretePointerArray allocWithZone:zone];
++    return [super allocWithZone:zone];
++}
++
+++ (BOOL)supportsSecureCoding { return YES; }
+++ (NSPointerArray *)pointerArrayWithOptions:(NSPointerFunctionsOptions)options { return [[[self alloc] initWithOptions:options] autorelease]; }
+++ (NSPointerArray *)pointerArrayWithPointerFunctions:(NSPointerFunctions *)functions { return [[[self alloc] initWithPointerFunctions:functions] autorelease]; }
+++ (id)pointerArrayWithStrongObjects { return [self pointerArrayWithOptions:NSPointerFunctionsStrongMemory]; }
+++ (id)pointerArrayWithWeakObjects { return [self pointerArrayWithOptions:NSPointerFunctionsWeakMemory]; }
+++ (NSPointerArray *)strongObjectsPointerArray { return [self pointerArrayWithOptions:NSPointerFunctionsStrongMemory]; }
+++ (NSPointerArray *)weakObjectsPointerArray { return [self pointerArrayWithOptions:NSPointerFunctionsWeakMemory]; }
++
++- (instancetype)init { return [self initWithOptions:0]; }
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options { return [super init]; }
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions { return [super init]; }
++
++- (void)encodeWithCoder:(NSCoder *)coder { [coder encodeObject:[self allObjects] forKey:@"NS.objects"]; }
++- (instancetype)initWithCoder:(NSCoder *)coder
++{
++    NSArray *a = [coder decodeObjectForKey:@"NS.objects"];
++    if ((self = [self initWithOptions:0])) for (id o in a) [self addPointer:o];
++    return self;
++}
++
++@end
++
++@implementation NSConcretePointerArray
++
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options
++{
++    if ((self = [super initWithOptions:options])) _f = funcs_for(options);
++    return self;
++}
++
++- (instancetype)initWithPointerFunctions:(NSPointerFunctions *)functions
++{
++    if ((self = [super initWithOptions:0])) _f = functions->_f;
++    return self;
++}
++
++- (void)dealloc
++{
++    for (NSUInteger i = 0; i < _n; i++) {
++        slot_clear(&_f, self, (void **)_cells[i]);
++        free(_cells[i]);
++    }
++    free(_cells);
++    [super dealloc];
++}
++
++- (NSPointerFunctions *)pointerFunctions { return pointer_functions(_f); }
++- (NSUInteger)count { return _n; }
++
++static void
++check_pa_index(NSConcretePointerArray *self, SEL _cmd, NSUInteger index, NSUInteger limit)
++{
++    if (index >= limit)
++        FinchRaise(NSRangeException, "*** -[NSConcretePointerArray %s]: attempt to access pointer at index %lu beyond bounds %lu",
++            sel_getName(_cmd), (unsigned long)index, (unsigned long)limit);
++}
++
++- (void *)pointerAtIndex:(NSUInteger)index
++{
++    check_pa_index(self, _cmd, index, _n);
++    return slot_get(&_f, (void **)_cells[index]);
++}
++
++- (void)insertPointer:(void *)item atIndex:(NSUInteger)index
++{
++    check_pa_index(self, _cmd, index, _n + 1);
++    if (_n == _cap) {
++        _cap = _cap ? _cap * 2 : 8;
++        _cells = realloc(_cells, _cap * sizeof(void **));
++    }
++    memmove(_cells + index + 1, _cells + index, (_n - index) * sizeof(void **));
++    _cells[index] = calloc(1, sizeof(void *));
++    if (item) slot_set(&_f, self, (void **)_cells[index], item);
++    _n++;
++    _mutations++;
++}
++
++- (void)addPointer:(void *)pointer { [self insertPointer:pointer atIndex:_n]; }
++
++- (void)removePointerAtIndex:(NSUInteger)index
++{
++    check_pa_index(self, _cmd, index, _n);
++    slot_clear(&_f, self, (void **)_cells[index]);
++    free(_cells[index]);
++    memmove(_cells + index, _cells + index + 1, (_n - index - 1) * sizeof(void **));
++    _n--;
++    _mutations++;
++}
++
++- (void)replacePointerAtIndex:(NSUInteger)index withPointer:(void *)item
++{
++    check_pa_index(self, _cmd, index, _n);
++    void **slot = (void **)_cells[index];
++    if (_f.weak) {
++        objc_storeWeak((id *)slot, (id)item);
++    } else {
++        void *old = *slot;
++        *slot = item ? f_acquire(&_f, self, item) : NULL;
++        f_relinquish(&_f, self, old);
++    }
++    _mutations++;
++}
++
++- (void)compact
++{
++    for (NSUInteger i = _n; i > 0; i--)
++        if (!slot_get(&_f, (void **)_cells[i - 1])) [self removePointerAtIndex:i - 1];
++}
++
++- (void)setCount:(NSUInteger)count
++{
++    while (_n > count) [self removePointerAtIndex:_n - 1];
++    while (_n < count) [self addPointer:NULL];
++}
++
++- (NSArray *)allObjects
++{
++    NSMutableArray *a = [NSMutableArray array];
++    for (NSUInteger i = 0; i < _n; i++) {
++        void *p = slot_get(&_f, (void **)_cells[i]);
++        if (p) [a addObject:(id)p];
++    }
++    return a;
++}
++
++- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state objects:(id __unsafe_unretained [])buffer count:(NSUInteger)len
++{
++    if (state->state == 0) state->mutationsPtr = &_mutations;
++    NSUInteger i = state->state, k = 0;
++    for (; i < _n && k < len; i++, k++) buffer[k] = (id)slot_get(&_f, (void **)_cells[i]);
++    state->state = i;
++    state->itemsPtr = buffer;
++    return k;
++}
++
++- (id)copyWithZone:(NSZone *)zone
++{
++    NSConcretePointerArray *c = [[NSConcretePointerArray allocWithZone:zone] initWithPointerFunctions:[self pointerFunctions]];
++    for (NSUInteger i = 0; i < _n; i++) [c addPointer:slot_get(&_f, (void **)_cells[i])];
++    return c;
++}
++
++@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h b/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h	2026-11-14 10:25:55.117992916 -0800
+@@ -0,0 +1,46 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSPointerFunctions, declared from the public names and values of
++ * macOS's Foundation (no SDK header copied). Implemented in NSPointerCollections.m
++ * (Finch's, MIT OR Apache-2.0).
++ */
++#ifndef NSPointerFunctions_h
++#define NSPointerFunctions_h
++
++#import <Foundation/NSObject.h>
++#import <Foundation/NSObjCRuntime.h>
++
++typedef NS_OPTIONS(NSUInteger, NSPointerFunctionsOptions) {
++    NSPointerFunctionsStrongMemory = (0UL << 0),
++    NSPointerFunctionsZeroingWeakMemory = (1UL << 0),
++    NSPointerFunctionsOpaqueMemory = (2UL << 0),
++    NSPointerFunctionsMallocMemory = (3UL << 0),
++    NSPointerFunctionsMachVirtualMemory = (4UL << 0),
++    NSPointerFunctionsWeakMemory = (5UL << 0),
++
++    NSPointerFunctionsObjectPersonality = (0UL << 8),
++    NSPointerFunctionsOpaquePersonality = (1UL << 8),
++    NSPointerFunctionsObjectPointerPersonality = (2UL << 8),
++    NSPointerFunctionsCStringPersonality = (3UL << 8),
++    NSPointerFunctionsStructPersonality = (4UL << 8),
++    NSPointerFunctionsIntegerPersonality = (5UL << 8),
++
++    NSPointerFunctionsCopyIn = (1UL << 16),
++};
++
++@interface NSPointerFunctions : NSObject <NSCopying>
++
++- (instancetype)initWithOptions:(NSPointerFunctionsOptions)options;
+++ (NSPointerFunctions *)pointerFunctionsWithOptions:(NSPointerFunctionsOptions)options;
++
++@property (nullable) NSUInteger (*hashFunction)(const void *item, NSUInteger (*_Nullable size)(const void *item));
++@property (nullable) BOOL (*isEqualFunction)(const void *item1, const void *item2, NSUInteger (*_Nullable size)(const void *item));
++@property (nullable) NSUInteger (*sizeFunction)(const void *item);
++@property (nullable) NSString *_Nullable (*descriptionFunction)(const void *item);
++@property (nullable) void (*relinquishFunction)(const void *item, NSUInteger (*_Nullable size)(const void *item));
++@property (nullable) void *_Nonnull (*acquireFunction)(const void *src, NSUInteger (*_Nullable size)(const void *item), BOOL shouldCopy);
++@property BOOL usesStrongWriteBarrier;
++@property BOOL usesWeakReadAndWriteBarriers;
++
++@end
++
++#endif /* NSPointerFunctions_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.h b/src/Frameworks/Foundation/Collections.subproj/NSSet.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-13 13:16:53.432324537 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-14 10:29:31.478715781 -0800
+@@ -42,6 +42,7 @@
+ - (BOOL)isEqualToSet:(NSSet *)other;
+ - (NSEnumerator *)objectEnumerator;
+ 
++- (NSSet *)setByAddingObject:(id)anObject;
+ - (NSSet *)setByAddingObjectsFromArray:(NSArray *)other;
+ @end
+ 
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:16:53.432324537 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-14 10:29:31.478822911 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -488,7 +1866,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  #import <Foundation/NSString.h>
  #import <Foundation/NSSet.h>
  #include <CoreFoundation/CFBase.h>
-@@ -627,3 +628,9 @@
+@@ -448,6 +449,12 @@
+ }
+ 
+ 
++- (NSSet *)setByAddingObject:(id)anObject {
++    NSMutableSet *result = [[self mutableCopy] autorelease];
++    [result addObject:anObject];
++    return [[result copy] autorelease];
++}
++
+ - (NSSet *)setByAddingObjectsFromArray:(NSArray *)other {
+     NSMutableSet *result = [[[NSMutableSet alloc] initWithSet:self] autorelease];
+ 
+@@ -627,3 +634,9 @@
  }
  
  @end
@@ -498,9 +1889,138 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +    return [[[self alloc] initWithArray:set != nil ? [set allObjects] : [NSArray array]] autorelease];
 +}
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h
+--- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-13 13:16:53.433353953 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-14 10:29:51.374487410 -0800
+@@ -37,10 +37,31 @@
+ 
+ #define NSUndefinedDateComponent NSIntegerMax
+ 
++@class NSCalendar;
++
++/* SiliconForest: calendar identifiers and the components' calendar and time zone (macOS's names) */
++typedef NSString *NSCalendarIdentifier;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierGregorian;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierISO8601;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierBuddhist;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierChinese;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierHebrew;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierIslamic;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierJapanese;
++FOUNDATION_EXPORT NSCalendarIdentifier const NSCalendarIdentifierPersian;
++
+ @interface NSDateComponents : NSObject <NSCopying> {
+     NSInteger _era, _year, _month, _day, _hour, _minute, _second, _weekday;
++    NSCalendar *_calendar;
++    NSTimeZone *_timeZone;
+ }
+ 
++- (NSCalendar *)calendar;
++- (void)setCalendar:(NSCalendar *)calendar;
++- (NSTimeZone *)timeZone;
++- (void)setTimeZone:(NSTimeZone *)timeZone;
++- (NSDate *)date;
++
+ - (NSInteger)era;
+ - (NSInteger)year;
+ - (NSInteger)month;
+@@ -64,6 +85,9 @@
+ @interface NSCalendar : NSObject <NSCopying>
+ 
+ + (NSCalendar *)currentCalendar;
+++ (NSCalendar *)autoupdatingCurrentCalendar;
+++ (NSCalendar *)calendarWithIdentifier:(NSCalendarIdentifier)calendarIdentifierConstant;
++- (NSCalendarIdentifier)calendarIdentifier;
+ 
+ - (instancetype)initWithCalendarIdentifier:(NSString *)identifier;
+ 
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m
+--- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-13 13:16:53.433353953 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-14 10:30:04.451227097 -0800
+@@ -15,6 +15,21 @@
+ /* Gregorian only, via the C library's civil-time conversion. Non-Gregorian
+  * identifiers are accepted and behave as Gregorian. */
+ 
++/* SiliconForest: macOS's identifier values; a calendar keeps the identifier it was made with */
++NSCalendarIdentifier const NSCalendarIdentifierGregorian = @"gregorian";
++NSCalendarIdentifier const NSCalendarIdentifierISO8601 = @"iso8601";
++NSCalendarIdentifier const NSCalendarIdentifierBuddhist = @"buddhist";
++NSCalendarIdentifier const NSCalendarIdentifierChinese = @"chinese";
++NSCalendarIdentifier const NSCalendarIdentifierHebrew = @"hebrew";
++NSCalendarIdentifier const NSCalendarIdentifierIslamic = @"islamic";
++NSCalendarIdentifier const NSCalendarIdentifierJapanese = @"japanese";
++NSCalendarIdentifier const NSCalendarIdentifierPersian = @"persian";
++
++@interface NSCalendar () {
++    NSString *_identifier;
++}
++@end
++
+ @implementation NSDateComponents
+ 
+ - (instancetype)init {
+@@ -45,9 +60,24 @@
+ - (void)setSecond:(NSInteger)value { _second = value; }
+ - (void)setWeekday:(NSInteger)value { _weekday = value; }
+ 
++- (NSCalendar *)calendar { return _calendar; }
++- (void)setCalendar:(NSCalendar *)calendar { [calendar retain]; [_calendar release]; _calendar = calendar; }
++- (NSTimeZone *)timeZone { return _timeZone; }
++- (void)setTimeZone:(NSTimeZone *)timeZone { [timeZone retain]; [_timeZone release]; _timeZone = timeZone; }
++- (NSDate *)date { return [(_calendar ? _calendar : [NSCalendar currentCalendar]) dateFromComponents:self]; }
++
++- (void)dealloc {
++    [_calendar release];
++    [_timeZone release];
++    [super dealloc];
++}
++
+ - (id)copyWithZone:(NSZone *)zone {
+     NSDateComponents *copy = [[NSDateComponents alloc] init];
+ 
++    copy->_calendar = [_calendar retain];
++    copy->_timeZone = [_timeZone retain];
++
+     copy->_era = _era;
+     copy->_year = _year;
+     copy->_month = _month;
+@@ -72,8 +102,32 @@
+     return shared;
+ }
+ 
+++ (NSCalendar *)autoupdatingCurrentCalendar {
++    return [self currentCalendar];
++}
++
+++ (NSCalendar *)calendarWithIdentifier:(NSCalendarIdentifier)identifier {
++    return [[[self alloc] initWithCalendarIdentifier:identifier] autorelease];
++}
++
+ - (instancetype)initWithCalendarIdentifier:(NSString *)identifier {
+-    return [super init];
++    if (identifier == nil) {
++        [self release];
++        return nil;
++    }
++    if ((self = [super init]) != nil) {
++        _identifier = [identifier copy];
++    }
++    return self;
++}
++
++- (NSCalendarIdentifier)calendarIdentifier {
++    return _identifier ? _identifier : NSCalendarIdentifierGregorian;
++}
++
++- (void)dealloc {
++    [_identifier release];
++    [super dealloc];
+ }
+ 
+ - (NSDateComponents *)components:(NSCalendarUnit)units fromDate:(NSDate *)date {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
---- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
-+++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:16:53.434019832 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:36:45.978142073 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -535,8 +2055,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
 +}
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
---- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:16:53.434448999 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:36:45.975985919 -0800
 @@ -189,3 +189,15 @@
  }
  
@@ -554,8 +2074,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 +- (NSUInteger)formatterBehavior { return 1040; }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m
---- a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-13 13:16:53.434448999 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-13 18:29:24.849932934 -0800
 @@ -20,6 +20,10 @@
  
  @implementation NSNumberFormatter
@@ -567,9 +2087,450 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
  + (NSNumberFormatterBehavior)defaultFormatterBehavior {
      return defaultBehavior;
  }
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h	2026-11-14 10:28:44.585138426 -0800
+@@ -0,0 +1,47 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSPersonNameComponentsFormatter, declared from the public names and values of
++ * macOS's Foundation (no SDK header copied). Implemented in NSPersonNameComponents.m (Finch's,
++ * MIT OR Apache-2.0).
++ */
++#ifndef NSPersonNameComponentsFormatter_h
++#define NSPersonNameComponentsFormatter_h
++
++#import <Foundation/NSFormatter.h>
++#import <Foundation/NSPersonNameComponents.h>
++
++@class NSAttributedString, NSLocale;
++
++typedef NS_ENUM(NSInteger, NSPersonNameComponentsFormatterStyle) {
++    NSPersonNameComponentsFormatterStyleDefault = 0,
++    NSPersonNameComponentsFormatterStyleShort,
++    NSPersonNameComponentsFormatterStyleMedium,
++    NSPersonNameComponentsFormatterStyleLong,
++    NSPersonNameComponentsFormatterStyleAbbreviated
++};
++
++typedef NS_OPTIONS(NSUInteger, NSPersonNameComponentsFormatterOptions) {
++    NSPersonNameComponentsFormatterPhonetic = (1UL << 1)
++};
++
++@interface NSPersonNameComponentsFormatter : NSFormatter
++@property NSPersonNameComponentsFormatterStyle style;
++@property (getter=isPhonetic) BOOL phonetic;
++@property (null_resettable, copy) NSLocale *locale;
+++ (NSString *)localizedStringFromPersonNameComponents:(NSPersonNameComponents *)components
++                                                style:(NSPersonNameComponentsFormatterStyle)nameFormatStyle
++                                              options:(NSPersonNameComponentsFormatterOptions)nameOptions;
++- (NSString *)stringFromPersonNameComponents:(NSPersonNameComponents *)components;
++- (NSAttributedString *)annotatedStringFromPersonNameComponents:(NSPersonNameComponents *)components;
++- (NSPersonNameComponents *)personNameComponentsFromString:(NSString *)string;
++@end
++
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentKey;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentGivenName;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentFamilyName;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentMiddleName;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentPrefix;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentSuffix;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentNickname;
++FOUNDATION_EXPORT NSString *const NSPersonNameComponentDelimiter;
++
++#endif /* NSPersonNameComponentsFormatter_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h	2026-11-14 10:28:44.584154392 -0800
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSPersonNameComponents, declared from the public names of macOS's Foundation
++ * (no SDK header copied). Implemented in NSPersonNameComponents.m (Finch's, MIT OR Apache-2.0).
++ */
++#ifndef NSPersonNameComponents_h
++#define NSPersonNameComponents_h
++
++#import <Foundation/NSObject.h>
++
++@class NSString;
++
++@interface NSPersonNameComponents : NSObject <NSCopying, NSCoding>
++- (instancetype)initWithNamePrefix:(NSString *)namePrefix givenName:(NSString *)givenName middleName:(NSString *)middleName
++                        familyName:(NSString *)familyName nameSuffix:(NSString *)nameSuffix nickname:(NSString *)nickname;
++@property (copy) NSString *namePrefix;
++@property (copy) NSString *givenName;
++@property (copy) NSString *middleName;
++@property (copy) NSString *familyName;
++@property (copy) NSString *nameSuffix;
++@property (copy) NSString *nickname;
++@property (copy) NSPersonNameComponents *phoneticRepresentation;
++@end
++
++#endif /* NSPersonNameComponents_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m	2026-11-14 10:28:44.586974872 -0800
+@@ -0,0 +1,358 @@
++/*
++ * Copyright (c) 2026 The Finch Project contributors.
++ * SPDX-License-Identifier: MIT OR Apache-2.0
++ *
++ * SiliconForest (docs/roadmap/issues/SF-AA-activity-monitor.md, "Taken from Finch"): NSPersonNameComponents
++ * from Finch's userland/Foundation/NSForSwiftFoundation.m and NSPersonNameComponentsFormatter from its
++ * NSLocalizedFormatters.m (the formatter's part only, not the ICU list and relative-date formatters), at
++ * 2d9b1bb, unchanged; the includes are ours.
++ */
++#import <Foundation/Foundation.h>
++#import <Foundation/NSPersonNameComponents.h>
++#import <Foundation/NSPersonNameComponentsFormatter.h>
++#include "../Runtime.subproj/PDFinch.h"
++
++@implementation NSPersonNameComponents {
++    NSString *_namePrefix, *_givenName, *_middleName, *_familyName, *_nameSuffix, *_nickname;
++    NSPersonNameComponents *_phoneticRepresentation;
++}
++@synthesize namePrefix = _namePrefix, givenName = _givenName, middleName = _middleName, familyName = _familyName,
++            nameSuffix = _nameSuffix, nickname = _nickname, phoneticRepresentation = _phoneticRepresentation;
+++ (BOOL)supportsSecureCoding { return YES; }
++- (instancetype)initWithNamePrefix:(NSString *)namePrefix givenName:(NSString *)givenName middleName:(NSString *)middleName
++                        familyName:(NSString *)familyName nameSuffix:(NSString *)nameSuffix nickname:(NSString *)nickname
++{
++    if ((self = [super init])) {
++        _namePrefix = [namePrefix copy];
++        _givenName = [givenName copy];
++        _middleName = [middleName copy];
++        _familyName = [familyName copy];
++        _nameSuffix = [nameSuffix copy];
++        _nickname = [nickname copy];
++    }
++    return self;
++}
++- (void)dealloc
++{
++    [_namePrefix release]; [_givenName release]; [_middleName release]; [_familyName release];
++    [_nameSuffix release]; [_nickname release]; [_phoneticRepresentation release];
++    [super dealloc];
++}
++- (id)copyWithZone:(struct _NSZone *)zone
++{
++    NSPersonNameComponents *c = [[NSPersonNameComponents alloc] initWithNamePrefix:_namePrefix givenName:_givenName
++        middleName:_middleName familyName:_familyName nameSuffix:_nameSuffix nickname:_nickname];
++    c.phoneticRepresentation = _phoneticRepresentation;
++    return c;
++}
++static NSString *const PNCKeys[] = { @"NS.namePrefix", @"NS.givenName", @"NS.middleName", @"NS.familyName",
++                                     @"NS.nameSuffix", @"NS.nickname" };
++- (NSString **)_slots:(NSUInteger)i
++{
++    NSString **slots[] = { &_namePrefix, &_givenName, &_middleName, &_familyName, &_nameSuffix, &_nickname };
++    return slots[i];
++}
++- (void)encodeWithCoder:(NSCoder *)coder
++{
++    for (NSUInteger i = 0; i < 6; i++) if (*[self _slots:i]) [coder encodeObject:*[self _slots:i] forKey:PNCKeys[i]];
++    if (_phoneticRepresentation) [coder encodeObject:_phoneticRepresentation forKey:@"NS.phoneticRepresentation"];
++}
++- (instancetype)initWithCoder:(NSCoder *)coder
++{
++    if ((self = [super init])) {
++        for (NSUInteger i = 0; i < 6; i++)
++            *[self _slots:i] = [[coder decodeObjectOfClass:[NSString class] forKey:PNCKeys[i]] copy];
++        _phoneticRepresentation = [[coder decodeObjectOfClass:[NSPersonNameComponents class]
++                                                      forKey:@"NS.phoneticRepresentation"] retain];
++    }
++    return self;
++}
++- (BOOL)isEqual:(id)other
++{
++    if (other == self) return YES;
++    if (![other isKindOfClass:[NSPersonNameComponents class]]) return NO;
++    NSPersonNameComponents *o = other;
++    for (NSUInteger i = 0; i < 6; i++) {
++        NSString *a = *[self _slots:i], *b = *[o _slots:i];
++        if (a != b && ![a isEqual:b]) return NO;
++    }
++    return _phoneticRepresentation == o->_phoneticRepresentation || [_phoneticRepresentation isEqual:o->_phoneticRepresentation];
++}
++- (NSUInteger)hash { return [_givenName hash] ^ [_familyName hash]; }
++@end
++
++
++/* --- NSPersonNameComponentsFormatter --- */
++
++NSString *const NSPersonNameComponentKey = @"NSPersonNameComponentKey";
++NSString *const NSPersonNameComponentGivenName = @"givenName";
++NSString *const NSPersonNameComponentFamilyName = @"familyName";
++NSString *const NSPersonNameComponentMiddleName = @"middleName";
++NSString *const NSPersonNameComponentPrefix = @"namePrefix";
++NSString *const NSPersonNameComponentSuffix = @"nameSuffix";
++NSString *const NSPersonNameComponentNickname = @"nickname";
++NSString *const NSPersonNameComponentDelimiter = @"delimiter";
++
++static BOOL
++is_cjk(NSString *s)
++{
++    for (NSUInteger i = 0; i < s.length; i++) {
++        unichar c = [s characterAtIndex:i];
++        if ((c >= 0x3040 && c <= 0x30FF) || (c >= 0x3400 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7AF) || (c >= 0xF900 && c <= 0xFAFF))
++            return YES;
++    }
++    return NO;
++}
++
++static BOOL
++family_first(NSLocale *locale)
++{
++    NSString *language = [locale objectForKey:NSLocaleLanguageCode];
++    return [@[ @"ja", @"zh", @"ko", @"vi", @"hu" ] containsObject:language ?: @""];
++}
++
++/* A name as pieces (text, component key), for both strings and annotated strings. */
++typedef struct {
++    NSMutableArray *texts, *keys;
++} Pieces;
++
++static void
++add(Pieces *p, NSString *text, NSString *key)
++{
++    if (!text.length)
++        return;
++    if (p->texts.count && key) {
++        [p->texts addObject:@" "];
++        [p->keys addObject:NSPersonNameComponentDelimiter];
++    }
++    [p->texts addObject:text];
++    [p->keys addObject:key];
++}
++
++static NSString *
++initial(NSString *s)
++{
++    return s.length ? [[s substringToIndex:[s rangeOfComposedCharacterSequenceAtIndex:0].length] uppercaseString] : @"";
++}
++
++@implementation NSPersonNameComponentsFormatter {
++    NSPersonNameComponentsFormatterStyle _style;
++    BOOL _phonetic;
++    NSLocale *_locale;
++}
++
++- (void)dealloc
++{
++    [_locale release];
++    [super dealloc];
++}
++
++- (NSPersonNameComponentsFormatterStyle)style { return _style; }
++- (void)setStyle:(NSPersonNameComponentsFormatterStyle)style { _style = style; }
++- (BOOL)isPhonetic { return _phonetic; }
++- (void)setPhonetic:(BOOL)phonetic { _phonetic = phonetic; }
++- (NSLocale *)locale { return _locale ?: [NSLocale autoupdatingCurrentLocale]; }
++- (void)setLocale:(NSLocale *)locale { [_locale autorelease]; _locale = [locale copy]; }
++
++- (Pieces)_pieces:(NSPersonNameComponents *)c
++{
++    Pieces p = {[NSMutableArray array], [NSMutableArray array]};
++    if (_phonetic && c.phoneticRepresentation)
++        c = c.phoneticRepresentation;
++    NSString *given = c.givenName, *family = c.familyName;
++    if (is_cjk(given) || is_cjk(family)) {
++        /* (family name first, no space between) */
++        if (_style == NSPersonNameComponentsFormatterStyleAbbreviated) {
++            [p.texts addObject:family.length ? family : given ?: @""];
++            [p.keys addObject:family.length ? NSPersonNameComponentFamilyName : NSPersonNameComponentGivenName];
++            return p;
++        }
++        if (family.length) {
++            [p.texts addObject:family];
++            [p.keys addObject:NSPersonNameComponentFamilyName];
++        }
++        if (given.length) {
++            [p.texts addObject:given];
++            [p.keys addObject:NSPersonNameComponentGivenName];
++        }
++        return p;
++    }
++    BOOL reversed = family_first(self.locale);
++    switch (_style) {
++    case NSPersonNameComponentsFormatterStyleShort:
++        if (c.nickname.length)
++            add(&p, c.nickname, NSPersonNameComponentNickname);
++        else
++            add(&p, given.length ? given : family, given.length ? NSPersonNameComponentGivenName : NSPersonNameComponentFamilyName);
++        break;
++    case NSPersonNameComponentsFormatterStyleLong:
++        add(&p, c.namePrefix, NSPersonNameComponentPrefix);
++        if (reversed) {
++            add(&p, family, NSPersonNameComponentFamilyName);
++            add(&p, given, NSPersonNameComponentGivenName);
++            add(&p, c.middleName, NSPersonNameComponentMiddleName);
++        } else {
++            add(&p, given, NSPersonNameComponentGivenName);
++            add(&p, c.middleName, NSPersonNameComponentMiddleName);
++            add(&p, family, NSPersonNameComponentFamilyName);
++        }
++        add(&p, c.nameSuffix, NSPersonNameComponentSuffix);
++        break;
++    case NSPersonNameComponentsFormatterStyleAbbreviated: {
++        NSString *a = initial(given), *b = initial(family);
++        NSString *s = reversed ? [b stringByAppendingString:a] : [a stringByAppendingString:b];
++        if (s.length) {
++            [p.texts addObject:s];
++            [p.keys addObject:NSPersonNameComponentGivenName];
++        }
++        break;
++    }
++    default:
++        if (reversed) {
++            add(&p, family, NSPersonNameComponentFamilyName);
++            add(&p, given, NSPersonNameComponentGivenName);
++        } else {
++            add(&p, given, NSPersonNameComponentGivenName);
++            add(&p, family, NSPersonNameComponentFamilyName);
++        }
++        break;
++    }
++    return p;
++}
++
++- (NSString *)stringFromPersonNameComponents:(NSPersonNameComponents *)components
++{
++    return [[self _pieces:components].texts componentsJoinedByString:@""];
++}
++
++- (NSAttributedString *)annotatedStringFromPersonNameComponents:(NSPersonNameComponents *)components
++{
++    Pieces p = [self _pieces:components];
++    NSMutableAttributedString *s = [[[NSMutableAttributedString alloc] init] autorelease];
++    for (NSUInteger i = 0; i < p.texts.count; i++)
++        [s appendAttributedString:[[[NSAttributedString alloc] initWithString:p.texts[i] attributes:@{NSPersonNameComponentKey : p.keys[i]}]
++                                      autorelease]];
++    return s;
++}
++
+++ (NSString *)localizedStringFromPersonNameComponents:(NSPersonNameComponents *)components
++                                                style:(NSPersonNameComponentsFormatterStyle)nameFormatStyle
++                                              options:(NSPersonNameComponentsFormatterOptions)nameOptions
++{
++    NSPersonNameComponentsFormatter *f = [[self new] autorelease];
++    f.style = nameFormatStyle;
++    f.phonetic = (nameOptions & NSPersonNameComponentsFormatterPhonetic) != 0;
++    return [f stringFromPersonNameComponents:components];
++}
++
++/* As Apple's, by its rules if not its name lists: "Given Family", "Given Family Family"
++   for three names, "Given... Middle Family" for four or more, "Family, Given", a title
++   before and a suffix after (a title and one name is a family name), a name in CJK
++   script family first (an unspaced name of two or three characters split after its
++   first), and nothing from text with no letters or only Arabic letters. Words without
++   letters are left out. */
++static BOOL
++has_letter(NSString *w)
++{
++    return [w rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound;
++}
++
++static BOOL
++is_arabic(NSString *w)
++{
++    for (NSUInteger i = 0; i < w.length; i++) {
++        unichar c = [w characterAtIndex:i];
++        if ([[NSCharacterSet letterCharacterSet] characterIsMember:c] && !((c >= 0x0600 && c <= 0x06FF) || (c >= 0x0750 && c <= 0x077F)))
++            return NO;
++    }
++    return YES;
++}
++
++- (NSPersonNameComponents *)personNameComponentsFromString:(NSString *)string
++{
++    NSPersonNameComponents *c = [[NSPersonNameComponents new] autorelease];
++    NSString *s = [string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++    NSMutableArray *words = [NSMutableArray array];
++    for (NSString *w in [s componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]])
++        if (w.length && has_letter(w))
++            [words addObject:w];
++    BOOL arabic = YES;
++    for (NSString *w in words)
++        arabic = arabic && is_arabic(w);
++    if (!words.count || arabic)
++        return nil;
++    if (is_cjk(s)) {
++        if (words.count > 1) {
++            c.familyName = words.firstObject;
++            c.givenName = [[words subarrayWithRange:NSMakeRange(1, words.count - 1)] componentsJoinedByString:@" "];
++        } else if (s.length == 2 || s.length == 3) {
++            NSRange first = [s rangeOfComposedCharacterSequenceAtIndex:0];
++            c.familyName = [s substringWithRange:first];
++            c.givenName = [s substringFromIndex:NSMaxRange(first)];
++        } else {
++            c.givenName = s;
++        }
++        return c;
++    }
++    NSRange comma = [s rangeOfString:@","];
++    if (comma.location != NSNotFound) {
++        c.familyName = [[s substringToIndex:comma.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
++        c.givenName = [[s substringFromIndex:NSMaxRange(comma)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
++        return c;
++    }
++    NSArray *prefixes = @[ @"Dr.", @"Dr", @"Mr.", @"Mr", @"Mrs.", @"Mrs", @"Ms.", @"Ms", @"Miss", @"Prof.", @"Sir", @"Dame" ];
++    NSArray *suffixes = @[ @"Jr.", @"Jr", @"Sr.", @"Sr", @"II", @"III", @"IV", @"PhD", @"Ph.D.", @"MD", @"M.D.", @"Esq." ];
++    if (words.count > 1 && [prefixes containsObject:words.firstObject]) {
++        c.namePrefix = words.firstObject;
++        [words removeObjectAtIndex:0];
++        if (words.count == 1) {
++            c.familyName = words.firstObject;
++            return c;
++        }
++    }
++    if (words.count > 1 && [suffixes containsObject:words.lastObject]) {
++        c.nameSuffix = words.lastObject;
++        [words removeLastObject];
++    }
++    NSUInteger n = words.count;
++    if (n == 1)
++        c.givenName = words.firstObject;
++    else if (n == 2) {
++        c.givenName = words.firstObject;
++        c.familyName = words.lastObject;
++    } else if (n == 3) {
++        c.givenName = words.firstObject;
++        c.familyName = [[words subarrayWithRange:NSMakeRange(1, 2)] componentsJoinedByString:@" "];
++    } else if (n > 3) {
++        c.givenName = [[words subarrayWithRange:NSMakeRange(0, n - 2)] componentsJoinedByString:@" "];
++        c.middleName = [words objectAtIndex:n - 2];
++        c.familyName = words.lastObject;
++    }
++    return c;
++}
++
++- (NSString *)stringForObjectValue:(id)obj
++{
++    return [obj isKindOfClass:[NSPersonNameComponents class]] ? [self stringFromPersonNameComponents:obj] : nil;
++}
++
++- (BOOL)getObjectValue:(out id *)obj forString:(NSString *)string errorDescription:(out NSString **)error
++{
++    NSPersonNameComponents *components = [self personNameComponentsFromString:string];
++    if (obj)
++        *obj = components;
++    if (!components && error)
++        *error = @"Person's name could not be detected";
++    return components != nil;
++}
++
++- (id)copyWithZone:(NSZone *)zone
++{
++    NSPersonNameComponentsFormatter *c = [[[self class] allocWithZone:zone] init];
++    c.style = _style;
++    c.phonetic = _phonetic;
++    c.locale = _locale;
++    return c;
++}
++
++@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 13:16:53.434729533 -0800
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-14 02:50:14.341897114 -0800
 @@ -21,6 +21,8 @@
  #include <string.h>
  #include <stdio.h>
@@ -1022,8 +2983,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath { return kvcOperate(self, name, keyPath); }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-13 13:16:53.434729533 -0800
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-14 09:26:26.693833210 -0800
 @@ -16,6 +16,13 @@
  #import <Foundation/NSLock.h>
  #import <Foundation/NSSet.h>
@@ -1690,9 +3651,1163 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  @implementation NSArray (NSKeyValueObserverRegistration)
  
  - (void)addObserver:(NSObject *)observer
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h
+--- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-13 13:16:53.434958194 -0800
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-14 10:29:07.581041167 -0800
+@@ -25,6 +25,7 @@
+ @interface NSLocale : NSObject <NSCopying>
+ 
+ + (NSLocale *)currentLocale;
+++ (NSLocale *)autoupdatingCurrentLocale;
+ + (NSLocale *)systemLocale;
+ + (NSArray *)preferredLanguages;
+ 
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m
+--- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-13 13:16:53.434958194 -0800
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-14 10:29:13.160444558 -0800
+@@ -25,6 +25,11 @@
+     return (NSLocale *)CFAutorelease(CFLocaleCopyCurrent());
+ }
+ 
++/* SiliconForest: the current locale does not change while a program runs here */
+++ (NSLocale *)autoupdatingCurrentLocale {
++    return [self currentLocale];
++}
++
+ + (NSLocale *)systemLocale {
+     return (NSLocale *)CFLocaleGetSystem();
+ }
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h
+--- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	2026-11-14 10:28:14.132949486 -0800
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSDecimal and its functions, declared from the public names, layout and values
++ * of macOS's Foundation (no SDK header copied). Implemented in NSDecimal.m (Finch's, MIT OR
++ * Apache-2.0).
++ */
++#ifndef NSDecimal_h
++#define NSDecimal_h
++
++#import <Foundation/NSObjCRuntime.h>
++
++@class NSString;
++
++typedef NS_ENUM(NSUInteger, NSRoundingMode) {
++    NSRoundPlain,
++    NSRoundDown,
++    NSRoundUp,
++    NSRoundBankers
++};
++
++typedef NS_ENUM(NSUInteger, NSCalculationError) {
++    NSCalculationNoError = 0,
++    NSCalculationLossOfPrecision,
++    NSCalculationUnderflow,
++    NSCalculationOverflow,
++    NSCalculationDivideByZero
++};
++
++#define NSDecimalMaxSize (8)
++#define NSDecimalNoScale SHRT_MAX
++
++typedef struct {
++    signed int _exponent : 8;
++    unsigned int _length : 4;
++    unsigned int _isNegative : 1;
++    unsigned int _isCompact : 1;
++    unsigned int _reserved : 18;
++    unsigned short _mantissa[NSDecimalMaxSize];
++} NSDecimal;
++
++static __inline__ BOOL NSDecimalIsNotANumber(const NSDecimal *dcm)
++{
++    return ((dcm->_length == 0) && dcm->_isNegative);
++}
++
++FOUNDATION_EXPORT void NSDecimalCopy(NSDecimal *destination, const NSDecimal *source);
++FOUNDATION_EXPORT void NSDecimalCompact(NSDecimal *number);
++FOUNDATION_EXPORT NSComparisonResult NSDecimalCompare(const NSDecimal *leftOperand, const NSDecimal *rightOperand);
++FOUNDATION_EXPORT void NSDecimalRound(NSDecimal *result, const NSDecimal *number, NSInteger scale, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalNormalize(NSDecimal *number1, NSDecimal *number2, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalAdd(NSDecimal *result, const NSDecimal *leftOperand, const NSDecimal *rightOperand, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalSubtract(NSDecimal *result, const NSDecimal *leftOperand, const NSDecimal *rightOperand, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalMultiply(NSDecimal *result, const NSDecimal *leftOperand, const NSDecimal *rightOperand, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalDivide(NSDecimal *result, const NSDecimal *leftOperand, const NSDecimal *rightOperand, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalPower(NSDecimal *result, const NSDecimal *number, NSUInteger power, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSCalculationError NSDecimalMultiplyByPowerOf10(NSDecimal *result, const NSDecimal *number, short power, NSRoundingMode roundingMode);
++FOUNDATION_EXPORT NSString *NSDecimalString(const NSDecimal *dcm, id locale);
++
++#endif /* NSDecimal_h */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m
+--- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m	2026-11-14 10:28:14.143492624 -0800
+@@ -0,0 +1,965 @@
++/*
++ * Copyright (c) 2026 The Finch Project contributors.
++ * SPDX-License-Identifier: MIT OR Apache-2.0
++ *
++ * Decimal arithmetic (docs/design/FOUNDATION.md), against the SDK's
++ * <Foundation/NSDecimal.h> and <Foundation/NSDecimalNumber.h>: the
++ * NSDecimal functions, NSDecimalNumber, NSDecimalNumberHandler and
++ * NSNumber's -decimalValue.
++ *
++ * An NSDecimal is a 128-bit mantissa (eight 16-bit words, least
++ * significant first) times ten to a signed 8-bit exponent. The work is
++ * done on wider integers (Big, 1024 bits, enough to line up any two
++ * exponents) and brought back to 128 bits by dropping digits, rounded as
++ * the caller asks. Results are compacted (no trailing zeros in the
++ * mantissa), as Apple's are. Division scales the numerator by 10^38,
++ * truncates the quotient, then applies the requested mode only if the
++ * result needs to fit the mantissa.
++ *
++ * SiliconForest (docs/roadmap/issues/SF-AA-activity-monitor.md, "Taken from Finch"): Finch's
++ * userland/Foundation/NSDecimal.m at 2d9b1bb, unchanged but for its includes (our NSDecimal.h and
++ * NSDecimalNumber.h; Foundation_Finch.h is ../Runtime.subproj/PDFinch.h, FinchScanDecimal static).
++ */
++#import <Foundation/Foundation.h>
++#include <math.h>
++#import <objc/runtime.h>
++
++#import <Foundation/NSDecimalNumber.h>
++#import <Foundation/NSCharacterSet.h>
++#import <Foundation/NSLocale.h>
++#include <dispatch/dispatch.h>
++#include <limits.h>
++#include "../Runtime.subproj/PDFinch.h"
++static NSUInteger FinchScanDecimal(NSString *s, NSUInteger start, NSString *sep, NSDecimal *out);
++
++NSExceptionName const NSDecimalNumberExactnessException = @"NSDecimalNumberExactnessException";
++NSExceptionName const NSDecimalNumberOverflowException = @"NSDecimalNumberOverflowException";
++NSExceptionName const NSDecimalNumberUnderflowException = @"NSDecimalNumberUnderflowException";
++NSExceptionName const NSDecimalNumberDivideByZeroException = @"NSDecimalNumberDivideByZeroException";
++NSString *const NSDecimalSeparator = @"NSDecimalSeparator";
++
++/* MARK: - Wide integers */
++
++#define LIMBS 32
++
++typedef struct {
++    uint32_t w[LIMBS];   /* least significant first */
++} Big;
++
++static void
++big_set128(Big *b, unsigned __int128 v)
++{
++    memset(b, 0, sizeof(*b));
++    for (int i = 0; i < 4; i++) { b->w[i] = (uint32_t)v; v >>= 32; }
++}
++
++static BOOL
++big_is_zero(const Big *b)
++{
++    for (int i = 0; i < LIMBS; i++) if (b->w[i]) return NO;
++    return YES;
++}
++
++static BOOL
++big_fits128(const Big *b)
++{
++    for (int i = 4; i < LIMBS; i++) if (b->w[i]) return NO;
++    return YES;
++}
++
++static unsigned __int128
++big_get128(const Big *b)
++{
++    unsigned __int128 v = 0;
++    for (int i = 3; i >= 0; i--) v = (v << 32) | b->w[i];
++    return v;
++}
++
++/* NO on overflow. */
++static BOOL
++big_mul_small(Big *b, uint32_t k)
++{
++    uint64_t carry = 0;
++    for (int i = 0; i < LIMBS; i++) {
++        uint64_t p = (uint64_t)b->w[i] * k + carry;
++        b->w[i] = (uint32_t)p;
++        carry = p >> 32;
++    }
++    return carry == 0;
++}
++
++static uint32_t
++big_divmod_small(Big *b, uint32_t k)
++{
++    uint64_t rem = 0;
++    for (int i = LIMBS - 1; i >= 0; i--) {
++        uint64_t cur = (rem << 32) | b->w[i];
++        b->w[i] = (uint32_t)(cur / k);
++        rem = cur % k;
++    }
++    return (uint32_t)rem;
++}
++
++static int
++big_cmp(const Big *a, const Big *b)
++{
++    for (int i = LIMBS - 1; i >= 0; i--)
++        if (a->w[i] != b->w[i]) return a->w[i] < b->w[i] ? -1 : 1;
++    return 0;
++}
++
++static void
++big_add(Big *r, const Big *a, const Big *b)
++{
++    uint64_t carry = 0;
++    for (int i = 0; i < LIMBS; i++) {
++        uint64_t s = (uint64_t)a->w[i] + b->w[i] + carry;
++        r->w[i] = (uint32_t)s;
++        carry = s >> 32;
++    }
++}
++
++/* a >= b */
++static void
++big_sub(Big *r, const Big *a, const Big *b)
++{
++    int64_t borrow = 0;
++    for (int i = 0; i < LIMBS; i++) {
++        int64_t d = (int64_t)a->w[i] - b->w[i] - borrow;
++        borrow = d < 0;
++        r->w[i] = (uint32_t)(d + (borrow ? ((int64_t)1 << 32) : 0));
++    }
++}
++
++static void
++big_mul(Big *r, const Big *a, const Big *b)
++{
++    Big t;
++    memset(&t, 0, sizeof(t));
++    for (int i = 0; i < LIMBS; i++) {
++        if (!a->w[i]) continue;
++        uint64_t carry = 0;
++        for (int j = 0; i + j < LIMBS; j++) {
++            uint64_t p = (uint64_t)a->w[i] * b->w[j] + t.w[i + j] + carry;
++            t.w[i + j] = (uint32_t)p;
++            carry = p >> 32;
++        }
++    }
++    *r = t;
++}
++
++static int
++big_bits(const Big *b)
++{
++    for (int i = LIMBS - 1; i >= 0; i--)
++        if (b->w[i]) return i * 32 + (32 - __builtin_clz(b->w[i]));
++    return 0;
++}
++
++/* q = a / b, by shift and subtract. */
++static void
++big_div(Big *q, const Big *a, const Big *b, Big *remainder)
++{
++    Big rem, quo;
++    memset(&rem, 0, sizeof(rem));
++    memset(&quo, 0, sizeof(quo));
++    for (int bit = big_bits(a) - 1; bit >= 0; bit--) {
++        for (int i = LIMBS - 1; i > 0; i--) rem.w[i] = (rem.w[i] << 1) | (rem.w[i - 1] >> 31);
++        rem.w[0] = (rem.w[0] << 1) | ((a->w[bit / 32] >> (bit % 32)) & 1);
++        if (big_cmp(&rem, b) >= 0) {
++            big_sub(&rem, &rem, b);
++            quo.w[bit / 32] |= 1u << (bit % 32);
++        }
++    }
++    *q = quo;
++    if (remainder) *remainder = rem;
++}
++
++/* MARK: - Values */
++
++typedef struct {
++    Big m;
++    int exp;
++    BOOL neg;
++    BOOL nan;
++} Value;
++
++static Value
++from_decimal(const NSDecimal *d)
++{
++    Value v;
++    memset(&v, 0, sizeof(v));
++    if (NSDecimalIsNotANumber(d)) { v.nan = YES; return v; }
++    unsigned __int128 m = 0;
++    for (int i = (int)d->_length - 1; i >= 0; i--) m = (m << 16) | d->_mantissa[i];
++    big_set128(&v.m, m);
++    v.exp = d->_exponent;
++    v.neg = d->_isNegative && m != 0;
++    return v;
++}
++
++static void
++set_nan(NSDecimal *d)
++{
++    memset(d, 0, sizeof(*d));
++    d->_isNegative = 1;
++}
++
++static void
++set_zero(NSDecimal *d)
++{
++    memset(d, 0, sizeof(*d));
++    d->_isCompact = 1;
++}
++
++/* Divide by ten `n` times, rounding the dropped digits as `mode` asks. */
++static void
++drop_digits(Big *m, int n, BOOL neg, NSRoundingMode mode, BOOL *inexact)
++{
++    if (n <= 0) return;
++    uint32_t last = 0;
++    BOOL sticky = NO;
++    for (int i = 0; i < n; i++) {
++        if (last) sticky = YES;
++        last = big_divmod_small(m, 10);
++    }
++    if (!last && !sticky) return;
++    if (inexact) *inexact = YES;
++    BOOL up;
++    switch (mode) {
++    case NSRoundDown: up = neg; break;
++    case NSRoundUp: up = !neg; break;
++    case NSRoundBankers: up = last > 5 || (last == 5 && (sticky || (m->w[0] & 1))); break;
++    case NSRoundPlain:
++    default: up = last >= 5; break;
++    }
++    if (up) {
++        Big one;
++        big_set128(&one, 1);
++        big_add(m, m, &one);
++    }
++}
++
++/* Bring a value back to an NSDecimal: at most 128 bits of mantissa, the
++ * exponent in -128...127, compacted. */
++static NSCalculationError
++to_decimal(NSDecimal *d, Value v, NSRoundingMode mode)
++{
++    if (v.nan) { set_nan(d); return NSCalculationNoError; }
++    BOOL inexact = NO;
++    while (!big_fits128(&v.m)) {
++        drop_digits(&v.m, 1, v.neg, mode, &inexact);
++        v.exp++;
++    }
++    if (v.exp < -128) {
++        drop_digits(&v.m, -128 - v.exp, v.neg, mode, &inexact);
++        v.exp = -128;
++        if (big_is_zero(&v.m)) { set_zero(d); return NSCalculationUnderflow; }
++    }
++    if (big_is_zero(&v.m)) { set_zero(d); return inexact ? NSCalculationLossOfPrecision : NSCalculationNoError; }
++    /* Compact: no trailing zeros. */
++    for (;;) {
++        Big t = v.m;
++        if (v.exp >= 127 || big_divmod_small(&t, 10) != 0) break;
++        v.m = t;
++        v.exp++;
++    }
++    while (v.exp > 127) {
++        Big t = v.m;
++        if (!big_mul_small(&t, 10) || !big_fits128(&t)) { set_nan(d); return NSCalculationOverflow; }
++        v.m = t;
++        v.exp--;
++    }
++    unsigned __int128 m = big_get128(&v.m);
++    memset(d, 0, sizeof(*d));
++    int len = 0;
++    while (m) { d->_mantissa[len++] = (unsigned short)m; m >>= 16; }
++    d->_length = (unsigned)len;
++    d->_exponent = v.exp;
++    d->_isNegative = v.neg;
++    d->_isCompact = 1;
++    return inexact ? NSCalculationLossOfPrecision : NSCalculationNoError;
++}
++
++/* Line up two values on the smaller exponent (the Big has room for any
++ * difference an NSDecimal can have). */
++static void
++align(Value *a, Value *b)
++{
++    while (a->exp > b->exp) { big_mul_small(&a->m, 10); a->exp--; }
++    while (b->exp > a->exp) { big_mul_small(&b->m, 10); b->exp--; }
++}
++
++/* MARK: - The functions */
++
++void
++NSDecimalCopy(NSDecimal *dst, const NSDecimal *src)
++{
++    *dst = *src;
++}
++
++void
++NSDecimalCompact(NSDecimal *number)
++{
++    if (NSDecimalIsNotANumber(number)) return;
++    to_decimal(number, from_decimal(number), NSRoundPlain);
++}
++
++NSComparisonResult
++NSDecimalCompare(const NSDecimal *l, const NSDecimal *r)
++{
++    Value a = from_decimal(l), b = from_decimal(r);
++    if (a.nan || b.nan) return a.nan && b.nan ? NSOrderedSame : a.nan ? NSOrderedAscending : NSOrderedDescending;
++    if (big_is_zero(&a.m)) a.neg = NO;
++    if (big_is_zero(&b.m)) b.neg = NO;
++    if (a.neg != b.neg) return a.neg ? NSOrderedAscending : NSOrderedDescending;
++    align(&a, &b);
++    int c = big_cmp(&a.m, &b.m);
++    if (a.neg) c = -c;
++    return c < 0 ? NSOrderedAscending : c > 0 ? NSOrderedDescending : NSOrderedSame;
++}
++
++void
++NSDecimalRound(NSDecimal *result, const NSDecimal *number, NSInteger scale, NSRoundingMode mode)
++{
++    Value v = from_decimal(number);
++    if (v.nan) { set_nan(result); return; }
++    if (scale != NSDecimalNoScale && v.exp < -scale) {
++        drop_digits(&v.m, (int)(-scale - v.exp), v.neg, mode, NULL);
++        v.exp = (int)-scale;
++    }
++    to_decimal(result, v, mode);
++}
++
++NSCalculationError
++NSDecimalNormalize(NSDecimal *n1, NSDecimal *n2, NSRoundingMode mode)
++{
++    Value a = from_decimal(n1), b = from_decimal(n2);
++    if (a.nan || b.nan) return NSCalculationNoError;
++    NSCalculationError err = NSCalculationNoError;
++    /* Lower the larger exponent while the mantissa fits, then raise the
++     * smaller one, losing digits. */
++    Value *hi = a.exp > b.exp ? &a : &b, *lo = hi == &a ? &b : &a;
++    while (hi->exp > lo->exp) {
++        Big t = hi->m;
++        if (!big_mul_small(&t, 10) || !big_fits128(&t)) break;
++        hi->m = t;
++        hi->exp--;
++    }
++    if (hi->exp > lo->exp) {
++        BOOL inexact = NO;
++        drop_digits(&lo->m, hi->exp - lo->exp, lo->neg, mode, &inexact);
++        lo->exp = hi->exp;
++        if (inexact) err = NSCalculationLossOfPrecision;
++    }
++    /* Write them back without compacting. */
++    NSDecimal *outs[2] = { n1, n2 };
++    Value *vals[2] = { &a, &b };
++    for (int i = 0; i < 2; i++) {
++        unsigned __int128 m = big_get128(&vals[i]->m);
++        NSDecimal *d = outs[i];
++        memset(d, 0, sizeof(*d));
++        int len = 0;
++        while (m) { d->_mantissa[len++] = (unsigned short)m; m >>= 16; }
++        d->_length = (unsigned)len;
++        d->_exponent = vals[i]->exp;
++        d->_isNegative = vals[i]->neg;
++    }
++    return err;
++}
++
++static NSCalculationError
++add(NSDecimal *result, Value a, Value b, NSRoundingMode mode)
++{
++    if (a.nan || b.nan) { set_nan(result); return NSCalculationNoError; }
++    align(&a, &b);
++    Value r;
++    memset(&r, 0, sizeof(r));
++    r.exp = a.exp;
++    if (a.neg == b.neg) {
++        big_add(&r.m, &a.m, &b.m);
++        r.neg = a.neg;
++    } else if (big_cmp(&a.m, &b.m) >= 0) {
++        big_sub(&r.m, &a.m, &b.m);
++        r.neg = a.neg;
++    } else {
++        big_sub(&r.m, &b.m, &a.m);
++        r.neg = b.neg;
++    }
++    if (big_is_zero(&r.m)) r.neg = NO;
++    return to_decimal(result, r, mode);
++}
++
++NSCalculationError
++NSDecimalAdd(NSDecimal *result, const NSDecimal *l, const NSDecimal *r, NSRoundingMode mode)
++{
++    return add(result, from_decimal(l), from_decimal(r), mode);
++}
++
++NSCalculationError
++NSDecimalSubtract(NSDecimal *result, const NSDecimal *l, const NSDecimal *r, NSRoundingMode mode)
++{
++    Value b = from_decimal(r);
++    b.neg = !b.neg;
++    return add(result, from_decimal(l), b, mode);
++}
++
++NSCalculationError
++NSDecimalMultiply(NSDecimal *result, const NSDecimal *l, const NSDecimal *r, NSRoundingMode mode)
++{
++    Value a = from_decimal(l), b = from_decimal(r);
++    if (a.nan || b.nan) { set_nan(result); return NSCalculationNoError; }
++    Value p;
++    memset(&p, 0, sizeof(p));
++    big_mul(&p.m, &a.m, &b.m);
++    p.exp = a.exp + b.exp;
++    p.neg = a.neg != b.neg && !big_is_zero(&p.m);
++    return to_decimal(result, p, mode);
++}
++
++NSCalculationError
++NSDecimalDivide(NSDecimal *result, const NSDecimal *l, const NSDecimal *r, NSRoundingMode mode)
++{
++    Value a = from_decimal(l), b = from_decimal(r);
++    if (a.nan || b.nan) { set_nan(result); return NSCalculationNoError; }
++    if (big_is_zero(&b.m)) { set_nan(result); return NSCalculationDivideByZero; }
++    if (big_is_zero(&a.m)) { set_zero(result); return NSCalculationNoError; }
++    Value q;
++    memset(&q, 0, sizeof(q));
++    Big numerator = a.m, remainder;
++    for (int i = 0; i < 38; i++) big_mul_small(&numerator, 10);
++    big_div(&q.m, &numerator, &b.m, &remainder);
++    BOOL inexact = !big_is_zero(&remainder);
++    q.exp = a.exp - 38 - b.exp;
++    q.neg = a.neg != b.neg;
++    NSCalculationError error = to_decimal(result, q, mode);
++    return error == NSCalculationNoError && inexact ? NSCalculationLossOfPrecision : error;
++}
++
++NSCalculationError
++NSDecimalPower(NSDecimal *result, const NSDecimal *number, NSUInteger power, NSRoundingMode mode)
++{
++    if (NSDecimalIsNotANumber(number)) { set_nan(result); return NSCalculationNoError; }
++    NSDecimal acc, base = *number;
++    Value one;
++    memset(&one, 0, sizeof(one));
++    big_set128(&one.m, 1);
++    to_decimal(&acc, one, mode);
++    NSCalculationError err = NSCalculationNoError;
++    while (power) {
++        if (power & 1) {
++            NSCalculationError e = NSDecimalMultiply(&acc, &acc, &base, mode);
++            if (e) err = e;
++            if (e == NSCalculationOverflow) break;
++        }
++        power >>= 1;
++        if (power) {
++            NSCalculationError e = NSDecimalMultiply(&base, &base, &base, mode);
++            if (e == NSCalculationOverflow) { set_nan(&acc); err = e; break; }
++        }
++    }
++    *result = acc;
++    return err;
++}
++
++NSCalculationError
++NSDecimalMultiplyByPowerOf10(NSDecimal *result, const NSDecimal *number, short power, NSRoundingMode mode)
++{
++    Value v = from_decimal(number);
++    if (v.nan) { set_nan(result); return NSCalculationNoError; }
++    v.exp += power;
++    return to_decimal(result, v, mode);
++}
++
++static NSString *
++separator(id locale)
++{
++    id sep = nil;
++    if ([locale isKindOfClass:[NSLocale class]]) sep = [locale objectForKey:NSLocaleDecimalSeparator];
++    else if ([locale isKindOfClass:[NSDictionary class]]) sep = [locale objectForKey:NSDecimalSeparator];
++    return [sep isKindOfClass:[NSString class]] && [sep length] ? sep : @".";
++}
++
++NSString *
++NSDecimalString(const NSDecimal *dcm, id locale)
++{
++    if (NSDecimalIsNotANumber(dcm)) return @"NaN";
++    Value v = from_decimal(dcm);
++    if (big_is_zero(&v.m)) return @"0";
++    char digits[200], *p = digits + sizeof(digits);
++    *--p = 0;
++    Big t = v.m;
++    while (!big_is_zero(&t)) *--p = (char)('0' + big_divmod_small(&t, 10));
++    NSMutableString *s = [NSMutableString string];
++    if (v.neg) [s appendString:@"-"];
++    int n = (int)strlen(p);
++    if (v.exp >= 0) {
++        [s appendFormat:@"%s", p];
++        for (int i = 0; i < v.exp; i++) [s appendString:@"0"];
++    } else if (-v.exp >= n) {
++        [s appendFormat:@"0%@", separator(locale)];
++        for (int i = 0; i < -v.exp - n; i++) [s appendString:@"0"];
++        [s appendFormat:@"%s", p];
++    } else {
++        [s appendFormat:@"%.*s%@%s", n + v.exp, p, separator(locale), p + n + v.exp];
++    }
++    return s;
++}
++
++/* Parse a decimal at `start`: [+-]digits[sep digits][e[+-]digits]. The
++ * index after it, or NSNotFound without digits. Digits past the 128-bit
++ * mantissa are dropped, as Apple's are. */
++static NSUInteger
++FinchScanDecimal(NSString *s, NSUInteger start, NSString *sep, NSDecimal *out)
++{
++    NSUInteger len = [s length], i = start;
++    unichar sepc = [sep length] ? [sep characterAtIndex:0] : '.';
++    Value v;
++    memset(&v, 0, sizeof(v));
++    if (i < len && ([s characterAtIndex:i] == '-' || [s characterAtIndex:i] == '+')) {
++        v.neg = [s characterAtIndex:i] == '-';
++        i++;
++    }
++    BOOL any = NO, full = NO, frac = NO;
++    for (; i < len; i++) {
++        unichar c = [s characterAtIndex:i];
++        if (c == sepc && !frac) { frac = YES; continue; }
++        if (c < '0' || c > '9') break;
++        any = YES;
++        if (!full) {
++            Big t = v.m;
++            if (big_mul_small(&t, 10)) {
++                Big d;
++                big_set128(&d, c - '0');
++                big_add(&t, &t, &d);
++            }
++            if (big_fits128(&t)) {
++                v.m = t;
++                if (frac) v.exp--;
++                continue;
++            }
++            full = YES;
++        }
++        if (!frac) v.exp++;
++    }
++    if (!any) return NSNotFound;
++    if (i < len && ([s characterAtIndex:i] == 'e' || [s characterAtIndex:i] == 'E')) {
++        NSUInteger j = i + 1;
++        BOOL eneg = NO;
++        if (j < len && ([s characterAtIndex:j] == '-' || [s characterAtIndex:j] == '+')) eneg = [s characterAtIndex:j++] == '-';
++        if (j < len && [s characterAtIndex:j] >= '0' && [s characterAtIndex:j] <= '9') {
++            int e = 0;
++            for (; j < len && [s characterAtIndex:j] >= '0' && [s characterAtIndex:j] <= '9'; j++)
++                if (e < 10000) e = e * 10 + ([s characterAtIndex:j] - '0');
++            v.exp += eneg ? -e : e;
++            i = j;
++        }
++    }
++    if (big_is_zero(&v.m)) v.neg = NO;
++    if (out && to_decimal(out, v, NSRoundPlain) == NSCalculationOverflow) set_nan(out);
++    return i;
++}
++
++/* MARK: - NSDecimalNumberHandler */
++
++@implementation NSDecimalNumberHandler
++
++static NSDecimalNumberHandler *default_handler;
++static NSDecimalNumberHandler *implicit_handler;
++
++static id<NSDecimalNumberBehaviors>
++implicit_decimal_behavior(void)
++{
++    static dispatch_once_t once;
++    dispatch_once(&once, ^{
++        implicit_handler = [[NSDecimalNumberHandler alloc] initWithRoundingMode:NSRoundPlain scale:0
++            raiseOnExactness:NO raiseOnOverflow:YES raiseOnUnderflow:YES raiseOnDivideByZero:YES];
++    });
++    return implicit_handler;
++}
++
+++ (NSDecimalNumberHandler *)defaultDecimalNumberHandler
++{
++    static dispatch_once_t once;
++    dispatch_once(&once, ^{
++        default_handler = [[NSDecimalNumberHandler alloc] initWithRoundingMode:NSRoundPlain scale:NSDecimalNoScale
++            raiseOnExactness:NO raiseOnOverflow:YES raiseOnUnderflow:YES raiseOnDivideByZero:YES];
++    });
++    return default_handler;
++}
++
++- (instancetype)init
++{
++    return [self initWithRoundingMode:NSRoundPlain scale:NSDecimalNoScale raiseOnExactness:NO raiseOnOverflow:YES
++        raiseOnUnderflow:YES raiseOnDivideByZero:YES];
++}
++
++- (instancetype)initWithRoundingMode:(NSRoundingMode)roundingMode scale:(short)scale raiseOnExactness:(BOOL)exact
++    raiseOnOverflow:(BOOL)overflow raiseOnUnderflow:(BOOL)underflow raiseOnDivideByZero:(BOOL)divideByZero
++{
++    if ((self = [super init])) {
++        _roundingMode = (unsigned)roundingMode;
++        _scale = scale;
++        _raiseOnExactness = exact;
++        _raiseOnOverflow = overflow;
++        _raiseOnUnderflow = underflow;
++        _raiseOnDivideByZero = divideByZero;
++    }
++    return self;
++}
++
+++ (instancetype)decimalNumberHandlerWithRoundingMode:(NSRoundingMode)roundingMode scale:(short)scale raiseOnExactness:(BOOL)exact
++    raiseOnOverflow:(BOOL)overflow raiseOnUnderflow:(BOOL)underflow raiseOnDivideByZero:(BOOL)divideByZero
++{
++    return [[[self alloc] initWithRoundingMode:roundingMode scale:scale raiseOnExactness:exact raiseOnOverflow:overflow
++        raiseOnUnderflow:underflow raiseOnDivideByZero:divideByZero] autorelease];
++}
++
++- (NSRoundingMode)roundingMode { return _roundingMode; }
++- (short)scale { return (short)_scale; }
++
++- (NSDecimalNumber *)exceptionDuringOperation:(SEL)operation error:(NSCalculationError)error
++    leftOperand:(NSDecimalNumber *)leftOperand rightOperand:(NSDecimalNumber *)rightOperand
++{
++    switch (error) {
++    case NSCalculationLossOfPrecision:
++        if (_raiseOnExactness) FinchRaise(NSDecimalNumberExactnessException, "NSDecimalNumber exactness exception");
++        break;
++    case NSCalculationOverflow:
++        if (_raiseOnOverflow) FinchRaise(NSDecimalNumberOverflowException, "NSDecimalNumber overflow exception");
++        break;
++    case NSCalculationUnderflow:
++        if (_raiseOnUnderflow) FinchRaise(NSDecimalNumberUnderflowException, "NSDecimalNumber underflow exception");
++        break;
++    case NSCalculationDivideByZero:
++        if (_raiseOnDivideByZero) FinchRaise(NSDecimalNumberDivideByZeroException, "NSDecimalNumber divide by zero exception");
++        break;
++    default:
++        break;
++    }
++    return nil;
++}
++
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++- (instancetype)initWithCoder:(NSCoder *)coder { [self release]; return nil; }
++- (void)encodeWithCoder:(NSCoder *)coder { }
++
++@end
++
++/* MARK: - NSDecimalNumber */
++
++@implementation NSDecimalNumber
++
++static id<NSDecimalNumberBehaviors> default_behavior;
++
++/* The mantissa words follow the object. */
+++ (instancetype)allocWithZone:(NSZone *)zone
++{
++    return NSAllocateObject(self, NSDecimalMaxSize * sizeof(unsigned short), zone);
++}
++
+++ (id<NSDecimalNumberBehaviors>)defaultBehavior
++{
++    return default_behavior ? default_behavior : [NSDecimalNumberHandler defaultDecimalNumberHandler];
++}
++
+++ (void)setDefaultBehavior:(id<NSDecimalNumberBehaviors>)behavior
++{
++    id old = default_behavior;
++    default_behavior = [(id)behavior retain];
++    [old release];
++}
++
++- (instancetype)initWithDecimal:(NSDecimal)dcm
++{
++    if ((self = [super init])) {
++        NSDecimalCompact(&dcm);
++        _exponent = dcm._exponent;
++        _length = dcm._length;
++        _isNegative = dcm._isNegative;
++        _isCompact = 1;
++        memcpy(_mantissa, dcm._mantissa, sizeof(dcm._mantissa));
++    }
++    return self;
++}
++
++- (instancetype)initWithMantissa:(unsigned long long)mantissa exponent:(short)exponent isNegative:(BOOL)flag
++{
++    Value v;
++    memset(&v, 0, sizeof(v));
++    big_set128(&v.m, mantissa);
++    v.exp = exponent;
++    v.neg = flag && mantissa;
++    NSDecimal d;
++    to_decimal(&d, v, NSRoundPlain);
++    return [self initWithDecimal:d];
++}
++
++- (instancetype)initWithString:(NSString *)numberValue { return [self initWithString:numberValue locale:nil]; }
++
++- (instancetype)initWithString:(NSString *)numberValue locale:(id)locale
++{
++    NSDecimal d;
++    NSUInteger start = 0, len = [numberValue length];
++    while (start < len && [[NSCharacterSet whitespaceCharacterSet] characterIsMember:[numberValue characterAtIndex:start]]) start++;
++    if (!numberValue || FinchScanDecimal(numberValue, start, separator(locale), &d) == NSNotFound) set_nan(&d);
++    return [self initWithDecimal:d];
++}
++
++/* NSNumber's initializers, through the value's decimal form. */
++#define INIT(NAME, FACTORY, TYPE) \
++    - (NSNumber *)NAME:(TYPE)value { return [self initWithDecimal:[[NSNumber FACTORY:value] decimalValue]]; }
++INIT(initWithChar, numberWithChar, char)
++INIT(initWithUnsignedChar, numberWithUnsignedChar, unsigned char)
++INIT(initWithShort, numberWithShort, short)
++INIT(initWithUnsignedShort, numberWithUnsignedShort, unsigned short)
++INIT(initWithInt, numberWithInt, int)
++INIT(initWithUnsignedInt, numberWithUnsignedInt, unsigned int)
++INIT(initWithLong, numberWithLong, long)
++INIT(initWithUnsignedLong, numberWithUnsignedLong, unsigned long)
++INIT(initWithLongLong, numberWithLongLong, long long)
++INIT(initWithUnsignedLongLong, numberWithUnsignedLongLong, unsigned long long)
++INIT(initWithFloat, numberWithFloat, float)
++INIT(initWithDouble, numberWithDouble, double)
++INIT(initWithBool, numberWithBool, BOOL)
++INIT(initWithInteger, numberWithInteger, NSInteger)
++INIT(initWithUnsignedInteger, numberWithUnsignedInteger, NSUInteger)
++#undef INIT
++
+++ (NSDecimalNumber *)decimalNumberWithMantissa:(unsigned long long)mantissa exponent:(short)exponent isNegative:(BOOL)flag
++{
++    return [[[self alloc] initWithMantissa:mantissa exponent:exponent isNegative:flag] autorelease];
++}
+++ (NSDecimalNumber *)decimalNumberWithDecimal:(NSDecimal)dcm { return [[[self alloc] initWithDecimal:dcm] autorelease]; }
+++ (NSDecimalNumber *)decimalNumberWithString:(NSString *)numberValue { return [[[self alloc] initWithString:numberValue] autorelease]; }
+++ (NSDecimalNumber *)decimalNumberWithString:(NSString *)numberValue locale:(id)locale
++{
++    return [[[self alloc] initWithString:numberValue locale:locale] autorelease];
++}
++
++#define CONSTANT(NAME, ...) \
++    + (NSDecimalNumber *)NAME \
++    { \
++        static NSDecimalNumber *n; \
++        static dispatch_once_t once; \
++        dispatch_once(&once, ^{ __VA_ARGS__ }); \
++        return n; \
++    }
++CONSTANT(zero, n = [[NSDecimalNumber alloc] initWithMantissa:0 exponent:0 isNegative:NO];)
++CONSTANT(one, n = [[NSDecimalNumber alloc] initWithMantissa:1 exponent:0 isNegative:NO];)
++CONSTANT(notANumber, NSDecimal d; set_nan(&d); n = [[NSDecimalNumber alloc] initWithDecimal:d];)
++CONSTANT(maximumDecimalNumber,
++    NSDecimal d; memset(&d, 0, sizeof(d)); d._length = 8; d._exponent = 127; d._isCompact = 1;
++    for (int i = 0; i < 8; i++) d._mantissa[i] = 0xffff;
++    n = [[NSDecimalNumber alloc] initWithDecimal:d];)
++CONSTANT(minimumDecimalNumber,
++    NSDecimal d; memset(&d, 0, sizeof(d)); d._length = 8; d._exponent = 127; d._isNegative = 1; d._isCompact = 1;
++    for (int i = 0; i < 8; i++) d._mantissa[i] = 0xffff;
++    n = [[NSDecimalNumber alloc] initWithDecimal:d];)
++
++- (NSDecimal)decimalValue
++{
++    NSDecimal d;
++    memset(&d, 0, sizeof(d));
++    d._exponent = _exponent;
++    d._length = _length;
++    d._isNegative = _isNegative;
++    d._isCompact = _isCompact;
++    memcpy(d._mantissa, _mantissa, sizeof(d._mantissa));
++    return d;
++}
++
++- (NSString *)descriptionWithLocale:(id)locale
++{
++    NSDecimal d = [self decimalValue];
++    return NSDecimalString(&d, locale);
++}
++- (NSString *)description { return [self descriptionWithLocale:nil]; }
++- (NSString *)stringValue { return [self descriptionWithLocale:nil]; }
++
++- (const char *)objCType { return "d"; }
++
++- (double)doubleValue
++{
++    NSDecimal d = [self decimalValue];
++    if (NSDecimalIsNotANumber(&d)) return NAN;
++    return strtod([NSDecimalString(&d, nil) UTF8String], NULL);
++}
++
++- (void)getValue:(void *)value
++{
++    double d = [self doubleValue];
++    memcpy(value, &d, sizeof(d));
++}
++- (void)getValue:(void *)value size:(NSUInteger)size
++{
++    double d = [self doubleValue];
++    memcpy(value, &d, MIN(size, sizeof(d)));
++}
++
++- (NSComparisonResult)compare:(NSNumber *)other
++{
++    if (!other)
++        FinchRaise(NSInvalidArgumentException, "*** -[%s compare:]: nil argument", object_getClassName(self));
++    double value = [other doubleValue];
++    if (isinf(value)) return value < 0 ? NSOrderedDescending : NSOrderedAscending;
++    NSDecimal a = [self decimalValue], b = [other decimalValue];
++    return NSDecimalCompare(&a, &b);
++}
++
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++
++/* Apple archives NSDecimalNumber under NSDecimalNumberPlaceholder. */
+++ (BOOL)supportsSecureCoding { return YES; }
++- (Class)classForCoder { return objc_getClass("NSDecimalNumberPlaceholder"); }
++
++- (void)encodeWithCoder:(NSCoder *)coder
++{
++    NSDecimal d = [self decimalValue];
++    [coder encodeInt:d._exponent forKey:@"NS.exponent"];
++    [coder encodeInt:(int)d._length forKey:@"NS.length"];
++    [coder encodeBool:d._isNegative forKey:@"NS.negative"];
++    [coder encodeBool:d._isCompact forKey:@"NS.compact"];
++    [coder encodeInt:1 forKey:@"NS.mantissa.bo"];
++    uint8_t bytes[16];
++    for (int i = 0; i < 8; i++) { bytes[2 * i] = (uint8_t)d._mantissa[i]; bytes[2 * i + 1] = (uint8_t)(d._mantissa[i] >> 8); }
++    [coder encodeBytes:bytes length:sizeof(bytes) forKey:@"NS.mantissa"];
++}
++
++- (instancetype)initWithCoder:(NSCoder *)coder
++{
++    NSDecimal d;
++    memset(&d, 0, sizeof(d));
++    d._exponent = [coder decodeIntForKey:@"NS.exponent"];
++    d._length = (unsigned)[coder decodeIntForKey:@"NS.length"] & 0xF;
++    d._isNegative = [coder decodeBoolForKey:@"NS.negative"];
++    d._isCompact = [coder decodeBoolForKey:@"NS.compact"];
++    BOOL big = [coder containsValueForKey:@"NS.mantissa.bo"] && [coder decodeIntForKey:@"NS.mantissa.bo"] != 1;
++    NSUInteger n = 0;
++    const uint8_t *b = [coder decodeBytesForKey:@"NS.mantissa" returnedLength:&n];
++    for (NSUInteger i = 0; i < 8 && 2 * i + 1 < n; i++)
++        d._mantissa[i] = big ? (unsigned short)(b[2 * i] << 8 | b[2 * i + 1]) : (unsigned short)(b[2 * i] | b[2 * i + 1] << 8);
++    if (d._length > 8) d._length = 8;
++    return [self initWithDecimal:d];
++}
++
++typedef NSCalculationError (*BinaryOp)(NSDecimal *, const NSDecimal *, const NSDecimal *, NSRoundingMode);
++
++/* An operation's result under a behavior: its errors to the behavior,
++ * then rounded to its scale. */
++static NSDecimalNumber *
++finish(NSDecimal r, NSCalculationError err, SEL op, NSDecimalNumber *l, NSDecimalNumber *rhs, id<NSDecimalNumberBehaviors> b)
++{
++    if (!b) b = [NSDecimalNumber defaultBehavior];
++    if (err != NSCalculationNoError) {
++        NSDecimalNumber *alt = [b exceptionDuringOperation:op error:err leftOperand:l rightOperand:rhs];
++        if (alt) return alt;
++        if (err == NSCalculationOverflow || err == NSCalculationDivideByZero) return [NSDecimalNumber notANumber];
++        if (err == NSCalculationUnderflow) return [NSDecimalNumber zero];
++    }
++    short scale = [b scale];
++    if (scale != NSDecimalNoScale) NSDecimalRound(&r, &r, scale, [b roundingMode]);
++    return [NSDecimalNumber decimalNumberWithDecimal:r];
++}
++
++static NSDecimalNumber *
++binary(NSDecimalNumber *self, SEL _cmd, NSDecimalNumber *other, id<NSDecimalNumberBehaviors> behavior, BinaryOp op)
++{
++    id<NSDecimalNumberBehaviors> b = behavior ? behavior : implicit_decimal_behavior();
++    NSDecimal l = [self decimalValue], r = [other decimalValue], result;
++    NSCalculationError err = op(&result, &l, &r, [b roundingMode]);
++    return finish(result, err, _cmd, self, other, b);
++}
++
++- (NSDecimalNumber *)decimalNumberByAdding:(NSDecimalNumber *)n { return [self decimalNumberByAdding:n withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberByAdding:(NSDecimalNumber *)n withBehavior:(id<NSDecimalNumberBehaviors>)b
++{
++    return binary(self, _cmd, n, b, NSDecimalAdd);
++}
++- (NSDecimalNumber *)decimalNumberBySubtracting:(NSDecimalNumber *)n { return [self decimalNumberBySubtracting:n withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberBySubtracting:(NSDecimalNumber *)n withBehavior:(id<NSDecimalNumberBehaviors>)b
++{
++    return binary(self, _cmd, n, b, NSDecimalSubtract);
++}
++- (NSDecimalNumber *)decimalNumberByMultiplyingBy:(NSDecimalNumber *)n { return [self decimalNumberByMultiplyingBy:n withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberByMultiplyingBy:(NSDecimalNumber *)n withBehavior:(id<NSDecimalNumberBehaviors>)b
++{
++    return binary(self, _cmd, n, b, NSDecimalMultiply);
++}
++- (NSDecimalNumber *)decimalNumberByDividingBy:(NSDecimalNumber *)n { return [self decimalNumberByDividingBy:n withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberByDividingBy:(NSDecimalNumber *)n withBehavior:(id<NSDecimalNumberBehaviors>)b
++{
++    return binary(self, _cmd, n, b, NSDecimalDivide);
++}
++
++- (NSDecimalNumber *)decimalNumberByRaisingToPower:(NSUInteger)power { return [self decimalNumberByRaisingToPower:power withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberByRaisingToPower:(NSUInteger)power withBehavior:(id<NSDecimalNumberBehaviors>)behavior
++{
++    id<NSDecimalNumberBehaviors> b = behavior ? behavior : implicit_decimal_behavior();
++    NSDecimal d = [self decimalValue], r;
++    NSCalculationError err = NSDecimalPower(&r, &d, power, [b roundingMode]);
++    return finish(r, err, _cmd, self, nil, b);
++}
++
++- (NSDecimalNumber *)decimalNumberByMultiplyingByPowerOf10:(short)power { return [self decimalNumberByMultiplyingByPowerOf10:power withBehavior:[NSDecimalNumber defaultBehavior]]; }
++- (NSDecimalNumber *)decimalNumberByMultiplyingByPowerOf10:(short)power withBehavior:(id<NSDecimalNumberBehaviors>)behavior
++{
++    id<NSDecimalNumberBehaviors> b = behavior ? behavior : implicit_decimal_behavior();
++    NSDecimal d = [self decimalValue], r;
++    NSCalculationError err = NSDecimalMultiplyByPowerOf10(&r, &d, power, [b roundingMode]);
++    return finish(r, err, _cmd, self, nil, b);
++}
++
++- (NSDecimalNumber *)decimalNumberByRoundingAccordingToBehavior:(id<NSDecimalNumberBehaviors>)behavior
++{
++    id<NSDecimalNumberBehaviors> b = behavior ? behavior : implicit_decimal_behavior();
++    NSDecimal d = [self decimalValue], r;
++    NSDecimalRound(&r, &d, [b scale], [b roundingMode]);
++    return [NSDecimalNumber decimalNumberWithDecimal:r];
++}
++
++@end
++
++/* The name Apple's archives give NSDecimalNumber; decoding it gives an
++ * NSDecimalNumber. */
++@interface NSDecimalNumberPlaceholder : NSDecimalNumber
++@end
++@implementation NSDecimalNumberPlaceholder
+++ (Class)classForKeyedUnarchiver { return [NSDecimalNumber class]; }
++@end
++
++/* MARK: - NSNumber's decimal value */
++
++@implementation NSNumber (NSDecimalNumberExtensions)
++
++/* Integers exactly; floating-point values by their shortest round-trip
++ * form (0.1 is 0.1, as Apple's is). */
++- (NSDecimal)decimalValue
++{
++    NSDecimal d;
++    const char *t = [self objCType];
++    if (*t == 'f' || *t == 'd') {
++        double v = [self doubleValue];
++        if (isnan(v) || isinf(v)) { set_nan(&d); return d; }
++        char buf[40];
++        for (int prec = *t == 'f' ? 7 : 15; prec <= 17; prec++) {
++            snprintf(buf, sizeof(buf), "%.*g", prec, v);
++            if (*t == 'f' ? (float)strtod(buf, NULL) == (float)v : strtod(buf, NULL) == v) break;
++        }
++        FinchScanDecimal([NSString stringWithUTF8String:buf], 0, @".", &d);
++        return d;
++    }
++    Value v;
++    memset(&v, 0, sizeof(v));
++    if (strchr("CSILQ", *t)) {
++        big_set128(&v.m, [self unsignedLongLongValue]);
++    } else {
++        long long s = [self longLongValue];
++        v.neg = s < 0;
++        big_set128(&v.m, s < 0 ? (unsigned long long)0 - (unsigned long long)s : (unsigned long long)s);
++    }
++    to_decimal(&d, v, NSRoundPlain);
++    return d;
++}
++
++@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h b/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h
+--- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h	2026-11-14 10:28:21.505850276 -0800
+@@ -0,0 +1,93 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: NSDecimalNumber and NSDecimalNumberHandler, declared from the public names and
++ * instance layout of macOS's Foundation (no SDK header copied). Implemented in NSDecimal.m
++ * (Finch's, MIT OR Apache-2.0).
++ */
++#ifndef NSDecimalNumber_h
++#define NSDecimalNumber_h
++
++#import <Foundation/NSNumber.h>
++#import <Foundation/NSDecimal.h>
++#import <Foundation/NSException.h>
++
++FOUNDATION_EXPORT NSString *const NSDecimalNumberExactnessException;
++FOUNDATION_EXPORT NSString *const NSDecimalNumberOverflowException;
++FOUNDATION_EXPORT NSString *const NSDecimalNumberUnderflowException;
++FOUNDATION_EXPORT NSString *const NSDecimalNumberDivideByZeroException;
++
++@class NSDecimalNumber;
++
++@protocol NSDecimalNumberBehaviors
++- (NSRoundingMode)roundingMode;
++- (short)scale;
++- (NSDecimalNumber *)exceptionDuringOperation:(SEL)operation error:(NSCalculationError)error leftOperand:(NSDecimalNumber *)leftOperand rightOperand:(NSDecimalNumber *)rightOperand;
++@end
++
++@interface NSDecimalNumber : NSNumber {
++@private
++    signed int _exponent : 8;
++    unsigned int _length : 4;
++    unsigned int _isNegative : 1;
++    unsigned int _isCompact : 1;
++    unsigned int _reserved : 1;
++    unsigned int _hasExternalRefCount : 1;
++    unsigned int _refs : 16;
++    unsigned short _mantissa[0];
++}
++- (instancetype)initWithMantissa:(unsigned long long)mantissa exponent:(short)exponent isNegative:(BOOL)flag;
++- (instancetype)initWithDecimal:(NSDecimal)dcm;
++- (instancetype)initWithString:(NSString *)numberValue;
++- (instancetype)initWithString:(NSString *)numberValue locale:(id)locale;
++- (NSString *)descriptionWithLocale:(id)locale;
++@property (readonly) NSDecimal decimalValue;
+++ (NSDecimalNumber *)decimalNumberWithMantissa:(unsigned long long)mantissa exponent:(short)exponent isNegative:(BOOL)flag;
+++ (NSDecimalNumber *)decimalNumberWithDecimal:(NSDecimal)dcm;
+++ (NSDecimalNumber *)decimalNumberWithString:(NSString *)numberValue;
+++ (NSDecimalNumber *)decimalNumberWithString:(NSString *)numberValue locale:(id)locale;
++@property (class, readonly, copy) NSDecimalNumber *zero;
++@property (class, readonly, copy) NSDecimalNumber *one;
++@property (class, readonly, copy) NSDecimalNumber *minimumDecimalNumber;
++@property (class, readonly, copy) NSDecimalNumber *maximumDecimalNumber;
++@property (class, readonly, copy) NSDecimalNumber *notANumber;
++- (NSDecimalNumber *)decimalNumberByAdding:(NSDecimalNumber *)decimalNumber;
++- (NSDecimalNumber *)decimalNumberByAdding:(NSDecimalNumber *)decimalNumber withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberBySubtracting:(NSDecimalNumber *)decimalNumber;
++- (NSDecimalNumber *)decimalNumberBySubtracting:(NSDecimalNumber *)decimalNumber withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberByMultiplyingBy:(NSDecimalNumber *)decimalNumber;
++- (NSDecimalNumber *)decimalNumberByMultiplyingBy:(NSDecimalNumber *)decimalNumber withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberByDividingBy:(NSDecimalNumber *)decimalNumber;
++- (NSDecimalNumber *)decimalNumberByDividingBy:(NSDecimalNumber *)decimalNumber withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberByRaisingToPower:(NSUInteger)power;
++- (NSDecimalNumber *)decimalNumberByRaisingToPower:(NSUInteger)power withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberByMultiplyingByPowerOf10:(short)power;
++- (NSDecimalNumber *)decimalNumberByMultiplyingByPowerOf10:(short)power withBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSDecimalNumber *)decimalNumberByRoundingAccordingToBehavior:(id<NSDecimalNumberBehaviors>)behavior;
++- (NSComparisonResult)compare:(NSNumber *)decimalNumber;
+++ (void)setDefaultBehavior:(id<NSDecimalNumberBehaviors>)behavior;
+++ (id<NSDecimalNumberBehaviors>)defaultBehavior;
++@property (readonly) const char *objCType;
++@property (readonly) double doubleValue;
++@end
++
++@interface NSDecimalNumberHandler : NSObject <NSDecimalNumberBehaviors, NSCoding> {
++@private
++    signed int _scale : 16;
++    unsigned _roundingMode : 3;
++    unsigned _raiseOnExactness : 1;
++    unsigned _raiseOnOverflow : 1;
++    unsigned _raiseOnUnderflow : 1;
++    unsigned _raiseOnDivideByZero : 1;
++    unsigned _unused : 9;
++    void *_reserved2;
++    void *_reserved;
++}
++@property (class, readonly, strong) NSDecimalNumberHandler *defaultDecimalNumberHandler;
++- (instancetype)initWithRoundingMode:(NSRoundingMode)roundingMode scale:(short)scale raiseOnExactness:(BOOL)exact raiseOnOverflow:(BOOL)overflow raiseOnUnderflow:(BOOL)underflow raiseOnDivideByZero:(BOOL)divideByZero;
+++ (instancetype)decimalNumberHandlerWithRoundingMode:(NSRoundingMode)roundingMode scale:(short)scale raiseOnExactness:(BOOL)exact raiseOnOverflow:(BOOL)overflow raiseOnUnderflow:(BOOL)underflow raiseOnDivideByZero:(BOOL)divideByZero;
++@end
++
++@interface NSNumber (NSDecimalNumberExtensions)
++@property (readonly) NSDecimal decimalValue;
++@end
++
++#endif /* NSDecimalNumber_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m
---- a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m
-+++ b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m
+--- a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-13 13:16:53.435383221 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-13 18:29:24.836524309 -0800
 @@ -684,3 +684,37 @@
      _CFRuntimeBridgeClasses(CFNumberGetTypeID(), "NSNumber");
  }
@@ -1731,9 +4846,26 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.su
 +}
 +#undef NS_BOOLEAN_VALUE
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/Foundation.h b/src/Frameworks/Foundation/Runtime.subproj/Foundation.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-14 10:55:19.095487640 -0800
+@@ -47,6 +47,13 @@
+ #import <Foundation/NSKeyValueObserving.h>
+ #import <Foundation/NSLock.h>
+ #import <Foundation/NSHashTable.h>
++#import <Foundation/NSIndexPath.h>
++#import <Foundation/NSPointerFunctions.h>
++#import <Foundation/NSPointerArray.h>
++#import <Foundation/NSDecimal.h>
++#import <Foundation/NSDecimalNumber.h>
++#import <Foundation/NSPersonNameComponents.h>
++#import <Foundation/NSPersonNameComponentsFormatter.h>
+ #import <Foundation/NSRaise.h>
+ #import <Foundation/NSByteOrder.h>
+ #import <Foundation/NSRangeEntries.h>
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 18:20:18.178643886 -0800
 @@ -11,6 +11,11 @@
  #import <Foundation/NSDictionary.h>
  #import <Foundation/NSString.h>
@@ -1827,8 +4959,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  /* The bundle's classes all live in the one image here, so this is a lookup by
   * name rather than a per-bundle class table. */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:53:53.870421956 -0800
 @@ -6,6 +6,11 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -1876,8 +5008,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:16:53.436328669 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:41:04.042310718 -0800
 @@ -110,8 +110,15 @@
  "   .globl _NSForwardingTrampoline          \n"
  "   .p2align 2                              \n"
@@ -1954,8 +5086,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  static void _NSInstallForwardHandler(void) {
  #if defined(NS_HAVE_FORWARDING_TRAMPOLINE) && ARGON_LIBOBJC2
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:16:53.438324457 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:28:47.364980906 -0800
 @@ -289,3 +289,17 @@
  }
  
@@ -1974,9 +5106,68 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
 +}
 +
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h b/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h	2026-11-14 10:36:58.253541975 -0800
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: put in front of every source of this Foundation (-include, ../../../../terminal-app/
++ * build-foundation.nix). PureDarwin's CoreFoundation autoreleases only objects it does not own
++ * itself: for its own instances (every CFArray, CFString, CFDictionary... this Foundation hands out)
++ * CFAutorelease returns the object and nothing releases it (the Linux runtime's hook, argon_cf, is
++ * not there on Darwin). Every convenience constructor of this Foundation leaked its object. Here
++ * CFAutorelease sends -autorelease, as macOS's does (objc_autorelease): the pool sends -release,
++ * and the bridged classes hand that to CFRelease.
++ */
++#ifndef PD_AUTORELEASE_CF_H
++#define PD_AUTORELEASE_CF_H
++#include <CoreFoundation/CFBase.h>
++#ifdef __OBJC__
++#import <objc/message.h>
++static inline CFTypeRef PDCFAutorelease(CFTypeRef cf)
++{
++    return cf ? (CFTypeRef)((id (*)(id, SEL))objc_msgSend)((id)cf, @selector(autorelease)) : cf;
++}
++#define CFAutorelease(cf) PDCFAutorelease(cf)
++#endif
++#endif
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h b/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h	1969-12-31 16:00:00.000000000 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h	2026-11-14 10:26:55.288952911 -0800
+@@ -0,0 +1,30 @@
++/* SPDX-License-Identifier: MIT
++ * SiliconForest: what the files taken from Finch (MIT OR Apache-2.0) expect from Finch's
++ * Foundation_Finch.h, done with this Foundation's NSException. Not a public header.
++ */
++#ifndef PDFINCH_H
++#define PDFINCH_H
++#import <Foundation/NSException.h>
++#import <Foundation/NSString.h>
++#import <objc/runtime.h>
++#include <stdarg.h>
++
++__attribute__((noreturn, unused)) static void
++FinchRaise(NSString *name, const char *format, ...)
++{
++    va_list ap;
++    va_start(ap, format);
++    NSString *f = [NSString stringWithUTF8String:format];
++    NSString *reason = [[[NSString alloc] initWithFormat:f arguments:ap] autorelease];
++    va_end(ap);
++    [[NSException exceptionWithName:name reason:reason userInfo:nil] raise];
++    __builtin_unreachable();
++}
++
++__attribute__((noreturn, unused)) static void
++FinchAbstract(id self, SEL _cmd)
++{
++    FinchRaise(NSInvalidArgumentException, "-[%s %s]: method only defined for abstract class.  Define -[%s %s]!",
++               object_getClassName(self), sel_getName(_cmd), object_getClassName(self), sel_getName(_cmd));
++}
++#endif
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
---- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
-+++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 17:45:12.394757875 -0800
 @@ -39,6 +39,19 @@
  
  @implementation NSAttributedString
@@ -2036,8 +5227,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
---- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
-+++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
+--- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 17:48:01.837099596 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -2062,9 +5253,21 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +        CFCharacterSetIntersect((CFMutableCharacterSetRef)self, (CFCharacterSetRef)other);
 +}
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSString.h b/src/Frameworks/Foundation/String.subproj/NSString.h
+--- a/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-14 10:29:07.580115225 -0800
+@@ -155,6 +155,8 @@
+ - (const char *)fileSystemRepresentation;
+ - (NSArray *)componentsSeparatedByString:(NSString *)separator;
+ - (NSRange)rangeOfString:(NSString *)string;
++- (NSRange)rangeOfComposedCharacterSequenceAtIndex:(NSUInteger)index;
++- (NSRange)rangeOfComposedCharacterSequencesForRange:(NSRange)range;
+ - (NSRange)lineRangeForRange:(NSRange)range;
+ - (NSRange)paragraphRangeForRange:(NSRange)range;
+ - (NSRange)rangeOfString:(NSString *)string options:(NSStringCompareOptions)options;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks/Foundation/String.subproj/NSString.m
---- a/src/Frameworks/Foundation/String.subproj/NSString.m
-+++ b/src/Frameworks/Foundation/String.subproj/NSString.m
+--- a/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:16:53.440526676 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:56:11.786892112 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -2275,8 +5478,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
---- a/src/Frameworks/Foundation/URL.subproj/NSURL.m
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:16:53.441146971 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 04:54:15.272812577 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */

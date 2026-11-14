@@ -206,6 +206,37 @@
 #         system catalog colour is resolved once per appearance; PD_CA_TRACE is read once (it was a getenv per
 #         -setFrame:); a pop-up (not pull-down) menu with items has one selected (Activity Monitor's Send Signal
 #         sent signal 0). Activity Monitor's own CPU: docs/roadmap/issues/SF-AA-activity-monitor.md, Performance
+#   0108  AppKit: NSMenuItem's object getters (title, attributed title, key equivalent, image, represented
+#         object) answer retained and autoreleased, as macOS's atomic properties do. With libFoundation's
+#         CFAutorelease fix (terminal-app/build-foundation.nix, 14 November evening) strings are freed when
+#         their pool ends; Terminal keeps a removed item's key equivalent (macOS's one-letter strings are
+#         tagged pointers, never freed) and ended in -[NSMenuItem initWithTitle:...] without this
+#   0109  CoreGraphics (ImageIO re-exports it): CGImageSourceCreateThumbnailAtIndex (oriented, scaled to
+#         kCGImageSourceThumbnailMaxPixelSize) and image metadata (tags by path, made, copied, set, read,
+#         removed; a source's EXIF and TIFF properties as exif:/tiff: tags), for Finch's Contacts and
+#         MediaAccessibility (runs/m1-coord/requests-for-CLAUDE.md)
+#   0110  AppKit: the modern NSCollectionView from Finch (MIT OR Apache-2.0; data source, registered items, flow
+#         and grid layouts, selection, the older content/prototype form; NSCollectionView.m, NSCollectionViewLayout.m,
+#         notices kept): an item with nothing registered comes from a nib or class of the identifier's name, as
+#         on macOS; NSViewController -isViewLoaded; PD_CV_TRACE=1 prints each layout pass. Activity Monitor's
+#         Window > CPU Usage and CPU History open (they ended the application or did not open). Needs
+#         libFoundation's NSIndexPath: AppKit is built against ../terminal-app/build-foundation.nix (below)
+#   0111  AppKit: images of an application's asset catalog for +[NSImage imageNamed:] (Finch's CoreUI bitmap,
+#         deepmap2 and LZFSE/LZVN/zip decoding and rendition choice; libcompression and zlib looked up at run
+#         time) and Finch's symbol glyphs (about 150 names drawn in code, with .fill/.circle/.slash/.badge) after
+#         our own five (NSSymbolImages.m)
+#   0112  AppKit: PD_SOLVE_TIME=1 prints each whole-tree constraint solve's time and the sum (Finch's solver core
+#         in place of ours was measured with it and taken back: Terminal's Preferences 1574 ms of solving with
+#         ours, over 10000 ms with Finch's used as a throwaway solver; SF-AA, "Taken from Finch")
+#   0113  AppKit: macOS 26's toolbar buttons: an image button or pull-down that is a toolbar item's view draws its
+#         glyph alone, centred, one height (28 points) for all, a row of them in one rounded capsule, a small
+#         down chevron after a pull-down's glyph, the room around each glyph the same; a preferences toolbar's
+#         selected item in a soft rounded rectangle (Activity Monitor's stop/info/actions row, owner's photo)
+#   0114  AppKit: macOS's overlay scrollers (the style of a Mac with a trackpad; legacy with AppleShowScrollBars=Always
+#         or PD_SCROLLERS=legacy): a thin rounded knob over the content, no track or arrows, wider on a faint
+#         track while dragged, shown when the user scrolls (-flashScrollers) and faded a second later (a one-shot
+#         timer, then a fade that stops itself: nothing runs at rest); no room taken, no corner, a scroller
+#         with nothing to scroll hidden; in the legacy style the square where two scrollers meet is painted
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -272,6 +303,12 @@ let
     ./patches/0105-appkit-asset-catalog-colors-from-finch.patch
     ./patches/0106-appkit-nib-layout-standard-space-priorities.patch
     ./patches/0107-appkit-activity-monitor-look-and-cost.patch
+    ./patches/0108-appkit-menu-item-getters-autoreleased.patch
+    ./patches/0110-appkit-collection-view-from-finch.patch
+    ./patches/0111-appkit-catalog-images-symbols-from-finch.patch
+    ./patches/0112-appkit-solve-time-trace.patch
+    ./patches/0113-appkit-toolbar-buttons-macos26.patch
+    ./patches/0114-appkit-overlay-scrollers.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -307,6 +344,7 @@ let
   coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [
     ./patches/0025-coregraphics-private-additions.patch
     ./patches/0102-coregraphics-activity-monitor-cgs.patch
+    ./patches/0109-coregraphics-imageio-thumbnail-metadata.patch
   ];
   coregraphics = optimised (pd."coregraphics-arm64".override { src = coregraphicsSrc; });
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
@@ -330,7 +368,9 @@ let
               for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
   }));
-  appkit = optimised (pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver; });
+  # (0110) against the libFoundation the root has (NSIndexPath is in it), not upstream's
+  foundation = import ../terminal-app/build-foundation.nix;
+  appkit = optimised (pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver foundation; });
   # Security for arm64 (upstream's build) with SecItemCopyMatching's result defined on every path
   security = pd."security-arm64".overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./patches/0009-security-secitemcopymatching-defined-result.patch ];

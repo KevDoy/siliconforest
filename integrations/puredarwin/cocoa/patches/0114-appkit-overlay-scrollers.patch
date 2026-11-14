@@ -1,0 +1,414 @@
+--- a/src/Frameworks/AppKit/NSScroller.m
++++ b/src/Frameworks/AppKit/NSScroller.m
+@@ -18,6 +18,11 @@
+ #import <AppKit/NSRaise.h>
+ #import <AppKit/NSAppearance.h>
+ #import <AppKit/NSBezierPath.h>
++#import <AppKit/NSModernAppKit.h>
++#import <Foundation/NSUserDefaults.h>
++#import <Foundation/NSTimer.h>
++#include <string.h>
++#include <stdlib.h>
+ 
+ extern BOOL PDControlLookIs26(void);
+ 
+@@ -25,8 +30,86 @@
+ -(BOOL)_isDark;
+ @end
+ 
++/* (cocoa 0114) macOS's overlay scrollers, the style a Mac with a trackpad shows: a thin rounded knob over the
++ * content, no track and no arrows; while the knob is dragged it is wider on a faint track; it fades out
++ * a second after the last scroll. Nothing runs at rest: a one-shot timer after a scroll, then a short fade
++ * that stops itself. They appear when the user scrolls (the wheel or trackpad through NSView, or the
++ * knob) and with -[NSScrollView flashScrollers]. The legacy style (always shown, taking room) with AppleShowScrollBars=Always in the
++ * defaults, or PD_SCROLLERS=legacy, or -setScrollerStyle: */
++@interface NSScroller () {
++   CGFloat  _pdOverlayAlpha;
++   NSTimer *_pdOverlayTimer;
++}
++@end
++
++NSScrollerStyle PDScrollerPreferredStyle(void) {
++   static int style=-1;
++
++   if(style<0){
++    const char *env=getenv("PD_SCROLLERS");
++    NSString   *shown=[[NSUserDefaults standardUserDefaults] stringForKey:@"AppleShowScrollBars"];
++
++    style=((env!=NULL && strcmp(env,"legacy")==0) || [shown isEqualToString:@"Always"])?NSScrollerStyleLegacy:NSScrollerStyleOverlay;
++   }
++   return (NSScrollerStyle)style;
++}
++
++const CGFloat PDOverlayScrollerWidth=14;
++
+ @implementation NSScroller
+ 
++-(BOOL)_pdOverlay {
++   return [(id)self scrollerStyle]==NSScrollerStyleOverlay;
++}
++
++-(void)_pdOverlayStopTimer {
++   [_pdOverlayTimer invalidate];
++   [_pdOverlayTimer release];
++   _pdOverlayTimer=nil;
++}
++
++-(void)_pdOverlayFadeStep:(NSTimer *)timer {
++   _pdOverlayAlpha-=0.12;
++   if(_pdOverlayAlpha<=0){
++    _pdOverlayAlpha=0;
++    [self _pdOverlayStopTimer];
++   }
++   [self setNeedsDisplay:YES];
++}
++
++-(void)_pdOverlayStartFade:(NSTimer *)timer {
++   [_pdOverlayTimer release];
++   _pdOverlayTimer=[[NSTimer scheduledTimerWithTimeInterval:1.0/30 target:self selector:@selector(_pdOverlayFadeStep:) userInfo:nil repeats:YES] retain];
++}
++
++// shown at once, faded out a second after the last call
++-(void)_pdOverlayReveal {
++   [self _pdOverlayStopTimer];
++   if(_pdOverlayAlpha!=1){
++    _pdOverlayAlpha=1;
++    [self setNeedsDisplay:YES];
++   }
++   if(!_isHighlighted && [self window]!=nil)
++    _pdOverlayTimer=[[NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(_pdOverlayStartFade:) userInfo:nil repeats:NO] retain];
++}
++
++-(BOOL)isOpaque {
++   return ![self _pdOverlay];
++}
++
++// a faded overlay scroller lets clicks through to the content under it
++-(NSView *)hitTest:(NSPoint)point {
++   if([self _pdOverlay] && _pdOverlayAlpha<=0)
++    return nil;
++   return [super hitTest:point];
++}
++
++-(void)viewWillMoveToWindow:(NSWindow *)window {
++   if(window==nil)
++    [self _pdOverlayStopTimer];
++   [super viewWillMoveToWindow:window];
++}
++
+ +(CGFloat)scrollerWidth {
+    return [[NSDisplay currentDisplay] scrollerWidth];
+ }
+@@ -145,12 +228,17 @@
+     if(zeroToOneKnob<0)
+         zeroToOneKnob=0;
+ 
++    BOOL changed=(_floatValue!=zeroToOneValue || _knobProportion!=zeroToOneKnob);
++
+     _floatValue=zeroToOneValue;
+    _knobProportion=zeroToOneKnob;
+    if(_knobProportion>1)
+     _knobProportion=1;
+ 
+-   [self setNeedsDisplay:YES];
++   // (overlay) shown by user scrolling only (-[NSScrollView flashScrollers]): an application changing its
++   // content does not make them appear, as on macOS
++   if(changed)
++    [self setNeedsDisplay:YES];
+ }
+ 
+ -(double)doubleValue {
+@@ -392,6 +480,39 @@
+ 
+ 
+ -(void)drawRect:(NSRect)rect {
++   if([self _pdOverlay]){
++    if(_pdOverlayAlpha<=0 || ![self isEnabled])
++     return;
++
++    BOOL    dark=[[NSAppearance currentDrawingAppearance] _isDark];
++    NSRect  bounds=[self bounds];
++    NSRect  bar=[self rectForPart:NSScrollerKnob];
++    BOOL    held=_isHighlighted && _hitPart==NSScrollerKnob;
++    CGFloat thickness=held?9:6, alpha=_pdOverlayAlpha;
++    NSRect  knob,track;
++
++    if([self isVertical]){
++     track=NSMakeRect(NSMaxX(bounds)-thickness-4,NSMinY(bounds)+1,thickness+2,NSHeight(bounds)-2);
++     knob=NSMakeRect(NSMaxX(bounds)-thickness-3,NSMinY(bar)+2,thickness,NSHeight(bar)-4);
++    }
++    else {
++     track=NSMakeRect(NSMinX(bounds)+1,NSMaxY(bounds)-thickness-4,NSWidth(bounds)-2,thickness+2);
++     knob=NSMakeRect(NSMinX(bar)+2,NSMaxY(bounds)-thickness-3,NSWidth(bar)-4,thickness);
++    }
++    if(held){
++     CGFloat r=MIN(NSWidth(track),NSHeight(track))/2;
++
++     [[NSColor colorWithCalibratedWhite:dark?1:0 alpha:(dark?0.08:0.05)*alpha] setFill];
++     [[NSBezierPath bezierPathWithRoundedRect:track xRadius:r yRadius:r] fill];
++    }
++    if(NSWidth(knob)>0 && NSHeight(knob)>0){
++     CGFloat r=MIN(NSWidth(knob),NSHeight(knob))/2;
++
++     [[NSColor colorWithCalibratedWhite:dark?1:0 alpha:(dark?0.5:0.45)*alpha] setFill];
++     [[NSBezierPath bezierPathWithRoundedRect:knob xRadius:r yRadius:r] fill];
++    }
++    return;
++   }
+    if(PDControlLookIs26()){
+     BOOL   dark=[[NSAppearance currentDrawingAppearance] _isDark];
+     NSRect bounds=[self bounds];
+@@ -588,7 +709,17 @@
+      return;
+ 
+     case NSScrollerKnob:
++     // (overlay) wider while dragged, then the fade begins again
++     _hitPart=NSScrollerKnob;
++     _isHighlighted=YES;
++     if([self _pdOverlay])
++      [self _pdOverlayReveal];
++     [self setNeedsDisplay:YES];
+      [self trackKnob:event];
++     _isHighlighted=NO;
++     if([self _pdOverlay])
++      [self _pdOverlayReveal];
++     [self setNeedsDisplay:YES];
+      break;
+ 
+     case NSScrollerKnobSlot:
+--- a/src/Frameworks/AppKit/NSScrollView.m
++++ b/src/Frameworks/AppKit/NSScrollView.m
+@@ -5,6 +5,7 @@
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
++#import <AppKit/NSModernAppKit.h>
+ #import <AppKit/NSScrollView.h>
+ #import <AppKit/NSScroller.h>
+ #import <AppKit/NSClipView.h>
+@@ -17,8 +18,51 @@
+ #import <AppKit/NSCursor.h>
+ #import <AppKit/NSRaise.h>
+ 
++/* (cocoa 0114) overlay scrollers (NSScroller.m) lie over the content and take no room: the clip view and the
++ * header have the whole width and height, there is no corner, and a scroller that has nothing to scroll is
++ * hidden; legacy ones take their width as before and the square where they meet is painted. */
++extern const CGFloat PDOverlayScrollerWidth;
++
++@interface NSScroller (PDOverlay)
++-(void)_pdOverlayReveal;
++@end
++
++static BOOL pdOverlayScrollers(NSScrollView *self) {
++   NSScroller *scroller=[self verticalScroller];
++
++   if(scroller==nil)
++    scroller=[self horizontalScroller];
++   return scroller!=nil ? [(id)scroller scrollerStyle]==NSScrollerStyleOverlay : [NSScroller preferredScrollerStyle]==NSScrollerStyleOverlay;
++}
++
++// the room a shown scroller takes from the content
++static CGFloat pdScrollerRoom(NSScrollView *self) {
++   return pdOverlayScrollers(self)?0:[NSScroller scrollerWidth];
++}
++
+ @implementation NSScrollView
+ 
++-(NSScrollerStyle)scrollerStyle {
++   return pdOverlayScrollers(self)?NSScrollerStyleOverlay:NSScrollerStyleLegacy;
++}
++
++// overlay scrollers that have something to scroll appear, and fade a second later
++-(void)flashScrollers {
++   if(!pdOverlayScrollers(self))
++    return;
++   if([self hasVerticalScroller] && ![_verticalScroller isHidden] && [_verticalScroller isEnabled])
++    [(id)_verticalScroller _pdOverlayReveal];
++   if([self hasHorizontalScroller] && ![_horizontalScroller isHidden] && [_horizontalScroller isEnabled])
++    [(id)_horizontalScroller _pdOverlayReveal];
++}
++
++-(void)setScrollerStyle:(NSScrollerStyle)style {
++   [(id)[self verticalScroller] setScrollerStyle:style];
++   [(id)[self horizontalScroller] setScrollerStyle:style];
++   [self tile];
++   [self setNeedsDisplay:YES];
++}
++
+ static Class _rulerViewClass = nil;
+ 
+ +(void)initialize
+@@ -212,7 +256,7 @@
+     // the header is as wide as the clip view under it: the corner is there only over a vertical scroller
+     // that takes room (a table without one had its last column's title under an empty corner)
+     if([self hasVerticalScroller] && ![_verticalScroller isHidden])
+-     result.size.width-=[NSScroller scrollerWidth];
++     result.size.width-=pdScrollerRoom(self);
+ 
+     return result;
+ }
+@@ -225,7 +269,7 @@
+ 
+     NSRect bounds = [self insetBounds];
+     NSRect frame;
+-    if (![self hasVerticalScroller] || [_verticalScroller isHidden])
++    if (![self hasVerticalScroller] || [_verticalScroller isHidden] || pdOverlayScrollers(self))
+         return NSMakeRect(bounds.origin.x + bounds.size.width, bounds.origin.y, 0, [headerView bounds].size.height);
+     frame.origin.x = bounds.origin.x+bounds.size.width-[NSScroller scrollerWidth];
+     frame.origin.y = bounds.origin.y;
+@@ -267,7 +311,7 @@
+ 
+    result.size.width=bounds.size.width;
+    if([self hasVerticalScroller] && ![_verticalScroller isHidden])
+-    result.size.width-=[NSScroller scrollerWidth];
++    result.size.width-=pdScrollerRoom(self);
+    if([self rulersVisible] && [self hasVerticalRuler]) {
+     result.origin.x+=[self verticalRulerFrame].size.width;
+     result.size.width-=[self verticalRulerFrame].size.width;
+@@ -275,7 +319,7 @@
+ 
+    result.size.height=bounds.size.height;
+    if([self hasHorizontalScroller] && ![_horizontalScroller isHidden]){
+-    result.size.height-=[NSScroller scrollerWidth];
++    result.size.height-=pdScrollerRoom(self);
+    }
+    if([self rulersVisible] && [self hasHorizontalRuler]) {
+     result.origin.y+=[self horizontalRulerFrame].size.height;
+@@ -294,12 +338,14 @@
+    NSRect bounds=[self insetBounds];
+    NSRect result;
+ 
+-   result.origin.x=bounds.origin.x+bounds.size.width-[NSScroller scrollerWidth];
++   CGFloat width=pdOverlayScrollers(self)?PDOverlayScrollerWidth:[NSScroller scrollerWidth];
++
++   result.origin.x=bounds.origin.x+bounds.size.width-width;
+    result.origin.y=bounds.origin.y;
+-   result.size.width=[NSScroller scrollerWidth];
++   result.size.width=width;
+    result.size.height=bounds.size.height;
+     if([self hasHorizontalScroller] && ![_horizontalScroller isHidden])
+-        result.size.height-=[NSScroller scrollerWidth];
++        result.size.height-=width;
+ 
+     if ([self _headerView] != nil) {
+        result.origin.y+=[self headerClipViewFrame].size.height;
+@@ -317,13 +363,15 @@
+    NSRect bounds=[self insetBounds];
+    NSRect result;
+ 
++   CGFloat width=pdOverlayScrollers(self)?PDOverlayScrollerWidth:[NSScroller scrollerWidth];
++
+    result.origin.x=bounds.origin.x;
+-   result.origin.y=(bounds.origin.y+bounds.size.height)-[NSScroller scrollerWidth];
++   result.origin.y=(bounds.origin.y+bounds.size.height)-width;
+    result.size.width=bounds.size.width;
+    if([self hasVerticalScroller] && ![_verticalScroller isHidden])
+-    result.size.width-=[NSScroller scrollerWidth];
++    result.size.width-=width;
+ 
+-   result.size.height=[NSScroller scrollerWidth];
++   result.size.height=width;
+ 
+     if([self rulersVisible] && [self hasVerticalRuler]) {
+        result.origin.x+=[_verticalRuler requiredThickness];
+@@ -799,9 +847,9 @@
+ 
+     if(docView==nil){
+      [_verticalScroller setEnabled:NO];
+-     [_verticalScroller setHidden:_autohidesScrollers];
++     [_verticalScroller setHidden:_autohidesScrollers || pdOverlayScrollers(self)];
+      [_horizontalScroller setEnabled:NO];
+-     [_horizontalScroller setHidden:_autohidesScrollers];
++     [_horizontalScroller setHidden:_autohidesScrollers || pdOverlayScrollers(self)];
+     }
+     else {
+      NSRect docRect=[docView frame];
+@@ -811,7 +859,7 @@
+ 
+      if(heightDiff<=0){
+       [_verticalScroller setEnabled:NO];
+-      [_verticalScroller setHidden:_autohidesScrollers];
++      [_verticalScroller setHidden:_autohidesScrollers || pdOverlayScrollers(self)];
+      }
+      else {
+       float  value=(heightDiff<=0)?0:(clipRect.origin.y-docRect.origin.y)/heightDiff;
+@@ -824,9 +872,10 @@
+       [_verticalScroller setFloatValue:value knobProportion:clipRect.size.height/docRect.size.height];
+      }
+ 
+-     if(widthDiff<=0){
++     // (a table as wide as its clip view is a point wider at most: it fits)
++     if(widthDiff<=0.5){
+       [_horizontalScroller setEnabled:NO];
+-      [_horizontalScroller setHidden:_autohidesScrollers];
++      [_horizontalScroller setHidden:_autohidesScrollers || pdOverlayScrollers(self)];
+      }
+      else {
+       float value=(widthDiff<=0)?0:(clipRect.origin.x-docRect.origin.x)/widthDiff;
+@@ -858,6 +907,15 @@
+     [[self backgroundColor] setFill];
+     NSRectFill(rect);
+    }
++   // (cocoa 0114) the square where two legacy scrollers meet is the scrollers' colour, not left unpainted
++   if(!pdOverlayScrollers(self) && [self hasVerticalScroller] && ![_verticalScroller isHidden] &&
++      [self hasHorizontalScroller] && ![_horizontalScroller isHidden]){
++    NSRect v=[_verticalScroller frame], h=[_horizontalScroller frame];
++    NSRect corner=NSMakeRect(NSMinX(v),NSMinY(h),NSWidth(v),NSHeight(h));
++
++    [[NSColor colorWithCalibratedWhite:0.965 alpha:1] setFill];
++    NSRectFill(NSIntersectionRect(corner,rect));
++   }
+    
+    switch(_borderType){
+     case NSNoBorder:
+--- a/src/Frameworks/AppKit/NSScrollView.h
++++ b/src/Frameworks/AppKit/NSScrollView.h
+@@ -97,4 +97,5 @@
+ - (void)tile;
+ - (void)reflectScrolledClipView:(NSClipView *)clipView;
+ 
++- (void)flashScrollers;
+ @end
+--- a/src/Frameworks/AppKit/NSView.m
++++ b/src/Frameworks/AppKit/NSView.m
+@@ -2753,6 +2753,8 @@
+             visible.origin.x=NSMaxX(bounds)-visible.size.width;
+ 
+         [documentView scrollRectToVisible:visible];
++        // (cocoa 0114) the user scrolled: overlay scrollers appear
++        [scrollView flashScrollers];
+     }
+ }
+ 
+--- a/src/Frameworks/AppKit/NSMacOS26Additions.m
++++ b/src/Frameworks/AppKit/NSMacOS26Additions.m
+@@ -296,9 +296,10 @@
+     // overlay scrollers (style 1) take no room; legacy ones their usual width
+     return style == 1 ? 0 : [self scrollerWidth];
+ }
+-+ (NSInteger)preferredScrollerStyle { return 0; /* NSScrollerStyleLegacy: scrollers are always shown */ }
+-- (void)setScrollerStyle:(NSInteger)style { PD_SET_INT(self, PDScrollerStyleKey, style); }
+-- (NSInteger)scrollerStyle { return PD_GET_INT(self, PDScrollerStyleKey); }
++// (cocoa 0114) overlay unless the defaults say Always (NSScroller.m); a scroller's own style once set
+++ (NSInteger)preferredScrollerStyle { extern NSInteger PDScrollerPreferredStyle(void); return PDScrollerPreferredStyle(); }
++- (void)setScrollerStyle:(NSInteger)style { PD_SET_INT(self, PDScrollerStyleKey, style + 1); [self setNeedsDisplay:YES]; }
++- (NSInteger)scrollerStyle { extern NSInteger PDScrollerPreferredStyle(void); NSInteger s = PD_GET_INT(self, PDScrollerStyleKey); return s ? s - 1 : PDScrollerPreferredStyle(); }
+ - (void)setKnobStyle:(NSInteger)style { PD_SET_INT(self, PDKnobStyleKey, style); }
+ - (NSInteger)knobStyle { return PD_GET_INT(self, PDKnobStyleKey); }
+ - (void)setKnobProportion:(CGFloat)proportion { [self setFloatValue:[self floatValue] knobProportion:proportion]; }
+--- a/src/Frameworks/AppKit/NSModernAppKit.m
++++ b/src/Frameworks/AppKit/NSModernAppKit.m
+@@ -651,10 +651,11 @@
+ 
+ @implementation NSScroller (ModernStyle)
+ 
+-// scrollers are always shown, as with a mouse attached on macOS
++// (cocoa 0114) overlay, as on a Mac with a trackpad, unless the defaults say Always (NSScroller.m)
+ + (NSScrollerStyle)preferredScrollerStyle
+ {
+-    return NSScrollerStyleLegacy;
++    extern NSScrollerStyle PDScrollerPreferredStyle(void);
++    return PDScrollerPreferredStyle();
+ }
+ 
+ @end
