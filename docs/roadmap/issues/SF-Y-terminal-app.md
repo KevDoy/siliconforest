@@ -78,6 +78,15 @@ and no physical keyboard or trackpad was used.
 | 20 s of processor time at launch | every string measurement is a pass of the whole text system (5 ms); Terminal measures 1384 strings for its profiles | AppKit 0032: sizes of unbounded one-style strings are remembered |
 | Each bell an exception report | `-[NSDisplay beep]` raised "not implemented" | AppKit 0029: said once |
 
+## Taken from Finch
+Finch (an open Darwin for Apple Silicon; its own code "MIT OR Apache-2.0", SPDX per file) is cloned
+at `sources/finch` (git-ignored). Taken from it, at Finch commit `2d9b1bb`, with its copyright and
+SPDX notice kept in the file that carries it:
+
+| Finch file | Where here | What |
+|---|---|---|
+| `userland/AppKit/NSWindowTabbing.m` | `cocoa/patches/0039-appkit-window-tabs.patch` (new file `AppKit/NSWindowTabbing.m`) | the structure of `NSWindowTab`, `NSWindowTabGroup` and NSWindow's tabbing calls: the group's bookkeeping (windows not retained, the window owns its group), the tabbing identifier's form, where `addTabbedWindow:ordered:` puts the tab, which tab is selected when one leaves, Move Tab to New Window, Merge All Windows. Adapted to this AppKit (manual retain/release, no `__weak`); the hand-over of one toplevel per group, the tab bar and the Window menu's tab items are ours |
+
 ## The binary (scanner, `integrations/puredarwin/homebrew/sf_gapscan.py --app`)
 The scanner now reads universal files (`--arch arm64e`), the import table of chained fixups, the
 chains themselves (authenticated binds and rebases), Objective-C class and category method lists and

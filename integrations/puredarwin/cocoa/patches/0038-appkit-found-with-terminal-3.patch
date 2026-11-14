@@ -1,6 +1,14 @@
 --- a/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
 +++ b/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
-@@ -86,3 +86,14 @@
+@@ -74,6 +74,7 @@
+ @end
+ 
+ #import <AppKit/NSCell.h>
++#import <AppKit/NSTextField.h>
+ 
+ /* -[NSCell interiorBackgroundStyle]: the background a cell's interior is drawn on (light, unless
+  * the cell is highlighted in a list, where it is the selection's dark fill). A table's custom cell
+@@ -86,3 +87,30 @@
  }
  
  @end
@@ -12,6 +20,22 @@
 ++ (id)setWithCapacity:(NSUInteger)capacity
 +{
 +    return [[[self alloc] initWithCapacity:capacity] autorelease];
++}
++
++@end
++
++/* -[NSTextField setLineBreakMode:] (macOS 10.11; Terminal sets it on its tab's accessory field):
++ * the cell's. */
++@implementation NSTextField (PDLineBreakMode)
++
++- (void)setLineBreakMode:(NSLineBreakMode)mode
++{
++    [[self cell] setLineBreakMode:mode];
++}
++
++- (NSLineBreakMode)lineBreakMode
++{
++    return [[self cell] lineBreakMode];
 +}
 +
 +@end

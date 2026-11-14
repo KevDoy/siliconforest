@@ -120,7 +120,71 @@
          return NULL;
      }
      if (pick->buffer == NULL || pick->w != w || pick->h != h) {
-@@ -2624,7 +2672,9 @@
+@@ -2617,6 +2665,63 @@
+     return KERN_SUCCESS;
+ }
+ 
++/* Window tabs: the windows of a tab group are one toplevel on the compositor (one place, one frame,
++ * no window appearing and vanishing when the tab changes). The record that has the toplevel takes
++ * the identity of the tab to be shown (its number, which every event carries, its backing store and
++ * its title); that tab's own record, without a toplevel or with an unmapped one, takes the identity
++ * of the tab that was shown, which AppKit then orders out. Frames (wl_buffers) stay with their
++ * record: they are copies, the one on the surface is replaced by the next flush. */
++static kern_return_t windowTakeToplevel(struct wsRPCWindow *msg) {
++    struct wsWindow *shown = windowForID(msg->state);
++    struct wsWindow *next = windowForID(msg->windowID);
++
++    if (shown == NULL || next == NULL || shown == next)
++        return KERN_FAILURE;
++    pthread_mutex_lock(&ws.pixelsLock);
++    pthread_mutex_lock(&ws.queueLock);
++#define WS_SWAP(field) do { __typeof__(shown->field) t_ = shown->field; shown->field = next->field; next->field = t_; } while (0)
++    WS_SWAP(windowID);
++    WS_SWAP(pixels);
++    WS_SWAP(pixelsSize);
++    WS_SWAP(pixelsW);
++    WS_SWAP(pixelsH);
++    WS_SWAP(pointsW);
++    WS_SWAP(pointsH);
++    WS_SWAP(shmFd);
++    WS_SWAP(scale120);
++    WS_SWAP(flushed);
++#undef WS_SWAP
++    char title[sizeof(shown->title)];
++    memcpy(title, shown->title, sizeof(title));
++    memcpy(shown->title, next->title, sizeof(title));
++    memcpy(next->title, title, sizeof(title));
++    shown->presentPending = next->presentPending = 0;
++    for (int i = 0; i < WS_FRAMES; i++) {
++        shown->frames[i].ownerID = shown->windowID;
++        next->frames[i].ownerID = next->windowID;
++    }
++    // input that goes to the surface goes to the tab shown in it
++    if (ws.focusWindowID == next->windowID)
++        ws.focusWindowID = shown->windowID;
++    else if (ws.focusWindowID == shown->windowID)
++        ws.focusWindowID = next->windowID;
++    if (ws.pointerWindowID == next->windowID)
++        ws.pointerWindowID = shown->windowID;
++    else if (ws.pointerWindowID == shown->windowID)
++        ws.pointerWindowID = next->windowID;
++    pthread_mutex_unlock(&ws.queueLock);
++    if (shown->toplevel != NULL && shown->title[0] != '\0')
++        xdg_toplevel_set_title(shown->toplevel, shown->title);
++    // what the tab last drew, at once; its next flush follows
++    if (shown->attached && shown->flushed && shown->state != MINIMIZED && shown->state != HIDDEN && windowPresent(shown))
++        wl_surface_commit(shown->surface);
++    pthread_mutex_unlock(&ws.pixelsLock);
++    wl_display_flush(ws.display);
++    if (getenv("PD_WS_TRACE") != NULL)
++        fprintf(stderr, "WindowServer: window %d takes the toplevel of window %d\n", shown->windowID, next->windowID);
++    return KERN_SUCCESS;
++}
++
+ static kern_return_t windowDestroy(struct wsRPCWindow *msg) {
+     struct wsWindow **link = &ws.windows;
+ 
+@@ -2624,7 +2729,9 @@
          struct wsWindow *window = *link;
  
          if (window->windowID == msg->windowID) {
@@ -130,7 +194,7 @@
              windowReleaseBuffer(window);
              windowDestroyRole(window);
              if (window->blurEffect != NULL) { ext_background_effect_surface_v1_destroy(window->blurEffect); }
-@@ -2930,10 +2980,19 @@
+@@ -2930,10 +3037,19 @@
                  window->inputDirty = 0;
              }
              // hand the compositor a copy of the backing store, so it never reads a frame mid-draw
@@ -151,3 +215,26 @@
              return KERN_SUCCESS;
          }
  
+@@ -2954,6 +3070,9 @@
+             return KERN_SUCCESS;
+         }
+ 
++        case kWSWindowTakeToplevel:
++            return windowTakeToplevel((struct wsRPCWindow *)data);
++
+         case kWSWindowSetPopupAnchor: {
+             struct wsRPCWindow *msg = (struct wsRPCWindow *)data;
+             struct wsWindow *window = windowForID(msg->windowID);
+--- a/src/Frameworks/WindowServer/message.h
++++ b/src/Frameworks/WindowServer/message.h
+@@ -37,6 +37,10 @@
+     // wsRPCWindow: a popup's anchor before it is shown. x, y, w, h: the rectangle it belongs to, on the
+     // screen as AppKit counts (y up); style: WS_POPUP_*; state: the window number of its parent (0: found)
+     kWSWindowSetPopupAnchor = 13,
++    // wsRPCWindow: window tabs (AppKit's NSWindowTabGroup) share one toplevel. windowID: the tab to be
++    // shown; state: the window number of the tab shown now. The two records exchange what AppKit
++    // knows them by (number, backing store, title): the toplevel, its place and its frames stay
++    kWSWindowTakeToplevel = 14,
+     kCGGetLastMouseDelta = 100,
+     kCGGetMouseLocation = 101,
+     /* windowID 0 asks for the active application window. */

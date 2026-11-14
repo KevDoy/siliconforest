@@ -80,11 +80,15 @@
 #         there is no menu transport
 #   0036  WindowServer: a flush that finds every frame busy is presented when the compositor releases
 #         one (it waited up to 100 ms on the main thread and was then dropped); PD_WS_TIMING=1 prints
-#         the wall time of each commit and release
+#         the wall time of each commit and release; kWSWindowTakeToplevel: the tabs of a window share
+#         one toplevel (two records exchange their identities)
 #   0037  Onyx2D: one font per name (each was a fontconfig match, the whole file read and a FreeType
 #         face opened: AppKit makes an NSFont by name for every string it measures)
 #   0038  AppKit: more found with Terminal.app: +[NSCountedSet setWithCapacity:] (its check for running
 #         processes when it quits)
+#   0039  AppKit: window tabs (NSWindowTabGroup, NSWindowTab, addTabbedWindow:ordered:, Show Next/Previous
+#         Tab, Move Tab to New Window, Merge All Windows) as one toplevel per group, with a tab bar under
+#         the menu strip; structure from Finch's NSWindowTabbing.m (MIT OR Apache-2.0, commit 2d9b1bb)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -128,13 +132,14 @@ let
     ./patches/0033-appkit-scroller-look-macos26.patch
     ./patches/0035-appkit-glyph-advances-font-directory-menu-archive.patch
     ./patches/0038-appkit-found-with-terminal-3.patch
+    ./patches/0039-appkit-window-tabs.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
     ./patches/0018-windowserver-popup-placement.patch
     ./patches/0022-windowserver-presented-frame-dump.patch
     ./patches/0030-windowserver-app-id-without-bundle-identifier.patch
-    ./patches/0036-windowserver-busy-flush-presented-on-release.patch
+    ./patches/0036-windowserver-present-on-release-tab-toplevel.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
