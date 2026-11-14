@@ -5,7 +5,9 @@
 //   touch /tmp/sfprof.on        sampling starts (every SFPROF_US microseconds, default 1000)
 //   rm /tmp/sfprof.on           sampling stops; the report is written to /tmp/sfprof.txt
 //                               (SFPROF_OUT=path): functions by samples where they were running
-//                               (self) and by samples where they were on the stack (total)
+//                               (self) and by samples where they were on the stack (total);
+//                               /tmp/sfprof.txt.stacks has each sample's stack on a line (outermost
+//                               first, ';' between names) for callers and folded stacks
 //   SFPROF_FOCUS=name           the report counts only the samples with NAME on their stack
 //   SFPROF_PROGRAM=text         only the program whose name contains TEXT samples (the variable
 //                               reaches the program's children too: a terminal's shell)
@@ -101,6 +103,21 @@ static void report(void) {
     fclose(out);
     for (unsigned i = 0; i < used; i++) free((void *)entries[i].name);
     free(entries);
+    // every sample's stack, outermost first, names joined by ';' (sort | uniq -c makes folded stacks)
+    char folded[600];
+    snprintf(folded, sizeof(folded), "%s.stacks", path);
+    if ((out = fopen(folded, "w")) != NULL) {
+        for (unsigned s = 0; s < count; s++) {
+            for (int d = (int)depths[s] - 1; d >= 0; d--) {
+                char *plus;
+                nameOf(samples[s][d] - (d > 0 ? 4 : 0), buf, sizeof(buf));
+                // a function without a symbol keeps its image's offset (SFPROF_OFFSETS=1)
+                if ((plus = strchr(buf, '+')) != NULL && strncmp(buf, "0x", 2) != 0 && getenv("SFPROF_OFFSETS") == NULL) *plus = 0;
+                fprintf(out, "%s%s", buf, d ? ";" : "\n");
+            }
+        }
+        fclose(out);
+    }
 }
 
 static void *sampler(void *unused) {
