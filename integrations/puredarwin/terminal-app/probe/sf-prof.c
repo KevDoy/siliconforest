@@ -7,6 +7,8 @@
 //                               (SFPROF_OUT=path): functions by samples where they were running
 //                               (self) and by samples where they were on the stack (total)
 //   SFPROF_FOCUS=name           the report counts only the samples with NAME on their stack
+//   SFPROF_PROGRAM=text         only the program whose name contains TEXT samples (the variable
+//                               reaches the program's children too: a terminal's shell)
 //
 // The main thread is suspended for each sample (thread_suspend, thread_get_state, a walk of the
 // frame-pointer chain, thread_resume). Names are what dladdr finds: the nearest symbol of the
@@ -135,6 +137,9 @@ static void *sampler(void *unused) {
 }
 
 __attribute__((constructor)) static void start(void) {
+    const char *only = getenv("SFPROF_PROGRAM");
+    if (only != NULL && strstr(getprogname(), only) == NULL)
+        return;
     mainThread = mach_thread_self();
     samples = calloc(MAXSAMPLES, sizeof(*samples));
     depths = calloc(MAXSAMPLES, 1);

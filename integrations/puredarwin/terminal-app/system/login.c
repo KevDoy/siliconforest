@@ -16,11 +16,16 @@
 #include <grp.h>
 #include <pwd.h>
 #include <stdio.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 extern char **environ;
+
+static pid_t shellPid;
+static void passOn(int sig) { if (shellPid > 0) kill(shellPid, sig); }
 
 int main(int argc, char **argv)
 {
@@ -65,7 +70,24 @@ int main(int argc, char **argv)
     sprintf(zero, "%s%s", notlogin ? "" : "-", leaf);
     child[0] = zero;
     for (int i = 2; i < argc; i++) child[i - 1] = argv[i];
-    execv(prog, child);
-    fprintf(stderr, "login: %s: %s\n", prog, strerror(errno));
-    return 1;
+    /* As macOS's login, this process stays the program's parent until it ends: Apple's Terminal
+     * finds the shell as the child of the process it started, sends it SIGHUP when the window or
+     * the application closes, and waits for that process (login) to end. With login replaced by
+     * the shell nothing got the signal and Terminal waited 60 s before its SIGKILL went to pid 0. */
+    pid_t pid = fork();
+    if (pid < 0) { fprintf(stderr, "login: fork: %s\n", strerror(errno)); return 1; }
+    if (pid == 0) {
+        execv(prog, child);
+        fprintf(stderr, "login: %s: %s\n", prog, strerror(errno));
+        _exit(1);
+    }
+    // the session's signals are the program's: a hangup of the terminal or a TERM sent to login
+    // is passed on; interrupts typed at the terminal reach the program's process group directly
+    shellPid = pid;
+    signal(SIGINT, SIG_IGN); signal(SIGQUIT, SIG_IGN); signal(SIGTSTP, SIG_IGN);
+    signal(SIGHUP, passOn); signal(SIGTERM, passOn);
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return WEXITSTATUS(status);
 }

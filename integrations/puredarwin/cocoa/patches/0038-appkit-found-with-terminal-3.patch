@@ -1,0 +1,17 @@
+--- a/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
++++ b/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
+@@ -86,3 +86,14 @@
+ }
+ 
+ @end
++
++/* +[NSCountedSet setWithCapacity:] (Terminal's check for running processes when it quits): this
++ * Foundation's counted set does not inherit NSMutableSet's convenience constructor. */
++@implementation NSCountedSet (PDCapacity)
++
+++ (id)setWithCapacity:(NSUInteger)capacity
++{
++    return [[[self alloc] initWithCapacity:capacity] autorelease];
++}
++
++@end

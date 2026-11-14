@@ -83,6 +83,8 @@
 #         the wall time of each commit and release
 #   0037  Onyx2D: one font per name (each was a fontconfig match, the whole file read and a FreeType
 #         face opened: AppKit makes an NSFont by name for every string it measures)
+#   0038  AppKit: more found with Terminal.app: +[NSCountedSet setWithCapacity:] (its check for running
+#         processes when it quits)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -125,6 +127,7 @@ let
     ./patches/0032-appkit-measured-sizes-remembered.patch
     ./patches/0033-appkit-scroller-look-macos26.patch
     ./patches/0035-appkit-glyph-advances-font-directory-menu-archive.patch
+    ./patches/0038-appkit-found-with-terminal-3.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
