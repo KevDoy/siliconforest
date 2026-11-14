@@ -270,3 +270,178 @@ dock's instrument data on Darwin; window restore position after maximise (TERM s
 
 ## Taken from Finch
 Nothing.
+
+## macOS key map and recording (DESK2, 14 November, evening)
+The owner: "I want the muscle memory to be macOS. All feels native to Mac OS please and btw do we
+support screen recording as well", then: application icons on every launcher, the dock's right-hand
+column as one themed SiliconForest set with real figures, maximise honouring it.
+
+**Truthfulness.** "Observed" below = seen on the M1's disk system with **synthetic input** (the
+compositor's inject module in the test build `.next`, or the same-uid capture socket from SSH), judged
+from the compositor's own captures (looked at) and its log. Nobody looked at the panel, no real key
+was pressed and no real finger touched the trackpad. Captures: `runs/m1-desktop-010/desk2-tests/shots/`
+(not committed), recordings in `desk2-tests/rec/`.
+
+### What a person at the M1 can now do
+- macOS's own chords (table below): Command-Tab switcher with the applications' icons, Command-Space
+  launcher, Command-Shift-3/4/5 screenshots and the capture toolbar, screen recording, Command-H and
+  Command-Tab to get it back, Force Quit, Control-arrows/-digits for Spaces. A Mac application keeps
+  every Command chord the system does not take (Command-T, -F, -S, -O, -<digit>, -Q, -W, -M, Control-Command-F ...).
+- Record the screen or a selection (toolbar, `--screencapture -v`), stop it with Command-Control-Escape
+  or the indicator at the top right; files "Screen Recording <date> at <time>.mov".
+- The dock: real icons (Terminal and Activity Monitor from their bundles, our drawn terminal icon),
+  a round running dot, tiles that launch the right application (or bring it forward when it runs,
+  hidden or not), and on the right the SiliconForest column: the mark, CPU/MEM with figures
+  ("5%  1.1G"), NET, the clock (digital, a click switches to analog), all in the desktop's theme.
+
+### The key table (Command = the Mac keyboard's Command key)
+macOS wins every clash. The Linux desk's verbs that macOS lacks moved to chords macOS leaves free, by
+one rule: Spaces verbs keep macOS's Control (Control-Shift-<n> takes the window to Space n,
+Control-Option-Shift-<n> sends it, Control-Shift-Left/Right take it along), window verbs are
+Control-Option (as Rectangle and other macOS window managers use it). The full list:
+`cargo test -p chonk-shell standalone_key_table_dump -- --ignored --nocapture`.
+
+| macOS chord | Action | State |
+|---|---|---|
+| Command-Tab / Command-Shift-Tab | application switcher: per application, icons and name, held Command; Tab/Shift-Tab/arrows/` step, Q quits the selected application, Escape cancels, releasing Command switches | **observed** (`d2-k-switcher`, `d2-f3-switcher`, commit; Q quit Terminal.app: it got its own Command-Q); Shift-Tab bound, not exercised |
+| Command-` / Command-Shift-` | the front application's next/previous window | bound, not exercised |
+| Command-Space | launcher (Spotlight's place): applications in /Applications, /System/Applications (and Utilities) and the desk's terminal; type, Up/Down, Return opens or brings forward, Escape clears/closes | **observed** (`d2-h-launcher`: "act" -> Activity Monitor opened; "terminal" -> Terminal.app opened and got the focus) |
+| Command-Shift-3 | screen to a file | **observed** (135,829 bytes, 228 ms) |
+| Command-Shift-4 | drag an area; Space: pick a window (the window alone with its frame); Escape / right click cancel | **observed** with Space: window 1327x890 in 37 ms; the drag itself not exercised this round |
+| Command-Shift-5 | capture toolbar: Entire Screen, Window, Selection, Record Screen, Record Selection, Options (Save to Desktop/Documents/Pictures/Screenshots/Clipboard, Timer None/5/10 s, Show Mouse Pointer), Capture/Record, × | **observed** (`d2-e-toolbar`; Record Screen and Record Selection from it); the Options choices bound, not exercised |
+| Command-Control-Shift-3 / -4 | the same to the clipboard (`image/png`) | bound, not exercised |
+| Command-Control-Escape | stop a recording | **observed** |
+| Command-Option-Escape | Force Quit Applications (Return, Return again = SIGKILL) | list **observed** (`d2-f7-forcequit`); the kill not exercised |
+| Command-H / Command-Option-H | hide the application / the others (the desk hides the windows; Command-Tab or the dock tile shows them) | Command-H **observed** for the desk's terminals and for Terminal.app, back by Command-Tab (`d2-f2-hidden`, `d2-f4-back`); Option-H not exercised. AppKit's own Hide did nothing visible for Terminal.app (Command-H reached it with build 006), hence the desk's |
+| Command-Q, -W, -M, -Option-M, Control-Command-F, Command-N | the application's (its menu's): a Mac application gets them; on the desk's windows: quit, close, minimise, minimise all, full screen, new terminal | Control-Command-F **observed** with Terminal.app (full screen on Space 2, back at 865x479); Command-Q to a Mac app observed (via the switcher's Q); native ones host-tested, not exercised on the M1 |
+| Control-Left / Control-Right | previous / next Space | bound; exercised with one Space only (nothing to switch to, as on macOS) |
+| Control-Up / F3 | Mission Control (Overview) | bound, not exercised this round (whether the Touch Bar's F3 reaches us: unknown) |
+| Control-Down | the front application's windows (App Exposé) | bound, not exercised |
+| Control-1 ... Control-0 | Space 1 ... 10 | bound, not exercised |
+| Command-F3 | show the desktop | bound, not exercised |
+| Control-Command-Q | lock screen | **not available**: there is no lock screen; unbound (goes to the application) |
+| Shift-Command-Q | log out | not bound (no log-out dialog) |
+| three/four fingers left/right, up, down | next/previous Space (content follows the fingers), Mission Control, App Exposé (down, new) | swipe code of DESK unchanged; down -> App Exposé not exercised; real fingers untested |
+| Control-Command + two-finger scroll | the swipe stand-in (kept) | not exercised |
+| Control-Shift-<n>, Control-Option-Shift-<n>, Control-Shift-Left/Right | take / send the window to a Space | bound, not exercised |
+| Control-Option-Return / -F / -arrows / -Shift-arrows / -=/- / -T / -L / -Shift-L / -S / -Shift-S / -Tab / -Escape / -Space | maximise / tiled full screen / focus / move / size / float / layout / freeform / scratchpad / to scratchpad / last Space / window menu / desktop menu | maximise **observed** (`d2-z4c-max`: the frame ends at the column); the others bound, not exercised |
+
+### Screenshots, the toolbar and recording
+- Files: "Screenshot <date> at <time>.png", "Screen Recording <date> at <time>.mov", mode 0600, never
+  replacing a file, in `~/Pictures/Screenshots` by default: the session's HOME (/var/root) has no Desktop
+  folder and nothing here shows one (no Finder), so the macOS default was not adopted; the toolbar's
+  Options offer Desktop and Documents, kept in `/private/var/db/desktop-state/screencapture`. No
+  floating thumbnail.
+- Command line: `chonkstep-darwin-desktop --screencapture [-c] [-w | -R x,y,w,h] [file.png]`, and
+  `--screencapture -v | -V <seconds> [-F] [-R x,y,w,h] [file.mov]` (Return or Control-C stops `-v`).
+- Recording: no hardware encoder and no ffmpeg on the M1 (not installed: checked), so each frame is
+  scaled by the GPU (`glBlitFramebuffer`, then a small `glReadPixels`) and compressed to JPEG by the
+  CPU on three worker threads into a QuickTime movie (Photo-JPEG; ffprobe: mjpeg, decodes with ffmpeg).
+  Frames are taken only when the screen changed, at most 30 a second; default size half the panel's
+  pixels (1280x800), `-F` the full panel. **Measured on the M1:** 1280x800: read 25 ms on the
+  compositor's thread + JPEG 43 ms per frame on a worker; 35 frames in 6.0 s (5.8 fps, as often as the
+  screen changed) at 50 % of one core; a selection 500x300: read 5 ms, JPEG 8 ms, 15 % of one core;
+  full 2560x1600: read 99 ms, JPEG 174 ms, 3.7 fps, 108 % of one core. The first attempt read the
+  whole panel (100 ms per frame on the compositor's thread, 2 fps): replaced. At high frame rates the
+  25 ms read costs the desk responsiveness (not measured). **No sound** (not trivial: no audio capture
+  path here). The indicator ("● 0:07 Stop", top right of the work area) is in the recording, as the
+  pointer is.
+- Privacy as for screenshots: only the compositor's keys/toolbar or a same-uid socket connection start
+  a capture or a recording; the installed daily build has no inject module (`WMINJECT absent`, no
+  `armed`), nothing reads a request from a file.
+
+### Icons
+`wm-theme/src/app_icon.rs`, used by the dock (launcher and window tiles), the switcher, the launcher,
+minimised-window tiles (a badge) and Overview cards (a badge). A bundle's icon is decoded at run time
+from the bundle in place (CFBundleIconFile -> .icns; PNG, ARGB and RLE+mask entries; JPEG 2000
+skipped), kept only in the process's memory; an application id maps to its bundle by
+CFBundleIdentifier, else by its process's executable (`proc_pidpath`) -> enclosing .app. **Decoded on
+the M1:** Terminal.app (Terminal.icns) and Activity Monitor (AppIcon.icns), both PNG entries; the RLE
+and ARGB decoders are host-tested only (no bundle here uses them); no bundle needed its Assets.car.
+The desk's terminal uses our own drawn icon (`Icon=chonkstep-terminal`); an application without any
+icon gets a drawn generic one; the two-letter tile stays only where nothing else exists.
+
+### The dock (SiliconForest)
+- Items: `integrations/puredarwin/desktop/system/applications/*.desktop` in `/usr/share/applications`
+  (`Icon=` a bundle path, a file, a hicolor name or `chonkstep-terminal`); pins in
+  `$XDG_STATE_HOME/chonkstep/dock` (one desktop-file id a line). The Mac applications' tiles run
+  `chonkstep-darwin-desktop --desktop-request application <bundle id>`: brought forward when running
+  (also when hidden or windowless: AppKit's `org.puredarwin.appkit.reopen`), else opened, its first
+  window then gets the focus.
+- The column (Darwin build only; `dock/crates/chonk-dock/src/siliconforest.rs`): the mark, CPU/MEM,
+  NET, clock; no sound/link/Bluetooth/power tile, no Clip. Real data from Darwin's counters
+  (`widgets/darwin_proc.rs`: host_processor_info, host_statistics64 + hw.memsize, getifaddrs);
+  en0's receive counters are 0 in the kernel today, so NET shows what the driver counts. Everything
+  takes the active theme's tile material, glass, LED ink and fonts, and the dock follows the desktop's
+  theme (`$XDG_STATE_HOME/chonkstep/theme`, re-read every 2 s): observed in Relay and Amber Phosphor
+  (`d2-z5-amber`, `d2-z6-relay`), previews of four themes at 56/84/112 px from
+  `DOCK_PREVIEW_DIR=<dir> cargo test -p chonk-dock column_preview -- --ignored`.
+- Clock style: a click on the clock switches digital <-> analog, kept in
+  `$XDG_STATE_HOME/chonkstep/dock-clock` (`digital` or `analog`; observed).
+- Geometry: the column is as tall as its tiles (observed 112x448 at the top right); the compositor
+  reserves its width over the full height for maximise/tiling (work area 2448 wide, observed), while the
+  area under it is ordinary desk: no surface there, a window dragged into it stays (observed,
+  `d2-z4b-dropped`). Full screen covers everything (observed).
+- The mark is a first draft for the owner to judge (vector source:
+  `integrations/puredarwin/desktop/branding/siliconforest-mark.svg`, the same geometry in code).
+- Before/after: `runs/m1-desktop-010/desk-tests/shots/t7-a-dock.png` (the night's dock: the Chonkstep logo, NET/SND/LNK/BT/PWR showing dead screens, CPU/MEM, the analog clock, the column's band down to the Clip at the bottom) / `desk2-tests/shots/d2-final-daily.png` (made by the daily build through the socket).
+
+### Faults
+- **Dock tiles did not launch** (Activity Monitor, Terminal.app): at the M1's 150 % the compositor gave
+  layer surfaces pointer coordinates in fractional units while the dock's surfaces use the whole buffer
+  scale (2): a click landed a tile further down (often past the last one). Fixed in the compositor
+  (input.rs, layers.rs, popups.rs). Observed: the click on the Terminal.app tile made the dock spawn
+  its Exec (dock log with RUST_LOG); the Exec's request opened Activity Monitor with the daily build.
+- **Exit Full Screen ended at the work-area size** (TERM 4.1/5.2): the client acknowledged the
+  old-size configure but committed one more full-screen buffer, which was adopted (cut to the work
+  area) and configured back. A buffer larger than the size acknowledged within a second of a
+  full-screen/maximise change is no longer adopted. Host test `a_stale_full_screen_buffer_after_exit_
+  is_not_adopted` (fails without the change); observed with Terminal.app: `WMFIT ... stale buffer
+  1707x1067 ... (asked 865x479): not adopted`, the window back at its old size.
+- **Stale minimised tiles** (TERM 5.1): not reproduced (host test with a client that goes while
+  minimised passes; not seen on the M1 this round). Open.
+- **"S..." notices** and elided labels: the label drew with one face and elided by an estimate of
+  0.75 em a character; it now measures. Observed: notices and launcher rows whole.
+- **Window capture size**: a window capture is now the window alone with its frame (what covers it is
+  not in it), the frame's rectangle (observed 1327x890).
+- **New: a desk terminal ended ("duplicate key press")** after the switcher: Command's release was
+  taken while its press had gone to the client, so smithay listed Command as held at the next focus.
+  Fixed; host test `after_the_switcher_no_key_is_left_held_for_the_client` (fails without it);
+  observed: both desk terminals alive after Command-Tab then Command-Space.
+
+### Not done
+The toolbar is text buttons (no symbols), no floating thumbnail, no adjustable selection; the
+switcher's H and mouse; Command-Tab-Q closes the switcher (macOS keeps it open); the launcher finds
+applications only; lock screen and log out (none); dock hover tooltips (labels kept), a slimmer
+column (tiles stay 56 pt); a running dot for an AppKit application without windows (the dock knows
+only toplevels); AppKit's own Hide (menu) path (request to CLAUDE); recording audio, pointer
+on/off for recordings, frame rates above what the screen changes at (not demonstrated); every chord
+marked "bound, not exercised"; real keys and fingers.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop` = desk2-daily-008 `3e89453a…` (no inject; running, no
+  `/private/var/db/desktop-inject`), before: `.before-desk2` `71da0543…`; `.next` = desk2-next-008
+  `da2be149…`, before: `.next.before-desk2` `bb9a2c9b…` (and `.before-desk2b..e`, test builds of the
+  evening); `/usr/bin/chonkstep-dock` = desk2-dock-008 `53601217…`, before: `.before-desk2`
+  `5f1baa06…`; `.safe` unchanged (`b1104b75…`). `/usr/share/applications/*.desktop` (3) replaced, the
+  ones of before in `/private/var/db/desk2-keep/applications.before-desk2/`. New state file
+  `/private/var/db/desktop-state/chonkstep/dock-clock`.
+- Revert: `ln -f <path>.before-desk2 <path>.back && mv -f <path>.back <path>` for the three binaries,
+  copy the three .desktop files back, `rm /private/var/db/desktop-state/chonkstep/dock-clock`, then
+  `echo relaunch > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop`.
+- Source: compositor patch 12 `integrations/puredarwin/terminal-app/compositor/wm-darwin-macos-desk.patch`
+  (gives the build sources of desk2-next/daily/dock-008 from `desk-src` exactly, `diff -r`).
+
+### For the owner, at the M1 (real keys and fingers)
+1. Command-Tab, keep Command held, Tab again, let go: the application you picked comes forward.
+   With Command held, Q quits the selected application.
+2. Command-Space, type "act", Return: Activity Monitor opens in front. Command-Space again closes.
+3. Command-Shift-3: a notice "Screenshot saved". Command-Shift-4, drag: an area; Command-Shift-4, Space,
+   click a window: that window.
+4. Command-Shift-5, click "Record Screen", "Record": the indicator counts at the top right;
+   Command-Control-Escape stops; the movie is in ~/Pictures/Screenshots.
+5. In Terminal.app: Command-H hides it; Command-Tab brings it back. Control-Command-F and again:
+   full screen and back at the same size.
+6. Control-Right / Control-Left with two Spaces; three fingers left/right on the trackpad.
+7. Click the dock's Terminal and Activity Monitor tiles (opened, or brought forward); click the clock
+   (digital <-> analog); maximise a window (Control-Option-Return): it ends at the right column.

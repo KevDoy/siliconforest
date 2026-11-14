@@ -22,6 +22,7 @@ the desktop menu ...").
 | 9 | `wm-darwin-swipe-new-space.patch` | a swipe past the last Space makes a new one when the current Space has windows (Linux docs/gestures.md) | `desk-next-009`, `desk-daily-009` |
 | 10 | `wm-darwin-mac-command-chords.patch` | with a Mac application focused every Command chord goes to it (Find, New Tab, Save, its window numbers, text size, ...) except the desk's: Command-Space, Command-(Shift/Control-)Tab, Command-Shift-<digit>, Command-Option-Shift-<digit>, Command-Control-Shift-3/4/5 | `desk-next-010`, `desk-daily-010` |
 | 11 | `wm-darwin-fullscreen-covers-dock.patch` | a full-screen window on the Space shown hides the top layer-shell layer (the dock), the overlay layer stays | `desk-next-011`, `desk-daily-011` |
+| 12 | `wm-darwin-macos-desk.patch` | DESK2, 14 November evening (`docs/roadmap/issues/SF-Z-desktop-night.md`, "macOS key map and recording"): macOS's key map (`chonk-shell` `standalone_darwin_keybindings`, Mac interaction mode); the application switcher, the launcher and Force Quit (`wm-darwin/src/macdesk.rs`); the capture toolbar, window pick, save location and timer (`capture.rs`); screen recording to Photo-JPEG QuickTime movies with the GPU scaling the frame (`record.rs`, `glrender.rs` `read_back_scaled`); applications' icons from their bundles (`wm-theme/src/app_icon.rs`) in the dock, switcher, launcher, minimised tiles and Overview; the SiliconForest dock column (the mark, CPU/MEM with figures, NET, the themed digital/analog clock, real Darwin counters, the desktop's theme, as tall as its tiles) and the dock's round running dot; faults: layer-surface pointer units at fractional scales (dock tiles launched the wrong tile), a stale full-screen buffer after Exit Full Screen, labels elided by an estimate, a held Command reported to a client after the switcher, the window capture (the window alone) | `desk2-next-008`, `desk2-daily-008`; dock `desk2-dock-008` |
 
 Builds:
 ```sh
@@ -70,6 +71,13 @@ Every build is first host-tested: `cargo test --offline --locked -p wm-darwin --
 nothing had) and, with a host build of the dock, `CHONK_DOCK_BIN=... cargo test ... --test dock_host -- --ignored`.
 `/usr/bin/chonkstep-darwin-desktop.safe` is a build that ran on the M1 (desk-daily-001): the session
 starts it when a compositor ends by itself within 20 s (`m1-storage/system/sf-session`).
+
+### 14 November, evening (DESK2)
+Source: `runs/m1-desktop-010/desk2-src` (`desk-src` + patch 12, one local commit); the patch applied to a
+fresh copy of `desk-src` gives the build sources of `desk2-next-008` and `desk2-daily-008` exactly (`diff -r`).
+Every build host-tested first (`runs/m1-desktop-010/desk2-tests/cargo-test-*-007.txt`: wm-darwin lib
+134/134, wayland_shm 12/13 and wayland_scale 3/4 with the two failures of the base, the other crates all
+passing). The dock is built from the same source (`../../desktop/tools/build_dock.sh`).
 
 ## Terminal (`chonk-terminal-darwin`)
 Base: the source of `terminal-application-build-008`.
