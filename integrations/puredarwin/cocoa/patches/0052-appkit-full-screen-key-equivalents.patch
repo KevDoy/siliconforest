@@ -75,7 +75,25 @@
     _isDocumentEdited=flag;
     [self _updatePlatformWindowTitle];
  }
-@@ -2085,6 +2103,10 @@
+@@ -2076,15 +2094,27 @@
+ 
+    _serverState=bits;
+    if((bits^was)&WS_STATE_SUSPENDED){
++    // put away and brought back by the compositor (its tile of the window, its buttons): the
++    // window's own miniaturised state follows, so that the Window menu and -isMiniaturized agree
+     if(bits&WS_STATE_SUSPENDED){
+      [self postNotificationName:NSWindowWillMiniaturizeNotification];
++     _isMiniaturized=YES;
+      [self postNotificationName:NSWindowDidMiniaturizeNotification];
+     }
+-    else
++    else {
++     if(_isMiniaturized){
++      _isMiniaturized=NO;
++      [self _updateWSState];
++     }
+      [self postNotificationName:NSWindowDidDeminiaturizeNotification];
++    }
     }
     if((bits^was)&WS_STATE_MAXIMIZED)
      [_backgroundView setNeedsDisplay:YES];
@@ -86,7 +104,7 @@
  }
  
  /* The compositor's answer about this window's frame differs from what the window was laid out
-@@ -2109,14 +2131,21 @@
+@@ -2109,14 +2139,21 @@
     struct wsRPCWindow data = {
         { kWSWindowSetSizeLimits, sizeof(struct wsRPCWindow) - sizeof(struct wsRPCBase) },
         _number, min.width, min.height,
@@ -109,7 +127,7 @@
  
     if(!(_styleMask&NSResizableWindowMask) || NSEqualSizes(size,frame.size))
      return;
-@@ -2162,6 +2191,14 @@
+@@ -2162,6 +2199,14 @@
  
  // a full-size content view and the lights above it cover the frame, so they repaint with it
  -(void)_redrawForKeyChange {
@@ -124,7 +142,7 @@
     [_backgroundView setNeedsDisplay:YES];
     for(NSView *view in [_backgroundView subviews])
      [view setNeedsDisplay:YES];
-@@ -2334,7 +2371,7 @@
+@@ -2334,7 +2379,7 @@
              struct wsRPCWindow flush = {
                  { kWSWindowFlush, sizeof(struct wsRPCWindow) - sizeof(struct wsRPCBase) },
                  _number, _frame.origin.x, _frame.origin.y,
@@ -133,7 +151,7 @@
              };
              _windowServerRPC(&flush, sizeof(flush), NULL, NULL);
          }
-@@ -2516,7 +2553,7 @@
+@@ -2516,7 +2561,7 @@
      struct wsRPCWindow data = {
          { kWSWindowDestroy, sizeof(struct wsRPCWindow) - sizeof(struct wsRPCBase) },
          _number, _frame.origin.x, _frame.origin.y,
@@ -142,7 +160,7 @@
      };
      _windowServerRPC(&data, sizeof(data), NULL, NULL);
  
-@@ -2568,6 +2605,14 @@
+@@ -2568,6 +2613,14 @@
       if(![self isKindOfClass:[NSPanel class]] && ![self isExcludedFromWindowsMenu]) {
           [NSApp changeWindowsItem:self title:_title filename:NO];
       }
@@ -157,7 +175,7 @@
  
       break;
  
-@@ -3074,25 +3119,105 @@
+@@ -3074,25 +3127,105 @@
     objc_setAssociatedObject(self,&restorableKey,[NSNumber numberWithBool:value],OBJC_ASSOCIATION_RETAIN);
  }
  
@@ -219,8 +237,9 @@
 +      [self setFrame:[saved rectValue] display:YES];
 +     [center postNotificationName:NSWindowDidExitFullScreenNotification object:self];
 +    }
-+    objc_setAssociatedObject(self,&fullScreenFrameKey,nil,OBJC_ASSOCIATION_RETAIN);
-+   }
+     objc_setAssociatedObject(self,&fullScreenFrameKey,nil,OBJC_ASSOCIATION_RETAIN);
+-    [center postNotificationName:@"NSWindowDidExitFullScreenNotification" object:self];
+    }
 +   [_backgroundView setNeedsDisplay:YES];
 +}
 +
@@ -234,9 +253,8 @@
 +   NSLog(@"AppKit: the compositor did not %@ full screen", asked>0 ? @"enter" : @"leave");
 +   if(asked>0){
 +    _styleMask&=~(NSUInteger)NSFullScreenWindowMask;
-     objc_setAssociatedObject(self,&fullScreenFrameKey,nil,OBJC_ASSOCIATION_RETAIN);
--    [center postNotificationName:@"NSWindowDidExitFullScreenNotification" object:self];
-    }
++    objc_setAssociatedObject(self,&fullScreenFrameKey,nil,OBJC_ASSOCIATION_RETAIN);
++   }
 +   else
 +    _styleMask|=NSFullScreenWindowMask;
 +   [self _updateWSState];
@@ -269,7 +287,7 @@
  }
  
  -(void)zoom:sender {
-@@ -3745,6 +3870,16 @@
+@@ -3745,6 +3878,16 @@
      if ([item action] == @selector(selectNextTab:) || [item action] == @selector(selectPreviousTab:) ||
          [item action] == @selector(moveTabToNewWindow:))
          return [self _pdTabCommandEnabled:[item action]];
@@ -286,7 +304,7 @@
      if ([item action] == @selector(undo:))
          return [[self undoManager] canUndo];
      if ([item action] == @selector(redo:))
-@@ -3925,7 +4060,7 @@
+@@ -3925,7 +4068,7 @@
      struct wsRPCWindow data = {
          { kWSWindowModifyState, sizeof(struct wsRPCWindow) - sizeof(struct wsRPCBase) },
          _number, _frame.origin.x, _frame.origin.y,
@@ -295,7 +313,7 @@
      };
      // a window may have no title (nil), and a title may have no UTF-8 form
      const char *titleUTF8 = [_title UTF8String];
-@@ -3952,7 +4087,9 @@
+@@ -3952,7 +4095,9 @@
   * compositor. True for windows with a standard frame when the compositor offers to draw
   * frames; see wsStyleWantsServerFrame for which styles those are. */
  BOOL NSWindowFrameIsDrawnByServer(unsigned styleMask) {
@@ -375,3 +393,44 @@
                                      break;
                                  case WS_EVENT_SCALE:
                                      if(window != nil)
+@@ -877,6 +887,40 @@
+    return nil;
+ }
+ 
++/* Window > Cycle Through Windows (Command-`, and with Shift backwards): the next window of the
++ * application that is on screen, a document window rather than a panel, and not a background tab
++ * of a group, made key and brought to the front (the compositor raises it: kWSWindowOrder). */
++-(void)_pdCycleWindowsBackwards:(BOOL)backwards {
++   NSArray  *windows=[self orderedWindows];
++   NSWindow *key=[self keyWindow];
++
++   // the window server may not say the order: the application's own list then
++   if([windows count]==0)
++    windows=[self windows];
++   NSMutableArray *candidates=[NSMutableArray array];
++
++   for(NSWindow *window in windows)
++    if([window isVisible] && ![window isMiniaturized] && ![window isKindOfClass:[NSPanel class]] && [window canBecomeKeyWindow])
++     [candidates addObject:window];
++   if([candidates count]<2){
++    NSBeep();
++    return;
++   }
++   NSUInteger at=key ? [candidates indexOfObjectIdenticalTo:key] : NSNotFound;
++   NSUInteger count=[candidates count];
++   NSUInteger next=(at==NSNotFound) ? 0 : (backwards ? (at+count-1)%count : (at+1)%count);
++
++   [[candidates objectAtIndex:next] makeKeyAndOrderFront:nil];
++}
++
++-(void)_cycleWindows:sender {
++   [self _pdCycleWindowsBackwards:NO];
++}
++
++-(void)_cycleWindowsReversed:sender {
++   [self _pdCycleWindowsBackwards:YES];
++}
++
+ -(void)miniaturizeAll:sender {
+    int count=[_windows count];
+ 

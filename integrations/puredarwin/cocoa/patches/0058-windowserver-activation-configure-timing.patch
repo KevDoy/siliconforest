@@ -8,7 +8,15 @@
  #include <CoreGraphics/CGDirectDisplay_puredarwin.h>
  #include <CoreGraphics/CGWindowLevel.h>
  #include <CoreFoundation/CFBundle.h>
-@@ -123,6 +124,7 @@
+@@ -71,6 +72,7 @@
+     int minW, minH, maxW, maxH;
+     // WS_STATE_* as the compositor last sent them
+     int stateBits;
++    int minimizedByCompositor;   // set_minimized sent: an activation brings it back
+     int level;
+     // the backing store AppKit maps by path and draws into, never attached to the surface itself
+     void *pixels;
+@@ -123,6 +125,7 @@
      // NULL when the compositor cannot blur, windows that ask for it then just stay translucent
      struct ext_background_effect_manager_v1 *blurManager;
      struct wl_seat *seat;
@@ -16,7 +24,7 @@
      struct wl_output *output;
      struct wl_shm *shm;
      // metal's CAMetalLayer presents into subsurfaces of AppKit windows.
-@@ -517,6 +519,8 @@
+@@ -517,6 +520,8 @@
          ws.fractionalManager = wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1);
      } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
          ws.viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
@@ -25,7 +33,7 @@
      } else if (strcmp(interface, zwlr_output_manager_v1_interface.name) == 0) {
          ws.outputManager = wl_registry_bind(registry, name, &zwlr_output_manager_v1_interface,
                                              version < 2 ? version : 2);
-@@ -580,8 +584,21 @@
+@@ -580,8 +585,21 @@
  
  static int ensureConnected(void);
  
@@ -48,7 +56,7 @@
  }
  
  static int ensureConnected(void) {
-@@ -760,8 +777,10 @@
+@@ -760,8 +778,10 @@
  
  /* Desktop sorts below normal and the dock/menu levels above it. Anything that
   * maps to a layer is given a layer-shell role instead of an xdg_toplevel. */
@@ -60,7 +68,7 @@
          return 0;
      }
      if (level <= kWSDesktopIconLevel) {
-@@ -982,6 +1001,44 @@
+@@ -982,6 +1002,44 @@
  
  static int windowPresent(struct wsWindow *window);
  
@@ -105,7 +113,7 @@
  /* A flush that found every frame on the compositor's side is presented when one comes back,
   * from here (the thread that reads the connection), under the lock the flush takes too. The
   * backing store may be in the middle of the next drawing then; that drawing ends in a flush of
-@@ -2148,6 +2205,8 @@
+@@ -2148,6 +2206,8 @@
      if (getenv("PD_WS_TRACE") != NULL)
          fprintf(stderr, "WindowServer: toplevel %d configure %dx%d (now %gx%g)\n",
                  window->windowID, width, height, window->w, window->h);
@@ -114,7 +122,46 @@
      /* Maximised, put away (suspended) or made full screen by the compositor, from its frame's
       * buttons or its own shortcuts: AppKit keeps the window's zoomed and miniaturised state
       * and the notifications applications wait for. */
-@@ -3077,7 +3136,12 @@
+@@ -2862,13 +2922,18 @@
+     if (msg->state != window->state) {
+         switch (msg->state) {
+             case MINIMIZED:
+-                /* Deliberately not xdg_toplevel_set_minimized(): that request
+-                 * is a one-way hint. xdg-shell has no unset_minimized, so a
+-                 * client cannot un-minimize itself - only the compositor can,
+-                 * through a taskbar protocol - and a window minimized that way
+-                 * can never be restored. Unmapping looks the same and is
+-                 * reversible, which is what -deminiaturize: needs. */
+-                windowUnmap(window);
++                /* Where the compositor offers xdg_activation_v1 a toplevel is minimised by the
++                 * compositor (xdg_toplevel_set_minimized: it shows the window's tile, and a click
++                 * there brings it back) and comes back by an activation (-deminiaturize:, the Window
++                 * menu). Elsewhere it is unmapped: xdg-shell has no unset_minimized, so a client
++                 * could not bring back a window it minimised itself. */
++                if (window->toplevel != NULL && ws.activation != NULL && window->attached) {
++                    xdg_toplevel_set_minimized(window->toplevel);
++                    window->minimizedByCompositor = 1;
++                    wl_display_flush(ws.display);
++                }
++                else
++                    windowUnmap(window);
+                 break;
+             case MAXIMIZED:
+                 if (window->toplevel != NULL && window->state == FULLSCREEN)
+@@ -2880,6 +2945,12 @@
+                     xdg_toplevel_set_fullscreen(window->toplevel, NULL);
+                 break;
+             case NORMAL:
++                if (window->state == MINIMIZED && window->minimizedByCompositor) {
++                    window->minimizedByCompositor = 0;
++                    window->state = NORMAL;
++                    windowActivate(window);
++                    break;
++                }
+                 if (window->toplevel != NULL && window->state == FULLSCREEN)
+                     xdg_toplevel_unset_fullscreen(window->toplevel);
+                 else if (window->toplevel != NULL) { xdg_toplevel_unset_maximized(window->toplevel); }
+@@ -3077,7 +3148,12 @@
              window->minW = (int)msg->x, window->minH = (int)msg->y;
              window->maxW = (int)msg->w, window->maxH = (int)msg->h;
              windowSendSizeLimits(window);
@@ -128,7 +175,7 @@
                  wl_surface_commit(window->surface);
                  wl_display_flush(ws.display);
              }
-@@ -3141,6 +3205,17 @@
+@@ -3141,6 +3217,17 @@
              return KERN_SUCCESS;
          }
  
