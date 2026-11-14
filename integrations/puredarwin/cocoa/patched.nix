@@ -97,7 +97,20 @@
 #         device pixels (at 150% a rect of whole points left a seam of the grey at each row edge)
 #   0041  AppKit: a window starts opaque, as on macOS (Terminal turns a window with a translucent profile
 #         clear only when -setOpaque:NO changes that), and its background is copied, not drawn over
-#         what the backing store held
+#         what the backing store held; a window without NSTitledWindowMask (a sheet, an alert) has no
+#         title bar and no room for one, a sheet a hairline border, and the WindowServer is told a
+#         sheet's parent
+#   0042  Onyx2D: PNG entries of an .icns (ic07 to ic14, all a current application icon has), upstream's
+#         change at the tip (29bc3a57 "Onyx2D: PNG icons in ICNS"): Terminal's icon read as nothing
+#   0043  WindowServer: a window's parent (kWSWindowSetParent, xdg_toplevel.set_parent): the compositor
+#         keeps a sheet over its parent and centres it there
+#   0044  AppKit: alerts laid out as on macOS 26 (metrics after Finch's NSAlert.m, MIT OR Apache-2.0):
+#         420 points wide, the application's icon, the message bold and wrapped, buttons sized to their
+#         titles; NSRunAlertPanel and NSBeginAlertSheet are NSAlert (they were a panel that put the
+#         message in its title bar); Return, Escape and Command-D buttons; the application's icon is
+#         its bundle's from the start and is what NSApplicationIcon names
+#   0045  AppKit: a space that opens a layout fragment is a place to wrap (lines broke inside words
+#         and began with a space after a kerning pair had ended a fragment)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -143,7 +156,9 @@ let
     ./patches/0038-appkit-found-with-terminal-3.patch
     ./patches/0039-appkit-window-tabs.patch
     ./patches/0040-appkit-dirty-rects-as-drawn.patch
-    ./patches/0041-appkit-window-opaque-background-copied.patch
+    ./patches/0041-appkit-windows-opaque-untitled-sheets.patch
+    ./patches/0044-appkit-alerts-macos-layout.patch
+    ./patches/0045-appkit-word-wrap-at-fragment-start.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -151,6 +166,7 @@ let
     ./patches/0022-windowserver-presented-frame-dump.patch
     ./patches/0030-windowserver-app-id-without-bundle-identifier.patch
     ./patches/0036-windowserver-present-on-release-tab-toplevel.patch
+    ./patches/0043-windowserver-sheet-parent.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -160,6 +176,7 @@ let
     ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
     ./patches/0026-onyx2d-copy-bits.patch
     ./patches/0037-onyx2d-font-by-name-once.patch
+    ./patches/0042-tip-onyx2d-icns-png-entries.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
