@@ -15,7 +15,8 @@ if [ ! -e /etc/compat-dyld-done ] && [ -r $D/dyld.new ]; then
 else
     echo "COMPAT_DYLD nothing to install in this boot: $(ls -l /usr/lib/dyld /usr/lib/dyld.old 2>&1 | awk '{print $5, $NF}' | tr '\n' ' ')"
 fi
-for p in sf-arm64e-probe sf-libsystem26-probe sf-kvo-probe sf-corefoundation-framework-probe sf-foundation-framework-probe; do
+for p in sf-arm64e-probe sf-libsystem26-probe sf-kvo-probe sf-corefoundation-framework-probe sf-foundation-framework-probe sf-cf-o2-probe sf-cf-autorelease-probe; do
+    [ -x $T/$p ] || { echo "COMPAT_PROBE $p not in this stage"; continue; }
     $T/$p > /private/tmp/p.out 2>&1; rc=$?
     echo "COMPAT_PROBE $p rc=$rc $(tail -n 1 /private/tmp/p.out | cut -c1-140)"
     ok "$p runs as a new process" '[ "$rc" = 0 ]'
@@ -29,4 +30,4 @@ for p in $PROGRAMS; do
     echo "COMPAT_PROGRAM $p $v rc=$rc $(head -n 1 /private/tmp/p.out | cut -c1-80)"
     ok "$(basename "$p") $v" '[ "$rc" = 0 ]'
 done
-ls -l /usr/lib/dyld* /usr/lib/libSystem.B.dylib* /usr/lib/libFoundation.dylib* /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation* /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation* 2>&1 | awk '{print "COMPAT_FILES", $1, $5, $9, $10, $11}'
+ls -l /usr/lib/dyld* /usr/lib/libSystem.B.dylib* /usr/lib/libCoreFoundation.dylib* /usr/lib/libFoundation.dylib* /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation* /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation* 2>&1 | awk '{print "COMPAT_FILES", $1, $5, $9, $10, $11}'

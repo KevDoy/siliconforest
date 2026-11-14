@@ -166,6 +166,13 @@ through the inject module (captures `runs/sf-cocoa4/shots`, not committed):
   draw opaque; the opacity slider of the new colour panel changes it.
 - Leaks (sf-heap, `probe/sf-heap.c`): the window-server thread's autoreleased objects (0116), and libFoundation's
   shells and +1 returns (core round c4b; SF-AA). Terminal idle: +0.33 MB/min before, +0.1 MB/min with c4b's files.
+- Core round (QEMU, then the guarded installer): `c4a` (CoreFoundation -O2 alone) left libFoundation out of its stage,
+  so the image's older libFoundation met today's Foundation wrapper (failures unrelated to CF; libCoreFoundation -O2
+  replaced and ls/sh/node/claude/python3/bash/git/vim/nvim/tmux ran with it); `c4b` failed on its own probes
+  (CFAutorelease's owned-class test missed NSArray-bridged objects; NSDate had no keyed coding for the NSDateInterval
+  check); fixed and checked on the M1 from a test prefix; `c4c`/`c4c-2` failed=0, QDDESK_PASS; installed (SF-AA).
+  `sf-cf-o2-probe` and `sf-cf-autorelease-probe` are the installer's proofs of a new libCoreFoundation (CORE list and
+  probe_of in `tools/sf_terminal.sh`).
 - Installed (direct, the files of before as `.pre-c4`): AppKit 335c15a4, libWindowServer 2e251bb1, Onyx2D e5497009,
   CoreGraphics b5a1f9b4. Revert: `ln -f <path>.pre-c4 <path>.back && mv -f <path>.back <path>`.
 

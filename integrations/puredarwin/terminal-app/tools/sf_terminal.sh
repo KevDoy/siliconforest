@@ -57,7 +57,7 @@ nb() { (cd "$1" && nix-build --extra-experimental-features 'nix-command flakes' 
 WRAPPED="QuartzCore Carbon CoreServices AudioToolbox"
 # the files every program loads: <path in the tree> (dyld last, by its own installer)
 # (IOKit's framework path: every IOKit user loads it; Activity Monitor's wrapper replaces the link there)
-CORE="usr/lib/libSystem.B.dylib usr/lib/libFoundation.dylib $F/CoreFoundation.framework/Versions/A/CoreFoundation $F/Foundation.framework/Versions/C/Foundation $F/IOKit.framework/Versions/A/IOKit"
+CORE="usr/lib/libSystem.B.dylib usr/lib/libCoreFoundation.dylib usr/lib/libFoundation.dylib $F/CoreFoundation.framework/Versions/A/CoreFoundation $F/Foundation.framework/Versions/C/Foundation $F/IOKit.framework/Versions/A/IOKit"
 PROGRAMS="/opt/homebrew/bin/node /usr/local/bin/claude /opt/homebrew/bin/python3 /opt/homebrew/bin/bash /opt/homebrew/bin/git /opt/homebrew/bin/vim /opt/homebrew/bin/nvim /opt/homebrew/bin/tmux"
 tree() { local r; r=$(nb $T build-macos-apps-root.nix); [ -d "$r/usr/lib" ] || { echo "build-macos-apps-root.nix did not build" >&2; exit 2; }; echo "$r"; }
 case "${1:?stage|push|run|shot|scan|install-stage|qemu|install|launch|revert}" in
@@ -115,7 +115,7 @@ install-stage)
   chmod -R u+w "$IN" 2>/dev/null || true; rm -rf "$IN"; mkdir -p $IN/core/replace $IN/core/test $IN/core/new $IN/direct/files
   cp $R/usr/share/sf-test/* $IN/core/test/; [ -d "$PR/usr/share/sf-test" ] && cp -n $PR/usr/share/sf-test/* $IN/core/test/
   cp $T/guest/sf-dyld-install.py $IN/core/test/
-  probe_of() { case "$1" in *libSystem*) echo sf-libsystem26-probe;; *libFoundation*) echo sf-kvo-probe;; *CoreFoundation) echo sf-corefoundation-framework-probe;; *Foundation) echo sf-foundation-framework-probe;; *IOKit) echo sf-iokit-framework-probe;; esac; }
+  probe_of() { case "$1" in *libSystem*) echo sf-libsystem26-probe;; *libCoreFoundation*) echo sf-cf-autorelease-probe;; *libFoundation*) echo sf-kvo-probe;; *CoreFoundation) echo sf-corefoundation-framework-probe;; *Foundation) echo sf-foundation-framework-probe;; *IOKit) echo sf-iokit-framework-probe;; esac; }
   : > $IN/core/replace.list
   # the rehearsal's root is the image the disk root was made from: what ../../macos-compat brought to the
   # M1 since (its replaced libraries other than libSystem, its new files) goes first, so that the root

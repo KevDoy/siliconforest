@@ -19,3 +19,5 @@ b5a239e7fddd448c944db0d928fc5d44bf44caad22427bfd37a5b77dd88b9fae  /System/Librar
 bed36b5d7c71cacfd30da4021ece623baf6334a673d681a70101eb4c88970fcc  /usr/lib/libFoundation.dylib am2, am2-2 2026-11-14
 e77c98248ba595cab4ab71c1dccdad70796de40ef583830eeeb8a6eac0db6491  /usr/lib/libFoundation.dylib c3b, c3b-2 2026-11-14
 a660d7509392f2175eee967b6add4741e783213aa64ca16dc81faa2366d7  /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation c3b, c3b-2 2026-11-14
+82638edd18c15a02debbb8ec8ad635657953370b4987b676501b99323510cd90  /usr/lib/libCoreFoundation.dylib c4c, c4c-2 2026-11-14
+a8aea7dcd9eda393aa319b556d5bd961fa676c7af4eda29b1fe0607fe65c06e6  /usr/lib/libFoundation.dylib c4c, c4c-2 2026-11-14

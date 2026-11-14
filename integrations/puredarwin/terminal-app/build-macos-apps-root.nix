@@ -5,6 +5,7 @@
 #
 #   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix
 #   usr/lib/libFoundation.dylib                  ./build-foundation.nix
+#   usr/lib/libCoreFoundation.dylib              ./build-corefoundation.nix (-O2; CFAutorelease autoreleases)
 #   usr/lib/swift/*.dylib                        ./build-swift-runtime.nix
 #   usr/lib/libWindowServer.dylib, AppKit.framework (binary and resources), CoreText.framework,
 #     CoreGraphics.framework, Onyx2D.framework (binaries)   ../cocoa/patched.nix (the Cocoa
@@ -38,6 +39,7 @@ let
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   libsystem = import ./build-libsystem.nix;
   foundation = import ./build-foundation.nix;
+  corefoundation = import ./build-corefoundation.nix { };
   swift = import ./build-swift-runtime.nix;
   compat = import ./build-compat.nix;
   cocoa = import ../cocoa/patched.nix;
@@ -50,6 +52,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   set -o pipefail
   mkdir -p $out/usr/lib/swift $out/${F} $out/usr/share/sf-test
   cp -L ${libsystem}/usr/lib/dyld ${libsystem}/usr/lib/libSystem.B.dylib ${foundation}/usr/lib/libFoundation.dylib $out/usr/lib/
+  cp -L ${corefoundation}/usr/lib/libCoreFoundation.dylib $out/usr/lib/
   cp -L ${swift}/usr/lib/swift/*.dylib $out/usr/lib/swift/
   cp -L ${cocoa.windowserver}/usr/lib/libWindowServer.dylib $out/usr/lib/
   mkdir -p $out/${F}/AppKit.framework/Versions/A $out/${F}/AppKit.framework/Versions/C
@@ -85,6 +88,8 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   T=$out/usr/share/sf-test; P=${./probe}
   $CC $CF $P/sf-libsystem26-probe.c $LF $out/usr/lib/libSystem.B.dylib -o $T/sf-libsystem26-probe
   $CC $CF $P/sf-kvo-probe.m $LF -lobjc -lFoundation -lCoreFoundation -lSystem -o $T/sf-kvo-probe
+  $CC $CF $P/sf-cf-autorelease-probe.c $LF $out/usr/lib/libCoreFoundation.dylib -lobjc -lSystem -o $T/sf-cf-autorelease-probe
+  $CC $CF $P/sf-cf-o2-probe.c $LF $out/usr/lib/libCoreFoundation.dylib -lSystem -o $T/sf-cf-o2-probe
   $CC $CF -DPROBE_COREFOUNDATION $P/sf-framework-probe.c $LF $out/${F}/CoreFoundation.framework/Versions/A/CoreFoundation -lSystem -o $T/sf-corefoundation-framework-probe
   $CC $CF -DPROBE_FOUNDATION $P/sf-framework-probe.c $LF $out/${F}/Foundation.framework/Versions/C/Foundation -lSystem -o $T/sf-foundation-framework-probe
   $CC $CF -DPROBE_IOKIT $P/sf-framework-probe.c $LF -L${p.iokit-arm64}/usr/lib $out/${F}/IOKit.framework/Versions/A/IOKit -lSystem -o $T/sf-iokit-framework-probe

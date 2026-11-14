@@ -23,6 +23,13 @@
 #     frameworks' requests, runs/m1-coord/requests-for-CLAUDE.md); NSIndexPath (Collections.subproj/
 #     NSIndexPath.m, from the Foundation wrapper: AppKit's collection view needs it). The four new sources
 #     are compiled after NSHashTable.m (upstream's recipe names its sources).
+#   (14 November, night; COCOA4, found with probe/sf-heap.c) +alloc of NSArray/NSMutableArray, NSDictionary/
+#     NSMutableDictionary and NSSet/NSMutableSet gives one placeholder per class (each +alloc made an instance
+#     nothing could free: every [[NSMutableArray alloc] init...] leaked one); NSStringFromClass/Selector,
+#     -stringByAppendingPathComponent:/-PathExtension:, -stringByDeletingPathExtension, -[NSBundle resourcePath]
+#     autoreleased (+0, as Cocoa; each leaked at every call); -[NSURL initWithScheme:host:path:];
+#     NSDateInterval's secure coding (Finch's, NSFoundationExtras.m) and -[NSUserActivity targetContentIdentifier]
+#     (Codex's Intents requests)
 # A file every Objective-C program loads: QEMU pass and the guarded procedure before it replaces
 # the disk root's; until then it is tried from a scratch prefix (DYLD_LIBRARY_PATH).
 #

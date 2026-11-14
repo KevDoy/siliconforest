@@ -416,8 +416,42 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:33:52.014119091 -0800
-@@ -472,6 +472,8 @@
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-14 13:10:57.596477241 -0800
+@@ -17,6 +17,8 @@
+ #import <Foundation/FoundationErrors.h>
+ #import <Foundation/NSData.h>
+ #include <CoreFoundation/CFBase.h>
++#include <dispatch/dispatch.h>
++#include <objc/runtime.h>
+ #include <CoreFoundation/CFArray.h>
+ #include <CoreFoundation/CFPropertyList.h>
+ #include <CoreFoundation/ForFoundationOnly.h>
+@@ -118,6 +120,24 @@
+ 
+ @implementation NSArray
+ 
++/* +alloc of the cluster's own two classes gives one immortal placeholder each, whose -init... hands back
++ * a CF object. Before, +alloc made a plain instance per call that nothing frees (its -release goes to
++ * CFRelease, which it is not for): every [[NSArray alloc] init...] and [[NSMutableArray alloc] init...] leaked one
++ * (Onyx2D at each save of the graphics state: hundreds a second while Activity Monitor draws, COCOA4's
++ * sf-heap). A subclass outside the cluster gets a real instance of itself, as before. */
+++ (instancetype)allocWithZone:(NSZone *)zone {
++    static id placeholders[2];
++    static dispatch_once_t once;
++
++    if (self != [NSArray class] && self != [NSMutableArray class])
++        return [super allocWithZone:zone];
++    dispatch_once(&once, ^{
++        placeholders[0] = class_createInstance([NSArray class], 0);
++        placeholders[1] = class_createInstance([NSMutableArray class], 0);
++    });
++    return placeholders[self == [NSArray class] ? 0 : 1];
++}
++
+ /* See the note in NSDictionary.m: bridged onto CF, so +new/-init must produce a
+  * real CF object rather than NSObject's plain allocation. */
+ + (instancetype)new {
+@@ -472,6 +492,8 @@
   * from each element, which is what callers use to pluck a field out. */
  - (id)valueForKey:(NSString *)key {
      CFIndex count = CFArrayGetCount((CFArrayRef)self);
@@ -426,7 +460,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
      CFMutableArrayRef values = CFArrayCreateMutable(kCFAllocatorDefault, count,
                                                       &ns_array_callbacks);
  
-@@ -1104,3 +1106,26 @@
+@@ -1104,3 +1126,26 @@
  }
  
  @end
@@ -515,6 +549,56 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  + (instancetype)data
  {
  	return __NSDataAutorelease(CFDataCreate(kCFAllocatorDefault, NULL, 0));
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m
+--- a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-13 13:16:53.432269729 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-14 13:10:57.597145624 -0800
+@@ -10,6 +10,8 @@
+ #import <Foundation/NSEnumerator.h>
+ #import <Foundation/NSException.h>
+ #include <CoreFoundation/CFBase.h>
++#include <dispatch/dispatch.h>
++#include <objc/runtime.h>
+ #import <Foundation/NSURL.h>
+ #import <Foundation/NSError.h>
+ #import <Foundation/FoundationErrors.h>
+@@ -190,6 +192,24 @@
+ 
+ @implementation NSDictionary
+ 
++/* +alloc of the cluster's own two classes gives one immortal placeholder each, whose -init... hands back
++ * a CF object. Before, +alloc made a plain instance per call that nothing frees (its -release goes to
++ * CFRelease, which it is not for): every [[NSDictionary alloc] init...] and [[NSMutableDictionary alloc] init...] leaked one
++ * (Onyx2D at each save of the graphics state: hundreds a second while Activity Monitor draws, COCOA4's
++ * sf-heap). A subclass outside the cluster gets a real instance of itself, as before. */
+++ (instancetype)allocWithZone:(NSZone *)zone {
++    static id placeholders[2];
++    static dispatch_once_t once;
++
++    if (self != [NSDictionary class] && self != [NSMutableDictionary class])
++        return [super allocWithZone:zone];
++    dispatch_once(&once, ^{
++        placeholders[0] = class_createInstance([NSDictionary class], 0);
++        placeholders[1] = class_createInstance([NSMutableDictionary class], 0);
++    });
++    return placeholders[self == [NSDictionary class] ? 0 : 1];
++}
++
+ /* These classes are bridged onto CF, so an instance has to be a CF object.
+  * NSObject's +new/-init would hand back a plain ObjC allocation, and the first
+  * CFDictionaryGetValue() on it crashes. */
+@@ -246,10 +266,8 @@
+ - (instancetype)initWithObjects:(NSArray *)objects forKeys:(NSArray *)keys {
+     NSUInteger count = [objects count];
+ 
+-    if ([keys count] != count) {
+-        [self release];
+-        return nil;
+-    }
++    if ([keys count] != count)
++        return nil;  // (self is the class's placeholder, see +allocWithZone:)
+ 
+     CFMutableDictionaryRef result = CFDictionaryCreateMutable(
+         kCFAllocatorDefault, (CFIndex)count, &ns_dictionary_key_callbacks,
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h
 --- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-13 13:16:53.432269729 -0800
 +++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-14 10:26:11.046730089 -0800
@@ -1857,8 +1941,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:16:53.432324537 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-14 10:29:31.478822911 -0800
-@@ -6,6 +6,7 @@
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-14 13:10:57.597707230 -0800
+@@ -6,9 +6,12 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
  
@@ -1866,7 +1950,37 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  #import <Foundation/NSString.h>
  #import <Foundation/NSSet.h>
  #include <CoreFoundation/CFBase.h>
-@@ -448,6 +449,12 @@
++#include <dispatch/dispatch.h>
++#include <objc/runtime.h>
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSEnumerator.h>
+ #include <CoreFoundation/CFSet.h>
+@@ -87,6 +90,24 @@
+ 
+ @implementation NSSet
+ 
++/* +alloc of the cluster's own two classes gives one immortal placeholder each, whose -init... hands back
++ * a CF object. Before, +alloc made a plain instance per call that nothing frees (its -release goes to
++ * CFRelease, which it is not for): every [[NSSet alloc] init...] and [[NSMutableSet alloc] init...] leaked one
++ * (Onyx2D at each save of the graphics state: hundreds a second while Activity Monitor draws, COCOA4's
++ * sf-heap). A subclass outside the cluster gets a real instance of itself, as before. */
+++ (instancetype)allocWithZone:(NSZone *)zone {
++    static id placeholders[2];
++    static dispatch_once_t once;
++
++    if (self != [NSSet class] && self != [NSMutableSet class])
++        return [super allocWithZone:zone];
++    dispatch_once(&once, ^{
++        placeholders[0] = class_createInstance([NSSet class], 0);
++        placeholders[1] = class_createInstance([NSMutableSet class], 0);
++    });
++    return placeholders[self == [NSSet class] ? 0 : 1];
++}
++
+ + (instancetype)new {
+     // a subclass outside the cluster gets a real instance of itself
+     if (self != [NSSet class])
+@@ -448,6 +469,12 @@
  }
  
  
@@ -1879,7 +1993,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  - (NSSet *)setByAddingObjectsFromArray:(NSArray *)other {
      NSMutableSet *result = [[[NSMutableSet alloc] initWithSet:self] autorelease];
  
-@@ -627,3 +634,9 @@
+@@ -627,3 +654,9 @@
  }
  
  @end
@@ -2018,6 +2132,81 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  }
  
  - (NSDateComponents *)components:(NSCalendarUnit)units fromDate:(NSDate *)date {
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h
+--- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-13 13:16:53.433353953 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-14 12:45:37.741792312 -0800
+@@ -4,7 +4,7 @@
+ #import <Foundation/NSObject.h>
+ #import <Foundation/NSDate.h>
+ 
+-@interface NSDateInterval : NSObject <NSCopying> {
++@interface NSDateInterval : NSObject <NSCopying, NSSecureCoding> {
+     NSDate *_startDate;
+     NSTimeInterval _duration;
+ }
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m
+--- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-13 13:16:53.433353953 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-14 12:45:43.107589807 -0800
+@@ -2,6 +2,7 @@
+ // Copyright (c) 2026 The PureDarwin Project, SPDX-License-Identifier: MPL-2.0 OR BSD-2-Clause
+ 
+ #import <Foundation/NSDateInterval.h>
++#import <Foundation/NSCoder.h>
+ 
+ @implementation NSDateInterval
+ 
+@@ -69,4 +70,19 @@
+     return [_startDate hash] ^ (NSUInteger)_duration;
+ }
+ 
++// Secure coding: Finch's (userland/Foundation/NSFoundationExtras.m, Copyright (c) 2026 The Finch Project contributors,
++// SPDX-License-Identifier: MIT OR Apache-2.0), on this class's accessors (Intents' store, Codex's request)
+++ (BOOL)supportsSecureCoding { return YES; }
++
++- (void)encodeWithCoder:(NSCoder *)coder {
++    [coder encodeObject:_startDate forKey:@"NS.startDate"];
++    [coder encodeDouble:_duration forKey:@"NS.duration"];
++}
++
++- (instancetype)initWithCoder:(NSCoder *)coder {
++    NSDate *start = [coder decodeObjectOfClass:[NSDate class] forKey:@"NS.startDate"];
++    return [self initWithStartDate:start ? start : [NSDate dateWithTimeIntervalSinceReferenceDate:0]
++                          duration:[coder decodeDoubleForKey:@"NS.duration"]];
++}
++
+ @end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDate.m b/src/Frameworks/Foundation/Date.subproj/NSDate.m
+--- a/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-13 13:16:53.433353953 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-14 14:22:54.087148916 -0800
+@@ -7,6 +7,7 @@
+  */
+ 
+ #import <Foundation/NSDate.h>
++#import <Foundation/NSCoder.h>
+ #import <Foundation/NSString.h>
+ #import <Foundation/NSTimeZone.h>
+ #include <math.h>
+@@ -28,6 +29,20 @@
+ }
+ 
+ // the instance +alloc made is not a CFDate, so these hand back a real one. Subclasses keep theirs
++// keyed coding as Apple's archives have it ("NS.time": seconds since the reference date); an NSDateInterval
++// archives its start date (Intents' store, COCOA4)
+++ (BOOL)supportsSecureCoding {
++    return YES;
++}
++
++- (void)encodeWithCoder:(NSCoder *)coder {
++    [coder encodeDouble:[self timeIntervalSinceReferenceDate] forKey:@"NS.time"];
++}
++
++- (instancetype)initWithCoder:(NSCoder *)coder {
++    return [self initWithTimeIntervalSinceReferenceDate:[coder decodeDoubleForKey:@"NS.time"]];
++}
++
+ - (instancetype)initWithTimeIntervalSinceReferenceDate:(NSTimeInterval)seconds {
+     if (_CFIsObjC(CFDateGetTypeID(), (void *)self))
+         return [super init];
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
 --- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:16:53.434019832 -0800
 +++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:36:45.978142073 -0800
@@ -2054,6 +2243,36 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
 +    return [urls objectEnumerator];
 +}
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m b/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-13 13:16:53.434019832 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-14 13:10:48.082734001 -0800
+@@ -191,7 +191,7 @@
+ 
+     CFStringRef path = CFURLCopyFileSystemPath(stripped, kCFURLPOSIXPathStyle);
+     CFRelease(stripped);
+-    return (NSString *)path;
++    return [(NSString *)path autorelease];  // +0 as in Cocoa (it leaked one at every call)
+ }
+ 
+ - (NSString *)stringByAppendingPathComponent:(NSString *)component {
+@@ -203,7 +203,7 @@
+     }
+     CFStringAppend(path, (CFStringRef)component);
+ 
+-    return (NSString *)path;
++    return [(NSString *)path autorelease];  // +0 as in Cocoa (it leaked one at every call)
+ }
+ 
+ - (NSString *)stringByAppendingPathExtension:(NSString *)extension {
+@@ -211,7 +211,7 @@
+                                                         (CFStringRef)self);
+     CFStringAppend(path, CFSTR("."));
+     CFStringAppend(path, (CFStringRef)extension);
+-    return (NSString *)path;
++    return [(NSString *)path autorelease];  // +0 as in Cocoa (it leaked one at every call)
+ }
+ 
+ - (NSArray<NSString *> *)pathComponents {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
 --- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:16:53.434448999 -0800
 +++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:36:45.975985919 -0800
@@ -4865,7 +5084,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  #import <Foundation/NSRangeEntries.h>
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
 --- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 18:20:18.178643886 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-14 13:10:48.083062061 -0800
 @@ -11,6 +11,11 @@
  #import <Foundation/NSDictionary.h>
  #import <Foundation/NSString.h>
@@ -4878,6 +5097,15 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  #include <CoreFoundation/CFBundle.h>
  #include <CoreFoundation/CFString.h>
  #include <CoreFoundation/CFURL.h>
+@@ -156,7 +161,7 @@
+     NSString *path = (NSString *)CFURLCopyFileSystemPath(absolute, kCFURLPOSIXPathStyle);
+     CFRelease(absolute);
+     CFRelease(url);
+-    return path;
++    return [path autorelease];  // +0 as in Cocoa (it leaked one at every call)
+ }
+ 
+ // the InfoPlist.strings values over the Info.plist ones
 @@ -284,7 +289,12 @@
                                                      &kCFTypeArrayCallBacks);
      for (CFIndex i = 0; i < count; i++) {
@@ -5085,6 +5313,60 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  __attribute__((constructor))
  static void _NSInstallForwardHandler(void) {
  #if defined(NS_HAVE_FORWARDING_TRAMPOLINE) && ARGON_LIBOBJC2
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m b/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-13 13:16:53.437324470 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-14 13:10:48.082342787 -0800
+@@ -15,8 +15,10 @@
+     if (cString == NULL) {
+         return nil;
+     }
+-    return (NSString *)CFStringCreateWithCString(kCFAllocatorDefault, cString,
+-                                                 kCFStringEncodingUTF8);
++    // autoreleased (Cocoa's +0): NSStringFromClass/Selector/Protocol leaked a string at every call (key-value
++    // observing asks NSStringFromClass for each class of each observation: Activity Monitor, COCOA4's sf-heap)
++    return [(NSString *)CFStringCreateWithCString(kCFAllocatorDefault, cString,
++                                                  kCFStringEncodingUTF8) autorelease];
+ }
+ 
+ /* CFStringGetCStringPtr can refuse, so go through a bounded copy. */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-13 13:16:53.438324457 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-14 12:45:37.742115628 -0800
+@@ -20,6 +20,7 @@
+     NSDate *_expirationDate;
+     NSSet *_keywords;
+     NSString *_persistentIdentifier;
++    NSString *_targetContentIdentifier;
+     id _delegate;
+     BOOL _needsSave;
+     BOOL _eligibleForHandoff;
+@@ -44,6 +45,7 @@
+ @property BOOL supportsContinuationStreams;
+ @property (assign) id delegate;
+ @property (copy) NSUserActivityPersistentIdentifier persistentIdentifier;
++@property (copy) NSString *targetContentIdentifier;
+ @property (getter=isEligibleForHandoff) BOOL eligibleForHandoff;
+ @property (getter=isEligibleForSearch) BOOL eligibleForSearch;
+ @property (getter=isEligibleForPublicIndexing) BOOL eligibleForPublicIndexing;
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-13 13:16:53.438324457 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-14 12:45:37.742235236 -0800
+@@ -55,12 +55,15 @@
+     [_expirationDate release];
+     [_keywords release];
+     [_persistentIdentifier release];
++    [_targetContentIdentifier release];
+     [super dealloc];
+ }
+ 
+ - (NSString *)activityType { return _activityType; }
+ - (NSString *)title { return _title; }
+ COPY_SETTER(setTitle:, _title, NSString *)
++- (NSString *)targetContentIdentifier { return _targetContentIdentifier; }
++COPY_SETTER(setTargetContentIdentifier:, _targetContentIdentifier, NSString *)
+ - (NSDictionary *)userInfo { return [[_userInfo copy] autorelease]; }
+ 
+ - (void)setUserInfo:(NSDictionary *)userInfo {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
 --- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:16:53.438324457 -0800
 +++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:28:47.364980906 -0800
@@ -5477,9 +5759,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +}
 +
 +@end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.h b/src/Frameworks/Foundation/URL.subproj/NSURL.h
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-13 13:16:53.441146971 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-14 13:11:38.350397551 -0800
+@@ -20,6 +20,7 @@
+ + (instancetype)fileURLWithPath:(NSString *)path;
+ 
+ - (nullable instancetype)initWithString:(NSString *)string;
++- (nullable instancetype)initWithScheme:(NSString *)scheme host:(nullable NSString *)host path:(NSString *)path;
+ - (nullable NSString *)absoluteString;
+ - (nullable NSString *)path;
+ - (BOOL)isFileURL;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
 --- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:16:53.441146971 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 04:54:15.272812577 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 13:11:38.349893712 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -5491,7 +5784,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  #import <Foundation/NSURL.h>
  #import <Foundation/NSArray.h>
  #import <Foundation/NSNumber.h>
-@@ -35,10 +39,22 @@
+@@ -35,10 +39,30 @@
      return [[[self alloc] initWithString:string] autorelease];
  }
  
@@ -5512,10 +5805,18 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
                                                (CFStringRef)path,
 -                                              kCFURLPOSIXPathStyle, false) autorelease];
 +                                              kCFURLPOSIXPathStyle, pathIsDirectory(path)) autorelease];
++}
++
++// scheme://host/path with the path's characters escaped (AppKit's NSPathCell, applications)
++- (nullable instancetype)initWithScheme:(NSString *)scheme host:(nullable NSString *)host path:(NSString *)path {
++    NSString *escaped = [path stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
++    if ([escaped length] > 0 && ![escaped hasPrefix:@"/"])
++        escaped = [@"/" stringByAppendingString:escaped];
++    return [self initWithString:[NSString stringWithFormat:@"%@://%@%@", scheme, host ? host : @"", escaped ? escaped : @""]];
  }
  
  - (nullable instancetype)initWithString:(NSString *)string {
-@@ -191,6 +207,8 @@
+@@ -191,6 +215,8 @@
      return (id)CFURLCreateWithString(kCFAllocatorDefault, (CFStringRef)string, (CFURLRef)base);
  }
  
@@ -5524,7 +5825,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  - (instancetype)initFileURLWithPath:(NSString *)path {
      return (id)CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)path, kCFURLPOSIXPathStyle, [path hasSuffix:@"/"]);
  }
-@@ -274,3 +292,73 @@
+@@ -274,3 +300,73 @@
      _CFRuntimeBridgeClasses(CFURLGetTypeID(), "NSURL");
  }
  #endif

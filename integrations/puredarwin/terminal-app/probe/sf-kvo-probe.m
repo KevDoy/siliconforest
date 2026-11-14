@@ -172,6 +172,39 @@ static int sixth_checks(void)
     return bad;
 }
 
+// the seventh build's additions (COCOA4): NSDateInterval's secure coding, -[NSUserActivity
+// targetContentIdentifier]; 0 when they hold, else the bits of the checks that failed
+static int seventh_checks(void)
+{
+    int bad = 0;
+    NSDate *start = [NSDate dateWithTimeIntervalSinceReferenceDate:1000];
+    NSDateInterval *interval = [[[NSDateInterval alloc] initWithStartDate:start duration:60] autorelease];
+    if (![[NSDateInterval class] respondsToSelector:@selector(supportsSecureCoding)] || ![interval respondsToSelector:@selector(encodeWithCoder:)])
+        bad |= 1;
+    else {
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:interval];
+        NSDateInterval *back = data ? [NSKeyedUnarchiver unarchiveObjectWithData:data] : nil;
+        if (![back isKindOfClass:[NSDateInterval class]] || [back duration] != 60 || ![[back startDate] isEqualToDate:start])
+            bad |= 2;
+    }
+    Class activity = NSClassFromString(@"NSUserActivity");
+    id a = [[activity alloc] initWithActivityType:@"org.puredarwin.probe"];
+    if (![a respondsToSelector:@selector(setTargetContentIdentifier:)])
+        bad |= 4;
+    else {
+        [a setTargetContentIdentifier:@"target"];
+        if (![[a targetContentIdentifier] isEqual:@"target"])
+            bad |= 4;
+    }
+    [a release];
+    return bad;
+}
+static int seventh_build(void)
+{
+    @try { return seventh_checks(); }
+    @catch (id e) { return 7; }
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -188,7 +221,7 @@ int main(void)
     int end = root->heard;
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
-    int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16);
+    int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16) | (seventh_build() << 25);
     BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0;
     printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, ok ? "ok" : "FAIL");
     [pool release];

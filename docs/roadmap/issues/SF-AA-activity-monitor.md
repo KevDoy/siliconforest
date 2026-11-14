@@ -93,6 +93,20 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
 
+## Installed on the M1's disk, seventh round (14 November, night; COCOA4)
+- Core files by the guarded installer after QEMU `c4c`/`c4c-2` (failed=0, QDDESK_PASS both; `c4a` and `c4b` before them
+  failed on staging and on their own probes, see SF-Y): `/usr/lib/libCoreFoundation.dylib` 82638edd (the first
+  CoreFoundation of ours: -O2, CFAutorelease into the pool; the file of before, PureDarwin's -O0 build, is `.old`),
+  `/usr/lib/libFoundation.dylib` a8aea7dc (`.old7` = e77c9824). `sf_compat_push.sh check` after: 18 of 18, failed=0
+  (`runs/sf-cocoa4/check-after-core.txt`). Then Terminal (Preferences twice, Inspector, a tab, the colour panel) and
+  Activity Monitor (CPU History opened and closed) on the installed files (`c4z-*`, synthetic input).
+- Replaced directly, the file of before kept as `<path>.pre-c4` (once: the first replacement's file): AppKit 765fb180
+  (`.pre-c4` = cfd8699a), libWindowServer 2e251bb1 (84eb8bf4), Onyx2D e5497009 (872a34b6), CoreGraphics b5a1f9b4
+  (87682a2e).
+- Revert: direct files `ln -f <path>.pre-c4 <path>.back && mv -f <path>.back <path>`; the core files as SF-Y
+  (`ln <path>.old <path>.back && mv -f <path>.back <path>` for libCoreFoundation, `.old7` for libFoundation; libFoundation
+  first: AppKit 765fb180 runs with either).
+
 ## Installed on the M1's disk, sixth round (14 November, evening; `/private/var/db/sfcocoa3/installed.txt`)
 - Core files by the guarded installer after QEMU `c3b`/`c3b-2`: `/usr/lib/libFoundation.dylib` e77c9824 (the one of
   before, bed36b5d, is `.old6`), the Foundation wrapper a660d750 (without its own NSIndexPath; `.old3`).
@@ -288,6 +302,11 @@ dyld), CF object creation, drawing (paths, strings), and `getenv` inside libobjc
 The next lever is libSystem with optimisation (a separate core round), then libobjc's getenv.
 
 ## Still wrong (in the order a person meets it)
+- (seventh round) Closing CPU Usage, CPU History or the main window with Command-W no longer ends the application
+  (`a2-*`). CPU Usage and CPU History still show no content (their items come from Activity Monitor's nibs; the
+  item's `-setCpuLevel:` only sets the segments' alpha); `+[NSColor colorWithRed:green:blue:alpha:]`, on which they
+  raised, exists now. Activity Monitor's own CPU at the 5 s interval: 10.6 % with the new core files (target under
+  10 %: libSystem's -O0 malloc is the next lever).
 - The dock tile does not start Activity Monitor (`open -a` and the session's listener do).
 - Window > CPU Usage and CPU History open (sixth round) but stay empty: CPU Usage's 8 items are laid out by the
   flow layout (`PD_CV_TRACE=1`: 8 attributes, 296x106) and draw nothing (Activity Monitor draws them through
