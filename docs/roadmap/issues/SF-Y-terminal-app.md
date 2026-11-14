@@ -22,8 +22,10 @@ and italic faces (table below). Input in every test is synthetic (the compositor
 inject module, a test instrument: `terminal-app/compositor/README.md`). Nobody looked at the panel
 and no physical keyboard or trackpad was used.
 
-**14 November, third round (this section is the current state; the rows below it are the earlier
-rounds').** In Terminal on the M1, with synthetic input: rows a program did not redraw no longer
+**Fourth round (night of 14 November): the section "Fourth round" below is the current state;
+where it and the rows here differ, it is right.**
+
+**14 November, third round (the rows below it are the earlier rounds').** In Terminal on the M1, with synthetic input: rows a program did not redraw no longer
 stay grey (tmux, a click in vim: `fin-tmux-vim`); tmux finds `tmux-256color` (the whole ncurses
 database is in the root); 24-bit colour (`COLORTERM=truecolor`, `tc3`); its questions are macOS
 alerts with Terminal's icon, centred on their window, with Return and Escape (`al10`, `al11`);
@@ -132,6 +134,145 @@ SPDX notice kept in the file that carries it:
 | Tab switch, Command-Shift-[ | - | 47 to 102 ms | |
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
+
+## Fourth round (night of 14 November): performance, text size and keys, full screen
+Everything here was done on the M1 booted from its disk. The input was synthetic (the compositor's
+inject module); nobody looked at the panel. Pictures are in `runs/sf-terminal/shots/` (not committed).
+
+What a person at the M1 can now do that they could not before:
+- Scroll with the wheel at 60 frames a second (synthetic wheel events; the trackpad's scrolling was not tried). Menus open in 64 to 96 ms. Resizing the window by its border
+  follows the pointer (about 25 ms from each compositor configure to the frame of that size).
+- Change the text size: View > Bigger, Smaller and Default Font Size (Command-+, Command-=, Command--,
+  Command-0). The window grows and shrinks with the text and keeps its 120x30 grid. Command-0 beeps
+  when the size is already the default, as on macOS.
+- Full screen: View > Enter Full Screen and Control-Command-F. The window covers the whole display
+  in a Space of its own, with its menu strip. Exit Full Screen (the same key or menu item) brings it
+  back (`fs1`..`fs3`, `w-Enter-Full-Screen-Ctrl-Cmd-F`).
+- Use the panels: Shell > Export Text As (Command-S) and Open (Command-O). Print (Command-P) says
+  that there are no printers and saves a PDF. New Remote Connection opens its window (all four in
+  `t4-panels`).
+- Use the Window menu: Minimize (Command-M) puts the window on the compositor's tile and a click on
+  the tile brings it back (`w-Minimize-Cmd-M`, `min2`). Cycle Through Windows (Command-`) raises the next
+  window. Tabs can be dragged to another place in the bar or out of the window into a window of
+  their own (`tdrag0`..`tdrag2`).
+- Use the Edit menu: Clear to Start (Command-K), Clear Screen, Select All, Find (`fd*`) and Use
+  Selection for Find (Command-E) work.
+- Open the inspector (Command-I): it lists the running processes by name ("login -pf root",
+  "-zsh", "sleep 300", with their colours: `ins3`). Command-W closes it. Edit Title (Command-Shift-I)
+  selects its title field (`t4-inspector-cmdw`: open, then closed by Command-W).
+- See the other menu items: Terminal > Services shows "No Services Apply" (`svc1`). Secure
+  Keyboard Entry toggles its check mark (`sk2`). New Command and New Remote Connection open their
+  windows. Help says that no help is available instead of raising.
+- Hear the bell: the sound goes through the sound stream's coreaudiod, as a short tone, because no
+  macOS sound is copied. The audio server opened the speakers and mixed one client. Nobody listened.
+- `open -a Terminal <folder>` opens the shell in that folder, not in its parent (installed
+  libFoundation `193b520a…`, rehearsed in `ty11`).
+
+### Performance (M1, `tools/sf-latency.py`, synthetic input)
+"Before" is the stack installed at the start of the night (Ctrl-C, idle and memory: the libraries of
+before in the test prefix `tpre`). "After" is the stack installed at the end. Each row is 2 to 6
+measurements.
+
+| Measure | Target | Before | After | Met? |
+|---|---|---|---|---|
+| Menu, press to the popup's first frame | < 100 ms | 122 to 164 ms | 64 to 96 ms | yes. The popup was drawn twice, and the window's menu strip was laid out again on every frame (at 150% the content's top edge falls into a pixel row of the strip); each key equivalent validated every menu |
+| Launch, exec to the first frame | about 0.85 s, nib decoding and strip layout | 827 to 850 ms (2255 ms the first after a boot) | 818 to 933 ms | no. The profile: nib loading about 213 ms (key-value coding `setValue:forKey:` 63 ms, property-list parsing 33 ms, autorelease pool 45 ms), NSApplication's start 58 ms (a Wayland round trip 27 ms, the localization table 25 ms). |
+| New tab (Command-T), to the new tab's first frame | near one frame | 169 to 171 ms | 137 to 175 ms | no. A new tab starts a shell on a pty and lays out a whole view. The rest of the time was not attributed |
+| Tab switch (Command-Shift-[ / ]), first frame | near one frame | 58 to 62 ms | 44 to 54 ms (one 101 ms) | partly. It was drawn twice. Now 3 frames per switch (what each holds was not attributed) |
+| Wheel, 60 steps one per compositor frame | 60 Hz | a frame every 31 to 33 ms, the last 400 ms behind | 60 frames for 60 steps, 14 ms median, 17 ms p90 | yes. The causes: the strip relayout; a CTLine and a CTFont made for each row of each frame (CoreText now keeps them); `-valueForKey:` formatting nine names per call (Foundation keeps the answer per class and key); rectangle outlines stroked through the edge rasterizer (Onyx2D covers axis-aligned rectangles and outlines directly); a 2 MB winding buffer calloc'd per context. In a tab with nothing to scroll: 31 frames for 60 steps |
+| Resize by dragging the border, configure to the frame of that size | smooth | median 44 to 129 ms | median 24 to 26 ms, p90 30 to 39 (fresh window); 25 to 42 / 114 with the long scrollback `yes` and `find` leave | yes for a fresh window. Before, every configure was drawn in turn, at the old buffer's size limits |
+| Maximize (frame button), click to the first full-size frame | - | 234 ms (restore 216) | 215 ms (restore 185); configure to frame 47 ms (26) | the client's part is 26 to 47 ms; the rest is before the configure arrives (compositor) |
+| Typing echo, key to frame | keep 7 to 8 ms | 9 to 11 ms | 7 to 11 ms | kept |
+| Output, 40 lines to the pty, to the frame / on screen | - | 63 to 73 / 74 to 84 ms | 49 to 69 / 62 to 83 ms | - |
+| Control-C under `yes` / `find /`, to the process gone | at once | 86 / 115 ms (old libraries) | 61 / 39 to 43 ms (fresh window); 126 to 129 / 41 to 188 ms with the scrollback `yes` leaves | yes in a fresh window. A long scrollback slows everything that reflows or redraws |
+| Selection drag, 30 pointer steps | - | not measured | 28 frames, 17 ms median gap | - |
+| Flood, `cat` of 1.3 MB | - | 73 to 699 ms (noisy) | 297 to 880 ms (noisy) | not established either way |
+| Idle CPU with a blinking cursor, 20 s | - | 0.21 s (old libraries) | 0.13 s (dev) to 0.32 s (installed, just after launch); RSS about 63 MB | - |
+| Memory growth, 300,000 lines of output | - | +92 MB (old libraries) | +81 MB | - |
+
+### Menus and key equivalents (Terminal's main menu, walked on the M1)
+Each item was chosen by its key equivalent through the inject module, or by the pointer where it
+has none. "Works" means the result was seen in a capture of the screen. "Commit only" means Terminal drew a new
+frame and the content was not inspected. Not walked: no result either way.
+
+| Menu | Works | Commit only | Unclear or wrong | Nothing | Not walked |
+|---|---|---|---|---|---|
+| Terminal | Preferences (1.2 s); Secure Keyboard Entry (the check mark; the private call it makes does nothing here, and on Wayland no other client receives the keys anyway); Services ("No Services Apply"); Quit | - | Hide Terminal (hides every window; nothing on the desktop brings a hidden application back); Hide Others (nothing to hide) | - | About Terminal; Show All |
+| Shell | New Window; New Tab; New Command; New Remote Connection; Open; Close Window / Close Tab; Export Text As; Show Inspector; Edit Title; Print (no printers, Save as PDF) | Reset; Hard Reset | - | - | New Window / New Tab with Same Command; Use Settings as Default; Export Settings; Export Selected Text As; Edit Background Color (needs the colour panel); Print Selection |
+| Edit | Copy; Paste; Select All; Clear to Start; Clear Screen; Find; Find Next; Find Previous; Hide Find Bar; Use Selection for Find; Copy Plain Text (beeps without a selection, as on macOS) | Clear Scrollback; Mark; Jump to Previous Mark; Jump to Next Mark | Paste Escaped Text, Insert Bookmark, Select Between Marks, Undo, Jump to Selection, Use Option as Meta Key (its HUD appears; the effect on keys not checked): no visible change | Show Colors (`NSColorPanel.nib` is missing) | Redo; Cut; Copy Without Background Color; Style for Copy; Paste Selection; Paste Escaped Selection; the Marks, Bookmarks and Navigate items other than those named; Clear to Previous Mark / Bookmark; Fill Screen; Find's Select All items; Num Lock |
+| View | Show / Hide Tab Bar; Split Pane; Close Split Pane; Bigger; Smaller; Default Font Size; Enter / Exit Full Screen (menu and Control-Command-F) | Scroll to Top; Scroll to Bottom; Page Up; Page Down; Line Up; Line Down | Allow Mouse Reporting (no visible change) | - | Show Marks; Show / Hide Alternate Screen |
+| Window | Minimize; Cycle Through Windows; Show Previous / Next Tab; Move Tab to New Window and Merge All Windows (third round); Zoom by the frame's button | - | - | Show All Tabs | Zoom (menu item); Open Window Group; Save Windows as Group; Return to Default Size; Bring All to Front |
+| Help | Terminal Help (the alert that help is not available) | - | Open man Page for Selection (no result recorded) | - | Search man Page Index |
+| Keys outside menus | typing; Return; Escape; Control-C; arrows | Page Up, Home, End | - | - | - |
+
+Counts: 40 work, 12 drew a frame without being inspected, 10 unclear, 2 do nothing (Show Colors,
+Show All Tabs). The rest were not walked: about 44 items, mostly alternates and the Marks,
+Bookmarks and Navigate submenus.
+
+Split Pane followed by Close Split Pane makes the window shorter each time, by 14 points per pair
+(719, 710, 689 ... 599 pixels over three pairs). `sf-trace` shows Terminal's own geometry doing it:
+`-[TTTabController splitPane:]` gives each pane 225 points (14 rows of 15 points), sets the window
+to fit 2 x 14 rows, and Close sets it to fit the 29 rows that remain. Whether macOS, with its
+line height, comes out the same was not checked. Show / Hide Tab Bar returns to the old height.
+
+### Full screen
+AppKit asks the compositor through `xdg_toplevel.set_fullscreen` / `unset_fullscreen` (AppKit
+0052) and follows the compositor's state. The window's full-screen mask is AppKit's and is not sent to the
+server as a style. The menu item reads Enter or Exit Full Screen, and the delegate gets the
+will/did calls. The compositor's side was DESK's: client full-screen and maximize requests,
+`xdg_activation_v1`, Command chords passed to Mac applications, and full-screen windows covering the
+dock (`answers-from-DESK.md`, compositor patches 9 to 11). Open, the compositor's: after Exit Full Screen a second configure 120
+to 145 ms later gives the window the work area's size (1629x1029 points) instead of its old frame
+(seen again at the end with Control-Command-F).
+
+### Left-overs
+| Item | State |
+|---|---|
+| `open -a Terminal <folder>` in the parent | fixed. Terminal's `-openFolder:inNewTab:` keeps a URL that ends in "/" and otherwise takes the parent. Foundation's `+[NSURL fileURLWithPath:]` now ends a directory's URL in "/", as on macOS. The same check in `-initFileURLWithPath:` left the Preferences window empty, so that method is unchanged (the caller that depends on it was not found) |
+| Use Selection for Find (Command-E) took one character | not a fault: the synthetic double-click's timing. With a proper double-click it takes the word (`findme123`) |
+| Tab bar colour in dark profiles | as on macOS: Terminal sets no appearance on its windows (only on the Option-as-Meta HUD), so the bar follows the system appearance |
+| Bell | audible through coreaudiod (AudioToolbox wrapper: System Sound Services, a short tone as the alert sound). Not heard by a person |
+| Tab dragging | done: reorder within the bar, and drag out (more than 40 points away) to a new window |
+| Services | the menu shows "No Services Apply"; there are no services |
+| Secure Keyboard Entry | the item toggles; nothing to secure on Wayland (only the focused client receives keys; the test compositor's inject module is the exception) |
+| Session restore | a relaunch restored a window with its working directory (it shows the `cd` it ran) |
+| Marks | Mark and Jump to Previous / Next Mark draw; the marks themselves were not inspected |
+| Profile thumbnails grey | not fixed. AppKit 0057 makes `-getRectsBeingDrawn:` answer the whole view outside a display; the thumbnails are still grey frames. Traced (`sf-trace`): `-[TTView thumbnailImageWithProfile:size:]` locks focus on a new image, concatenates its scale (0.16), and `-drawRect:` runs there over the whole 850x457 view. It then draws that image into a second image (`-drawAtPoint:fromRect:operation:fraction:` inside the second image's focus). Suspected, not established: an image whose only representation is a cached window copied into another image's focus gives nothing |
+| Symbol images, `Assets.car` | not done. Finch's CoreUI reader is a whole framework, which is not adopted. Terminal's catalogue holds only its icon (read from the `.icns`) and colours; the toolbar's images are system SF Symbols |
+| Font panel ("at least does not break") | it does not break, and it does not open: Preferences > Profiles > Text > Change… highlights and nothing follows (no `NSFontPanel.nib` installed; see the remaining-work table) |
+| Scroller look, colour emoji (CBDT), window proxy icon, drag and drop, Show All Tabs, colour panel | not done |
+
+### Faults found in the fourth round (in the system, none in Terminal)
+| Symptom | Cause | Fix |
+|---|---|---|
+| Wheel at 30 Hz, menus 120 to 160 ms, tab switch 60 ms | the strip relaid out on every frame; popups and tabs drawn twice; a CTLine/CTFont per row per frame; `-valueForKey:` formatting names; rectangles through the edge rasterizer; a key equivalent validated every menu | AppKit 0051, 0052; CoreText 0053; Onyx2D 0054; Foundation (key-value coding cache) |
+| A resize drag lagged hundreds of ms | every configure was drawn in turn; the size limits were committed on the old buffer, and the compositor clamped the next configure to them | AppKit 0052 (a configure overtaken by a later one is skipped); WindowServer 0058 (limits ride on the next frame) |
+| Bigger / Smaller gave the wrong window size after the line cache | `-[NSFont isEqual:]` ignores the point size, so a line laid out at the old size was reused | CoreText 0053 compares the size (found in this round's own change) |
+| Command-= did nothing | the item's key is "+" | AppKit 0052: Command-= is Command-+ |
+| Every AppKit menu became a layer-shell overlay | upstream's layer-shell path, live once the compositor offered layer shell | WindowServer 0058: layer shell only with `PD_WS_LAYER_SHELL=1` |
+| Export, Open, Print did nothing; Help raised | no panels without a display server's own; no print path; `NSHelpManager` unimplemented | AppKit 0055, 0056 |
+| Command-` and the Window menu did not raise a window; Minimize lost the window | no `xdg_activation_v1` use; minimise was an unmap | WindowServer 0058, AppKit 0052 |
+| Inspector raised exceptions; then listed `<TTProcessInfo: ...>` | `NSTableColumn -isHidden`, a cell copying a non-copyable value, font bindings, a non-colour foreground; value transformers named by class were never instantiated and a table column's binder ignored transformers | AppKit 0059 |
+| Shift alone (and so Command-W) opened the inspector's pull-down | a button's empty key equivalent matched an event without characters | AppKit 0059 |
+| `open -a Terminal <folder>` opened the parent | `+[NSURL fileURLWithPath:]` never ended a directory's URL in "/" | Foundation |
+
+Patches: `cocoa/patches/0051`..`0059` (descriptions in `cocoa/patched.nix`),
+`terminal-app/patches/foundation-macos-applications.patch`, `terminal-app/compat/AudioToolbox.c`.
+Nothing was taken from Finch in this round.
+
+### Remaining work (after the fourth round)
+| Item | What is known | Estimate |
+|---|---|---|
+| Launch 0.8 to 0.9 s | nib decoding (key-value coding setters, property lists, autorelease) and NSApplication's start; the profile's figures are in the performance table | 1 day for a setter cache and the start's round trip |
+| New tab 140 to 175 ms, tab switch 45 to 55 ms | three frames per switch; not attributed further | 1 day |
+| Colour panel and Font panel (Show Colors, Edit Background Color, Preferences' colour wells and its font Change… button) | Show Colors does nothing and Change… only highlights. AppKit's own panels load from Cocotron's compiled nibs (`en.lproj/NSColorPanel.nib`, `NSFontPanel.nib`, `NSColorPicker.subproj/en.lproj/*.nib`, MIT, in the source), which upstream's recipe does not install. Laid into a test prefix's AppKit resources: Show Colors opened the Colors panel (its wheel drawn black), and Terminal then ended without a message when Preferences' Profiles pane opened (crash not diagnosed). Not installed | 1 day |
+| Profile thumbnails grey | the drawing reaches the first image; the copy into the second is the suspect | 1 day |
+| Show All Tabs | no tab overview in AppKit | 2 days |
+| Exit Full Screen size | the compositor's second configure (work area) | compositor (`requests-for-DESK.md`, TERM 5) |
+| Minimised-window tiles outlive their windows | two tiles stayed after their Terminal processes exited | compositor (TERM 5) |
+| Hide Terminal | nothing on the desktop unhides an application | compositor / dock |
+| Scroller look, colour emoji, proxy icon, drag and drop, symbol images | as before | as before |
+| `-initFileURLWithPath:` of a directory | macOS ends it in "/"; doing so here broke the Preferences window | half a day to find the caller |
 
 ## The binary (scanner, `integrations/puredarwin/homebrew/sf_gapscan.py --app`)
 The scanner now reads universal files (`--arch arm64e`), the import table of chained fixups, the
@@ -318,6 +459,15 @@ otherwise) and records what it did in `/private/var/db/sf-macos-apps.installed`.
 | M1: AppKit, Onyx2D, libWindowServer, `/usr/bin/open`, the desktop terminal | replaced directly by `runs/sf-terminal/y2/put.sh` (the files of before are `<path>.pre-y2`); each the nix build of the patches committed (AppKit `e610800f…`, equal to the dev build) | - |
 | M1: regression | `sf_compat_push.sh check`: 18 of 18 ok, `failed=0` | `runs/sf-terminal/regress/compat-check-y2.txt` |
 | QEMU: the Cocoa stream's checks | `hello --scale 2 --theme graphite`, `frame --scale 2`, `popups --scale 2` (AppKit up to 0049), `apps --scale 1.5`, `apps --scale 1.5 --theme amber-phosphor` (up to 0050): all pass. The amber-phosphor failure of before was the check's: the compositor draws window titles in amber there, a few anti-aliased edge pixels of the Calculator's title fell within the tolerance of the operator keys' orange and the located box took in the title bar (1.5 px/pt measured as 3.83). The Cocoa stream recorded apps passing at 100% nextstep-classic, 150% teal-blueprint and 200% graphite, never at amber-phosphor. `cocoa_run.py`'s locate now leaves out rows and columns with only a few matching pixels: 1.52 px/pt | `runs/sf-terminal/regress/cocoa-*-y2.txt`, `cocoa-y2-summary.txt` |
+| Night of 14 November, fourth round. QEMU `ty8` | libFoundation with the key-value coding cache: FAILED (`COMPAT_VERDICT failed=2`): its probe's 200 ms timing bound is too slow under TCG. The probe now finds the cache by the symbol `PDFoundationKeyValueCodingCache` | `runs/m1-storage/qemu-dr/ty8/serial.log` |
+| QEMU `ty9`, `ty9-2` | libFoundation `5fdf0875…` with the other four unchanged: replaced as on the M1, `COMPAT_VERDICT failed=0`, `QDDESK_PASS`; fresh boot: `failed=0`, `QDDESK_PASS` | `qemu-dr/ty9/`, `ty9-2/`; `core-rehearsed.sha256` |
+| M1: `install core libFoundation.dylib` | `SFLIB 3 installed`; the one of before is `.old3` | commit `1c191fd87` |
+| M1: AppKit, CoreText, Onyx2D, libWindowServer, AudioToolbox wrapper | replaced directly by `runs/sf-terminal/t4/put.sh` (the files of before are `<path>.pre-t4`), each the nix build of the committed patches; AppKit and libWindowServer twice more as patches were added (last: AppKit `527784f2…`, equal to the dev build that was tested) | `runs/m1-coord/log.txt` |
+| QEMU `ty10` | libFoundation that also asked the file system in `-initFileURLWithPath:`: first pass `failed=0`, `QDDESK_PASS`; stopped in the second pass, because on the M1 (test prefix) this build left Terminal's Preferences window empty. Not installed | `qemu-dr/ty10/` |
+| QEMU `ty11`, `ty11-2` | libFoundation `193b520a…` (`+[NSURL fileURLWithPath:]` of a directory ends in "/"; the probe checks it) with the other four unchanged: replaced as on the M1, `COMPAT_VERDICT failed=0`, `QDDESK_PASS`; fresh boot: `failed=0`, `QDDESK_PASS` | `qemu-dr/ty11/`, `ty11-2/`; `core-rehearsed.sha256` |
+| M1: `install core libFoundation.dylib` | `SFLIB 3 installed`, the one of before (ty9's) is `.old4`; the probe 1 with the library in use (it lacks the fourth build), 0 with the new one; node, claude, python3, bash, git, vim, nvim 0 with both, tmux `-V` 1 with both. Then `open -a Terminal <folder>` (as `-NSOpen`) gave the folder, and Preferences drew | `runs/sf-terminal/m1-install/core-t4.txt` |
+| M1: regression | `sf_compat_push.sh check`: 18 of 18 ok, `failed=0` | `runs/sf-terminal/regress/compat-check-t4.txt` |
+| QEMU: the Cocoa stream's checks (AppKit up to 0059) | `hello --scale 2 --theme graphite`, `frame --scale 2`, `popups --scale 2`, `apps --scale 1.5 --theme amber-phosphor`: pass. `apps --scale 1.5`: FAILED the first time (the typed command's `COCOATERM_OK` did not arrive within 120 s; the keys reached the window; two other QEMU guests ran at the same time), passed when run again alone | `runs/sf-terminal/regress/cocoa-*-t4.txt`, `cocoa-t4-summary.txt`, `cocoa-apps_scale_1.5-t4-rerun.txt` |
 
 The dyld and libSystem that were rehearsed and installed are what
 `libsystem-default/build-libsystem.nix` builds (sha256 `472fd9a3…` and `dfc854f1…`); libFoundation
@@ -381,6 +531,17 @@ is not a reliable check on this kernel, and `verify apps` names this file each t
   `/private/var/db/sf-terminfo.installed` (remove each); the fonts and the feature flag plist are
   on `/private/var/db/sf-macos-apps.installed` (`sf_terminal.sh revert direct`). Terminal's
   preferences file holds what the tests changed (window frames; CursorBlink was set and unset).
+- Fourth round (night of 14 November): AppKit, CoreText, Onyx2D, libWindowServer and the AudioToolbox
+  wrapper of before are `<path>.pre-t4` (hard links: `ln -f <path>.pre-t4 <path>.back && mv -f
+  <path>.back <path>` each; AppKit `/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit`,
+  CoreText and Onyx2D likewise under their frameworks, `/usr/lib/libWindowServer.dylib`,
+  `/System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox`). Installed now:
+  AppKit `527784f2…`, CoreText `348df207…`, Onyx2D `872a34b6…`, libWindowServer `84eb8bf4…`,
+  AudioToolbox `ac4f1f0a…`. libFoundation (as for the core files above): installed now `193b520a…`
+  (ty11); ty9's (the key-value coding cache alone) is `/usr/lib/libFoundation.dylib.old4`; the
+  build of before the cache is `.old3`. Test prefixes `/private/var/db/sfy/{tdev,tpre,tdevnf}`
+  (remove). Terminal's preferences file holds what the tests changed (window frames, a restored window, the Secure
+  Keyboard Entry default set and unset). `/private/tmp/oaf` is a test folder.
 
 ## Launching
 From the desktop menu (right click on the desktop, or Command-Space): **Applications > Terminal**.
@@ -419,6 +580,10 @@ new instance: there are no Apple Events to hand a request to a running one.
   `SFPROF_FOCUS`, `SFPROF_PROGRAM`). How every cause of slowness above was found.
 - `tools/sf-latency.py` (on the target): `launch`, `output N`, `inject REQUEST`: ms from exec, from a
   write to the pty, from an injected request to the WindowServer's commits (`PD_WS_TIMING=1`).
+  `trace REQUEST [settle]`: every frame of each surface after a request (count, sizes, gaps) and
+  the time from each compositor configure to the frame of that size (drags, wheel, floods);
+  `ctrlc PROGRAM`: Control-C while PROGRAM runs, ms until it is gone. `sf-prof` also writes each
+  sample's whole stack (`/tmp/sfprof.txt.stacks`) for inclusive times.
 
 ## Commands
 ```sh
