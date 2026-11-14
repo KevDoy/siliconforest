@@ -684,6 +684,25 @@ Seen and not fixed: upstream Terminal draws its text at about half the cell size
 (also at 100%, so not a scaling fault; not investigated); an application-set pointer image stays
 at 1x; windows are placed by the compositor, the position AppKit asked for is ignored.
 
+### 14 November: the checks again, on patches 0001 to 0033 (QEMU arm64, pin root)
+Run by the Terminal.app stream after its changes (the menu strip, bindings, toolbars, scrollers,
+the remembered string sizes); the Foundation of these runs is the pin's, not the patched one of
+the M1.
+
+| Check | Scale | Result | Run |
+|---|---|---|---|
+| hello | 200% | pass (27 steps); its window carries the menu strip "CocoaHello File" | `reg2-hello-s2` |
+| frame | 100% | pass (29 steps) after the check's click on our close button was moved up by the strip's 22 points (`checks/frame.json`, also `zoom.json`, `miniaturize.json`: they place the title bar relative to the application's view). With the old offset it failed: the click landed on the strip | `reg4-frame-s1` (`reg2-frame-s1`: the failure) |
+| apps (upstream's Terminal and Calculator) | 150% | pass (29 steps) | `reg4-apps-s1.5` |
+| popups | 200% | pass (269 steps) | `reg4-popups-s2` |
+| miniaturize | 100% | pass (10 steps) | `reg4-miniaturize-s1` |
+| scorecard | 100% | 2077 compared, 1214 equal within 0.01, 836 different, 27 missing (`scorecard-007`, 12 November: 1214, 834, 29). Changed: the two scroller widths are answered now (15 and 0 where macOS has 17 and 17); `layout/centered` has one more equal value; `renderScale` is 1 because this run was at 100% (the earlier one at 200%) | `reg4-metrics2`, `runs/cocoa/conformance/scorecard-008.md` |
+
+Not run: `live-scale`, `zoom`, and every Firefox check (`build-firefox-root.nix` was not built
+with 0019 to 0033 for a run; the Terminal.app tree takes ApplicationServices and ImageIO from it,
+so it builds). Firefox on the M1 was not tried. Trap met: `cocoa_check.sh metrics` without
+`--tree <build-conformance.nix output>=/` passes with an empty result.
+
 ## Conformance against real macOS (first scorecard)
 Reference: macOS 26.5.2 on the bench controller, used only as a renderer in `~/sf-cocoa-ref/`
 over ssh (no GUI session touched: an NSWindow that is never shown and `cacheDisplayInRect:`

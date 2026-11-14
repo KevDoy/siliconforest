@@ -327,6 +327,11 @@ new instance: there are no Apple Events to hand a request to a running one.
   `m1-storage/system/sf-session` runs `/usr/bin/chonkstep-darwin-desktop.next` for one boot when
   `/private/var/db/desktop-next-try` exists and gives the compositor its inject directory when
   `/private/var/db/desktop-inject` exists.
+- The compositor with the inject module is a test build: `compositor/README.md` says how it is
+  built, how it is kept out of daily use, and how to run it for one boot. Captures of the screen
+  need it.
+- `probe/sf-kvo-probe.m`: the installer's proof of a new libFoundation; extend it when the library
+  gains something the installed build lacks, or the installer will say "already installed".
 - `probe/sf-trace.c` (+ `sf-trace-thunks.S`): the methods of chosen classes as a program calls them,
   with arguments, results, objects named, and times (`DYLD_INSERT_LIBRARIES`, `SFTRACE=...`). How the
   causes above were found.
@@ -342,6 +347,8 @@ $T stage && $T scan && $T push          # the tree, tried from /private/tmp/sfy 
 $T install-stage                        # runs/sf-terminal/install
 $T qemu NAME && $T qemu NAME second     # the rehearsal and the fresh boot of its result (25 + 20 minutes)
 $T install new; $T install app; $T install core; $T install direct
+integrations/puredarwin/m1-storage/tools/sf_userland_push.sh push apps   # the three installs, core files only as rehearsed; verify apps
+$T revert direct                        # undo install new and install direct (then push apps again)
 $T launch 20                            # or on the target: open -a Terminal
 I=integrations/puredarwin/terminal-app/tools/sf_inject.sh
 $I 'text:echo hello\n' key:up chord:ctrl+c wait:500 capture:name     # runs/sf-terminal/shots/name.png
