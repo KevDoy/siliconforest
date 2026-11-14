@@ -20,8 +20,11 @@ touched the trackpad and no real key was pressed.
   14 November ~10:53Z). **Proven only with constructed trackpad reports fed to the driver's decoder,
   not with real fingers** — see "The gesture". Control-Command + two-finger scroll does the same
   (stand-in, kept).
-- Command-W closes the window, Command-Q quits the application (all its windows); for a Mac
-  application (Terminal.app, Activity Monitor) Command-Q/W/M/H go to the application itself.
+- Command-W closes the window, Command-Q quits the application (all its windows). With a Mac
+  application focused (Terminal.app, Activity Monitor) its Command chords are its own, as on macOS
+  (Command-W/Q/F/T/S/O/1..9/=/- …), except the desk's: Command-Space, Command-(Shift/Control-)Tab,
+  Command-Shift-<digit>, Command-Option-Shift-<digit>, Command-Control-Shift-3/4/5 (from desk-010:
+  build 009 still took Command-F/T/S/O/digits from Mac applications).
 - Command-Control-Shift-3: screenshot of the screen, Command-Control-Shift-4: drag an area,
   Command-Control-Shift-5: the focused window. Saved as `~/Pictures/Screenshots/Screenshot
   <date> at <time>.png` (owner-only) and put on the clipboard (`image/png`); a notice says so.
@@ -79,6 +82,15 @@ full list is printed by `cargo test -p chonk-shell standalone_key_table_dump -- 
 | Super-Ctrl-Q, Super-Escape, Super-Ctrl-C/O/H/S/E/…, notifications, reminders, night light | Omarchy programs | — | not applicable (programs absent) |
 | Super-Alt-Home/Super-Home, Super-Slash, monitors | Omarchy scripts, monitors | — | not applicable |
 | Volume / brightness keys | | F1/F2, F10–F12, Touch Bar | work as before (compositor's own) |
+
+Mac applications: see the first section (from desk-010). Observed with build 009 on the M1: with
+Terminal.app focused, Command-F made the window full screen on a Space of its own (wm-core's Spaces
+rule) and Terminal.app answered with unset_fullscreen (`WMSTATE request … Remove Fullscreen`): the
+desk had taken Command-F from it. Command-Q went to Terminal.app and it quit (its window went).
+With desk-010 (observed): Terminal.app focused, Command-O did not open the desk's Overview (it went to
+the application), Command-Shift-2 carried Terminal.app's window to Space 2 (the desk's), Command-1 went
+to Terminal.app (its window 1) and did not switch Space: from a Mac application, Spaces are reached
+by swipe, Command-Tab or Command-Shift-<digit> (carrying), not by Command-<digit>.
 
 ## 2. Spaces
 wm-core's Spaces profile (`InteractionMode::Spaces`, keyboard Desktop) on the standalone desk; the
@@ -226,12 +238,12 @@ IOHIDFamily, no new device node, nothing of `pd_nvme_wgate.c/.h`, the fence cons
   back. If nothing moves, `ssh root@<M1> 'sysctl -w kern.pd_trackpad_swipe_test=3'` shows whether
   the path behind the fingers works.
 
-## Final state (11:05Z)
+## Final state (11:20Z)
 SiliconForest on the disk with `sf/kernel.bin` `821cb932…` (trackpad swipes), the standard state of the
-night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-009 `57a4af86…` (with the inject module,
-running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-009 `89b26cb6…` (without it),
-`.safe` = desk-daily-001 `b1104b75…`, the dock running. Patches 6-9 in
-`integrations/puredarwin/terminal-app/compositor/` give the source of 009 from `wm-darwin-cmdq-src`
+night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-010 `73e765bd…` (with the inject module,
+running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-010 `219e4003…` (without it),
+`.safe` = desk-daily-001 `b1104b75…`, the dock running. Patches 6-10 in
+`integrations/puredarwin/terminal-app/compositor/` give the source of 010 from `wm-darwin-cmdq-src`
 (checked with `diff -r`). With desk-next-009 a swipe from a desk with one Space made Space 2 and
 came back (constructed four-finger reports through the driver: `release position=1.162
 velocity=3.655 target=1`, `WMSPACE current=2 count=2`, back `target=-1`).
