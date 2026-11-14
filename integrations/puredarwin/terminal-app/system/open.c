@@ -2,7 +2,13 @@
 // /usr/bin/open: start an application bundle on the SiliconForest desktop, as macOS's open(1)
 // does for the forms people type:
 //   open <path to .app>             open -a <name or path> [--args <arguments...>]
+//   open -a <application> <document...>   open <document...>
 //   open -n ...  (accepted: every open starts a new instance here)
+// Documents (files, folders) go to the application as its NSOpen default (-NSOpen <path>, a list
+// for several), which AppKit hands to the application delegate's application:openFile(s):, the
+// way macOS hands them over in an Apple Event: `open -a Terminal <folder>` opens a window there,
+// `open x.command` runs it in Terminal. Without -a the application is the one in the application
+// directories whose CFBundleDocumentTypes name the document's extension (folders: none).
 // The bundle's executable (CFBundleExecutable, read by CFBundle) is started in a session of its
 // own with the desktop's environment (the compositor's socket: XDG_RUNTIME_DIR and
 // WAYLAND_DISPLAY, taken from the caller or the session's defaults), detached from the terminal:
@@ -14,7 +20,8 @@
 //                                   compositor starts no program itself: it writes the path, the
 //                                   session's listener starts the application. Only bundles in the
 //                                   application directories are opened this way.
-// Not macOS's: documents and URLs (there is no LaunchServices database here), -b, -e, -t, -W, -g.
+// Not macOS's: URLs, a running instance taking the documents (there are no Apple Events), -b, -e,
+// -t, -W, -g.
 #include <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -72,19 +79,110 @@ static int listen_on(const char *fifo)
     return 0;
 }
 
+static int is_bundle(const char *p) { size_t n = strlen(p); while (n > 1 && p[n - 1] == '/') n--; return n > 4 && strncmp(p + n - 4, ".app", 4) == 0 && is_dir(p); }
+
+// the application in the application directories whose CFBundleDocumentTypes list this extension
+static int app_for_document(const char *doc, char *out, size_t size)
+{
+    static const char *dirs[] = { "/Applications", "/Applications/Utilities", "/System/Applications", "/System/Applications/Utilities", NULL };
+    const char *dot = strrchr(doc, '.'), *slash = strrchr(doc, '/');
+    if (dot == NULL || (slash && dot < slash) || is_dir(doc)) return 0;
+    CFStringRef ext = CFStringCreateWithCString(NULL, dot + 1, kCFStringEncodingUTF8);
+    int found = 0;
+    for (int i = 0; dirs[i] && !found; i++) {
+        CFURLRef dir = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)dirs[i], (CFIndex)strlen(dirs[i]), true);
+        CFArrayRef bundles = dir ? CFBundleCreateBundlesFromDirectory(NULL, dir, CFSTR("app")) : NULL;
+        for (CFIndex b = 0; bundles && b < CFArrayGetCount(bundles) && !found; b++) {
+            CFBundleRef bundle = (CFBundleRef)CFArrayGetValueAtIndex(bundles, b);
+            CFArrayRef types = CFBundleGetValueForInfoDictionaryKey(bundle, CFSTR("CFBundleDocumentTypes"));
+            // the type identifiers the bundle declares for this extension (UTExportedTypeDeclarations,
+            // UTImportedTypeDeclarations: Terminal's .command is com.apple.terminal.shell-script)
+            CFMutableArrayRef utis = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+            CFStringRef declKeys[] = { CFSTR("UTExportedTypeDeclarations"), CFSTR("UTImportedTypeDeclarations") };
+            for (int k = 0; k < 2; k++) {
+                CFArrayRef decls = CFBundleGetValueForInfoDictionaryKey(bundle, declKeys[k]);
+                for (CFIndex d = 0; decls && CFGetTypeID(decls) == CFArrayGetTypeID() && d < CFArrayGetCount(decls); d++) {
+                    CFDictionaryRef decl = CFArrayGetValueAtIndex(decls, d), tags;
+                    CFStringRef uti;
+                    CFArrayRef exts;
+                    if (CFGetTypeID(decl) != CFDictionaryGetTypeID()) continue;
+                    uti = CFDictionaryGetValue(decl, CFSTR("UTTypeIdentifier"));
+                    tags = CFDictionaryGetValue(decl, CFSTR("UTTypeTagSpecification"));
+                    exts = tags && CFGetTypeID(tags) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(tags, CFSTR("public.filename-extension")) : NULL;
+                    if (exts && CFGetTypeID(exts) == CFStringGetTypeID()) {
+                        if (uti && CFStringCompare((CFStringRef)exts, ext, kCFCompareCaseInsensitive) == kCFCompareEqualTo) CFArrayAppendValue(utis, uti);
+                    } else
+                        for (CFIndex e = 0; uti && exts && CFGetTypeID(exts) == CFArrayGetTypeID() && e < CFArrayGetCount(exts); e++)
+                            if (CFStringCompare(CFArrayGetValueAtIndex(exts, e), ext, kCFCompareCaseInsensitive) == kCFCompareEqualTo) CFArrayAppendValue(utis, uti);
+                }
+            }
+            for (CFIndex t = 0; types && CFGetTypeID(types) == CFArrayGetTypeID() && t < CFArrayGetCount(types) && !found; t++) {
+                CFDictionaryRef type = CFArrayGetValueAtIndex(types, t);
+                if (CFGetTypeID(type) != CFDictionaryGetTypeID()) continue;
+                CFArrayRef exts = CFDictionaryGetValue(type, CFSTR("CFBundleTypeExtensions"));
+                CFArrayRef contents = CFDictionaryGetValue(type, CFSTR("LSItemContentTypes"));
+                int match = 0;
+                for (CFIndex e = 0; exts && CFGetTypeID(exts) == CFArrayGetTypeID() && e < CFArrayGetCount(exts); e++)
+                    if (CFStringCompare(CFArrayGetValueAtIndex(exts, e), ext, kCFCompareCaseInsensitive) == kCFCompareEqualTo) match = 1;
+                for (CFIndex c = 0; !match && contents && CFGetTypeID(contents) == CFArrayGetTypeID() && c < CFArrayGetCount(contents); c++)
+                    if (CFArrayContainsValue(utis, CFRangeMake(0, CFArrayGetCount(utis)), CFArrayGetValueAtIndex(contents, c))) match = 1;
+                if (match) {
+                    CFURLRef url = CFBundleCopyBundleURL(bundle);
+                    found = url && CFURLGetFileSystemRepresentation(url, true, (UInt8 *)out, (CFIndex)size);
+                    if (url) CFRelease(url);
+                }
+            }
+            CFRelease(utis);
+        }
+        if (bundles) CFRelease(bundles);
+        if (dir) CFRelease(dir);
+    }
+    CFRelease(ext);
+    return found;
+}
+
 int main(int argc, char **argv)
 {
     const char *target = NULL; char **args = NULL; int nargs = 0;
+    char **docs = calloc((size_t)argc, sizeof(char *)); int ndocs = 0;
     if (argc == 3 && strcmp(argv[1], "--listen") == 0) return listen_on(argv[2]);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--args") == 0) { args = argv + i + 1; nargs = argc - i - 1; break; }
         else if (strcmp(argv[i], "-a") == 0 && i + 1 < argc) target = argv[++i];
         else if (strcmp(argv[i], "-n") == 0) continue;
         else if (argv[i][0] == '-') { fprintf(stderr, "open: option %s is not supported here\n", argv[i]); return 1; }
-        else if (target == NULL) target = argv[i];
-        else { fprintf(stderr, "open: documents are not supported here (one application bundle per call)\n"); return 1; }
+        else if (target == NULL && ndocs == 0 && is_bundle(argv[i])) target = argv[i];
+        else {
+            char real[PATH_MAX];
+            if (realpath(argv[i], real) == NULL) { fprintf(stderr, "open: %s: %s\n", argv[i], strerror(errno)); return 1; }
+            docs[ndocs++] = strdup(real);
+        }
     }
-    if (target == NULL) { fprintf(stderr, "usage: open <application bundle> | open -a <application> [--args ...]\n"); return 1; }
+    static char app[PATH_MAX];
+    if (target == NULL && ndocs > 0) {
+        if (!app_for_document(docs[0], app, sizeof(app))) { fprintf(stderr, "open: no application here opens %s (use open -a <application> ...)\n", docs[0]); return 1; }
+        target = app;
+    }
+    if (target == NULL) { fprintf(stderr, "usage: open <application bundle> | open [-a <application>] <document...> [--args ...]\n"); return 1; }
+    if (ndocs > 0) {
+        // -NSOpen <path>, or -NSOpen (<path>, ...) for several, before the caller's own arguments
+        char **all = calloc((size_t)(nargs + 2), sizeof(char *));
+        all[0] = "-NSOpen";
+        if (ndocs == 1) all[1] = docs[0];
+        else {
+            size_t len = 3; for (int i = 0; i < ndocs; i++) len += strlen(docs[i]) * 2 + 4;
+            char *list = malloc(len), *p = list; *p++ = '(';
+            for (int i = 0; i < ndocs; i++) {
+                if (i) *p++ = ',';
+                *p++ = '"';
+                for (const char *c = docs[i]; *c; c++) { if (*c == '"' || *c == '\\') *p++ = '\\'; *p++ = *c; }
+                *p++ = '"';
+            }
+            *p++ = ')'; *p = 0; all[1] = list;
+        }
+        for (int i = 0; i < nargs; i++) all[i + 2] = args[i];
+        args = all; nargs += 2;
+    }
     return open_bundle(target, args, nargs);
 }
 
