@@ -157,8 +157,9 @@ desktop's own launcher, through the same uid-checked socket), `com.apple.Termina
 Terminal`), `com.apple.ActivityMonitor` (`open -a "Activity Monitor"`, TryExec on
 `/System/Applications/Utilities/...`: absent on the M1 tonight, so not shown). The Linux dock has no
 default pins; these are this desk's. Observed: dock up, running indicator on Terminal, click ->
-the terminal brought forward on its Space. Not observed: launching Terminal.app or a new desktop
-terminal from the dock; the dockapps (SOCK_SEQPACKET is not on Darwin: "dockapps are unavailable this
+the terminal brought forward on its Space. A full-screen window covers the dock (desk-011, observed with
+Command-F on a desktop terminal: `WMLAYER top layer covered`, capture `t11-a-fullscreen.png`).
+Not observed: launching Terminal.app or a new desktop terminal from the dock; the dockapps (SOCK_SEQPACKET is not on Darwin: "dockapps are unavailable this
 session"); the instruments' data (Linux samplers; most show nothing here). The Clip is placed by the
 dock itself and sits partly below the panel's edge at 200 %.
 
@@ -183,7 +184,9 @@ dock itself and sits partly below the panel's edge at 200 %.
   Revert: `ln -f <path>.before-desk <path>.back && mv -f <path>.back <path>` for the compositor and
   `.next`; `ln -f /usr/libexec/sf-session.before-desk ...` likewise; remove `/usr/bin/chonkstep-dock`
   (the session then starts no dock), the three `.desktop` files and the pins file.
-- Cargo tests (host, `XDG_STATE_HOME` at a scratch directory): `cargo test --offline --locked -p wm-darwin
+- Cargo tests (host, `XDG_STATE_HOME` at a scratch directory; full run on the final source, that of
+  desk-011, results in `runs/m1-desktop-010/desk-tests/cargo-test-011.txt`; lib and dock_host also on
+  every build in between): `cargo test --offline --locked -p wm-darwin
   --features desktop-shell`: lib 129/129; wayland_dmabuf 5/5; wayland_theme 3/3; wayland_shm 9/10
   (`autopilot_exercises_the_whole_desktop_against_a_real_window` fails); wayland_scale 3/4
   (`a_window_too_large_for_the_panel_at_a_scale_is_shrunk_and_gets_its_size_back` fails). **Both
@@ -238,12 +241,12 @@ IOHIDFamily, no new device node, nothing of `pd_nvme_wgate.c/.h`, the fence cons
   back. If nothing moves, `ssh root@<M1> 'sysctl -w kern.pd_trackpad_swipe_test=3'` shows whether
   the path behind the fingers works.
 
-## Final state (11:20Z)
+## Final state (11:35Z)
 SiliconForest on the disk with `sf/kernel.bin` `821cb932…` (trackpad swipes), the standard state of the
-night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-010 `73e765bd…` (with the inject module,
-running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-010 `219e4003…` (without it),
-`.safe` = desk-daily-001 `b1104b75…`, the dock running. Patches 6-10 in
-`integrations/puredarwin/terminal-app/compositor/` give the source of 010 from `wm-darwin-cmdq-src`
+night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-011 `bb9a2c9b…` (with the inject module,
+running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-011 `71da0543…` (without it),
+`.safe` = desk-daily-001 `b1104b75…`, the dock running. Patches 6-11 in
+`integrations/puredarwin/terminal-app/compositor/` give the source of 011 from `wm-darwin-cmdq-src`
 (checked with `diff -r`). With desk-next-009 a swipe from a desk with one Space made Space 2 and
 came back (constructed four-finger reports through the driver: `release position=1.162
 velocity=3.655 target=1`, `WMSPACE current=2 count=2`, back `target=-1`).

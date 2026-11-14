@@ -21,6 +21,7 @@ the desktop menu ...").
 | 8 | `wm-darwin-trackpad-swipes.patch` | the compositor reads the trackpad driver's swipe ring (`sysctl kern.pd_trackpad_swipe`, `m1-trackpad-child/multitouch/PDM1SPIHIDMultitouch.inc`) once a frame and turns each event into the swipe of patch 7; nothing happens with a kernel without it | `desk-next-008`, `desk-daily-008` |
 | 9 | `wm-darwin-swipe-new-space.patch` | a swipe past the last Space makes a new one when the current Space has windows (Linux docs/gestures.md) | `desk-next-009`, `desk-daily-009` |
 | 10 | `wm-darwin-mac-command-chords.patch` | with a Mac application focused every Command chord goes to it (Find, New Tab, Save, its window numbers, text size, ...) except the desk's: Command-Space, Command-(Shift/Control-)Tab, Command-Shift-<digit>, Command-Option-Shift-<digit>, Command-Control-Shift-3/4/5 | `desk-next-010`, `desk-daily-010` |
+| 11 | `wm-darwin-fullscreen-covers-dock.patch` | a full-screen window on the Space shown hides the top layer-shell layer (the dock), the overlay layer stays | `desk-next-011`, `desk-daily-011` |
 
 Builds:
 ```sh
@@ -57,7 +58,7 @@ Not run: the crate's own tests (`cargo test -p wm-darwin`); two test expectation
 hand for the new Applications row.
 
 ### Night of 14 November (DESK)
-Source: `runs/m1-desktop-010/desk-src` (`wm-darwin-cmdq-src` + patches 6 to 10; a local git with one
+Source: `runs/m1-desktop-010/desk-src` (`wm-darwin-cmdq-src` + patches 6 to 11; a local git with one
 commit per patch; the patches applied to a fresh copy of `wm-darwin-cmdq-src` give the same tree).
 Builds as above (`desk-next-NNN` with `DESKTOP_FEATURES=test-inject`, `desk-daily-NNN` without).
 The dock: `../../desktop/tools/build_dock.sh <name> <same source>` (binary `chonk-dock`, installed as
