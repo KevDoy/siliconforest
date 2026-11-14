@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Small whole Finch frameworks, against open PureDarwin headers and libraries.
 { name, version ? "1", arc ? true, security ? null, patches ? [],
-  extraIncludes ? "", extraLinks ? "" }:
+  extraIncludes ? "", extraLinks ? "", prepare ? "" }:
 let
   e = import ./environment.nix;
   inherit (e) pkgs p finch libsystem sdk cc ld;
@@ -13,6 +13,7 @@ in pkgs.stdenv.mkDerivation {
   dontConfigure = true;
   buildPhase = ''
     export DARWIN_SDK_ROOT=${sdk}
+    ${prepare}
     mkdir objects
     CF="-isysroot ${sdk} -mmacosx-version-min=26.5 -O2 -fblocks -fobjc-exceptions ${if arc then "-fobjc-arc" else "-fno-objc-arc"} -D_DARWIN_C_SOURCE -Wno-deprecated-declarations -Wno-availability -Wno-nullability-completeness -Wno-incomplete-implementation -I${headers} -I${p.foundation-arm64}/usr/include -I${p.coreFoundation-arm64}/include -I${p.libobjc-arm64}/usr/include -I${libsystem}/usr/include ${extraIncludes}"
     for s in userland/${name}/*.m; do
