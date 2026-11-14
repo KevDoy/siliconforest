@@ -15,9 +15,11 @@ touched the trackpad and no real key was pressed.
 - Command-1 … Command-0: go to Space 1 … 10; Command-Shift-<n>: take the focused window there;
   Command-Option-Shift-<n>: send it without following; Command-Tab / Command-Shift-Tab: next/previous
   occupied Space; a notice says "Space N". Command-O: Overview with the Spaces row.
-- Three- or four-finger swipe left/right: next/previous Space, the desk following the fingers
-  (**compositor side only**: see "The gesture" for what the trackpad driver still has to deliver).
-  Control-Command + two-finger scroll does the same today (stand-in).
+- Three- or four-finger swipe left/right: next/previous Space, the desk following the fingers.
+  The trackpad driver now hands such swipes to the compositor (new kernel collection, installed
+  14 November ~10:53Z). **Proven only with constructed trackpad reports fed to the driver's decoder,
+  not with real fingers** — see "The gesture". Control-Command + two-finger scroll does the same
+  (stand-in, kept).
 - Command-W closes the window, Command-Q quits the application (all its windows); for a Mac
   application (Terminal.app, Activity Monitor) Command-Q/W/M/H go to the application itself.
 - Command-Control-Shift-3: screenshot of the screen, Command-Control-Shift-4: drag an area,
@@ -53,7 +55,7 @@ full list is printed by `cargo test -p chonk-shell standalone_key_table_dump -- 
 | Linux chord (Omarchy keymap / Mac profile) | Action | On the M1 | State |
 |---|---|---|---|
 | Super-Return | terminal | Command-Return | works (desktop's terminal; from M1 runs of earlier days, not re-run tonight) |
-| Super-W | close window | Command-W | **observed** (t6-j); Mac app: goes to the app |
+| Super-W | close window | Command-W | **observed** (t6-j); Mac app: goes to the app (not exercised) |
 | Cmd-Q (Mac profile) | quit application | Command-Q | bound; native: wm-core quit_application (closes every window of the app); Mac app: goes to the app (since 13 Nov). Native path not exercised tonight |
 | Super-Ctrl-Shift-3 | capture screen (file + clipboard) | Command-Control-Shift-3 | **observed** (file 219,906 bytes, 206 ms) |
 | Super-Ctrl-Shift-4 | capture area | Command-Control-Shift-4 | bound; drag-select with an outline, Escape/right click cancels. Not exercised on the M1 |
@@ -101,11 +103,10 @@ Overview, down closes it (at release; the Linux morph is not ported). Natural sc
 turn it (physical directions, as on Linux). Two-finger swipes stay with scrolling.
 Evidence: injected `swipe begin/update/end 3 ...` records: `WMGESTURE release position=1.074
 velocity=1.646 target=1` -> Space 2, back with `position=-1.132 target=-1`, mid-swipe capture t6-d.
-**Trackpad driver (not reached at the time of writing):** the kext (`m1-trackpad-child/multitouch`,
-PDM1SPIHID in multitouch mode) decodes every contact but hands userspace only a synthesized pointer
-(buttons, motion, one vertical wheel byte); three and four fingers are recognised by its libinput
-port and then dropped (`M1TP_MT_G_IGNORED`). See the section "Kernel" at the end for what was done
-afterwards.
+**Trackpad driver:** the kext (`m1-trackpad-child/multitouch`, PDM1SPIHID in multitouch mode)
+decoded every contact but handed userspace only a synthesized pointer (buttons, motion, one vertical
+wheel byte); three and four fingers were recognised by its libinput port and dropped
+(`M1TP_MT_G_IGNORED`). Now it gives them to the compositor: see "Kernel" below.
 **Stand-in (labelled so):** Control-Command with a two-finger scroll drives the same swipe (each
 wheel step = 24 units of horizontal travel, scrolling down = next Space, released 250 ms after the last
 step). Not exercised on the M1.
@@ -123,7 +124,10 @@ started only by (1) the compositor's own key binding, or (2) a connection to the
 uid (`getpeereid`) is its own (root): same user only, no other account. The test-only inject module
 (file requests and captures) is compiled only with the feature `test-inject`; the installed
 `/usr/bin/chonkstep-darwin-desktop` has no inject code (`WMINJECT absent` string, no `WMINJECT armed`).
-Not done: recording, the capture toolbar, a selection outline that dims the rest.
+Not done: recording, the capture toolbar, a selection outline that dims the rest. Seen in the
+captures: the one-line notices ("Space 2", "Screenshot saved: …") are cut short ("S…"): the notice is
+sized by a font measure smaller than the one it is drawn with at 200 % (chonk-shell `show_notice`); not
+fixed.
 
 ## 5. The dock
 The real Chonkstep dock (`dock/crates/chonk-dock`, built for Darwin by
@@ -159,8 +163,7 @@ dock itself and sits partly below the panel's edge at 200 %.
   without a reboot (`relaunch` / `relaunch-next` in `$XDG_RUNTIME_DIR/session-end-request`, used by
   `desk_m1.sh relaunch`), the dock, `/var/log/desktop-session.log`, and the fallback to
   `/usr/bin/chonkstep-darwin-desktop.safe` when a compositor ends with an error within 20 s.
-- On the M1 (10:45Z): `/usr/bin/chonkstep-darwin-desktop` = desk-daily-007 `56f4d073…`, `.next` =
-  desk-next-007 `b25ea00d…` (inject), `.safe` = desk-daily-001 `b1104b75…`; before: `.before-desk`
+- On the M1: see "Final state" below for the compositor builds. `.safe` = desk-daily-001 `b1104b75…`; before: `.before-desk`
   (cmdq-daily-001, `894bbf15…`), `.before-desk001`, `.before-desk006`, `.next.before-desk*`;
   `/usr/bin/chonkstep-dock` (`5f1baa06…`); `/usr/share/applications/*.desktop` (3);
   `/private/var/db/desktop-state/chonkstep/dock` (pins); `/usr/libexec/sf-session` (14653 bytes; the
@@ -177,6 +180,61 @@ dock itself and sits partly below the panel's edge at 200 %.
   "Session" row of 96effcf; the expectation is corrected). dock_host 1/1 (ignored by default; needs a
   host build of the dock). chonk-shell: `standalone_darwin_key_tests` 1/1 (the whole chonk-shell suite
   was not run).
+
+## Kernel: swipes from the trackpad driver (after the coordinator put it in scope)
+**Why this shape (the smallest change).** The record that reaches `/dev/usb_hid_mouse`
+(PDHIDEventQueue in IOHIDFamily: sequence, buttons, dx, dy, one wheel byte, absolute flag) has no
+room for a swipe, and IOHIDFamily is a hash-pinned revision (`m1-native-input/revisions/002`). So
+only the trackpad kext changed: its decoder emits libinput's swipe gesture beside the pointer
+report, and the kext keeps the last 32 swipe events in a ring that userspace reads with sysctl. No
+IOHIDFamily, no new device node, nothing of `pd_nvme_wgate.c/.h`, the fence constants or
+`pd_halt_gate.h`.
+- `m1tp_mt.c`: three or four active fingers -> `M1TP_MT_G_SWIPE`; BEGIN, UPDATE (the average
+  travel of the touches, accelerated with the pointer's libinput curve, in libinput's units: what
+  a Linux compositor gets as the swipe's dx/dy, physical directions) and END when the fingers leave
+  (a lifted or added finger debounced 100 ms, as libinput does for gestures). Host tests
+  (`run-host-tests.sh`): all earlier checks pass; three and four fingers 40 mm left in 300 ms give
+  1 begin, 40 updates, 1 end, travel -419 units, no pointer motion; two fingers no swipe.
+- `PDM1SPIHIDMultitouch.inc`: the ring, `sysctl kern.pd_trackpad_swipe` (opaque, read-only:
+  version, next sequence, 32 events of 16 bytes) and `kern.pd_trackpad_swipe_test` (root writes
+  3/4 = left, -3/-4 = right: a constructed swipe, report bytes built by `m1tp_mt_build`, through
+  `m1tp_mt_parse` and `m1tp_mt_step` on a scratch state, 8 ms apart in real time; marked synthetic).
+- Compositor (patch 8): reads the ring once a frame (`Server::trackpad_swipes`), each new event a
+  Swipe as in section 3; a kernel without the sysctl is noticed once and left alone.
+- Collection: `m1-storage/build-kc-native-rw-halt.nix` (unchanged recipe; the kext comes from
+  `m1-touchbar/build-spihid.nix` <- `m1-trackpad-child/multitouch`). Kit:
+  `m1-native-boot/install/build.sh runs/m1-desktop-010/desk-kit-001`: `kernel.bin` `821cb932…`
+  (10,165,616 bytes), `boot.bin` `81d58f1b…` (unchanged). Control: the same kit built with the
+  three changed files put back gives `093b61f1…`, the installed kernel of before, byte for byte.
+- Install (from Linux, inside gui.lock): `e2fsck -fn` of the partition (`dr_linux_root.sh check`):
+  rc 0, clean; `sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin kernel.bin`: `sf/kernel.bin`
+  `821cb932…`, `sf/kernel.bin.old` `093b61f1…`, boot.bin left alone; `asahi-bless --next`; the
+  first boot came up (sysctl present, length 520, `PDM1SPIHID: MT stage=config enabled=1`); a
+  second boot after Linux too. `e2fsck -fn` after: rc 0, clean. Records: `install/out/` holds the new
+  kit (the one of before in `runs/m1-desktop-010/install-out-before-desk-swipes/`), SF-R-storage.md.
+  Rollback: from Linux `sudo bash ./sf-bootbin-install.sh <PARTUUID of SFBOOT> --rollback`.
+- **Observed on the M1 (constructed reports, not fingers):** `sysctl -w kern.pd_trackpad_swipe_test=3`
+  -> kernel log `MT stage=swipe-begin fingers=3 synthetic=1`, `swipe-test … direction=left
+  next_seq=43`; compositor `WMGESTURE trackpad swipes: first event phase=Begin fingers=3
+  synthetic=1`, `release position=1.162 … target=1`, `WMSPACE current=2`; `=-3` -> `position=-1.162
+  velocity=-3.824 target=-1`, back to Space 1. Capture `k-b-kmid.png`: the Space sliding with the
+  constructed fingers. Not tested: real fingers, the controller's real reports of three or four
+  fingers (the decoder's handling of them is the libinput port that has driven the pointer and
+  scrolling since boot mt01/tp02), a palm or thumb among them, natural feel.
+- **For the owner, in the morning:** on the desk, swipe three fingers to the left on the trackpad:
+  the desk should slide to the next Space (a new one if this one has windows), three fingers right:
+  back. If nothing moves, `ssh root@<M1> 'sysctl -w kern.pd_trackpad_swipe_test=3'` shows whether
+  the path behind the fingers works.
+
+## Final state (11:05Z)
+SiliconForest on the disk with `sf/kernel.bin` `821cb932…` (trackpad swipes), the standard state of the
+night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-009 `57a4af86…` (with the inject module,
+running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-009 `89b26cb6…` (without it),
+`.safe` = desk-daily-001 `b1104b75…`, the dock running. Patches 6-9 in
+`integrations/puredarwin/terminal-app/compositor/` give the source of 009 from `wm-darwin-cmdq-src`
+(checked with `diff -r`). With desk-next-009 a swipe from a desk with one Space made Space 2 and
+came back (constructed four-finger reports through the driver: `release position=1.162
+velocity=3.655 target=1`, `WMSPACE current=2 count=2`, back `target=-1`).
 
 ## Incident
 desk-002 ended at start on the M1 ("standalone keyboard contract not installed": the shell refuses the
