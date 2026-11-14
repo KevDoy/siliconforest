@@ -116,7 +116,7 @@
 +@end
 --- a/src/Frameworks/AppKit/NSMacOS26Additions.m
 +++ b/src/Frameworks/AppKit/NSMacOS26Additions.m
-@@ -0,0 +1,504 @@
+@@ -0,0 +1,512 @@
 +// NSMacOS26Additions.m - see the header. SPDX-License-Identifier: MIT
 +#import <AppKit/NSMacOS26Additions.h>
 +#import <AppKit/NSAccessibility.h>
@@ -124,6 +124,7 @@
 +#import <AppKit/NSWindow.h>
 +#import <AppKit/NSApplication.h>
 +#import <AppKit/NSGraphics.h>
++#import <AppKit/NSPasteboard.h>
 +#import <objc/runtime.h>
 +
 +NSString *const NSAllRomanInputSourcesLocaleIdentifier = @"NSAllRomanInputSourcesLocaleIdentifier";
@@ -556,6 +557,13 @@
 +    if (foundRange) *foundRange = found;
 +    return found.location != NSNotFound;
 +}
++@end
++
++@implementation NSPasteboard (PasteSource)
++// private, asked by Terminal before it pastes: the code-signing identifier of the application
++// that put the content on the pasteboard. Nothing here signs applications or records who wrote
++// a pasteboard: there is no identifier.
++- (NSString *)_sourceSigningIdentifier { return nil; }
 +@end
 +
 +@implementation NSMenuItem (Alternate)

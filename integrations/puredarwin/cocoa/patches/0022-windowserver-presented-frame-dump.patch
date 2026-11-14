@@ -48,3 +48,12 @@
      wl_surface_attach(window->surface, frame->buffer, 0, 0);
      window->attached = 1;
      if (window->viewport != NULL && frame->pointsW > 0 && frame->pointsH > 0) {
+@@ -2156,6 +2196,8 @@
+         return;
+     xdg_toplevel_set_min_size(window->toplevel, window->minW, window->minH);
+     xdg_toplevel_set_max_size(window->toplevel, window->maxW, window->maxH);
++    if (getenv("PD_WS_TRACE") != NULL)
++        fprintf(stderr, "WindowServer: toplevel %d size limits min %dx%d max %dx%d (0: none)\n", window->windowID, window->minW, window->minH, window->maxW, window->maxH);
+ }
+ 
+ // the bounds a compositor suggests and the window operations it has: nothing here depends on either

@@ -12,7 +12,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-N=${1:?name}; C=integrations/puredarwin/macos-compat; ST=runs/sf-compat/stage; T=/usr/share/sf-test
+N=${1:?name}; C=integrations/puredarwin/macos-compat; ST=${SF_COMPAT_STAGE:-runs/sf-compat/stage}; T=/usr/share/sf-test
 [ -s "$ST/replace.list" ] || { echo "run $C/tools/sf_compat_stage.sh first" >&2; exit 2; }
 LS=$(cd integrations/puredarwin/libsystem-default && nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix 2>/dev/null | tail -1)
 W=runs/sf-compat/qemu-$N; rm -rf "$W"; mkdir -p "$W"
@@ -42,6 +42,9 @@ else
     fi
 fi
 [ -z "${SF_COMPAT_EXTRA:-}" ] || FILES="$FILES $SF_COMPAT_EXTRA=$T/compat/extra.sh"
+# SF_COMPAT_STAGE: another stage directory of the same layout (../../terminal-app/tools/sf_terminal.sh
+# rehearses its own replacements with it); SF_COMPAT_MORE_FILES="src=/dest ...": further files for the root
+FILES="$FILES ${SF_COMPAT_MORE_FILES:-}"
 DR_QEMU_GUEST=$C/guest/qemu-compat.sh DR_QEMU_TIMEOUT=${DR_QEMU_TIMEOUT:-2400} DR_QEMU_FS_SIZE=${DR_QEMU_FS_SIZE:-3G} \
 DR_QEMU_PREFIX=${SF_COMPAT_PREFIX:-runs/sf-gaps/m1root/opt/homebrew} DR_QEMU_ROOT_FILES="$FILES" \
   integrations/puredarwin/m1-storage/tools/dr_qemu_userland.sh "$N" quick

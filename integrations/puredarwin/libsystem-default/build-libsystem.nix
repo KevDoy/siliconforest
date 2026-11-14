@@ -23,6 +23,18 @@
 #       directives (en_US.UTF-8 as the tree's locale data has it): SIGSEGV in every program
 #       that calls strxfrm() there (perl at start). Now such a locale collates as C does.
 #       Also built and exported: timingsafe_bcmp (openssh, libfido2), ualarm.
+#   + patches/dyld-arm64e-keys-off.patch, patches/dyld-objc-writes-data-const.patch (GitHub issue 52;
+#     both change /usr/lib/dyld, which this recipe's output carries beside libSystem):
+#       dyld measures that pointer signing does nothing in the process it starts (this kernel
+#       keeps the PAC keys off and lowers PAC instructions in every executable page) and then
+#       loads arm64 libraries into an arm64e program and arm64e slices into any program; it opens
+#       the read-only __DATA_CONST segment for the Objective-C runtime while it is told an image
+#       is mapped (current linkers put Objective-C reference sections there).
+#   + patches/macos26-sdk-imports.patch (GitHub issue 52):
+#       malloc_type_*, _os_feature_enabled_impl, the qtn_proc calls, os_variant_is_basesystem,
+#       strnvis: what programs built against the macOS 26 SDK import.
+#     See docs/roadmap/issues/SF-Y-terminal-app.md (rehearsed in QEMU and replaced on the M1 by
+#     the guarded procedure, ../terminal-app/tools/sf_terminal.sh).
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let
@@ -35,5 +47,8 @@ in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
     ./patches/macos-abi.patch
     ./patches/xpc-copy-description-never-aborts.patch
     ./patches/strxfrm-without-directives.patch
+    ./patches/dyld-arm64e-keys-off.patch
+    ./patches/dyld-objc-writes-data-const.patch
+    ./patches/macos26-sdk-imports.patch
   ];
 })

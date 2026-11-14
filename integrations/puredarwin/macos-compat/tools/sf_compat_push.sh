@@ -20,7 +20,7 @@
 # the new files are listed in runs/sf-compat/stage/new.sha256 and new.links (nothing else is touched).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); cd "$ROOT"
-C=integrations/puredarwin/macos-compat; ST=runs/sf-compat/stage; W=runs/sf-compat
+C=integrations/puredarwin/macos-compat; ST=${SF_COMPAT_STAGE:-runs/sf-compat/stage}; W=runs/sf-compat   # SF_COMPAT_STAGE: another stage of the same layout
 SF_HOST=${SF_HOST:-10.1.1.211}; SF_KNOWN=${SF_KNOWN:-$HOME/.ssh/known_hosts_m1_siliconforest}
 SSH=(ssh -o UserKnownHostsFile="$SF_KNOWN" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o HostKeyAlias=m1-siliconforest
      -o PasswordAuthentication=no -o BatchMode=yes -o ConnectTimeout=6 -o ServerAliveInterval=10 "root@$SF_HOST")

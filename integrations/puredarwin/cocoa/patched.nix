@@ -44,6 +44,8 @@
 #         notified it
 #   0025  CoreGraphics: the context getters for anti-aliasing and font smoothing and the private
 #         CGS/CPS window-server calls Terminal.app imports (answers of a Wayland client)
+#   0026  Onyx2D: -copyBitsInRect:toPoint:gState: for the bitmap context (-[NSView scrollRect:by:]
+#         raised "only defined for abstract class": Terminal.app scrolls its text this way)
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -89,6 +91,7 @@ let
   onyx2dSrc = patchedDir "src/Frameworks/Onyx2D" [
     ./patches/0006-onyx2d-glyphs-at-device-scale.patch
     ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
+    ./patches/0026-onyx2d-copy-bits.patch
   ];
   onyx2d = pd."onyx2d-arm64".override { src = onyx2dSrc; };
   coretextSrc = patchedDir "src/Frameworks/CoreText" [

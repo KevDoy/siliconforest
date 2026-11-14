@@ -10,6 +10,7 @@
 //   SFTRACE_SKIP='sel1,sel2'   selectors left alone (retain, release, autorelease, dealloc and
 //                              .cxx_destruct always are)
 //   SFTRACE_FILE=path          where the lines go (default: standard error)
+//   SFTRACE_PROGRAM=text       trace only the program whose path contains this
 //
 //   SFTRACE_OBJECTS=1          name the objects among the first four arguments and in the result
 //                              (class, and the text of a string, a number or a selector-free
@@ -53,6 +54,7 @@ static unsigned long long now_ms(void)
 
 // ---- naming objects without trusting the pointer ------------------------------------------
 #include <mach/mach.h>
+#include <mach-o/dyld.h>
 #include <mach/mach_vm.h>
 static int objects;
 static uintptr_t *classes; static unsigned nclasses;
@@ -136,10 +138,18 @@ static void hook(Class c, Method m, const char *cls, char sign)
 __attribute__((constructor)) static void sftrace_init(void)
 {
     const char *spec = getenv("SFTRACE"), *skip = getenv("SFTRACE_SKIP"), *file = getenv("SFTRACE_FILE");
-    out = file ? fopen(file, "a") : stderr;
+    out = stderr;
+    if (spec == NULL) return;
+    // SFTRACE_PROGRAM: only the program whose path contains this (the variables are inherited by
+    // everything a script starts on the way to the program meant)
+    const char *only = getenv("SFTRACE_PROGRAM");
+    if (only != NULL) {
+        char path[4096]; uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) != 0 || strstr(path, only) == NULL) return;
+    }
+    if (file) out = fopen(file, "a");
     if (out == NULL) out = stderr;
     setvbuf(out, NULL, _IOLBF, 0);
-    if (spec == NULL) return;
     objects = getenv("SFTRACE_OBJECTS") != NULL;
     if (objects) load_classes();
     char *copy = strdup(spec);
