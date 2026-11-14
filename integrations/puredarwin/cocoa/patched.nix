@@ -116,7 +116,8 @@
 #         answered a double: every caller read 0, so a nib's column widths and row heights were 0);
 #         labels a little too wide for a nib laid out for macOS's system font are drawn narrower when
 #         they clip too, and their descenders are not cut; a shortcut typed with Shift shows as macOS
-#         shows it (Shift-Command-[ for Command-{)
+#         shows it (Shift-Command-[ for Command-{); a menu's shadow layers are rings round the panel,
+#         not eight fills of its whole area
 #   0047  AppKit: a control's bound value goes to the model when it sends its action (a click changes
 #         the cell, which no key-value observation of the control hears), and a controller's
 #         selection proxy sets a value on each selected object: Terminal's preference checkboxes now
@@ -126,6 +127,9 @@
 #         Find Next/Previous, Use Selection for Find (the finder before had no bar and beeped); the bar
 #         takes the find actions while its field has the keys; a Command key that no menu took inserts
 #         no text (Command-G typed a "g")
+#   0049  AppKit: a font name's PostScript name (a fontconfig listing of every installed face) and the
+#         fallback font for a character are remembered: a menu opened in about 390 ms once the CJK fonts
+#         were installed, now about 195 ms
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -177,6 +181,7 @@ let
     ./patches/0046-appkit-nib-floats-labels-menu-glyphs.patch
     ./patches/0047-appkit-bindings-write-back.patch
     ./patches/0048-appkit-find-bar.patch
+    ./patches/0049-appkit-font-lookups-remembered.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

@@ -68,3 +68,26 @@
      if (mask & NSControlKeyMask)
          [out appendString:@"\u2303"];
      if (mask & NSAlternateKeyMask)
+@@ -569,12 +582,20 @@
+         NSBezierPath *panel = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(box, 0.5, 0.5)
+                                                               xRadius:PANEL_R yRadius:PANEL_R];
+ 
+-        // stacked faint rounded rects make the soft shadow, dropped a few pixels as in the demo
++        // stacked faint rounded rects make the soft shadow, dropped a few pixels as in the demo; each
++        // is a ring round the panel (even-odd), not the panel's whole area again: eight fills of
++        // the whole menu were half the time it took to open
++        NSRect inner = NSInsetRect(box, PANEL_R, PANEL_R);
+         for (int k = 8; k >= 1; k--) {
+             NSRect r = NSOffsetRect(NSInsetRect(box, -k * 1.5, -k * 1.5), 0, 5);
++            NSBezierPath *ring = [NSBezierPath bezierPathWithRoundedRect:r xRadius:PANEL_R + k yRadius:PANEL_R + k];
+ 
++            if (inner.size.width > 0 && inner.size.height > 0) {
++                [ring appendBezierPathWithRect:inner];
++                [ring setWindingRule:NSEvenOddWindingRule];
++            }
+             [[NSColor colorWithCalibratedWhite:0 alpha:0.018] setFill];
+-            [[NSBezierPath bezierPathWithRoundedRect:r xRadius:PANEL_R + k yRadius:PANEL_R + k] fill];
++            [ring fill];
+         }
+         // the demo's 92%, the compositor blurs what shows through
+         BOOL dark = [[NSAppearance currentDrawingAppearance] _isDark];
