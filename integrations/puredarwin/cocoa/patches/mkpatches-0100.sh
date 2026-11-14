@@ -49,7 +49,8 @@ mk am-0109 am-0115 0115-appkit-cgevent-autoreleased.patch $A/NSEvent.subproj/NSE
 ( diff -rq am-0109 am-0115 ) | sed "s/^/differs from am-0109: /"
 # 0116 on (COCOA4, night of 14 November): am-0115 -> am
 mk am-0115 am 0116-appkit-owner-findings-windows-cursor-colors.patch $A/NSWindow.m $A/NSCursor.m $A/NSApplication.m $A/NSPathCell.m \
-  $A/NSModernAppKit.m
+  $A/NSModernAppKit.m $A/NSColorPanel.m
 mk am-0115 am 0117-windowserver-cursor-shown-when-the-pointer-moves.patch src/Frameworks/WindowServer/rpc_wayland.c
 mk am-0115 am 0118-coregraphics-icc-and-indexed-color-spaces.patch src/Frameworks/CoreGraphics/CGColorSpace.h src/Frameworks/CoreGraphics/CGColorSpace.m
+mk am-0115 am 0119-onyx2d-shading-path-released.patch src/Frameworks/Onyx2D/O2Context_builtin.m
 ( diff -rq am-0115 am ) | sed 's/^/differs from am-0115: /'

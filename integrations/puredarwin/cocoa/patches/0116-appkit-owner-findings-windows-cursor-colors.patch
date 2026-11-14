@@ -92,7 +92,26 @@
  -initWithImage:(NSImage *)image foregroundColorHint:(NSColor *)foregroundHint backgroundColorHint:(NSColor *)backgroundHint hotSpot:(NSPoint)hotSpot {
 --- a/src/Frameworks/AppKit/NSApplication.m
 +++ b/src/Frameworks/AppKit/NSApplication.m
-@@ -1588,11 +1588,12 @@
+@@ -234,7 +234,10 @@
+         if(_windowServerReceiveMessage(&msg) == 0) {
+             break;
+         }
++        /* each message's autoreleased objects (the NSEvent made for it, the numbers and values handed to the
++         * main thread) go with it: this thread never returns to an outer pool, so they all stayed (COCOA4) */
+         else {
++            NSAutoreleasePool *messagePool=[NSAutoreleasePool new];
+             switch(msg.header.msgh_id) {
+                 case MSG_ID_INLINE:
+                     switch(msg.code) {
+@@ -640,6 +643,7 @@
+             // we received _something_ so wake the main event loop in case we posted
+             if([self _wakeUp] < 0)
+                 NSLog(@"Error waking runloop - write: %s", strerror(errno));
++            [messagePool release];
+         }
+     }
+ }
+@@ -1588,11 +1592,12 @@
  -(void)_checkForTerminate {
     int  count=[_windows count];
  
@@ -110,7 +129,7 @@
     BOOL asks=[_delegate respondsToSelector:@selector(applicationShouldTerminateAfterLastWindowClosed:)];
     BOOL unreachable=[self _pdEndsWithLastWindow];
  
-@@ -1628,7 +1629,7 @@
+@@ -1628,7 +1633,7 @@
     if(allowed<0){
      id value=[[NSUserDefaults standardUserDefaults] objectForKey:@"PDQuitsWithLastWindow"];
  
@@ -121,7 +140,7 @@
      return NO;
 --- a/src/Frameworks/AppKit/NSPathCell.m
 +++ b/src/Frameworks/AppKit/NSPathCell.m
-@@ -220,7 +220,11 @@
+@@ -220,12 +220,16 @@
       [currentPath appendString: @"/"];
       [currentPath appendString: path];
       
@@ -134,6 +153,12 @@
       NSString *title;
       NSImage  *image;
  				
+      if (isFileURL) {
+-      title = [fm displayNameAtPath: currentPath]; 
++      title = [fm respondsToSelector:@selector(displayNameAtPath:)] ? [fm displayNameAtPath: currentPath] : [currentPath lastPathComponent];
+       image = [ws iconForFile: currentPath];
+      }
+      else {
 --- a/src/Frameworks/AppKit/NSModernAppKit.m
 +++ b/src/Frameworks/AppKit/NSModernAppKit.m
 @@ -61,6 +61,12 @@
@@ -149,3 +174,186 @@
  // display p3 shares sRGB's transfer curve, so only the primaries need converting, in linear light
  + (NSColor *)colorWithDisplayP3Red:(CGFloat)red green:(CGFloat)green blue:(CGFloat)blue alpha:(CGFloat)alpha
  {
+--- a/src/Frameworks/AppKit/NSColorPanel.m
++++ b/src/Frameworks/AppKit/NSColorPanel.m
+@@ -37,8 +37,17 @@
+ 
+ +(NSColorPanel *)sharedColorPanel {
+    if(_colorPanel==nil){
+-    if(![NSBundle loadNibNamed:@"NSColorPanel" owner:self])
+-     NSLog(@"Cannot load NSColorPanel.nib");
++    /* The panel is built here in code (SiliconForest): AppKit's NSColorPanel nib is not on this system
++     * (and the pickers' own nibs are of an archive format the nib loader does not read), so the panel was
++     * never made: a colour well opened nothing ("Cannot load NSColorPanel.nib" at each). A nib named
++     * NSColorPanel, if one is installed, is still preferred. */
++    if([[NSBundle bundleForClass:[NSColorPanel class]] pathForResource:@"NSColorPanel" ofType:@"nib"]==nil ||
++       ![NSBundle loadNibNamed:@"NSColorPanel" owner:self]){
++     // known as the shared panel before it is built: its colour well asks for the shared panel while it is made
++     // (a panel made before this asked for another, and so on: thousands of windows, Terminal ended)
++     _colorPanel=[NSColorPanel alloc];
++     [_colorPanel _pdInitInCode];
++    }
+ 
+     if(![_colorPanel setFrameUsingName:@"NSColorPanel"])
+      [_colorPanel center];
+@@ -172,6 +181,8 @@
+ 
+ - (NSColorPicker*)_selectedColorPicker
+ {
++    if ([_colorPickers count] == 0)   // the panel built in code has its own sliders, no pickers
++        return nil;
+     int index = [colorPickersMatrix selectedTag];
+     NSColorPicker *picker = [_colorPickers objectAtIndex: index];
+     return picker;
+@@ -188,6 +199,7 @@
+     float alpha = [color alphaComponent];
+     [opacitySlider setFloatValue: alpha * 100.f];
+     [opacityTextField setFloatValue: alpha * 100.f];
++    [self _pdShowComponentsOf:color];
+ 
+    [[NSNotificationQueue defaultQueue] enqueueNotification:[NSNotification notificationWithName:NSColorPanelColorDidChangeNotification object:self] postingStyle:NSPostNow coalesceMask:NSNotificationCoalescingOnName forModes:nil];
+ }
+@@ -249,3 +261,143 @@
+ }
+ 
+ @end
++
++/* ---- the panel built in code (SiliconForest): a colour swatch, a palette, red/green/blue sliders with their
++ * values, the opacity slider and field (shown when the application does not ignore alpha: [NSColor
++ * setIgnoresAlpha:NO], as Terminal's profile colours are). Tags 901..903: the sliders; 911..913: their fields. */
++
++@interface PDColorPaletteView : NSView
++@end
++
++@implementation PDColorPaletteView
++static NSColor *PDPaletteColor(int i) {
++   static const float rgb[16][3]={
++    {1,0,0},{1,0.5,0},{1,0.85,0},{0.2,0.8,0.2},{0,0.75,0.75},{0,0.45,1},{0.35,0.25,0.85},{0.85,0.3,0.75},
++    {0,0,0},{0.2,0.2,0.2},{0.4,0.4,0.4},{0.6,0.6,0.6},{0.75,0.75,0.75},{0.88,0.88,0.88},{0.95,0.95,0.95},{1,1,1}};
++   return [NSColor colorWithCalibratedRed:rgb[i][0] green:rgb[i][1] blue:rgb[i][2] alpha:1];
++}
++-(BOOL)isFlipped { return YES; }
++-(void)drawRect:(NSRect)rect {
++   NSRect b=[self bounds];
++   CGFloat w=b.size.width/8, h=b.size.height/2;
++   for(int i=0;i<16;i++){
++    NSRect cell=NSMakeRect((i%8)*w,(i/8)*h,w,h);
++    [PDPaletteColor(i) set];
++    NSRectFill(NSInsetRect(cell,1,1));
++   }
++}
++-(BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
++-(void)mouseDown:(NSEvent *)event {
++   NSPoint p=[self convertPoint:[event locationInWindow] fromView:nil];
++   NSRect b=[self bounds];
++   int col=(int)(p.x/(b.size.width/8)), row=(int)(p.y/(b.size.height/2));
++   if(col<0 || col>7 || row<0 || row>1)
++    return;
++   NSColorPanel *panel=(NSColorPanel *)[self window];
++   [panel setColor:[PDPaletteColor(row*8+col) colorWithAlphaComponent:[panel showsAlpha] ? [[panel color] alphaComponent] : 1]];
++}
++@end
++
++@implementation NSColorPanel (PDInCode)
++
++static NSTextField *PDLabel(NSView *parent, NSRect frame, NSString *text) {
++   NSTextField *label=[[[NSTextField alloc] initWithFrame:frame] autorelease];
++   [label setStringValue:text];
++   [label setBezeled:NO];
++   [label setDrawsBackground:NO];
++   [label setEditable:NO];
++   [label setSelectable:NO];
++   [label setFont:[NSFont systemFontOfSize:11]];
++   [parent addSubview:label];
++   return label;
++}
++
++-(id)_pdInitInCode {
++   self=[self initWithContentRect:NSMakeRect(0,0,260,250) styleMask:NSTitledWindowMask|NSClosableWindowMask|NSUtilityWindowMask
++                          backing:NSBackingStoreBuffered defer:YES];
++   if(self==nil)
++    return nil;
++   [self setTitle:@"Colors"];
++   [self setFloatingPanel:YES];
++   [self setHidesOnDeactivate:YES];
++   [self setReleasedWhenClosed:NO];
++   NSView *content=[self contentView];
++   CGFloat y=250-12-40;
++
++   colorWell=[[NSColorWell alloc] initWithFrame:NSMakeRect(12,y,236,40)];
++   [colorWell setBordered:NO];
++   [colorWell setEnabled:NO];
++   [colorWell setColor:[NSColor whiteColor]];
++   [content addSubview:colorWell];
++   y-=8+44;
++   PDColorPaletteView *palette=[[[PDColorPaletteView alloc] initWithFrame:NSMakeRect(12,y,236,44)] autorelease];
++   [content addSubview:palette];
++   NSArray *names=[NSArray arrayWithObjects:@"Red",@"Green",@"Blue",nil];
++   for(int i=0;i<3;i++){
++    y-=28;
++    PDLabel(content,NSMakeRect(12,y+2,44,16),[names objectAtIndex:i]);
++    NSSlider *slider=[[[NSSlider alloc] initWithFrame:NSMakeRect(58,y,140,20)] autorelease];
++    [slider setMinValue:0];
++    [slider setMaxValue:255];
++    [slider setContinuous:YES];
++    [slider setTag:901+i];
++    [slider setTarget:self];
++    [slider setAction:@selector(_pdComponentChanged:)];
++    [content addSubview:slider];
++    NSTextField *field=[[[NSTextField alloc] initWithFrame:NSMakeRect(204,y,44,20)] autorelease];
++    [field setTag:911+i];
++    [field setTarget:self];
++    [field setAction:@selector(_pdComponentChanged:)];
++    [field setFont:[NSFont systemFontOfSize:11]];
++    [content addSubview:field];
++   }
++   y-=34;
++   opacityTitle=[PDLabel(content,NSMakeRect(12,y+2,44,16),@"Opacity") retain];
++   opacitySlider=[[NSSlider alloc] initWithFrame:NSMakeRect(58,y,124,20)];
++   [opacitySlider setMinValue:0];
++   [opacitySlider setMaxValue:100];
++   [opacitySlider setContinuous:YES];
++   [opacitySlider setTarget:self];
++   [opacitySlider setAction:@selector(_alphaChanged:)];
++   [content addSubview:opacitySlider];
++   opacityTextField=[[NSTextField alloc] initWithFrame:NSMakeRect(188,y,44,20)];
++   [opacityTextField setFont:[NSFont systemFontOfSize:11]];
++   [opacityTextField setTarget:self];
++   [opacityTextField setAction:@selector(_alphaChanged:)];
++   [content addSubview:opacityTextField];
++   opacityPercentLabel=[PDLabel(content,NSMakeRect(234,y+2,16,16),@"%") retain];
++   _colorPickers=[[NSMutableArray alloc] init];
++   [self setShowsAlpha:![NSColor ignoresAlpha]];
++   [self setColor:[NSColor whiteColor]];
++   return self;
++}
++
++-(void)_pdShowComponentsOf:(NSColor *)color {
++   NSColor *rgb=[color colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
++   if(rgb==nil)
++    return;
++   CGFloat c[3]={[rgb redComponent],[rgb greenComponent],[rgb blueComponent]};
++   for(int i=0;i<3;i++){
++    [[[self contentView] viewWithTag:901+i] setDoubleValue:round(c[i]*255)];
++    [[[self contentView] viewWithTag:911+i] setIntValue:(int)round(c[i]*255)];
++   }
++}
++
++-(void)_pdComponentChanged:sender {
++   CGFloat c[3];
++   NSInteger tag=[sender tag];
++   for(int i=0;i<3;i++){
++    NSControl *control=(tag==911+i) ? sender : [[self contentView] viewWithTag:901+i];
++    c[i]=MIN(MAX([control doubleValue],0),255)/255.0;
++   }
++   [self setColor:[NSColor colorWithCalibratedRed:c[0] green:c[1] blue:c[2] alpha:[self showsAlpha] ? [[self color] alphaComponent] : 1]];
++}
++
++-(void)orderFront:sender {
++   // whether opacity is offered is the application's choice at the time it shows the panel
++   if(_colorPickers!=nil && [_colorPickers count]==0)
++    [self setShowsAlpha:![NSColor ignoresAlpha]];
++   [super orderFront:sender];
++}
++
++@end

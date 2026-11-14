@@ -244,12 +244,16 @@
 #         +unhide counted and +setHiddenUntilMouseMoves: hides only until the pointer moves (the pointer stayed
 #         invisible over Terminal after typing); an application outlives its last window (PDQuitsWithLastWindow
 #         =YES for the old rule); NSPathCell without -[NSURL initWithScheme:host:path:]; +[NSColor
-#         colorWithRed:green:blue:alpha:] (Activity Monitor's CPU windows raised on it)
+#         colorWithRed:green:blue:alpha:] (Activity Monitor's CPU windows raised on it); the window server
+#         thread drains a pool per message (every NSEvent it made stayed); NSColorPanel built in code when its
+#         nib is missing (colour swatch, palette, red/green/blue sliders and fields, opacity slider and field shown
+#         unless +[NSColor ignoresAlpha]): Terminal's colour wells opened nothing
 #   0117  WindowServer: a pointer hidden until it moves is shown at its next motion or entry, on the input
 #         thread; PD_CURSOR_TRACE=1
 #   0118  CoreGraphics: CGColorSpaceCreateWithICCData/ICCProfile/ICCBased keep the profile (CGColorSpaceCopyICCData),
 #         model and components from its header; CGColorSpaceCreateIndexed and the indexed getters (Codex's
 #         bodies); kCGColorSpaceCoreMedia709
+#   0119  Onyx2D: the path a gradient fills under a clip path is released (its edges leaked at each one)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -345,6 +349,7 @@ let
     ./patches/0037-onyx2d-font-by-name-once.patch
     ./patches/0042-tip-onyx2d-icns-png-entries.patch
     ./patches/0054-onyx2d-rectangles-without-edges.patch
+    ./patches/0119-onyx2d-shading-path-released.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {

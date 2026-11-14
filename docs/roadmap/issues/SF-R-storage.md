@@ -563,6 +563,18 @@ None is irreversible in the strict sense. The steps that deserve the word in pra
 3. Write-fenced build proven on that empty partition; B0: root on NVMe, launched as today. This already gives "a real disk" and removes the upload.
 4. Root-wait/NVRAM path settled, native loader (B1) once the kernel is shown to run without the hypervisor.
 
+## After a crash during a GPU test (14 November 2026, ~21:06Z; recorded by COCOA4)
+- The M1 stopped during a headless Vulkan test with the root mounted read-write and came up in Linux. Linux
+  `e2fsck -fn` then: rc 4. The next SiliconForest mount found the journal dirty and replayed 17 blocks (one
+  transaction), mounted fine; after a sync and a clean reboot, Linux `e2fsck -fn` still rc 4, with only this left:
+  one deleted inode with a zero dtime that is still set in the inode bitmap, its 5 blocks still set in the block
+  bitmap, the free-block counts (one group and the total) off by 3. Passes 2 to 4 clean (no directory entry or
+  named file damaged); the rest of the listing is "extent tree could be narrower" (advice, not errors).
+- Not repaired (no `-fy`; the owner decides). `tools/sf_freed_inode_repair.py` does not cover this variant: it
+  touches an inode only when the bitmap already says free; here the bitmap says used.
+- Open question (not investigated): whether the driver journals an unlink's bitmap and dtime updates in the same
+  transaction as the inode's release; a crash between them would leave exactly this.
+
 ## Decisions for the owner
 1. Go for the first controller start (nv02) after reading the observe boot.
 2. P1 or P2, and the size.
