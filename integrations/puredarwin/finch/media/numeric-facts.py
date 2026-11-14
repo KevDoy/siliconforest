@@ -9,7 +9,7 @@ for path in sorted(root.glob('*.rs')):
     text=path.read_text()
     for name,value in re.findall(r'pub const (\w+):\s*[\w:]+\s*=\s*([^;]+);',text):
         if name.startswith(prefix) and re.fullmatch(r'[-+\d\sxa-fA-F_()<>|&]+',value):values[name]=value
-    for name,value in re.findall(r'#\[doc\(alias = "(\w+)"\)\]\s*(?:pub )?const \w+(?:: Self)? = (?:Self\()?([-+\d\sxa-fA-F_<>|&]+)\)?;',text):
+    for name,value in re.findall(r'#\[doc\(alias = "(\w+)"\)\]\s*(?:#\[[^\n]+\]\s*)*(?:pub )?const \w+(?:: Self)? = (?:Self\()?([-+\d\sxa-fA-F_<>|&]+)\)?;',text):
         if name.startswith(prefix):values[name]=value
 lines=['/* SPDX-License-Identifier: MIT */','/* Numeric facts checked against objc2 framework bindings 0.3.2; our declarations. */','#pragma once']
 for name,value in sorted(values.items()):

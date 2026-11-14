@@ -20,7 +20,21 @@ def declarations(source, classes, categories=False):
         body = text[impl.end():end]
         methods = re.findall(r'^[ \t]*([+-]\s*\([^\n]+?\)[^{;]*?)\s*\{', body, re.M)
         for method in methods:
-            first = re.match(r'[+-]\s*\([^)]*\)\s*(\w+)', method).group(1)
+            # A block return type contains nested parentheses before the selector.
+            opening = method.index('(')
+            depth = 0
+            closing = None
+            for pos in range(opening, len(method)):
+                if method[pos] == '(':
+                    depth += 1
+                elif method[pos] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        closing = pos
+                        break
+            if closing is None:
+                raise ValueError('Unbalanced method return type: '+method)
+            first = re.match(r'\s*(\w+)', method[closing+1:]).group(1)
             if re.search(r'^[ \t]*[+-]\s*\([^)]*\)\s*'+first+r'[^;{]*;', text[:impl.start()], re.M):
                 continue
             classes[name].append(re.sub(r'\s+', ' ', method.strip())+';')

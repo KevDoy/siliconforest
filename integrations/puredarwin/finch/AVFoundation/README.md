@@ -25,8 +25,8 @@ output file in the unique packet directory. There is no device or codec request.
 
 Both Linux-built native M5 MP4/MOV runs exit0. All20 cursor entries match Linux
 ffprobe including offsets/timestamps; both mux round-trips retain all2134 H264
-bytes (FNV64 ca36548e184c8c1c for the recorded synthetic fixture). M1 runtime is
-pending the coordinator's SSH recovery hold. No candidate or framework is installed.
+bytes (FNV64 ca36548e184c8c1c for the recorded synthetic fixture). Both M1 programs now exit0 and their complete stdout MATCH the identical Linux-built
+M5 programs. Candidate tables also match Linux ffprobe. No framework is installed.
 The existing repository CoreMedia/VideoToolbox and PD audio paths remain intact.
 
 prepare.py creates fresh trial/reference packets from Nix outputs; optional
@@ -37,6 +37,6 @@ cleanup rules and return only program output. compare-tables.py checks candidate
 or native receipts against Linux ffprobe JSON. Raw comparisons require identical
 program hashes and remain separate from these structural assertions.
 
-Pending: actual M1 reader/writer execution and generated mux inspection;native
+Pending: external inspection of generated candidate mux files;native
 and candidate date-metadata regressions;JPEG/raw/PCM conversion tests;fragmented
 or hostile media;remaining AVFoundation APIs,codecs and output integration.
