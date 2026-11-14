@@ -83,5 +83,5 @@ mkh 0055-appkit-save-open-panels.patch $A/PDFilePanel.m $A/NSSavePanel.m $A/NSOp
 mkh 0056-appkit-print-to-pdf-help.patch $A/NSDisplay.m $A/NSPrintOperation.m $A/NSHelpManager.m
 mkh 0057-appkit-rects-outside-display.patch $A/NSView.m
 mkh 0058-windowserver-activation-configure-timing.patch src/Frameworks/WindowServer/rpc_wayland.c
-mkh 0059-appkit-found-walking-the-menus.patch $A/NSFoundWithTerminalAdditions.m $A/NSCell.m $A/NSAttributedString.m
+mkh 0059-appkit-found-walking-the-menus.patch $A/NSFoundWithTerminalAdditions.m $A/NSCell.m $A/NSAttributedString.m $A/NSKeyValueBinding/NSBinder.m $A/NSKeyValueBinding/NSMultipleValueBinder.m $A/NSButton.m
 ( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq h b ) | sed 's/^/differs from h: /'

@@ -78,6 +78,22 @@
      return window;
  }
  
+@@ -746,6 +763,15 @@
+     if (submenu == nil && loose == nil) {
+         return;
+     }
++    /* No application here offers a service: as on macOS, the Services menu then has one
++     * disabled row instead of opening as nothing. */
++    if (submenu != nil && [submenu numberOfItems] == 0 && submenu == [NSApp servicesMenu]) {
++        NSMenuItem *none = [[NSMenuItem alloc] initWithTitle:@"No Services Apply" action:NULL keyEquivalent:@""];
++
++        [none setEnabled:NO];
++        [submenu addItem:none];
++        [none release];
++    }
+     // the submenu's owner fills it in and its items are enabled or not as of now
+     [submenu update];
+     if ([[submenu delegate] respondsToSelector:@selector(menuWillOpen:)])
 --- a/src/Frameworks/AppKit/NSWindowTabbing.m
 +++ b/src/Frameworks/AppKit/NSWindowTabbing.m
 @@ -167,6 +167,18 @@

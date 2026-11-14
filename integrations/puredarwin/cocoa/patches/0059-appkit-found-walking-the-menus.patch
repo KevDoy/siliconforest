@@ -128,3 +128,70 @@
      color=[NSColor blackColor];
  
     return color;
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
+@@ -89,7 +89,19 @@
+      return nil;
+      
+     result=[NSValueTransformer valueTransformerForName:name];
+-    
++
++    /* As on macOS: a name nobody registered that is the name of a value transformer class is
++     * an instance of that class, registered under its name (Terminal's inspector names
++     * TTProcessInfoToDisplayNameTransformer, which it never registers). */
++    if(result==nil){
++     Class cls=NSClassFromString(name);
++
++     if(cls!=Nil && [cls isSubclassOfClass:[NSValueTransformer class]]){
++      result=[[[cls alloc] init] autorelease];
++      [NSValueTransformer setValueTransformer:result forName:name];
++     }
++    }
++
+ 	   if(result==nil) {
+ 		   NSBindingDebugLog(kNSBindingDebugLogLevel1, @"[NSValueTransformer valueTransformerForName:%@] failed in NSBinder.m",name);
+ 	   }
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSMultipleValueBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSMultipleValueBinder.m
+@@ -46,7 +46,9 @@
+ -(void)applyToObject:(id)object inRow:(int)row keyPath:(id)path
+ {
+    @try {
+-      [object setValue:[[_rowValues objectAtIndex:row] valueForKeyPath:_valueKeyPath] forKey:path];
++      // through the binding's value transformer, as every other binder (Terminal's inspector
++      // names its processes and colours them with transformers of TTProcessInfo)
++      [object setValue:[self transformedObject:[[_rowValues objectAtIndex:row] valueForKeyPath:_valueKeyPath]] forKey:path];
+    }
+    @catch(id e) {
+         NSLog(@"exception %@ while setting value for key path %@ for row %i", e, _valueKeyPath, row);
+@@ -65,7 +67,7 @@
+ 
+ -(void)applyFromObject:(id)object inRow:(int)row keyPath:(id)keypath
+ {
+-	[[_rowValues objectAtIndex:row] setValue:[object valueForKeyPath:keypath]  forKeyPath:_valueKeyPath];
++	[[_rowValues objectAtIndex:row] setValue:[self reverseTransformedObject:[object valueForKeyPath:keypath]] forKeyPath:_valueKeyPath];
+ }
+ 
+ -(void)applyFromObject:(id)object inRow:(int)row
+@@ -84,7 +86,7 @@
+ }
+ 
+ -(id)objectAtIndex:(unsigned)row {
+-	return [[_rowValues objectAtIndex:row] valueForKeyPath:_valueKeyPath];
++	return [self transformedObject:[[_rowValues objectAtIndex:row] valueForKeyPath:_valueKeyPath]];
+ }
+ 
+ -(void)cacheArrayKeyPath
+--- a/src/Frameworks/AppKit/NSButton.m
++++ b/src/Frameworks/AppKit/NSButton.m
+@@ -232,7 +232,9 @@
+    if((modifiers&(NSCommandKeyMask|NSAlternateKeyMask))==([self keyEquivalentModifierMask]&(NSCommandKeyMask|NSAlternateKeyMask))){
+     NSString *key=[self keyEquivalent];
+ 
+-    if([key isEqualToString:characters]){
++    // an empty key equivalent is none (a modifier key alone arrives with no characters: Shift
++    // pressed in Terminal's inspector opened the process table's pull-down)
++    if([key length]>0 && [key isEqualToString:characters]){
+      [self performClick:nil];
+      return YES;
+     }

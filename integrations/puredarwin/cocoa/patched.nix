@@ -135,7 +135,8 @@
 #   0051  AppKit: drawn once: a menu that opens and a tab that is switched to were drawn twice; the
 #         window's menu strip laid out its titles again whenever the content under it was drawn (at
 #         150% the content's top edge falls inside a pixel row of the strip); the strip stays in full
-#         screen; a tab bar redraws when a tab's title changes
+#         screen; a tab bar redraws when a tab's title changes; an empty Services menu shows a
+#         disabled "No Services Apply" as on macOS (it opened as nothing)
 #   0052  AppKit: full screen through the compositor (xdg_toplevel set/unset_fullscreen, the window's
 #         state follows the compositor's, will/did notifications and delegate calls, the menu item
 #         says Enter or Exit Full Screen); Command-= is Command-+ (Bigger); a key equivalent validates
@@ -160,7 +161,11 @@
 #   0059  AppKit: found walking Terminal's menus: a table column can be hidden (-isHidden,
 #         -setHidden:; Terminal's inspector); a cell keeps an object value that cannot be copied
 #         (its process list); the font bindings of a cell (fontBold, fontItalic, fontName, fontSize);
-#         a foreground "colour" that is not one draws black instead of raising in every redraw
+#         a foreground "colour" that is not one draws black instead of raising in every redraw;
+#         a binding's value transformer named by a class nobody registered is an instance of that
+#         class, and a table column's bindings go through it (the inspector's process names and
+#         colours); an empty key equivalent of a button matches nothing (Shift alone opened the
+#         inspector's pull-down)
 #   0054  Onyx2D: a filled rectangle, a straight stroke along an axis and a stroked outline whose
 #         sides are straight (a rectangle, a rounded rectangle: its arcs alone go through the edge
 #         rasterizer) are covered directly, a row at a time; the rasterizer's winding buffer (2 MB at
