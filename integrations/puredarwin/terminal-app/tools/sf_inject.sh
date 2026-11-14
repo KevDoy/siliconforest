@@ -12,6 +12,7 @@
 # delivered). Captures are fetched to runs/sf-terminal/shots/<name>.png: the whole screen as
 # the compositor rendered it. Everything injected is synthetic and the compositor says so
 # (WMINJECT ... input=synthetic-inject); it is not evidence of a physical keyboard or trackpad.
+# SF_INJECT_FETCH=0: leave the captures on the target (in the inject directory).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); W=$ROOT/runs/sf-terminal
 SF_HOST=${SF_HOST:-10.1.1.211}; SF_KNOWN=${SF_KNOWN:-$HOME/.ssh/known_hosts_m1_siliconforest}
@@ -21,6 +22,7 @@ if [ "${1:-}" = --raw ]; then REQ=$2; else REQ="key e1 down;key e1 up;wait 400;$
 REQ=$(printf '%s\n' "$REQ" | tr ';' '\n')
 printf '%s\n' "$REQ" | "${SSH[@]}" 'D=/private/var/run/gpu-desktop/inject; [ -d $D ] || { echo "no inject directory: the session has no /private/var/db/desktop-inject, or its compositor has no inject module"; exit 1; }
   rm -f $D/done; cat > $D/request.part && mv $D/request.part $D/request; i=0; while [ ! -e $D/done ] && [ $i -lt 900 ]; do sleep 0.1; i=$((i+1)); done; cat $D/done 2>/dev/null || echo "no done file"'
+[ "${SF_INJECT_FETCH:-1}" = 0 ] && exit 0
 mkdir -p "$W/shots"
 for n in $(printf '%s\n' "$REQ" | awk '$1=="capture" {print $2}'); do
   "${SSH[@]}" "cat /private/var/run/gpu-desktop/inject/$n.ppm" > "$W/shots/$n.ppm" < /dev/null

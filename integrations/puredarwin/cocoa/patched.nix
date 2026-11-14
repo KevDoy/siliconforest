@@ -71,6 +71,18 @@
 #         an eighth too wide for its place is drawn narrower instead of cut with an ellipsis
 #   0033  AppKit: scrollers in the macOS 26 look (no arrow buttons, a rounded bar); PDControlLook=15
 #         keeps the old one
+#   0034  CoreText: one graphics font per installed face (a fontconfig search and a FreeType face per
+#         CTFont: Terminal.app makes a CTFont for each line it draws); a directory registered through
+#         CTFontManagerRegisterFontsForURL goes through fontconfig's cache of that directory
+#   0035  AppKit: glyph advances from the metrics table (FT_Get_Advance) instead of loading each
+#         glyph's outline; an application's fonts registered as their directory (cached by fontconfig,
+#         instead of three scans of each file at every launch); the main menu is not archived when
+#         there is no menu transport
+#   0036  WindowServer: a flush that finds every frame busy is presented when the compositor releases
+#         one (it waited up to 100 ms on the main thread and was then dropped); PD_WS_TIMING=1 prints
+#         the wall time of each commit and release
+#   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
+#   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -110,12 +122,14 @@ let
     ./patches/0031-appkit-popup-button-content-bindings.patch
     ./patches/0032-appkit-measured-sizes-remembered.patch
     ./patches/0033-appkit-scroller-look-macos26.patch
+    ./patches/0035-appkit-glyph-advances-font-directory-menu-archive.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
     ./patches/0018-windowserver-popup-placement.patch
     ./patches/0022-windowserver-presented-frame-dump.patch
     ./patches/0030-windowserver-app-id-without-bundle-identifier.patch
+    ./patches/0036-windowserver-busy-flush-presented-on-release.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -125,19 +139,24 @@ let
     ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
     ./patches/0026-onyx2d-copy-bits.patch
   ];
-  onyx2d = pd."onyx2d-arm64".override { src = onyx2dSrc; };
+  # upstream's framework recipes name no optimisation level: their compile lines get one here
+  optimised = d: d.overrideAttrs (old: {
+    buildPhase = builtins.replaceStrings [ "$cc $cflags -c" ] [ "$cc $cflags -O2 -fno-strict-aliasing -c" ] old.buildPhase;
+  });
+  onyx2d = optimised (pd."onyx2d-arm64".override { src = onyx2dSrc; });
   coretextSrc = patchedDir "src/Frameworks/CoreText" [
     ./patches/0023-coretext-fixed-pitch-families-private-draw.patch
+    ./patches/0034-coretext-graphics-font-cache-font-directories.patch
   ];
-  coretext = pd."coretext-arm64".override { src = coretextSrc; };
+  coretext = optimised (pd."coretext-arm64".override { src = coretextSrc; });
   coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [
     ./patches/0025-coregraphics-private-additions.patch
   ];
-  coregraphics = pd."coregraphics-arm64".override { src = coregraphicsSrc; };
+  coregraphics = optimised (pd."coregraphics-arm64".override { src = coregraphicsSrc; });
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
   # upstream's recipe names every protocol and object file; the three protocols the patch
   # uses are generated and linked the same way
-  windowserver = (pd."windowserver-arm64".override { src = windowserverSrc; }).overrideAttrs (old: {
+  windowserver = optimised ((pd."windowserver-arm64".override { src = windowserverSrc; }).overrideAttrs (old: {
     buildPhase = builtins.replaceStrings
       [ "cc=\"" "rpc_wayland.o xdg-shell-protocol.o" ]
       [ ''
@@ -154,8 +173,8 @@ let
           $cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o
               for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
-  });
-  appkit = pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver; };
+  }));
+  appkit = optimised (pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver; });
   # Security for arm64 (upstream's build) with SecItemCopyMatching's result defined on every path
   security = pd."security-arm64".overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./patches/0009-security-secitemcopymatching-defined-result.patch ];

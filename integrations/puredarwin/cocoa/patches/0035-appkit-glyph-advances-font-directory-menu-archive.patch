@@ -1,0 +1,75 @@
+--- a/src/Frameworks/AppKit/NSApplication.m
++++ b/src/Frameworks/AppKit/NSApplication.m
+@@ -731,19 +731,22 @@
+     return;
+ 
+    NSString *directory=[[bundle resourcePath] stringByAppendingPathComponent:relative];
++   BOOL      any=NO;
+ 
+    for(NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL]){
+     NSString *extension=[[name pathExtension] lowercaseString];
+ 
+-    if(![extension isEqualToString:@"ttf"] && ![extension isEqualToString:@"otf"] && ![extension isEqualToString:@"ttc"])
+-     continue;
+-
+-    NSString *path=[directory stringByAppendingPathComponent:name];
+-
+-    CTFontManagerRegisterFontsForURL((CFURLRef)[NSURL fileURLWithPath:path],kCTFontManagerScopeProcess,NULL);
+-    FcConfigAppFontAddFile(O2FontSharedFontConfig(),(const FcChar8 *)[path fileSystemRepresentation]);
+-    FcConfigAppFontAddFile(NULL,(const FcChar8 *)[path fileSystemRepresentation]);
++    if([extension isEqualToString:@"ttf"] || [extension isEqualToString:@"otf"] || [extension isEqualToString:@"ttc"])
++     any=YES;
+    }
++   if(!any)
++    return;
++   /* The directory, not file by file: fontconfig keeps a cache of a directory's fonts (in its
++    * cache directory, by the directory's path and time) and scans the files only when there is
++    * none; a file added alone is scanned every time, by each of the three configurations. */
++   CTFontManagerRegisterFontsForURL((CFURLRef)[NSURL fileURLWithPath:directory isDirectory:YES],kCTFontManagerScopeProcess,NULL);
++   FcConfigAppFontAddDir(O2FontSharedFontConfig(),(const FcChar8 *)[directory fileSystemRepresentation]);
++   FcConfigAppFontAddDir(NULL,(const FcChar8 *)[directory fileSystemRepresentation]);
+ }
+ 
+ -(NSSelectInputSource *)inputSource {
+@@ -1188,7 +1191,10 @@
+ }
+ 
+ -(void)sendMenusToWindowServer {
+-    if(_mainMenu == nil)
++    /* The window server runs in this process; there is no menu transport and nothing to render
++     * a menu bar: the menu is not copied and archived only to be dropped (that was a third of
++     * the time a menu took to open; it is sent each time the menu changes). */
++    if(_mainMenu == nil || _wsSvcPort == MACH_PORT_NULL)
+         return;
+ 
+     _tagAllMenus(_mainMenu, 1);
+--- a/src/Frameworks/AppKit/KTFont_FT.m
++++ b/src/Frameworks/AppKit/KTFont_FT.m
+@@ -15,6 +15,7 @@
+ //#import <AppKit/NSGraphicsContext.h>
+ #import FT_TRUETYPE_TABLES_H
+ #import FT_TRUETYPE_TAGS_H
++#import FT_ADVANCES_H
+ #include <math.h>
+ 
+ // the exact point size, a whole-pixel size would turn 12.5 into 12
+@@ -22,11 +23,16 @@
+    FT_Set_Char_Size(face, 0, (FT_F26Dot6)llround(size * 64), 72, 72);
+ }
+ 
+-// the unhinted advance at the current size, fractional as Apple's text system reports it
++// the unhinted advance at the current size, fractional as Apple's text system reports it.
++// FT_Get_Advance reads it from the metrics table where the font has one (unhinted advances take
++// FreeType's fast path); loading the glyph interpreted its outline (a CFF charstring) for every
++// glyph of every string measured or drawn: most of the time a menu took to open.
+ static CGFloat KTAdvance(FT_Face face, CGGlyph glyph) {
+-   if (glyph >= face->num_glyphs || FT_Load_Glyph(face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0)
++   FT_Fixed advance = 0;
++
++   if (glyph >= face->num_glyphs || FT_Get_Advance(face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP, &advance) != 0)
+       return 0;
+-   return face->glyph->linearHoriAdvance / 65536.0;
++   return advance / 65536.0;
+ }
+ 
+ #pragma mark GPOS pair kerning

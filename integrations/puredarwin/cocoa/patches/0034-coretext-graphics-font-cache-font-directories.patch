@@ -1,0 +1,138 @@
+--- a/src/Frameworks/CoreText/KTFont.m
++++ b/src/Frameworks/CoreText/KTFont.m
+@@ -14,6 +14,8 @@
+ #include FT_OUTLINE_H
+ #include FT_TRUETYPE_TABLES_H
+ #include <hb-ot.h>
++#include <pthread.h>
++#include <stdlib.h>
+ 
+ static CFTypeID fontTypeID;
+ 
+@@ -524,6 +526,37 @@
+ 
+ @end
+ 
++/* The graphics font of each installed face, made once. Finding it is a fontconfig search by name
++ * and a FreeType face opened from the file (or the whole file read when the search lands on
++ * another face): 0.1 ms to several ms, and Apple's Terminal makes a CTFont for every line it
++ * draws (CTLineCreateWithAttributedString), so a screenful paid it a hundred times. A shared
++ * graphics font also keeps Onyx2D's glyph bitmaps (cached by FreeType face) from being rendered
++ * again for each new CTFont. The cache holds one reference to each font for the process's life. */
++static pthread_mutex_t graphicsCacheLock=PTHREAD_MUTEX_INITIALIZER;
++static CFMutableDictionaryRef graphicsCache;
++
++static CGFontRef createGraphicsFont(const CTFontRecord *record);
++
++static CGFontRef copyGraphicsFont(const CTFontRecord *record) {
++   CFStringRef key=CFStringCreateWithFormat(NULL,NULL,CFSTR("%s#%ld"),record->path,record->index);
++   CGFontRef graphics;
++
++   pthread_mutex_lock(&graphicsCacheLock);
++   if(graphicsCache==NULL)
++    graphicsCache=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,NULL);
++   graphics=(CGFontRef)CFDictionaryGetValue(graphicsCache,key);
++   if(graphics==NULL){
++    graphics=createGraphicsFont(record);
++    if(graphics!=NULL)
++     CFDictionarySetValue(graphicsCache,key,graphics);
++   }
++   if(graphics!=NULL)
++    CGFontRetain(graphics);
++   pthread_mutex_unlock(&graphicsCacheLock);
++   CFRelease(key);
++   return graphics;
++}
++
+ // a font CoreText makes itself, its graphics font found by name or loaded from the file
+ CTFontRef CTFontCreateWithRecord(const CTFontRecord *record,CGFloat size,const CGAffineTransform *matrix,CFDictionaryRef extra) {
+    CTFace *face=CTFaceCreateWithPath(record->path,record->index);
+@@ -531,7 +564,22 @@
+ 
+    if(face==NULL)
+     return NULL;
+-   graphics=CGFontCreateWithFontName(record->postScriptName);
++   graphics=getenv("PD_CT_NO_FONT_CACHE")!=NULL ? createGraphicsFont(record) : copyGraphicsFont(record);
++
++   KTFont *font=[KTFont alloc];
++
++   font->_font=graphics;
++   font->_unitsPerEm=face->unitsPerEm;
++   font->_size=size>0 ? size : CTDefaultFontSize;
++   font->_matrix=matrix ? *matrix : CGAffineTransformIdentity;
++   font->_ctFace=face;
++   font->_ctAttributes=extra ? CFDictionaryCreateCopy(NULL,extra) : NULL;
++   font->_fromGraphicsFont=NO;
++   return font;
++}
++
++static CGFontRef createGraphicsFont(const CTFontRecord *record) {
++   CGFontRef graphics=CGFontCreateWithFontName(record->postScriptName);
+    if(graphics!=NULL){
+     CFStringRef full=CGFontCopyFullName(graphics);
+ 
+@@ -552,15 +600,5 @@
+     }
+     if(url) CFRelease(url);
+    }
+-
+-   KTFont *font=[KTFont alloc];
+-
+-   font->_font=graphics;
+-   font->_unitsPerEm=face->unitsPerEm;
+-   font->_size=size>0 ? size : CTDefaultFontSize;
+-   font->_matrix=matrix ? *matrix : CGAffineTransformIdentity;
+-   font->_ctFace=face;
+-   font->_ctAttributes=extra ? CFDictionaryCreateCopy(NULL,extra) : NULL;
+-   font->_fromGraphicsFont=NO;
+-   return font;
++   return graphics;
+ }
+--- a/src/Frameworks/CoreText/CTRegistry.m
++++ b/src/Frameworks/CoreText/CTRegistry.m
+@@ -768,6 +768,21 @@
+     return ok;
+ }
+ 
++/* Every font file of a directory, through fontconfig's cache of that directory: a font file
++ * added alone is scanned each time (a variable font: every glyph of every named instance, for
++ * its spacing; the fonts Apple's Terminal carries took a second per configuration at each
++ * launch), a directory is scanned once and read back from the cache after that. */
++bool CTRegistryAddDirectory(const char *path) {
++    bool ok;
++
++    CTRegistryLock();
++    ok = FcConfigAppFontAddDir(config(), (const FcChar8 *)path) == FcTrue;
++    if (ok)
++        CTRegistryInvalidateUnlocked();
++    CTRegistryUnlock();
++    return ok;
++}
++
+ bool CTRegistryRemoveFile(const char *path) {
+     bool ok;
+ 
+--- a/src/Frameworks/CoreText/CTInternal.h
++++ b/src/Frameworks/CoreText/CTInternal.h
+@@ -57,6 +57,7 @@
+ const CTFontRecord *CTRegistryRecordForPath(const char *path, long index);
+ void CTRegistryInvalidate(void);
+ bool CTRegistryAddFile(const char *path);
++bool CTRegistryAddDirectory(const char *path);
+ bool CTRegistryRemoveFile(const char *path);
+ 
+ // records matching a descriptor's attributes, best first, the caller frees the array
+--- a/src/Frameworks/CoreText/CTFontManager.m
++++ b/src/Frameworks/CoreText/CTFontManager.m
+@@ -167,6 +167,11 @@
+ 
+     if (!pathOfURL(fontURL, path, sizeof(path)) || stat(path, &st) != 0)
+         code = kCTFontManagerErrorFileNotFound;
++    // a directory (ours: an application's ATSApplicationFontsPath): its fonts, through fontconfig's cache
++    else if (S_ISDIR(st.st_mode)) {
++        if (!CTRegistryAddDirectory(path))
++            code = kCTFontManagerErrorInvalidFontData;
++    }
+     else if (!CTFontManagerIsSupportedFont(fontURL))
+         code = kCTFontManagerErrorInvalidFontData;
+     else if (!CTRegistryAddFile(path))

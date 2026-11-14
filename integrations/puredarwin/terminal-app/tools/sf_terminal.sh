@@ -8,7 +8,7 @@
 #                                   root/   the tree: the libraries the application loads instead of the
 #                                           system's (DYLD_FRAMEWORK_PATH / DYLD_LIBRARY_PATH)
 #                                   pd/     the libraries the wrappers re-export (<name>.pd)
-#                                   run.sh, show.sh, sf-catch, sf-nibprobe, libsftrace.dylib
+#                                   run.sh, show.sh, sf-catch, sf-nibprobe, libsftrace.dylib, libsfprof.dylib
 #   sf_terminal.sh push           send the stage and the application to /private/tmp/sfy on the target
 #                                 (the application's arm64e slice, plus a test copy that names
 #                                 /tmp/sfy/dyld as its dynamic linker: for a system whose dyld is the old one)
@@ -78,6 +78,7 @@ stage)
   $CC $CCF $T/probe/sf-nibprobe.m $LDF -lobjc -lFoundation -lCoreFoundation -lSystem -o $ST/sf-nibprobe 2>/dev/null
   $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 $INC $LDF -dynamiclib -install_name /tmp/sfy/libsftrace.dylib $T/probe/sf-trace.c $T/probe/sf-trace-thunks.S \
       -lobjc -lFoundation -lCoreFoundation -lSystem -o $ST/libsftrace.dylib 2>/dev/null
+  $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 $INC $LDF -dynamiclib -install_name /tmp/sfy/libsfprof.dylib $T/probe/sf-prof.c -lSystem -o $ST/libsfprof.dylib 2>/dev/null
   install -m755 $T/guest/run.sh $T/guest/show.sh $T/guest/probe.sh $ST/
   # the test copy: the arm64e slice with /tmp/sfy/dyld (same length) as its dynamic linker
   python3 -B - "$APP" "$ST/Terminal.testdyld" <<'PYEOF'
