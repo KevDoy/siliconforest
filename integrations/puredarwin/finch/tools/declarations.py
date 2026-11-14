@@ -10,11 +10,11 @@ from pathlib import Path
 import re
 
 
-def declarations(source, classes):
+def declarations(source, classes, categories=False):
     text = re.sub(r'/\*.*?\*/|//[^\n]*', '', source, flags=re.S)
     for impl in re.finditer(r'@implementation\s+(\w+)([^\n{]*)', text):
         name, suffix = impl.groups()
-        if '(' in suffix or name not in classes:
+        if ('(' in suffix and not categories) or name not in classes:
             continue
         end = text.index('@end', impl.end())
         body = text[impl.end():end]
@@ -32,12 +32,13 @@ def main():
     ap.add_argument('preamble', type=Path)
     ap.add_argument('output', type=Path)
     ap.add_argument('--class-map', required=True, help='Class:Superclass,Class:Superclass')
+    ap.add_argument('--categories', action='store_true', help='Include methods implemented by categories')
     args = ap.parse_args()
     bases = dict(pair.split(':') for pair in args.class_map.split(','))
     classes = {name: [] for name in bases}
     texts = [p.read_text() for p in sorted(args.source.glob('*.m'))]
     for text in texts:
-        declarations(text, classes)
+        declarations(text, classes, args.categories)
     constants = []
     for text in texts:
         for typ, name in re.findall(r'^(NSString\s*\*\s*const|const\s+double)\s+(\w+)\s*=', text, re.M):

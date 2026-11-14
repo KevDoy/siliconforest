@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Small whole Finch frameworks, against open PureDarwin headers and libraries.
-{ name, version ? "1", arc ? true, security ? null, patches ? [] }:
+{ name, version ? "1", arc ? true, security ? null, patches ? [],
+  extraIncludes ? "", extraLinks ? "" }:
 let
   e = import ./environment.nix;
   inherit (e) pkgs p finch libsystem sdk cc ld;
@@ -13,7 +14,7 @@ in pkgs.stdenv.mkDerivation {
   buildPhase = ''
     export DARWIN_SDK_ROOT=${sdk}
     mkdir objects
-    CF="-isysroot ${sdk} -mmacosx-version-min=26.5 -O2 -fblocks -fobjc-exceptions ${if arc then "-fobjc-arc" else "-fno-objc-arc"} -D_DARWIN_C_SOURCE -Wno-deprecated-declarations -Wno-availability -Wno-nullability-completeness -Wno-incomplete-implementation -I${headers} -I${p.foundation-arm64}/usr/include -I${p.coreFoundation-arm64}/include -I${p.libobjc-arm64}/usr/include -I${libsystem}/usr/include"
+    CF="-isysroot ${sdk} -mmacosx-version-min=26.5 -O2 -fblocks -fobjc-exceptions ${if arc then "-fobjc-arc" else "-fno-objc-arc"} -D_DARWIN_C_SOURCE -Wno-deprecated-declarations -Wno-availability -Wno-nullability-completeness -Wno-incomplete-implementation -I${headers} -I${p.foundation-arm64}/usr/include -I${p.coreFoundation-arm64}/include -I${p.libobjc-arm64}/usr/include -I${libsystem}/usr/include ${extraIncludes}"
     for s in userland/${name}/*.m; do
       ${cc} $CF -c "$s" -o objects/$(basename "$s" .m).o
     done
@@ -22,7 +23,9 @@ in pkgs.stdenv.mkDerivation {
       -L${p.coreFoundation-arm64}/usr/lib -L${p.libobjc-arm64}/usr/lib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libsystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -install_name /System/Library/Frameworks/${name}.framework/Versions/A/${name} \
-      -compatibility_version 1 -current_version ${version} ${pkgs.lib.optionalString (security != null) "-F${security}/System/Library/Frameworks -framework Security"} -lFoundation -lCoreFoundation -lobjc -lSystem -o ${name}
+      -compatibility_version 1 -current_version ${version} ${pkgs.lib.optionalString (security != null) "-F${security}/System/Library/Frameworks -framework Security"} \
+      -lFoundation \
+      ${extraLinks} -lCoreFoundation -lobjc -lSystem -o ${name}
   '';
   installPhase = ''
     fw=$out/System/Library/Frameworks/${name}.framework
