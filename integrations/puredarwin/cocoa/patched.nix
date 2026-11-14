@@ -130,6 +130,8 @@
 #   0049  AppKit: a font name's PostScript name (a fontconfig listing of every installed face) and the
 #         fallback font for a character are remembered: a menu opened in about 390 ms once the CJK fonts
 #         were installed, now about 195 ms
+#   0050  AppKit: tab views as on macOS 26 (rounded segments, the selected one white, a faint rounded
+#         pane with a hairline) instead of raised grey bevels, on which a disabled label vanished
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -182,6 +184,7 @@ let
     ./patches/0047-appkit-bindings-write-back.patch
     ./patches/0048-appkit-find-bar.patch
     ./patches/0049-appkit-font-lookups-remembered.patch
+    ./patches/0050-appkit-tab-view-macos26.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

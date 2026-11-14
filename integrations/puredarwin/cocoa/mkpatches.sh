@@ -71,4 +71,5 @@ mkg 0046-appkit-nib-floats-labels-menu-glyphs.patch $A/nib.subproj/NSNibArchiveU
 mkg 0047-appkit-bindings-write-back.patch $A/NSControl.m $A/NSController/NSControllerSelectionProxy.m
 mkg 0048-appkit-find-bar.patch $A/NSTextFinder.m $A/NSMacOS26Additions.m $A/NSMacOS26Additions.h $A/NSResponder.m
 mkg 0049-appkit-font-lookups-remembered.patch $A/O2Font_FT.m $A/NSMutableAttributedString.m
+mkg 0050-appkit-tab-view-macos26.patch $A/NSInterfacePart/NSGraphicsStyle.m
 ( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq g b ) | sed 's/^/differs from g: /'
