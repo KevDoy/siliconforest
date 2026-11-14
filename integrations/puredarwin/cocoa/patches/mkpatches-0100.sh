@@ -25,5 +25,5 @@ mk am-0105 am-0106 0106-appkit-nib-layout-standard-space-priorities.patch $A/NSL
 mk am-0106 am 0107-appkit-activity-monitor-look-and-cost.patch $A/NSSymbolImages.m $A/NSImage.m $A/nib.subproj/NSCustomResource.m $A/NSImageCell.m \
   $A/NSMenu.subproj/NSMenuView.m $A/NSTableHeaderView.m $A/NSTableView.m $A/NSTableViewViewBased.m $A/NSOutlineView.m \
   $A/NSToolbar.subproj/NSToolbarItemView.m $A/NSToolbar.subproj/NSToolbarView.m $A/NSColor.subproj/NSColor_catalog.h \
-  $A/NSColor.subproj/NSColor_catalog.m $A/NSView.m
+  $A/NSColor.subproj/NSColor_catalog.m $A/NSView.m $A/NSPopUpButtonCell.m
 ( diff -rq am-0106 am ) | sed 's/^/differs from am-0106: /'

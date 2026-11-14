@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSSymbolImages.m
 +++ b/src/Frameworks/AppKit/NSSymbolImages.m
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,174 @@
 +// NSSymbolImages.m - stand-ins for the few system symbol images applications here ask for
 +// Copyright (c) 2026 The SiliconForest contributors, SPDX-License-Identifier: MPL-2.0 OR BSD-2-Clause
 +//
@@ -9,7 +9,8 @@
 +// names below are our own drawings with NSBezierPath, in the symbols' usual shapes, so that a
 +// toolbar is not a row of empty buttons. Any other name still gives nil, as an unknown name does
 +// on macOS. They are template images (the shape is what counts, the colour is the control's).
-+// First users: Apple's Activity Monitor (its toolbar's Stop, Info and action buttons).
++// First users: Apple's Activity Monitor (its toolbar's Stop, Info and action buttons, the inspector's
++// link to a parent process).
 +#import <AppKit/NSImage.h>
 +#import <AppKit/NSBitmapImageRep.h>
 +#import <AppKit/NSGraphicsContext.h>
@@ -102,6 +103,23 @@
 +    [path stroke];
 +}
 +
++// a filled circle with an arrow to the right cut out of it (the inspector's link to a parent process)
++static void pdArrowForwardCircleFill(NSRect box, CGFloat line) {
++    NSBezierPath *path = pdStroke(line * 1.2);
++    CGFloat cx = NSMidX(box), cy = NSMidY(box), unit = NSWidth(box) / 16;
++
++    [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(box, 0.5, 0.5)] fill];
++    [NSGraphicsContext saveGraphicsState];
++    [[NSGraphicsContext currentContext] setCompositingOperation:NSCompositeClear];
++    [path moveToPoint:NSMakePoint(cx - 4 * unit, cy)];
++    [path lineToPoint:NSMakePoint(cx + 4 * unit, cy)];
++    [path moveToPoint:NSMakePoint(cx + 0.8 * unit, cy + 3.2 * unit)];
++    [path lineToPoint:NSMakePoint(cx + 4 * unit, cy)];
++    [path lineToPoint:NSMakePoint(cx + 0.8 * unit, cy - 3.2 * unit)];
++    [path stroke];
++    [NSGraphicsContext restoreGraphicsState];
++}
++
 +@implementation NSImage (PDSymbolImages)
 +
 ++ (NSImage *)_pdSymbolImageNamed:(NSString *)name {
@@ -111,6 +129,7 @@
 +        { "ellipsis.circle", pdEllipsisCircle },
 +        { "xmark.octagon", pdXmarkOctagon },
 +        { "magnifyingglass", pdMagnifyingGlass },
++        { "arrow.forward.circle.fill", pdArrowForwardCircleFill },
 +    };
 +    PDSymbolDrawer draw = NULL;
 +    NSImage *image;
@@ -787,3 +806,30 @@
      fprintf(stderr,"PD-CA view %s %p setLayer: %s %p\n",object_getClassName(self),self,value ? object_getClassName(value) : "nil",value);
     // a hosted CAMetalLayer or CALayerHost goes to its own subsurface, outside the CALayer renderer (which may be off)
     if(isSurfaceLayer(value) || isSurfaceLayer(_layer)){
+--- a/src/Frameworks/AppKit/NSPopUpButtonCell.m
++++ b/src/Frameworks/AppKit/NSPopUpButtonCell.m
+@@ -151,7 +151,16 @@
+    return [_menu indexOfItemWithTarget:target andAction:action];
+ }
+ 
++// a pop-up (not pull-down) menu with items has one of them selected, as on macOS: items put in its
++// menu directly, or a nib that archived no selection, left none, and Activity Monitor's Send Signal
++// sheet read the signal of no item (0: nothing was sent)
++static void pdSelectFirstIfNone(NSPopUpButtonCell *self, NSInteger *selected, BOOL pullsDown, NSMenu *menu) {
++  if(*selected<0 && !pullsDown && [menu numberOfItems]>0)
++   *selected=0;
++}
++
+ -(NSMenuItem *)selectedItem {
++  pdSelectFirstIfNone(self,&_selectedIndex,_pullsDown,_menu);
+   if(_selectedIndex<0)
+    return nil;
+    
+@@ -167,6 +176,7 @@
+ }
+ 
+ -(NSInteger)indexOfSelectedItem {
++   pdSelectFirstIfNone(self,&_selectedIndex,_pullsDown,_menu);
+    return _selectedIndex;
+ }
+ 

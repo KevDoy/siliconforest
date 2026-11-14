@@ -6,7 +6,8 @@
 #     new       libsysmon, NetworkStatistics, CoreSymbolication, UniformTypeIdentifiers,
 #               AssetCacheServicesExtensions, libIOReport, libsystemstats, libquit,
 #               libLaunchServicesSupport, RemoteServiceDiscovery, SafeEjectGPU, Metal (two names),
-#               SecurityFoundation, Suggestions, OpenCL, CrashReporterSupport (empty)
+#               SecurityFoundation, Suggestions, OpenCL, CrashReporterSupport (empty); libquit also carries
+#               Activity Monitor's helper service in process (ActivityMonitorHelper.m: Send Signal)
 #     wrappers  CoreServices, CoreFoundation, Foundation: Terminal.app's wrapper sources
 #               (../../terminal-app/compat, unchanged) and this directory's additions in one
 #               library each; IOKit: a new wrapper that re-exports /usr/lib/libIOKitCF.dylib (the
@@ -73,7 +74,7 @@ lib $F/IOKit.framework/Versions/A/IOKit 1:275 $S/IOKit-am.c -- -Wl,-reexport_lib
 lib /usr/lib/libsysmon.dylib 1:1 $S/sysmon.m -- $OBJC -framework IOKit
 lib /usr/lib/libIOReport.dylib 1:1 $S/IOReport.c -- -lCoreFoundation
 lib /usr/lib/libsystemstats.dylib 1:510.120.2 $S/systemstats.c --
-lib /usr/lib/libquit.dylib 1:1 $S/quit.c --
+lib /usr/lib/libquit.dylib 1:1 $S/quit.c $S/ActivityMonitorHelper.m -- $OBJC
 lib /usr/lib/libLaunchServicesSupport.dylib 1:1 $S/LaunchServicesSupport.c -- -lCoreFoundation
 fw $PF NetworkStatistics 1:1 $S/NetworkStatistics.c -- -lCoreFoundation
 fw $PF CoreSymbolication 1:64575.53.2 $S/CoreSymbolication.c -- -lCoreFoundation
