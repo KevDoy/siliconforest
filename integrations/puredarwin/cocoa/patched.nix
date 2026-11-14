@@ -99,7 +99,8 @@
 #         clear only when -setOpaque:NO changes that), and its background is copied, not drawn over
 #         what the backing store held; a window without NSTitledWindowMask (a sheet, an alert) has no
 #         title bar and no room for one, a sheet a hairline border, and the WindowServer is told a
-#         sheet's parent
+#         sheet's parent; the offscreen window of an image's cache does not take the current context
+#         while a view draws (Terminal's profile list drew into it after the first thumbnail)
 #   0042  Onyx2D: PNG entries of an .icns (ic07 to ic14, all a current application icon has), upstream's
 #         change at the tip (29bc3a57 "Onyx2D: PNG icons in ICNS"): Terminal's icon read as nothing
 #   0043  WindowServer: a window's parent (kWSWindowSetParent, xdg_toplevel.set_parent): the compositor
@@ -111,6 +112,15 @@
 #         its bundle's from the start and is what NSApplicationIcon names
 #   0045  AppKit: a space that opens a layout fragment is a place to wrap (lines broke inside words
 #         and began with a space after a kerning pair had ended a fragment)
+#   0046  AppKit: the NIBArchive reader's -decodeFloatForKey: answers a float as NSCoder declares it (it
+#         answered a double: every caller read 0, so a nib's column widths and row heights were 0);
+#         labels a little too wide for a nib laid out for macOS's system font are drawn narrower when
+#         they clip too, and their descenders are not cut; a shortcut typed with Shift shows as macOS
+#         shows it (Shift-Command-[ for Command-{)
+#   0047  AppKit: a control's bound value goes to the model when it sends its action (a click changes
+#         the cell, which no key-value observation of the control hears), and a controller's
+#         selection proxy sets a value on each selected object: Terminal's preference checkboxes now
+#         change the profile and persist
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -159,6 +169,8 @@ let
     ./patches/0041-appkit-windows-opaque-untitled-sheets.patch
     ./patches/0044-appkit-alerts-macos-layout.patch
     ./patches/0045-appkit-word-wrap-at-fragment-start.patch
+    ./patches/0046-appkit-nib-floats-labels-menu-glyphs.patch
+    ./patches/0047-appkit-bindings-write-back.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
