@@ -186,7 +186,8 @@ class Kit(unittest.TestCase):
         ka, kb = a[fa[1][5]:fa[1][5] + fa[1][2]], b[fb[1][5]:fb[1][5] + fb[1][2]]
         self.assertEqual(hashlib.sha256(ka).digest(), hashlib.sha256(kb).digest())
         ta, tb = a[fa[0][5]:fa[0][5] + fa[0][2]].decode(), b[fb[0][5]:fb[0][5] + fb[0][2]].decode()
-        self.assertEqual(tb, ta.replace(' pdapciebridge=1\n', ' pdapciebridge=1 sfsession_seconds=150 sfmark=1\n'))
+        first, rest = ta.split('\n', 1)   # the bench words go at the end of the command line
+        self.assertEqual(tb, first + ' sfsession_seconds=150 sfmark=1\n' + rest)
         # sf_bench_kernel.py (a bench copy with another session length) makes the same file for 150 s,
         # and refuses a file that already ends its session
         sys.path.insert(0, str(HERE)); import sf_bench_kernel

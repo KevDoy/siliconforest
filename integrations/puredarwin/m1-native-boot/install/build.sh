@@ -133,7 +133,12 @@ ARGS="$ARGS pdm1kbd=1 pdm1trackpadenum=1 pdm1trackpadchild=1 cpus=8 pdgpudt=2 pd
 ARGS="$ARGS rd=uuid boot-uuid=$SF_FSUUID wdt=-1 pdnvme=3 pdnvme_ttl=0 pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS"
 ARGS="$ARGS pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 pdthermal_delay=4 pdcpuheld=1 pdapciebridge=1"
 # the video decoder (PDAppleAVD, in the collection): /dev/pdavd; nothing is powered before its first open
-ARGS="$ARGS pdavd=1${SF_EXTRA_BOOTARGS:+ $SF_EXTRA_BOOTARGS}"
+ARGS="$ARGS pdavd=1"
+# no Skywalk compat netif on legacy interfaces (macOS's default 0x2f without IF_ATTACH_NX_NETIF_COMPAT):
+# en0 (IO80211Family, legacy TX model) got one that is never activated, since no flowswitch is attached
+# to a legacy-TX interface, and DLIL does not count input on an interface marked IFCAP_SKYWALK (the
+# compat netif would): en0's ipackets/ibytes stayed 0 (SF-AC, "Wi-Fi receive statistics")
+ARGS="$ARGS if_attach_nx=46${SF_EXTRA_BOOTARGS:+ $SF_EXTRA_BOOTARGS}"
 pack() { # <command line> <output> [--m1n1 <stage>]
   local args=$1 out=$2; shift 2
   python3 -B "$B1/pdsf_pack.py" pack "$@" --kernel "$KC/kernel" --bootargs "$args" \

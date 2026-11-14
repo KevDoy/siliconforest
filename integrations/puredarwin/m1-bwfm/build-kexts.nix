@@ -41,6 +41,8 @@ in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
     chmod -R u+w "$out"
     test -d "$out/src/Kernel/Extensions/IO80211Family"
     test ! -e "$out/src/Kernel/Extensions/PDBwfm"
+    # patches/: changes to the tree's IO80211Family (its licence, MPL-2.0 OR BSD-2-Clause)
+    for p in ${./patches}/*.patch; do ${pkgs.patch}/bin/patch -d "$out" -p1 --no-backup-if-mismatch < "$p"; done
     cp -R ${copied} "$out/src/Kernel/Extensions/PDBwfm"
     printf '\nadd_subdirectory(PDBwfm)\n' >> "$out/src/Kernel/Extensions/CMakeLists.txt"
   '';
