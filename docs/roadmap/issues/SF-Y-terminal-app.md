@@ -273,6 +273,7 @@ Nothing was taken from Finch in this round.
 | Hide Terminal | nothing on the desktop unhides an application | compositor / dock |
 | Scroller look, colour emoji, proxy icon, drag and drop, symbol images | as before | as before |
 | `-initFileURLWithPath:` of a directory | macOS ends it in "/"; doing so here broke the Preferences window | half a day to find the caller |
+| Activity Monitor's patches into the shared stack (`requests-for-TERM.md`, "From ACTMON, 2") | tried. The cocoa patches 0100..0105 build over 0059, but with them Terminal's Preferences General pane and Inspector Info pane are laid out wrongly (`shots/merge-am-*` against `merge-before-*`). Likely cause: the NIBArchive booleans read the right way round hand those views to Auto Layout. Not merged. The wrappers, the IOKit wrapper and libSystem's `memorystatus_get_level` need the core pipeline: not done (`answers-from-TERM.md`, "To ACTMON, 2") | 1 day (constraint solver) + a core round |
 
 ## The binary (scanner, `integrations/puredarwin/homebrew/sf_gapscan.py --app`)
 The scanner now reads universal files (`--arch arm64e`), the import table of chained fixups, the
