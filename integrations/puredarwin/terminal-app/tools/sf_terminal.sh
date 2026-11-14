@@ -131,7 +131,7 @@ install-stage)
   done
   cp $R/usr/lib/dyld $IN/core/dyld.new; sha256sum $IN/core/dyld.new | cut -c1-64 > $IN/core/dyld.sha256
   # everything else; the wrappers that stand in front of a library the system has
-  (cd $R && find . -type f -not -path './usr/share/*' -not -path './nix-support/*' -printf '%P\n' | LC_ALL=C sort) | while read -r f; do
+  (cd $R && find . -type f -not -path './usr/share/sf-test/*' -not -path './nix-support/*' -printf '%P\n' | LC_ALL=C sort) | while read -r f; do
     case " $CORE usr/lib/dyld " in *" $f "*) continue;; esac
     mkdir -p "$IN/direct/files/$(dirname "$f")"; cp "$R/$f" "$IN/direct/files/$f"
   done

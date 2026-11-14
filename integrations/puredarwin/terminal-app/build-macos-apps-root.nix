@@ -15,6 +15,8 @@
 #     DataDetectorsCore, CoreAnalytics, libScreenReader      ./build-compat.nix
 #   usr/bin/open                                 ./system/open.c: `open -a Terminal`, `open <bundle>`
 #   usr/bin/login                                ./system/login.c: `login -pf <user>` (a terminal's session)
+#   usr/share/terminfo                           ./build-terminfo.nix (ncurses' whole database:
+#                                                tmux-256color, screen-*, vt*, ...)
 #   usr/share/sf-test/sf-*-probe                 ./probe: what the installer proves each of
 #                                                dyld, libSystem, libFoundation and the two
 #                                                wrappers with before it replaces the file in use
@@ -34,6 +36,7 @@ let
   compat = import ./build-compat.nix;
   cocoa = import ../cocoa/patched.nix;
   firefoxRoot = import ../cocoa/build-firefox-root.nix;
+  terminfo = import ./build-terminfo.nix;
   sdk = "${p.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
   F = "System/Library/Frameworks";
 in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -53,6 +56,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   chmod -R u+w $out
   cp -a ${compat}/System ${compat}/usr $out/ 2>/dev/null || { cp -a ${compat}/System $out/; cp -a ${compat}/usr/. $out/usr/; }
   chmod -R u+w $out
+  mkdir -p $out/usr/share; cp -r ${terminfo}/usr/share/terminfo $out/usr/share/; chmod -R u+w $out/usr/share/terminfo
 
   # ---- /usr/bin/open (./system/open.c): start an application bundle on the desktop
   mkdir -p $out/usr/bin
