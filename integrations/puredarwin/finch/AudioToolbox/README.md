@@ -1,5 +1,11 @@
 # AudioToolbox file/converter slice (staged only)
 
+The extended variant is [codecs.nix](codecs.nix), documented in
+[codec/README.md](codec/README.md): M4A/MP3 demux, AAC/MP3/ALAC decoding through
+Linux/Nix FFmpeg, and queues through a distinct retained-PD image. Its M1 WAV/AAC
+CLI completes HAL buffers. The description below applies to the earlier PCM-only
+build.nix; neither variant replaces the installed AudioToolbox.
+
 Compile full AudioFile.c, AudioFormat.c, AudioFormatTables.c, AudioConverter.c,
 ExtendedAudioFile.c from Finch2d9b1bb in Linux/Nix using our declarations. No queue,
 unit, HAL, MIDI or output-device implementation is included. The66-export library

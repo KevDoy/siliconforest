@@ -1,5 +1,11 @@
 # AVFAudio device-independent slice (staged only)
 
+The extended [engine variant](engine/README.md) adds the complete offline graph
+source and compressed file/converter input. Its M1 offline engine,WAV and ALAC
+file results match same-byte M5 references; realtime engine output still returns
+NoConnection pending retained-PD queue wiring. The description below applies to
+the earlier six-file build.nix.
+
 Six whole implementation files: AVAudioTime.m, AVAudioFormat.m, AVAudioBuffer.m,
 AVAudioConverter.m, AVAudioFile.m, AVFConstants.m. Eight value/file/converter
 classes, own source-derived declarations, MRC and real CoreMedia format descriptions.
