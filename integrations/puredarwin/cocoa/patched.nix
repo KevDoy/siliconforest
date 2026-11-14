@@ -121,6 +121,11 @@
 #         the cell, which no key-value observation of the control hears), and a controller's
 #         selection proxy sets a value on each selected object: Terminal's preference checkboxes now
 #         change the profile and persist
+#   0048  AppKit: NSTextFinder with a find bar (search field, previous/next, Done, replace row), taken
+#         from Finch's NSTextFinder.m (MIT OR Apache-2.0, notice in the file): Terminal's Command-F,
+#         Find Next/Previous, Use Selection for Find (the finder before had no bar and beeped); the bar
+#         takes the find actions while its field has the keys; a Command key that no menu took inserts
+#         no text (Command-G typed a "g")
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -171,6 +176,7 @@ let
     ./patches/0045-appkit-word-wrap-at-fragment-start.patch
     ./patches/0046-appkit-nib-floats-labels-menu-glyphs.patch
     ./patches/0047-appkit-bindings-write-back.patch
+    ./patches/0048-appkit-find-bar.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
