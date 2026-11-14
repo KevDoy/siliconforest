@@ -1,0 +1,15 @@
+# AVFAudio device-independent slice (staged only)
+
+Six whole implementation files: AVAudioTime.m, AVAudioFormat.m, AVAudioBuffer.m,
+AVAudioConverter.m, AVAudioFile.m, AVFConstants.m. Eight value/file/converter
+classes, own source-derived declarations, MRC and real CoreMedia format descriptions.
+Link staged AudioToolbox/CoreMedia. No engine, node, player, recorder, session,
+AudioQueue or output-unit implementation is included. Engine output needs retained
+PD HAL/coreaudiod integration; see ../AudioToolbox/README.md.
+
+Original compressed-buffer/converter/file tests MATCH same-byte native M5 outputs;
+all4 original programs exit0 on M1. Buffer expected comparison DIFF only at
+malformed keyed-archive test: truncated-layout-rejected=1,0 versus1,1. Settings
+reject truncated layout and ordinary secure archive round-trip passes; malformed
+archive construction/validation through retained Foundation is still unresolved.
+No installation or general audio-engine support claim.

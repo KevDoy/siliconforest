@@ -20,7 +20,7 @@ def definitions(text):
                 head = text[start:token.start()].strip()
                 # This source uses plain C definitions. Ignore storage objects,
                 # typedefs and static helpers, while retaining pointer returns.
-                match = re.match(r'([\w\s*]+?)\b([A-Za-z_]\w*)\s*\((.*)\)\s*$', head, re.S)
+                match = re.match(r'([\w\s*<>]+?)\b([A-Za-z_]\w*)\s*\((.*)\)\s*$', head, re.S)
                 if match and not re.search(r'\b(static|typedef)\b', match.group(1)):
                     header = (' '.join(match.group(1).split()), match.group(2), ' '.join(match.group(3).split()))
             depth += 1
