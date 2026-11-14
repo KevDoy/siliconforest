@@ -16,7 +16,9 @@ menu (Applications > Terminal) or with `open -a Terminal`. It shows its menu bar
 inside the window's frame, opens windows with its twelve built-in profiles (the default is Clear
 Dark, as on macOS 26), runs root's zsh through `/usr/bin/login`, and ends when its last window is
 closed.** Everything below was seen in captures of the screen as the compositor rendered it
-(`runs/sf-terminal/shots/`, not committed); input in every test is synthetic (the compositor's
+(`runs/sf-terminal/shots/`, not committed). Later on 14 November: output on the screen about 80 ms
+after it reaches the pty, launch about 1 s, Command-Q quits, tabs (one toplevel per tab group), bold
+and italic faces (table below). Input in every test is synthetic (the compositor's
 inject module, a test instrument: `terminal-app/compositor/README.md`). Nobody looked at the panel
 and no physical keyboard or trackpad was used.
 
@@ -44,21 +46,22 @@ and no physical keyboard or trackpad was used.
 ### What stands between this and "perfectly working" (in the order a person meets it)
 | Item | What is known | Estimate |
 |---|---|---|
-| Launch takes 5 s to the shell | 2.5 s with one profile; with the twelve built-in profiles Terminal measures and prepares each. Measured (`sf-trace`): the preferences nib 2.0 s (decoding, connections), text measuring 0.6 s after AppKit 0032 (it was 6.9 s: 1384 measurements at 5 ms), first display 0.5 s; about 2 s not attributed | 2 to 3 days (nib decoding, the text system's cost per string) |
-| A screenful appears late | after Return on `ls` of 27 lines the capture of the screen shows the output between 1.9 and 3.4 s later, although Terminal's own drawing ends 0.5 s after the key (trace: data at +70 ms, `-drawRect:` 235 ms). Where the rest goes (WindowServer presenting, the compositor) is not found. A menu takes about 0.4 s to open (10 to 25 ms per row of text) | 2 to 4 days; needs a profiler on the M1 |
-| Command-Q | the compositor takes Command-Q ("quit application": it asks windows to close) and the request reaches only the focused window, though both carry the app id `com.apple.Terminal` (seen with `WAYLAND_DEBUG`). Not found why. Terminal > Quit Terminal works; closing the last window ends the program | half a day in the compositor |
-| Tabs | Command-T opens a window. Terminal uses AppKit's window tabbing (`addTabbedWindow:ordered:`, `tabGroup`, `selectNextTab:` ...), which this AppKit does not have. Design that fits Wayland: a tab group is one toplevel; switching hands the surface from one window's WindowServer record to the other (swap of the records' identities and backing stores), the tab bar is a second strip under the menu strip | 3 to 4 days |
+| Launch | done for what was cheap: exec to the window with its shell 0.97 to 1.06 s (was 3.4 s, measured the same way: `tools/sf-latency.py launch`; the 5 s of before was another measure). Causes found with the profiler (`probe/sf-prof.c`): the five drawing frameworks compiled without `-O`; the application's fonts scanned three times at each launch (now their directory, cached by fontconfig; the first launch after an install is 2.4 s); a fontconfig match, a file read and a FreeType face for every NSFont made by name; a font made of every installed face to find one character; the menu archived for a menu bar that does not exist. Left: nib decoding (about 0.3 s), the text system for the menu strip | - |
+| Output, typing, menus | done: 40 lines written to the pty are committed 66 to 72 ms later and on the screen (the compositor's release of the frame before) at about 80 ms; 33 ms of that is Terminal's own timer (it draws at most 30 times a second), drawing a screenful about 20 ms. Typed Return to output in a capture of the screen: 100 to 150 ms (zsh starting `ls` included; before: more than 300 ms, less than 1 s). Typing echo, key to commit: 15 ms (was 39). A menu, click to its popup: about 150 ms (was about 820 ms by this measure). Scrolling with the wheel: a frame every 50 ms. Maximize (the frame's button): the first frame at the new size (2556x1544 pixels) 218 ms after the click, in a second try 137 ms, of which the main thread drew about 70 ms (profile: no single cause; the menu strip about 18 ms) The 1.9 to 3.4 s of before were partly the capture instrument (each capture holds the compositor about 0.5 s) and a WindowServer that dropped a flush when every frame was busy | - |
+| Command-Q | done: the compositor passes Command-Q to a Mac application (patch 5); Terminal's own Quit then needed `login` to stay the shell's parent and `+[NSCountedSet setWithCapacity:]`. Two idle windows: Command-Q ends the program and both shells; with a process running: the alert "Do you want to terminate running processes", Return ends everything (`cq4`). The alert is too narrow (its text is cut) | alert layout: open |
+| Tabs | done (AppKit 0039, WindowServer 0036): a tab group is one toplevel; Command-T, Command-Shift-[ and ], a click on a tab, + (Terminal's `newWindowForTab:`), a tab's x, Command-W, Window > Move Tab to New Window, Merge All Windows (`tb1`, `tb6`, `tb7`, `tc3`..`tc5`, `mv1`, `mg1`, `mg2`). Not done: dragging tabs to reorder or out of the window, Show All Tabs, the Window menu shows the shortcuts as Command-{ and Command-}, the bar has the light look in a dark window | the rest: 1 to 2 days |
 | Preferences, rest | the profile list is drawn empty (its custom cell, `TTSettingsSourceCell`; the selected profile's values show); the inner tab view and the scrollers have the Cocotron look; bold section titles and two long labels are cut (they need more than an eighth); toolbar icons are blank (symbol images); bindings `enabled2` (a second condition) and `NSMenuItem.value` have no key; changing a setting and reading it back after a relaunch was not tried (the preferences file is written: window frames, profiles) | 1 week |
-| True colour | `48;2;r;g;b` draws a few wide bands instead of 64 cells | not looked into |
-| Bold, strike-through | bold text is drawn in the regular face (no bold face is derived for the bundle's font); strike-through is not drawn | 1 to 2 days |
+| True colour | cause found: Terminal turns on direct colour only where `os_feature_enabled(Terminal, DirectColor)` (and TERM is xterm-256color); our libSystem's `_os_feature_enabled_impl` answers no to every flag, so Terminal maps `38;2`/`48;2` to its palette (the bands). Fix: libSystem reads feature flags from `/System/Library/FeatureFlags/Domain/<domain>.plist` (Finch has such a reader, `userland/libsystem/featureflags/featureflags.c`, MIT OR Apache-2.0) and the root gets a plist that turns DirectColor on. libSystem is one of the five core files: its QEMU rehearsal and guarded install | 1 day with the rehearsal |
+| Bold, italic | done (`at1` before, `at3` after): bold was drawn in the regular face (`-convertFont:toHaveTrait:` took the first face with the trait, the variable font's Heavy instance, and CoreText drew a named instance from the file's default instance), italic in Light Italic. Strike-through (SGR 9), double underline (21) and overline (53) are not drawn: Terminal keeps no such cell attribute, as on macOS. Underline, dim, reverse, 256 colours: drawn. Cursor styles and blinking: not looked at | - |
 | Wide characters | Chinese text is not drawn and most emoji are missing: no installed font has the glyphs (Inter, Source Code Pro, URW, DejaVu); box drawing sits off the baseline | open fonts (Noto CJK, Noto Emoji) by recipe, fallback: 2 days |
-| First key after a click | the first character typed right after the click that focuses the window was lost once (`ls` arrived as `s`, `pr4`) | not looked into |
+| First key after a click | not reproduced: six times a click into the window followed by typing at once, every character arrived (synthetic input) | - |
 | Symbol images, `Assets.car` | `Could not find image named 'gearshape'` and others: SF Symbols and the CoreUI catalogue are not read; AppKit's `NSColorPanel.nib` is missing | 1 week for a `.car` reader, symbols need an open symbol font |
 | Scroller look | Terminal drives its scroller through `NSScrollerImpPair` (private), which answers nothing; the knob is drawn by AppKit's own scroller, in the Cocotron look | 3 days |
 | Bell | `NSBeep()` and `AudioServices*` make no sound (said once in the log); Terminal's own visual bell was not tried | 2 days over the sound stream's server |
 | Root's home in new windows | none: `login` starts in the home directory | - |
 | Resize handle is 2 pixels | the compositor's frame has a 2-pixel border as its resize zone | compositor |
-| Not tried | find (Command-F opened nothing visible), mouse reporting (htop drew its full screen, `th2`; vim was started and its screen was not there yet in a capture 3 s later; whether clicks reached either was not established), drag and drop, services, Secure Keyboard Entry, `open -a Terminal <directory>` and `.command` files (no Apple Events here: `open` starts a new instance), AppleScript, bookmarks, Look Up, help (`-[NSHelpManager openHelpAnchor:inBook:]` is not implemented) | as they are met |
+| Full-screen programs | vim, nvim, htop, less draw their screens; mouse reporting works (a click in vim with `mouse=a` moves its cursor, the wheel scrolls it: `fs3`, `fs4`). Open: after tmux starts, and after a click in vim, rows the program did not redraw show a light grey until something redraws everything (`fs4`, `p2`, `p3`); TTView's `-drawRect:` was asked for the full rect, the cause is not established. tmux also wants the terminfo entry `tmux-256color`. Command-F: no find bar (NSTextFinder here has none). `claude` (TUI) not tried in Terminal | grey rows: 1 day; find bar: 2 days |
+| Not tried | drag and drop, services, Secure Keyboard Entry, `open -a Terminal <directory>` and `.command` files (no Apple Events here: `open` starts a new instance), AppleScript, bookmarks, Look Up, help (`-[NSHelpManager openHelpAnchor:inBook:]` is not implemented) | as they are met |
 | Private frameworks | DataDetectorsCore, CoreAnalytics, libScreenReader: by design | - |
 | The M1's own Terminal (macOS 27.0) | pending: macOS was not running. Rescan with `sf_terminal.sh scan` once it is there | rescan |
 
@@ -77,6 +80,11 @@ and no physical keyboard or trackpad was used.
 | `-[__NSCFBoolean longLongValue]` unrecognized | CoreFoundation's boolean class answered only `-boolValue` | Foundation |
 | 20 s of processor time at launch | every string measurement is a pass of the whole text system (5 ms); Terminal measures 1384 strings for its profiles | AppKit 0032: sizes of unbounded one-style strings are remembered |
 | Each bell an exception report | `-[NSDisplay beep]` raised "not implemented" | AppKit 0029: said once |
+| Output 0.3 s late, menus 0.8 s, launch 3.4 s | AppKit, CoreText, Onyx2D, CoreGraphics and WindowServer were compiled without `-O`; a CTFont per drawn line was a fontconfig search and a FreeType face; glyph advances loaded each glyph's outline; application fonts scanned three times per launch; a fallback font searched through every installed face | `patched.nix` (`-O2`), CoreText 0034, AppKit 0035, Onyx2D 0037 |
+| The last lines of a burst stayed off the screen until the cursor blinked | a flush that found its three frames busy waited 100 ms on the main thread and was dropped | WindowServer 0036: presented on the next release |
+| Command-Q did nothing | Terminal sends SIGHUP to the child of the process it started and waits for that process; our `login` exec'd the shell | `system/login.c`: login stays the parent; AppKit 0038 (`+[NSCountedSet setWithCapacity:]`) |
+| Bold drawn regular, italic light | `-convertFont:toHaveTrait:` took the first face with the trait; a variable font's named instance was drawn from its default instance | AppKit 0038, CoreText 0034 |
+| True colour as bands | `_os_feature_enabled_impl` answers no to every feature flag (Terminal's DirectColor) | open (libSystem) |
 
 ## Taken from Finch
 Finch (an open Darwin for Apple Silicon; its own code "MIT OR Apache-2.0", SPDX per file) is cloned
@@ -263,6 +271,8 @@ otherwise) and records what it did in `/private/var/db/sf-macos-apps.installed`.
 | M1: `verify apps` | 80 of 81 files equal, one differs: `/usr/lib/libSystem.B.dylib` in 4 bytes (below) | `push-apps-3.txt` |
 | M1: regression | `sf_compat_push.sh check`: 18 of 18 ok, `failed=0` | `runs/sf-terminal/regress/compat-check-1114.txt` |
 | M1: the compositor | `/usr/bin/chonkstep-darwin-desktop` is the build with popups and Applications and without the inject module (`9115579a…`; the one of before, `721574af…`, is `.old-daily`); `.next` is the same source with the inject module (`810a1569…`) | `runs/m1-desktop-010/wm-darwin-apps-keep/` |
+| 14 November, later. M1: regression after this round's installs | `sf_compat_push.sh check`: 18 of 18 ok, `failed=0` | `runs/sf-terminal/regress/compat-check-1114b.txt` |
+| QEMU: the Cocoa stream's checks on patches 0001 to 0039 with `-O2` | `hello --scale 2 --theme graphite`, `frame --scale 2`, `popups --scale 2`, `apps --scale 1.5`: pass. `apps --scale 1.5 --theme amber-phosphor`: FAILED (the located operator-key box took in orange pixels at the Calculator's title, so the click landed below the keys; whether this theme passed before this round was not established) | `runs/sf-terminal/regress/cocoa-*-1114b.txt` |
 | M1: restart (test build, one marked boot) | from the desktop menu: Applications > Terminal; a command; Shell > New Window > Pro; Command-W twice ends the program | `shots/fin1`..`fin6` |
 | M1: restart (installed build, no marks) | the session runs `/usr/bin/chonkstep-darwin-desktop` and the listener; no inject directory; a bundle path written into the session's pipe starts Terminal with zsh on a pty (the menu row itself was exercised in the test build of the same source). No capture of the screen exists for this boot: the installed build cannot make one | process list over SSH |
 
@@ -314,6 +324,12 @@ is not a reliable check on this kernel, and `verify apps` names this file each t
   Inter 4.1 (SIL OFL 1.1), URW base35 (AGPL-3.0 with the font exception), Source Code Pro (SIL OFL
   1.1). Nothing from macOS but Terminal.app itself; the font Terminal draws with is inside its bundle
   and is read from there (`PDApplicationFonts=NO` in the environment or its defaults turns that off).
+- 14 November, later (this round): AppKit, CoreText, Onyx2D, CoreGraphics and libWindowServer of
+  before are `<path>.pre-perf` (hard links; `ln -f <path>.pre-perf <path>.back && mv -f <path>.back
+  <path>` each), the base's are still `.old-sfy`; `/usr/bin/login.before-fork` is the login that
+  exec'd the shell; the compositors of before are `/usr/bin/chonkstep-darwin-desktop.before-cmdq`
+  and `.next.before-cmdq`. `/var/cache/fontconfig` holds the cache of Terminal's font directory
+  (written at its first launch). Test copies: `/private/var/db/sfy/{devO,wsdev*,pre}` (remove).
 - `/private/var/db/sfy` (the scratch prefix, `/private/tmp/sfy` links to it after `ln -sfn`): remove.
 
 ## Launching
@@ -348,6 +364,11 @@ new instance: there are no Apple Events to hand a request to a running one.
 - `tools/sf-catch.c`: runs a program and reports a Mach exception from outside.
 - `probe/sf-nibprobe.m`: decodes a compiled nib as NSNib does and names what stands in the way.
 - `homebrew/sf_gapscan.py --app`.
+- `probe/sf-prof.c` (`libsfprof.dylib`, built by `stage`): a sampling profiler of the main thread
+  (`DYLD_INSERT_LIBRARIES`, `touch /tmp/sfprof.on` to start, `rm` to stop and write `/tmp/sfprof.txt`;
+  `SFPROF_FOCUS`, `SFPROF_PROGRAM`). How every cause of slowness above was found.
+- `tools/sf-latency.py` (on the target): `launch`, `output N`, `inject REQUEST`: ms from exec, from a
+  write to the pty, from an injected request to the WindowServer's commits (`PD_WS_TIMING=1`).
 
 ## Commands
 ```sh
