@@ -37,10 +37,12 @@ def main():
         result = dict(name=test["name"], returncode=proc.returncode, timed_out=timed_out,
                       seconds=round(time.monotonic()-start, 3),
                       output=output.decode("utf-8", "replace"))
+        if 'expected' in test:
+            result['matches_expected'] = result['output'] == test['expected']
         results.append(result)
         args.output.write_text(json.dumps(results, indent=2)+"\n")
         print(json.dumps(result), flush=True)
-    return int(any(r["returncode"] or r["timed_out"] for r in results))
+    return int(any(r["returncode"] or r["timed_out"] or r.get("matches_expected") is False for r in results))
 
 
 if __name__ == "__main__":

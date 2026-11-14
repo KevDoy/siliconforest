@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Small whole Finch frameworks, against open PureDarwin headers and libraries.
-{ name, version ? "1", arc ? true }:
+{ name, version ? "1", arc ? true, security ? null, patches ? [] }:
 let
   e = import ./environment.nix;
   inherit (e) pkgs p finch libsystem sdk cc ld;
@@ -8,6 +8,7 @@ let
 in pkgs.stdenv.mkDerivation {
   name = "siliconforest-finch-${name}-arm64";
   src = finch;
+  inherit patches;
   dontConfigure = true;
   buildPhase = ''
     export DARWIN_SDK_ROOT=${sdk}
@@ -21,7 +22,7 @@ in pkgs.stdenv.mkDerivation {
       -L${p.coreFoundation-arm64}/usr/lib -L${p.libobjc-arm64}/usr/lib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libsystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -install_name /System/Library/Frameworks/${name}.framework/Versions/A/${name} \
-      -compatibility_version 1 -current_version ${version} -lFoundation -lCoreFoundation -lobjc -lSystem -o ${name}
+      -compatibility_version 1 -current_version ${version} ${pkgs.lib.optionalString (security != null) "-F${security}/System/Library/Frameworks -framework Security"} -lFoundation -lCoreFoundation -lobjc -lSystem -o ${name}
   '';
   installPhase = ''
     fw=$out/System/Library/Frameworks/${name}.framework
