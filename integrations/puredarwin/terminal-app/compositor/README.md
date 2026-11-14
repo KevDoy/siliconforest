@@ -15,12 +15,13 @@ the desktop menu ...").
 | 2 | `wm-darwin-inject.patch` | the inject module: requested key and pointer records and captures of the screen, for tests | `wm-darwin-inject-build-002` |
 | 3 | `wm-darwin-popups.patch` | client popups (`xdg_popup`), frame state told to clients, fitted sizes: the Cocoa stream's commits `a447cef..f0955fb` of branch `wm-darwin-cocoa` (local), unchanged. Every AppKit menu, pop-up button and tool tip is such a popup | `wm-darwin-apps-build-001` |
 | 4 | `wm-darwin-applications.patch` | the desktop menu's Applications submenu (one row per bundle in `/Applications` and `/Applications/Utilities`; the path goes to the session's pipe, `open --listen` starts it: the compositor starts no program), and the inject module behind the feature `test-inject` | `wm-darwin-apps-build-001` |
+| 5 | `wm-darwin-mac-command-q.patch` | Command-Q goes to the focused toplevel when its app id is the bundle identifier of a bundle in `/Applications` (a Mac application quits itself, with its questions, as on macOS); elsewhere it stays the desktop's "quit application" | `wm-darwin-cmdq-build-001` (test), `wm-darwin-cmdq-daily-001` |
 
 Builds:
 ```sh
 B=integrations/puredarwin/chonkstep-darwin/tools/build_desktop_binaries.sh
-JOBS=10 $B compositor <name> <source with patches 1 to 4>                              # the desktop: no inject module
-JOBS=10 DESKTOP_FEATURES=test-inject $B compositor <name> <source with patches 1 to 4>   # the test build
+JOBS=10 $B compositor <name> <source with patches 1 to 5>                              # the desktop: no inject module
+JOBS=10 DESKTOP_FEATURES=test-inject $B compositor <name> <source with patches 1 to 5>   # the test build
 ```
 
 ### The inject module is a test instrument; how it is kept out of daily use
@@ -34,7 +35,11 @@ JOBS=10 DESKTOP_FEATURES=test-inject $B compositor <name> <source with patches 1
 3. The directory is in the session's runtime directory, mode 0700, root's.
 A fresh root has neither mark and no `.next` file.
 
-On the M1 (14 November): `/usr/bin/chonkstep-darwin-desktop` is the build without the module
+On the M1 (14 November, later): `/usr/bin/chonkstep-darwin-desktop` is `wm-darwin-cmdq-daily-001`
+(patches 1 to 5, no inject module, `894bbf15…`), `.next` is `wm-darwin-cmdq-build-001` (with it,
+`6136286b…`); the builds of before are `.before-cmdq` and `.next.before-cmdq` (copies in
+`runs/m1-desktop-010/wm-darwin-cmdq-keep/`; the source is `runs/m1-desktop-010/wm-darwin-cmdq-src`).
+Earlier the same day: `/usr/bin/chonkstep-darwin-desktop` was the build without the module
 (sha256 `9115579a…`; strings: `WMINJECT absent` once, `WMINJECT armed` and `request.taken` not at
 all), `.old-daily` the build of 12 November (`721574af…`), `.next` the test build (`810a1569…`).
 Both marks are removed. Both builds are from `runs/m1-desktop-010/wm-darwin-apps-build-001/source`
