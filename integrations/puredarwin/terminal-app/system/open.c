@@ -8,6 +8,12 @@
 // WAYLAND_DISPLAY, taken from the caller or the session's defaults), detached from the terminal:
 // open returns at once with status 0, or says why the bundle could not be started. What the
 // application writes goes to ~/Library/Logs/<name>.log.
+//   open --listen <fifo>            (SiliconForest's, for the session: the desktop menu's
+//                                   "Applications" rows) makes the named pipe and opens each bundle
+//                                   whose path arrives on it as a line, until it is killed. The
+//                                   compositor starts no program itself: it writes the path, the
+//                                   session's listener starts the application. Only bundles in the
+//                                   application directories are opened this way.
 // Not macOS's: documents and URLs (there is no LaunchServices database here), -b, -e, -t, -W, -g.
 #include <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
@@ -18,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -36,9 +43,39 @@ static int find_bundle(const char *name, char *out, size_t size)
     return 0;
 }
 
+static int open_bundle(const char *target, char **args, int nargs);
+
+// the session's listener: one bundle path per line on a named pipe
+static int listen_on(const char *fifo)
+{
+    static const char *dirs[] = { "/Applications/", "/System/Applications/", NULL };
+    unlink(fifo);
+    if (mkfifo(fifo, 0600) != 0) { fprintf(stderr, "open: %s: %s\n", fifo, strerror(errno)); return 1; }
+    // read and write: the pipe stays open between writers, a read never sees an end
+    int fd = open(fifo, O_RDWR | O_CLOEXEC);
+    FILE *in = fd >= 0 ? fdopen(fd, "r") : NULL;
+    if (in == NULL) { fprintf(stderr, "open: %s: %s\n", fifo, strerror(errno)); return 1; }
+    char line[PATH_MAX], real[PATH_MAX];
+    while (fgets(line, sizeof(line), in)) {
+        size_t n = strlen(line);
+        if (n == 0 || line[n - 1] != '\n') continue;
+        line[n - 1] = 0;
+        int ok = 0;
+        if (realpath(line, real) != NULL && strlen(real) > 4 && strcmp(real + strlen(real) - 4, ".app") == 0)
+            for (int i = 0; dirs[i]; i++) if (strncmp(real, dirs[i], strlen(dirs[i])) == 0) ok = 1;
+        if (!ok) { fprintf(stderr, "open: not an application bundle of the application directories: %s\n", line); continue; }
+        // a child starts it and ends, so the application is nobody's to wait for here
+        pid_t pid = fork();
+        if (pid == 0) _exit(open_bundle(real, NULL, 0));
+        if (pid > 0) { int st; waitpid(pid, &st, 0); }
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *target = NULL; char **args = NULL; int nargs = 0;
+    if (argc == 3 && strcmp(argv[1], "--listen") == 0) return listen_on(argv[2]);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--args") == 0) { args = argv + i + 1; nargs = argc - i - 1; break; }
         else if (strcmp(argv[i], "-a") == 0 && i + 1 < argc) target = argv[++i];
@@ -48,6 +85,11 @@ int main(int argc, char **argv)
         else { fprintf(stderr, "open: documents are not supported here (one application bundle per call)\n"); return 1; }
     }
     if (target == NULL) { fprintf(stderr, "usage: open <application bundle> | open -a <application> [--args ...]\n"); return 1; }
+    return open_bundle(target, args, nargs);
+}
+
+static int open_bundle(const char *target, char **args, int nargs)
+{
     char bundle[PATH_MAX], real[PATH_MAX], exe[PATH_MAX];
     if (!find_bundle(target, bundle, sizeof(bundle)) || realpath(bundle, real) == NULL) { fprintf(stderr, "open: no application bundle %s\n", target); return 1; }
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)real, (CFIndex)strlen(real), true);

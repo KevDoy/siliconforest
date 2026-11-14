@@ -135,6 +135,15 @@ if [ -e /private/var/db/desktop-inject ]; then
     mkdir -p "$runtime/inject" && chmod 0700 "$runtime/inject"
     CHONKSTEP_DARWIN_INJECT_DIR=$runtime/inject; export CHONKSTEP_DARWIN_INJECT_DIR
 fi
+# The desktop menu's Applications rows: the compositor starts no program itself, it writes the
+# path of a bundle in /Applications into this pipe and the listener opens it (open --listen,
+# terminal-app/system/open.c; an older open refuses the option and the rows say that nothing listens).
+if [ -x /usr/bin/open ]; then
+    rm -f "$runtime/open-requests"
+    XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-0 HOME=/var/root LANG=en_US.UTF-8 \
+        PATH=/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/bin:/usr/bin:/sbin:/usr/sbin \
+        /usr/bin/open --listen "$runtime/open-requests" > /dev/null 2>&1 &
+fi
 printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s\n' "$seconds" "$(date +%s)" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}"
 # The desktop's own exit status, not that of the filter it is piped through.
 {

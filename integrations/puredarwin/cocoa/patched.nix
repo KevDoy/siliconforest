@@ -50,6 +50,11 @@
 #   0027  AppKit: the constraint solves asked for inside one resize cascade are done once, at its end
 #         (every view holding constraints had the whole tree solved twice per resized view: 388
 #         solves, 4.8 s, while Terminal.app's preferences nib was decoded)
+#   0028  AppKit: the application's main menu as a strip, the first row of each titled window that is
+#         not a panel, where the compositor draws the frames (the desktop has no global menu bar):
+#         the application's own NSMenu in a horizontal NSMenuView, each title's menu an ordinary
+#         popup; pointer and keyboard (Control-F2, arrows); counted as frame, not content. Menu rows
+#         are measured once and only the rows whose highlight changed are drawn again
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -84,6 +89,7 @@ let
     ./patches/0021-appkit-fixes-found-with-terminal.patch
     ./patches/0024-appkit-fonts-bindings-found-with-terminal.patch
     ./patches/0027-appkit-layout-once-per-resize.patch
+    ./patches/0028-appkit-window-menu-strip.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

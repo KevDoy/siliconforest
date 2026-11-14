@@ -14,6 +14,7 @@
 #     AudioToolbox, each wrapped library beside its wrapper as <name>.pd), ColorSync,
 #     DataDetectorsCore, CoreAnalytics, libScreenReader      ./build-compat.nix
 #   usr/bin/open                                 ./system/open.c: `open -a Terminal`, `open <bundle>`
+#   usr/bin/login                                ./system/login.c: `login -pf <user>` (a terminal's session)
 #   usr/share/sf-test/sf-*-probe                 ./probe: what the installer proves each of
 #                                                dyld, libSystem, libFoundation and the two
 #                                                wrappers with before it replaces the file in use
@@ -58,6 +59,10 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   ${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang -isysroot ${sdk} -mmacosx-version-min=26.5 -O1 -Wall -isystem ${sdk}/usr/include -I${libsystem}/usr/include -I${p.coreFoundation-arm64}/include \
     ${./system/open.c} -fuse-ld=${p.native-ld}/bin/ld -nostdlib -Wl,-syslibroot,$out -L${p.coreFoundation-arm64}/usr/lib -Wl,-platform_version,macos,26.5,26.5 \
     -lCoreFoundation $out/usr/lib/libSystem.B.dylib -o $out/usr/bin/open
+  # ---- /usr/bin/login (./system/login.c): what a terminal emulator starts a session with
+  ${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang -isysroot ${sdk} -mmacosx-version-min=26.5 -O1 -Wall -isystem ${sdk}/usr/include -I${libsystem}/usr/include -I${p.coreFoundation-arm64}/include \
+    ${./system/login.c} -fuse-ld=${p.native-ld}/bin/ld -nostdlib -Wl,-syslibroot,$out -L${p.coreFoundation-arm64}/usr/lib -Wl,-platform_version,macos,26.5,26.5 \
+    $out/usr/lib/libSystem.B.dylib -o $out/usr/bin/login
 
   # ---- the installer's probes
   CC=${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang
