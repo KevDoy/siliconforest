@@ -39,3 +39,45 @@
 +}
 +
 +@end
+--- a/src/Frameworks/AppKit/NSFontFamily.m
++++ b/src/Frameworks/AppKit/NSFontFamily.m
+@@ -140,16 +140,37 @@
+    return nil;
+ }
+ 
++/* Of the faces with the traits, the one whose style is the plain form of them: "Bold" for bold,
++ * "Italic" (or "Regular Italic") for italic, "Regular" for neither. A family with weights between
++ * (a variable font's named instances: Light, Medium, Semibold, Bold, Heavy) has several faces with
++ * the bold or the italic trait; the first in the list was taken (Terminal's bold came out Heavy,
++ * its italic Light Italic). Then the first, as before. */
++static NSString *PDPlainStyle(NSFontTraitMask traits) {
++   BOOL bold=(traits&NSBoldFontMask)!=0,italic=(traits&NSItalicFontMask)!=0;
++
++   return bold ? (italic ? @"bold italic" : @"bold") : (italic ? @"italic" : @"regular");
++}
++
+ -(NSFontTypeface *)typefaceWithTraits:(NSFontTraitMask)traits {
+    int i,count=[_typefaces count];
++   NSFontTypeface *first=nil;
++   NSString *plain=PDPlainStyle(traits);
+ 
+    for(i=0;i<count;i++){
+     NSFontTypeface *typeface=[_typefaces objectAtIndex:i];
+-    if([typeface traits]==traits)
++
++    if([typeface traits]!=traits)
++     continue;
++    NSString *style=[[[typeface traitName] lowercaseString] stringByReplacingOccurrencesOfString:@"oblique" withString:@"italic"];
++
++    if([style isEqualToString:plain] || [style isEqualToString:[@"regular " stringByAppendingString:plain]] ||
++       ([plain isEqualToString:@"regular"] && ([style isEqualToString:@"book"] || [style isEqualToString:@"roman"] || [style isEqualToString:@"normal"])))
+      return typeface;
++    if(first==nil)
++     first=typeface;
+    }
+ 
+-   return nil;
++   return first;
+ }
+ 
+ -(void)addTypeface:(NSFontTypeface *)typeface {

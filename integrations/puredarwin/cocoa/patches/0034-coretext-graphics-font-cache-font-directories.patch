@@ -1,7 +1,10 @@
 --- a/src/Frameworks/CoreText/KTFont.m
 +++ b/src/Frameworks/CoreText/KTFont.m
-@@ -14,6 +14,8 @@
+@@ -12,8 +12,11 @@
+ #import "CTInternal.h"
+ #import <Foundation/NSArray.h>
  #include FT_OUTLINE_H
++#include FT_MULTIPLE_MASTERS_H
  #include FT_TRUETYPE_TABLES_H
  #include <hb-ot.h>
 +#include <pthread.h>
@@ -9,7 +12,7 @@
  
  static CFTypeID fontTypeID;
  
-@@ -524,6 +526,37 @@
+@@ -524,6 +527,37 @@
  
  @end
  
@@ -47,7 +50,7 @@
  // a font CoreText makes itself, its graphics font found by name or loaded from the file
  CTFontRef CTFontCreateWithRecord(const CTFontRecord *record,CGFloat size,const CGAffineTransform *matrix,CFDictionaryRef extra) {
     CTFace *face=CTFaceCreateWithPath(record->path,record->index);
-@@ -531,7 +564,22 @@
+@@ -531,7 +565,22 @@
  
     if(face==NULL)
      return NULL;
@@ -71,11 +74,17 @@
     if(graphics!=NULL){
      CFStringRef full=CGFontCopyFullName(graphics);
  
-@@ -552,15 +600,5 @@
+@@ -552,15 +601,15 @@
      }
      if(url) CFRelease(url);
     }
--
++   /* A named instance of a variable font (fontconfig's index carries it in its upper half): the
++    * graphics font was made from the file's default instance; its FreeType face is set to the
++    * instance, or the Bold of a variable family drew as its Regular. The graphics font is this
++    * record's own (made once per record above). */
++   if(graphics!=NULL && (record->index>>16)!=0 && [(id)graphics respondsToSelector:@selector(face)]){
++    FT_Face ft=(FT_Face)[(id)graphics face];
+ 
 -   KTFont *font=[KTFont alloc];
 -
 -   font->_font=graphics;
@@ -86,6 +95,9 @@
 -   font->_ctAttributes=extra ? CFDictionaryCreateCopy(NULL,extra) : NULL;
 -   font->_fromGraphicsFont=NO;
 -   return font;
++    if(ft!=NULL)
++     FT_Set_Named_Instance(ft,(FT_UInt)(record->index>>16));
++   }
 +   return graphics;
  }
 --- a/src/Frameworks/CoreText/CTRegistry.m
@@ -215,7 +227,15 @@
      else if (!CTRegistryAddFile(path))
 --- a/src/Frameworks/CoreText/CTFont.m
 +++ b/src/Frameworks/CoreText/CTFont.m
-@@ -46,7 +46,12 @@
+@@ -16,6 +16,7 @@
+ #include FT_MULTIPLE_MASTERS_H
+ #include FT_TRUETYPE_IDS_H
+ #include <hb-ot.h>
++#include <math.h>
+ 
+ #pragma mark creation
+ 
+@@ -46,7 +47,12 @@
     if(name==NULL)
      return createWithAttributes(NULL,size,matrix);
     attributes=CFDictionaryCreate(NULL,&key,(const void **)&name,1,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
@@ -229,3 +249,61 @@
     CFRelease(attributes);
     return font;
  }
+@@ -137,24 +143,53 @@
+    CTFontRef copy=NULL;
+    CTFontSymbolicTraits want=(CTFontGetSymbolicTraits(font)&~mask)|(value&mask);
+ 
+-   // Apple returns NULL when the family has no face with the traits asked for
+-   for(CFIndex i=0;matches!=NULL && i<CFArrayGetCount(matches) && copy==NULL;i++){
++   /* Apple returns NULL when the family has no face with the traits asked for. Of the faces that
++    * have them, the one of the font's own family and the weight the traits mean: bold is Bold (a
++    * variable family's named instances are Semibold, Bold and Heavy alike to the bold trait; the
++    * first found was taken: Terminal's bold text came out Heavy), otherwise the font's weight. */
++   CFStringRef family=CTFontCopyFamilyName(font);
++   CGFloat targetWeight=(want&kCTFontTraitBold) && !(CTFontGetSymbolicTraits(font)&kCTFontTraitBold) ? 0.4 : 0;
++   CTFontDescriptorRef best=NULL;
++   CGFloat bestScore=0;
++
++   if(!(want&kCTFontTraitBold) || (CTFontGetSymbolicTraits(font)&kCTFontTraitBold)){
++    CFDictionaryRef own=CTFontCopyTraits(font);
++    CFNumberRef w=own ? CFDictionaryGetValue(own,kCTFontWeightTrait) : NULL;
++
++    if(w) CFNumberGetValue(w,kCFNumberCGFloatType,&targetWeight);
++    if(own) CFRelease(own);
++   }
++   for(CFIndex i=0;matches!=NULL && i<CFArrayGetCount(matches);i++){
+     CTFontDescriptorRef d=CFArrayGetValueAtIndex(matches,i);
+     CFDictionaryRef traits=CTFontDescriptorCopyAttribute(d,kCTFontTraitsAttribute);
++    CFStringRef dFamily=CTFontDescriptorCopyAttribute(d,kCTFontFamilyNameAttribute);
+     uint32_t symbolic=0;
++    CGFloat weight=0;
+ 
+     if(traits!=NULL){
+      CFNumberRef n=CFDictionaryGetValue(traits,kCTFontSymbolicTrait);
++     CFNumberRef w=CFDictionaryGetValue(traits,kCTFontWeightTrait);
+ 
+      if(n) CFNumberGetValue(n,kCFNumberSInt32Type,&symbolic);
++     if(w) CFNumberGetValue(w,kCFNumberCGFloatType,&weight);
+      CFRelease(traits);
+     }
+     if((symbolic&mask&(kCTFontTraitBold|kCTFontTraitItalic|kCTFontTraitMonoSpace|kCTFontTraitCondensed|kCTFontTraitExpanded))==(want&mask&(kCTFontTraitBold|kCTFontTraitItalic|kCTFontTraitMonoSpace|kCTFontTraitCondensed|kCTFontTraitExpanded))){
+-     CGAffineTransform m=matrix ? *matrix : CTFontGetMatrix(font);
++     CGFloat score=fabs(weight-targetWeight)+((family && dFamily && CFEqual(family,dFamily)) ? 0 : 10);
+ 
+-     copy=CTFontCreateWithFontDescriptor(d,size>0 ? size : CTFontGetSize(font),&m);
++     if(best==NULL || score<bestScore){
++      best=d;
++      bestScore=score;
++     }
+     }
++    if(dFamily) CFRelease(dFamily);
++   }
++   if(best!=NULL){
++    CGAffineTransform m=matrix ? *matrix : CTFontGetMatrix(font);
++
++    copy=CTFontCreateWithFontDescriptor(best,size>0 ? size : CTFontGetSize(font),&m);
+    }
++   if(family) CFRelease(family);
+    if(matches) CFRelease(matches);
+    CFRelease(wanted);
+    CFRelease(base);

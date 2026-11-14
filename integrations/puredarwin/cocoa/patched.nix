@@ -73,7 +73,8 @@
 #         keeps the old one
 #   0034  CoreText: one graphics font per installed face (a fontconfig search and a FreeType face per
 #         CTFont: Terminal.app makes a CTFont for each line it draws); a directory registered through
-#         CTFontManagerRegisterFontsForURL goes through fontconfig's cache of that directory
+#         CTFontManagerRegisterFontsForURL goes through fontconfig's cache of that directory; a named
+#         instance of a variable font is drawn as that instance (its Bold was drawn as Regular)
 #   0035  AppKit: glyph advances from the metrics table (FT_Get_Advance) instead of loading each
 #         glyph's outline; an application's fonts registered as their directory (cached by fontconfig,
 #         instead of three scans of each file at every launch); the main menu is not archived when
@@ -85,7 +86,8 @@
 #   0037  Onyx2D: one font per name (each was a fontconfig match, the whole file read and a FreeType
 #         face opened: AppKit makes an NSFont by name for every string it measures)
 #   0038  AppKit: more found with Terminal.app: +[NSCountedSet setWithCapacity:] (its check for running
-#         processes when it quits)
+#         processes when it quits), -[NSTextField setLineBreakMode:], a family's plain Bold and Italic
+#         for -convertFont:toHaveTrait: (not the first face with the trait: Heavy, Light Italic)
 #   0039  AppKit: window tabs (NSWindowTabGroup, NSWindowTab, addTabbedWindow:ordered:, Show Next/Previous
 #         Tab, Move Tab to New Window, Merge All Windows) as one toplevel per group, with a tab bar under
 #         the menu strip; structure from Finch's NSWindowTabbing.m (MIT OR Apache-2.0, commit 2d9b1bb)
