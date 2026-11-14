@@ -15,6 +15,10 @@
 #                                start it there (DYLD_* to the stage), wait, print the log, stop it (KEEP=1: leave it)
 #   sf_actmon.sh scan            the gap table of the application against the stage
 #   sf_actmon.sh probe [pid]     the kernel's answers to the calls libsysmon makes (sf-am-probe)
+#   sf_actmon.sh inject <item> ...
+#                                synthetic input and screen captures through the compositor's inject
+#                                module (../../terminal-app/tools/sf_inject.sh, its items); captures
+#                                are fetched to runs/sf-actmon/shots/<name>.png. Inside gui.lock only.
 # SF_ACTMON_APP: the bundle (default private/mac-apps/m5-26.5.2/Activity Monitor.app; never committed).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); cd "$ROOT"
@@ -29,8 +33,11 @@ nb() { (cd "$1" && nix-build --extra-experimental-features 'nix-command flakes' 
 toolchain() {
   eval "$(cd integrations/puredarwin/cocoa && nix-instantiate --extra-experimental-features 'nix-command flakes' --eval --strict --json -E 'let a = import ./arm64.nix; in { CC = "${a.common.darwinCrossToolchain}/bin/arm64-apple-darwin20.4-clang"; LD = "${a.common.nativeLd}/bin/ld"; SDK = "${a.common.appleSdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"; I1 = "${a.common.libSystem}/usr/include"; I2 = "${a.base.libobjc}/usr/include"; I3 = "${a.base.corefoundation}/include"; I4 = "${a.base.foundation}/usr/include"; }' 2>/dev/null | python3 -c 'import json,sys; [print("export %s=%s" % kv) for kv in json.load(sys.stdin).items()]')"
   export INC="-I$I1 -I$I2 -I$I3 -I$I4" LINKROOT=$ROOT/$W/linkroot PY=python3 HB=$ROOT/integrations/puredarwin/homebrew
+  # the kernel's private headers (<net/ntstat.h> for NetworkStatistics), of the default (tip) kernel
+  X=$(nix-build --extra-experimental-features 'nix-command flakes' --no-out-link -E '(import ./integrations/puredarwin/rebase/pd.nix).pd.packages.x86_64-linux.xnu-headers-arm64' 2>/dev/null | tail -1)
+  export NTSTAT_INC=$X/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders
 }
-case "${1:?libs|stage|push|run|scan|probe}" in
+case "${1:?libs|stage|push|run|scan|probe|inject}" in
 libs)
   toolchain; chmod -R u+w $W/libs 2>/dev/null || true; rm -rf $W/libs; mkdir -p $W/libs
   bash $A/libs/build.sh $ROOT/$W/libs > $W/libs.log 2>&1 || { tail -30 $W/libs.log; exit 1; }
@@ -65,5 +72,12 @@ scan)
     --app "$APP=/System/Applications/Utilities/Activity Monitor.app" --arch arm64e --name ${NAME:-actmon-stage} --out $W/scan;;
 probe)
   "${SSH[@]}" "$TP/sf-am-probe ${2:-}" < /dev/null;;
-*) echo "libs|stage|push|run|scan|probe" >&2; exit 2;;
+inject)
+  shift; SF_INJECT_FETCH=0 integrations/puredarwin/terminal-app/tools/sf_inject.sh "$@"
+  mkdir -p $W/shots
+  for a in "$@"; do case $a in capture:*) n=${a#capture:}
+    "${SSH[@]}" "cat /private/var/run/gpu-desktop/inject/$n.ppm" > "$W/shots/$n.ppm" < /dev/null
+    python3 -c "from PIL import Image; import sys; im = Image.open(sys.argv[1]); im.save(sys.argv[2]); print(sys.argv[2], im.size)" "$W/shots/$n.ppm" "$W/shots/$n.png" && rm -f "$W/shots/$n.ppm";;
+  esac; done;;
+*) echo "libs|stage|push|run|scan|probe|inject" >&2; exit 2;;
 esac

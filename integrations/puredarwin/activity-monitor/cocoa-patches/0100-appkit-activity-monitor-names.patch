@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
 +++ b/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,316 @@
 +/* SPDX-License-Identifier: MIT */
 +/* What Apple's Activity Monitor (macOS 26.5) imports from AppKit that this AppKit lacked
 +   (docs/roadmap/issues/SF-AA-activity-monitor.md):
@@ -248,4 +248,72 @@
 +@implementation NSView (SFIdentifier)
 +- (NSString *)identifier { return objc_getAssociatedObject(self, &sfViewIdentifierKey); }
 +- (void)setIdentifier:(NSString *)identifier { objc_setAssociatedObject(self, &sfViewIdentifierKey, identifier, OBJC_ASSOCIATION_COPY); }
++@end
++
++/* ---- methods Activity Monitor sends that this AppKit lacked ---- */
++
++/* the Touch Bar is a list nothing shows (NSTouchBar.m); the item list Activity Monitor sets */
++static const char sfTouchBarItemsKey;
++@implementation NSTouchBar (SFItemIdentifiers)
++- (void)setItemIdentifiers:(NSArray *)identifiers {
++    objc_setAssociatedObject(self, &sfTouchBarItemsKey, identifiers, OBJC_ASSOCIATION_COPY);
++}
++@end
++
++@implementation NSColor (SFActivityMonitor)
+++ (NSColor *)systemCyanColor { return [NSColor colorWithCatalogName:@"System" colorName:@"systemCyanColor"]; }
+++ (NSColor *)systemMintColor { return [NSColor colorWithCalibratedRed:0.0 green:0.78 blue:0.75 alpha:1.0]; }
++/* An application's own named colours live in its asset catalog (Assets.car), which nothing here
++   reads. A name that says its colour ("DockChartBlueColor") gets that system colour; others none. */
+++ (NSColor *)colorNamed:(NSString *)name bundle:(NSBundle *)bundle {
++    static const struct { const char *word, *system; } words[] = {
++        { "Blue", "systemBlueColor" }, { "Red", "systemRedColor" }, { "Green", "systemGreenColor" },
++        { "Yellow", "systemYellowColor" }, { "Orange", "systemOrangeColor" }, { "Purple", "systemPurpleColor" },
++        { "Pink", "systemPinkColor" }, { "Cyan", "systemCyanColor" }, { "Teal", "systemTealColor" },
++        { "Gray", "systemGrayColor" }, { "Grey", "systemGrayColor" },
++    };
++    for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); i++)
++        if ([name rangeOfString:[NSString stringWithUTF8String:words[i].word]].location != NSNotFound)
++            return [NSColor colorWithCatalogName:@"System" colorName:[NSString stringWithUTF8String:words[i].system]];
++    return nil;
++}
+++ (NSColor *)colorNamed:(NSString *)name { return [self colorNamed:name bundle:nil]; }
++@end
++
++@implementation NSFont (SFActivityMonitor)
++/* the system font's digits are tabular already where its face has them (Inter has tabular figures
++   as a feature this text system does not select): the system font of that weight */
+++ (NSFont *)monospacedDigitSystemFontOfSize:(CGFloat)size weight:(CGFloat)weight {
++    return [NSFont systemFontOfSize:size weight:weight];
++}
++@end
++
++@implementation NSBundle (SFImageForResource)
++- (NSImage *)imageForResource:(NSString *)name {
++    NSString *path = [self pathForImageResource:name];
++    return path ? [[[NSImage alloc] initWithContentsOfFile:path] autorelease] : [NSImage imageNamed:name];
++}
++@end
++
++@implementation NSSavePanel (SFAllowedContentTypes)
++/* UTTypes (UniformTypeIdentifiers) as the file name extensions this panel filters by */
++- (void)setAllowedContentTypes:(NSArray *)types {
++    NSMutableArray *exts = [NSMutableArray array];
++    for (id t in types)
++        if ([t respondsToSelector:@selector(preferredFilenameExtension)] && [t preferredFilenameExtension])
++            [exts addObject:[t preferredFilenameExtension]];
++    [self setAllowedFileTypes:[exts count] ? exts : nil];
++    objc_setAssociatedObject(self, @selector(allowedContentTypes), types, OBJC_ASSOCIATION_COPY);
++}
++- (NSArray *)allowedContentTypes { return objc_getAssociatedObject(self, @selector(allowedContentTypes)); }
++@end
++
++@implementation NSPrintOperation (SFModalForWindow)
++- (void)runOperationModalForWindow:(NSWindow *)window delegate:(id)delegate didRunSelector:(SEL)selector contextInfo:(void *)info {
++    BOOL ok = [self runOperation];
++    if (delegate && selector) {
++        void (*f)(id, SEL, NSPrintOperation *, BOOL, void *) = (void *)[delegate methodForSelector:selector];
++        f(delegate, selector, self, ok, info);
++    }
++}
 +@end

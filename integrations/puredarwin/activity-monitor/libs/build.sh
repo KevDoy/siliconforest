@@ -19,7 +19,7 @@ set -euo pipefail
 OUT=${1:?out}; S=$(cd "$(dirname "$0")" && pwd); W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 TC=${TERMCOMPAT:-$S/../../terminal-app/compat}
 F=/System/Library/Frameworks; PF=/System/Library/PrivateFrameworks
-CF="-Wno-arc-bridge-casts-disallowed-in-nonarc -isysroot $SDK -mmacosx-version-min=26.5 -O2 -Wall -Wno-deprecated-declarations -Wno-unused-parameter -Wno-nullability-completeness -Wno-objc-root-class -fno-objc-arc -fobjc-exceptions -fblocks -D_DARWIN_C_SOURCE -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -I$S/UniformTypeIdentifiers/include $INC"
+CF="${NTSTAT_INC:+-idirafter $NTSTAT_INC} -Wno-arc-bridge-casts-disallowed-in-nonarc -isysroot $SDK -mmacosx-version-min=26.5 -O2 -Wall -Wno-deprecated-declarations -Wno-unused-parameter -Wno-nullability-completeness -Wno-objc-root-class -fno-objc-arc -fobjc-exceptions -fblocks -D_DARWIN_C_SOURCE -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -I$S/UniformTypeIdentifiers/include $INC"
 LF="-fuse-ld=$LD -nostdlib -isysroot $SDK -Wl,-syslibroot,$LINKROOT -mmacosx-version-min=26.5 -dynamiclib -Wl,-platform_version,macos,26.5,26.5 -Wl,-headerpad_max_install_names -L$LINKROOT/usr/lib -F$LINKROOT$F -F$LINKROOT$PF"
 objs() { local o= i=0; for s in "$@"; do i=$((i+1)); local b=$W/$i-$(basename "$s").o; case $s in *.m) $CC $CF -x objective-c -c "$s" -o "$b";; *) $CC $CF -c "$s" -o "$b";; esac; o="$o $b"; done; echo "$o"; }
 # lib <install path> <compat:current> <sources> -- <link flags>

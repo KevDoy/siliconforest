@@ -801,7 +801,18 @@
  }
 --- a/src/Frameworks/AppKit/NSTableHeaderView.m
 +++ b/src/Frameworks/AppKit/NSTableHeaderView.m
-@@ -67,9 +67,14 @@
+@@ -7,6 +7,10 @@
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
+ 
+ #import <AppKit/NSTableHeaderView.h>
++#import <AppKit/NSBezierPath.h>
++#import <AppKit/NSImage.h>
++#import <AppKit/NSColor.h>
++#import <Foundation/NSSortDescriptor.h>
+ #import <AppKit/NSTableView.h>
+ #import <AppKit/NSTableColumn.h>
+ #import <AppKit/NSCell.h>
+@@ -67,9 +71,14 @@
              column, 0, [tableColumns count]];
      }
  
@@ -819,7 +830,45 @@
      
      return headerRect;
  }
-@@ -98,7 +103,9 @@
+@@ -85,6 +94,37 @@
+     return NSNotFound;
+ }
+ 
++// the sort indicator: the image the table was given for the column (-setIndicatorImage:inTableColumn:),
++// or, for the highlighted column without one, a chevron in the direction of the table's first sort
++// descriptor (this AppKit has no NSAscendingSortIndicator image)
++-(void)_sfDrawSortIndicatorForColumn:(NSTableColumn *)column inRect:(NSRect)rect {
++    NSImage *image = [_tableView respondsToSelector:@selector(indicatorImageInTableColumn:)] ? [_tableView indicatorImageInTableColumn:column] : nil;
++    BOOL highlighted = [_tableView respondsToSelector:@selector(highlightedTableColumn)] && [_tableView highlightedTableColumn] == column;
++    if (image == nil && !highlighted)
++        return;
++    NSRect r = NSMakeRect(NSMaxX(rect) - 16, NSMinY(rect) + (NSHeight(rect) - 8) / 2, 9, 8);
++    if (image != nil && [image size].width > 1) {
++        [image drawInRect:r fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1.0];
++        return;
++    }
++    NSArray *sort = [_tableView sortDescriptors];
++    BOOL ascending = [sort count] ? [[sort objectAtIndex:0] ascending] : YES;
++    BOOL up = [self isFlipped] ? !ascending : ascending;
++    NSBezierPath *p = [NSBezierPath bezierPath];
++    if (up) {
++        [p moveToPoint:NSMakePoint(NSMinX(r), NSMaxY(r) - 2)];
++        [p lineToPoint:NSMakePoint(NSMidX(r), NSMinY(r) + 2)];
++        [p lineToPoint:NSMakePoint(NSMaxX(r), NSMaxY(r) - 2)];
++    } else {
++        [p moveToPoint:NSMakePoint(NSMinX(r), NSMinY(r) + 2)];
++        [p lineToPoint:NSMakePoint(NSMidX(r), NSMaxY(r) - 2)];
++        [p lineToPoint:NSMakePoint(NSMaxX(r), NSMinY(r) + 2)];
++    }
++    [p setLineWidth:1.5];
++    [[NSColor secondaryLabelColor] setStroke];
++    [p stroke];
++}
++
+ -(void)drawRect:(NSRect)rect {
+     NSArray *tableColumns = [_tableView tableColumns];
+     int i, count = [tableColumns count];
+@@ -98,11 +138,14 @@
  
      for (i = 0; i < count; ++i) {
          NSTableColumn *column = [tableColumns objectAtIndex:i];
@@ -830,3 +879,8 @@
          columnRect.size.width = [column width] + spacing.width;
          [[column headerCell] setHighlighted:[_tableView isColumnSelected:[[_tableView tableColumns] indexOfObject:column]]];
          [[column headerCell] setControlView:self];
+         [[column headerCell] drawWithFrame:columnRect inView:self];        
++        [self _sfDrawSortIndicatorForColumn:column inRect:columnRect];
+         columnRect.origin.x += [column width] + spacing.width;
+     }
+ }
