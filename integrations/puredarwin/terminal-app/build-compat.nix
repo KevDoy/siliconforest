@@ -9,6 +9,9 @@
 #       framework-compat layout), QuartzCore, Carbon, CoreServices, AudioToolbox (the real
 #       library stays beside its wrapper as <name>.pd: this recipe puts both)
 #   new: ColorSync, DataDetectorsCore, CoreAnalytics (private), libScreenReader
+#   with Apple's Activity Monitor's additions (../activity-monitor/libs: CoreFoundation-am.m,
+#     Foundation-am.m, CoreServices-am.c in those wrappers; IOKit-am.c in a new wrapper at
+#     IOKit.framework/Versions/A/IOKit re-exporting /usr/lib/libIOKitCF.dylib; GitHub issue 53)
 #
 # A tree rooted at /. What the wrapped libraries are built from:
 #   libSystem, libFoundation, the Swift runtime   ./build-libsystem.nix, ./build-foundation.nix, ./build-swift-runtime.nix
@@ -16,6 +19,7 @@
 #   QuartzCore, Carbon                            ../macos-compat/build-appkit.nix (the Cocoa stream's root)
 #   CoreServices                                  ../macos-compat/build-coreservices.nix
 #   AudioToolbox                                  ../m1-sound/sysaudio/build-sysaudio.nix
+#   libIOKitCF                                    upstream at ../rebase/pd.nix (the root's own)
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-compat.nix
 let
@@ -36,7 +40,7 @@ in pkgs.runCommand "siliconforest-macos-app-compat-arm64" { nativeBuildInputs = 
   L=$PWD/linkroot; mkdir -p $L/usr/lib/swift $L/${F}
   cp -L ${libsystem}/usr/lib/libSystem.B.dylib $L/usr/lib/
   cp -a ${libsystem}/usr/lib/system $L/usr/lib/ 2>/dev/null || true
-  cp -L ${foundation}/usr/lib/libFoundation.dylib ${p.libobjc-arm64}/usr/lib/libobjc.A.dylib ${p.coreFoundation-arm64}/usr/lib/libCoreFoundation.dylib $L/usr/lib/
+  cp -L ${foundation}/usr/lib/libFoundation.dylib ${p.libobjc-arm64}/usr/lib/libobjc.A.dylib ${p.coreFoundation-arm64}/usr/lib/libCoreFoundation.dylib ${p.iokit-arm64}/usr/lib/libIOKitCF.dylib $L/usr/lib/
   ln -s libobjc.A.dylib $L/usr/lib/libobjc.dylib
   for f in ${p.icuCore-arm64}/usr/lib/libicu*.dylib; do cp -P $f $L/usr/lib/; done
   cp -L ${swift}/usr/lib/swift/*.dylib $L/usr/lib/swift/
@@ -46,8 +50,9 @@ in pkgs.runCommand "siliconforest-macos-app-compat-arm64" { nativeBuildInputs = 
   cp -L ${coreservices}/${F}/CoreServices.framework/Versions/A/CoreServices $L/${F}/CoreServices.framework/Versions/A/
   cp -L ${audiotoolbox}/${F}/AudioToolbox.framework/Versions/A/AudioToolbox $L/${F}/AudioToolbox.framework/Versions/A/
   chmod -R u+w $L
-  mkdir -p src/compat src/hb; cp ${./compat}/* src/compat/; cp ${../homebrew/hb_macho.py} src/hb/hb_macho.py
-  export CC=${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang LD=${p.native-ld}/bin/ld SDK=${sdk} LINKROOT=$L PY=python3 HB=$PWD/src/hb
+  mkdir -p src/compat src/hb src/am; cp ${./compat}/* src/compat/; cp ${../homebrew/hb_macho.py} src/hb/hb_macho.py
+  for f in CoreFoundation-am.m Foundation-am.m CoreServices-am.c IOKit-am.c; do cp ${../activity-monitor/libs}/$f src/am/; done
+  export CC=${p.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-clang LD=${p.native-ld}/bin/ld SDK=${sdk} LINKROOT=$L PY=python3 HB=$PWD/src/hb AM=$PWD/src/am
   export INC="-I${libsystem}/usr/include -I${p.libobjc-arm64}/usr/include -I${p.coreFoundation-arm64}/include -I${foundation}/usr/include -I${p.icuCore-arm64}/include"
   export HOME=$PWD
   bash src/compat/build.sh $out > build.log 2>&1 || { tail -40 build.log; exit 1; }

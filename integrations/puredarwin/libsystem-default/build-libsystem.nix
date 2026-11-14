@@ -39,6 +39,8 @@
 #       under /System/Library/FeatureFlags and /Library/Preferences/FeatureFlags as macOS does
 #       (Finch's reader, MIT OR Apache-2.0, kept with its notice in stub/pd_featureflags.c);
 #       before, every feature was off (Terminal's DirectColor: true colour drawn as bands).
+#   + patches/memorystatus-level.patch (GitHub issue 53): memorystatus_get_level(), the wrapper of
+#       the kernel's system call 453 (the memory-pressure level Activity Monitor's Memory tab draws).
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let
@@ -55,5 +57,6 @@ in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
     ./patches/dyld-objc-writes-data-const.patch
     ./patches/macos26-sdk-imports.patch
     ./patches/feature-flags.patch
+    ./patches/memorystatus-level.patch
   ];
 })

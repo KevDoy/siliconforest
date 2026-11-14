@@ -7,10 +7,14 @@
 #                                           (CoreFoundation and Foundation re-export /usr/lib/lib*.dylib,
 #                                           as upstream's framework-compat does, and need no .pd)
 #     new       ColorSync, DataDetectorsCore, CoreAnalytics, libScreenReader
+#     with Apple's Activity Monitor's additions ($AM, default ../../activity-monitor/libs;
+#     docs/roadmap/issues/SF-AA-activity-monitor.md) in the CoreFoundation, Foundation and CoreServices
+#     wrappers, and IOKit's wrapper (at that path the root has a link to /usr/lib/libIOKitCF.dylib, as
+#     for CoreFoundation: it re-exports the library and needs no .pd)
 # Environment: CC (cross clang), LD (ld for -fuse-ld), SDK, LINKROOT (a root holding the real
 # libraries at their install paths, to link against), INC (extra -I flags), PY (python3), HB (directory of hb_macho.py).
 set -euo pipefail
-OUT=${1:?out}; S=$(cd "$(dirname "$0")" && pwd); W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+OUT=${1:?out}; S=$(cd "$(dirname "$0")" && pwd); AM=${AM:-$S/../../activity-monitor/libs}; W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 F=/System/Library/Frameworks; PF=/System/Library/PrivateFrameworks
 CF="-isysroot $SDK -mmacosx-version-min=26.5 -O2 -Wall -Wno-deprecated-declarations -Wno-unused-parameter -Wno-nullability-completeness -Wno-objc-root-class -fno-objc-arc -fobjc-exceptions -fblocks -D_DARWIN_C_SOURCE -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 $INC"
 LF="-fuse-ld=$LD -nostdlib -isysroot $SDK -Wl,-syslibroot,$LINKROOT -mmacosx-version-min=26.5 -dynamiclib -Wl,-platform_version,macos,26.5,26.5 -Wl,-headerpad_max_install_names -L$LINKROOT/usr/lib"
@@ -55,14 +59,15 @@ PYEOF
 }
 OBJC="-lobjc -lFoundation -lCoreFoundation"
 # CoreFoundation and Foundation at their framework paths (the root has links to /usr/lib there)
-lib $F/CoreFoundation.framework/Versions/A/CoreFoundation 150:1338 $S/CoreFoundation.m -- \
+lib $F/CoreFoundation.framework/Versions/A/CoreFoundation 150:1338 $S/CoreFoundation.m $AM/CoreFoundation-am.m -- \
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/libCoreFoundation.dylib -lobjc -licucore
-lib $F/Foundation.framework/Versions/C/Foundation 300:5026.5.4 $S/Foundation.m -- \
+lib $F/Foundation.framework/Versions/C/Foundation 300:5026.5.4 $S/Foundation.m $AM/Foundation-am.m -- \
   -Wl,-reexport_library,$LINKROOT/usr/lib/libFoundation.dylib -Wl,-reexport_library,$LINKROOT/usr/lib/swift/libswiftFoundation.dylib -lobjc -lCoreFoundation
 # (CoreGraphics' and CoreText's additions are in those frameworks themselves: ../../cocoa/patches 0023, 0025)
 wrap QuartzCore A 1:1 $S/QuartzCore.m -- $OBJC
 wrap Carbon A 2:170 $S/Carbon.c --
-wrap CoreServices A 1:1226 $S/CoreServices.c -- -lCoreFoundation
+wrap CoreServices A 1:1226 $S/CoreServices.c $AM/CoreServices-am.c -- -lCoreFoundation
+lib $F/IOKit.framework/Versions/A/IOKit 1:275 $AM/IOKit-am.c -- -Wl,-reexport_library,$LINKROOT/usr/lib/libIOKitCF.dylib -lCoreFoundation
 wrap AudioToolbox A 1:1000 $S/AudioToolbox.c -- -lCoreFoundation
 # new libraries
 lib $F/ColorSync.framework/Versions/A/ColorSync 1:1 $S/ColorSync.c -- -lCoreFoundation

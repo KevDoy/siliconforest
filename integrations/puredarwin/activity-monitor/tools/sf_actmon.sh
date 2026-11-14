@@ -9,7 +9,7 @@
 #   sf_actmon.sh stage           runs/sf-actmon/stage/root: the libraries, the test AppKit and
 #                                CoreGraphics (runs/sf-actmon/appkit-build, cg-build: ACTMON's cocoa
 #                                patches 0100+ over the committed series), the test libSystem
-#                                (../build-libsystem-am.nix); probes and run.sh
+#                                (the default recipe, ../../libsystem-default); probes and run.sh
 #   sf_actmon.sh push            the stage and the bundle to /private/var/db/sfam on the target
 #   sf_actmon.sh run [seconds] [VAR=value ...]
 #                                start it there (DYLD_* to the stage), wait, print the log, stop it (KEEP=1: leave it)
@@ -57,7 +57,7 @@ stage)
   ln -sfn A $ST/root/$F/AppKit.framework/Versions/C
   cp $W/cg-build/CoreGraphics $ST/root/$F/CoreGraphics.framework/Versions/A/CoreGraphics
   # the test libSystem (memorystatus_get_level), through DYLD_LIBRARY_PATH only
-  LS=$(nb $A build-libsystem-am.nix); cp $LS/usr/lib/libSystem.B.dylib $ST/root/usr/lib/libSystem.B.dylib
+  LS=$(nb integrations/puredarwin/libsystem-default build-libsystem.nix); cp $LS/usr/lib/libSystem.B.dylib $ST/root/usr/lib/libSystem.B.dylib
   LDF="-fuse-ld=$LD -nostdlib -Wl,-syslibroot,$LINKROOT -L$LINKROOT/usr/lib -Wl,-platform_version,macos,26.5,26.5"
   $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 -isystem $SDK/usr/include $INC $A/probe/sf-am-probe.c $LDF -lSystem -o $ST/sf-am-probe
   $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 -fblocks -isystem $SDK/usr/include $INC $A/probe/sf-sysmon-test.c $LDF -L$ROOT/$W/libs/usr/lib -lsysmon -lSystem -o $ST/sf-sysmon-test

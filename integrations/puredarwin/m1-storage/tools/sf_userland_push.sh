@@ -135,7 +135,7 @@ push|verify)
     # the files every program loads: only as the files a rehearsal passed with
     bad=0
     while read -r path sum _; do
-      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation)
+      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation|*/IOKit.framework/Versions/A/IOKit)
         if grep -q "^$sum  $path " "$REH" 2>/dev/null; then echo "SFPUSH apps core $path $(echo "$sum" | cut -c1-12): rehearsed ($(grep "^$sum  $path " "$REH" | cut -d' ' -f4- | head -1))"
         else echo "SFPUSH apps core $path $(echo "$sum" | cut -c1-12): NOT in $REH"; bad=1; fi;;
       esac
@@ -154,7 +154,7 @@ push|verify)
     # every file of the part there, hashed there, compared here (a wrapped library <name>.pd is the root's own)
     grep -v '\.pd$' "$IN/direct/manifest" | sed 's/^\([0-9a-f]*\) \(.*\)$/\1  \2/' > "$W/apps.sha256"
     while read -r path sum _; do
-      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation) echo "$sum  ${path#/}" >> "$W/apps.sha256";; esac
+      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation|*/IOKit.framework/Versions/A/IOKit) echo "$sum  ${path#/}" >> "$W/apps.sha256";; esac
     done < "$IN/core/replace.list"
     echo "$(cat "$IN/core/dyld.sha256")  usr/lib/dyld" >> "$W/apps.sha256"
     cut -c67- "$W/apps.sha256" | tr '\n' '\0' | "${SSH[@]}" 'cd / && xargs -0 sha256sum 2>&1' > "$W/apps.remote.sha256" || true
@@ -166,7 +166,7 @@ push|verify)
       # it maps, and on the M1 that showed through read(2) for libSystem: 4 words, xpaclri as nop.)
       grep '^<' "$W/apps.diff" | cut -c69- | while read -r f; do
         "${SSH[@]}" "cat '/$f'" < /dev/null > "$W/apps.there" 2>/dev/null || true
-        here=$IN/direct/files/$f; case "$f" in usr/lib/dyld) here=$IN/core/dyld.new;; usr/lib/libSystem.B.dylib|usr/lib/libFoundation.dylib) here=$IN/core/replace/$(basename "$f").new;; */CoreFoundation|*/Foundation) [ -e "$here" ] || here=$IN/core/replace/$(basename "$f").new;; esac
+        here=$IN/direct/files/$f; case "$f" in usr/lib/dyld) here=$IN/core/dyld.new;; usr/lib/libSystem.B.dylib|usr/lib/libFoundation.dylib) here=$IN/core/replace/$(basename "$f").new;; */CoreFoundation|*/Foundation|*/IOKit) [ -e "$here" ] || here=$IN/core/replace/$(basename "$f").new;; esac
         if [ "$(stat -c %s "$W/apps.there")" = "$(stat -c %s "$here")" ]; then echo "SFPUSH apps differs: /$f in $(cmp -l "$W/apps.there" "$here" | wc -l) bytes of $(stat -c %s "$here")"
         else echo "SFPUSH apps differs: /$f is $(stat -c %s "$W/apps.there") bytes there, $(stat -c %s "$here") here"; fi
       done

@@ -11,7 +11,8 @@
 #                                                stream's stack with patches 0001 to 0026)
 #   ApplicationServices.framework, ImageIO.framework   ../cocoa/build-firefox-root.nix
 #   the framework wrappers (CoreFoundation, Foundation, QuartzCore, Carbon, CoreServices,
-#     AudioToolbox, each wrapped library beside its wrapper as <name>.pd), ColorSync,
+#     AudioToolbox, IOKit; each wrapped library beside its wrapper as <name>.pd, IOKit re-exporting
+#     /usr/lib/libIOKitCF.dylib as CoreFoundation does), ColorSync,
 #     DataDetectorsCore, CoreAnalytics, libScreenReader      ./build-compat.nix
 #   usr/bin/open                                 ./system/open.c: `open -a Terminal`, `open <bundle>`
 #   usr/bin/login                                ./system/login.c: `login -pf <user>` (a terminal's session)
@@ -86,6 +87,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   $CC $CF $P/sf-kvo-probe.m $LF -lobjc -lFoundation -lCoreFoundation -lSystem -o $T/sf-kvo-probe
   $CC $CF -DPROBE_COREFOUNDATION $P/sf-framework-probe.c $LF $out/${F}/CoreFoundation.framework/Versions/A/CoreFoundation -lSystem -o $T/sf-corefoundation-framework-probe
   $CC $CF -DPROBE_FOUNDATION $P/sf-framework-probe.c $LF $out/${F}/Foundation.framework/Versions/C/Foundation -lSystem -o $T/sf-foundation-framework-probe
+  $CC $CF -DPROBE_IOKIT $P/sf-framework-probe.c $LF -L${p.iokit-arm64}/usr/lib $out/${F}/IOKit.framework/Versions/A/IOKit -lSystem -o $T/sf-iokit-framework-probe
   # a plain arm64 program with the arm64e subtype in its header: the dyld in use refuses to load
   # arm64 libraries into it, the new one finds that signing does nothing and runs it
   $CC $CF $P/sf-arm64e-probe.c $LF -lSystem -o $T/sf-arm64e-probe.arm64
