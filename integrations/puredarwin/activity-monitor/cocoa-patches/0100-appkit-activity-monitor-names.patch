@@ -1,0 +1,251 @@
+--- a/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
++++ b/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
+@@ -0,0 +1,248 @@
++/* SPDX-License-Identifier: MIT */
++/* What Apple's Activity Monitor (macOS 26.5) imports from AppKit that this AppKit lacked
++   (docs/roadmap/issues/SF-AA-activity-monitor.md):
++     NSWorkspaceDidWakeNotification;
++     NSSearchToolbarItem: a toolbar item whose view is a search field;
++     the compositional layout's description objects (NSCollectionLayoutDimension, ...Size,
++     ...Item, ...Group, ...Section, NSCollectionViewCompositionalLayout): kept as data. This
++     AppKit's NSCollectionView is the old grid of item prototypes and does not lay them out:
++     -setCollectionViewLayout: keeps the layout and the view stays as it is. */
++#import <AppKit/AppKit.h>
++
++NSString *const NSWorkspaceDidWakeNotification = @"NSWorkspaceDidWakeNotification";
++
++#define EXPORT __attribute__((visibility("default")))
++
++/* ---- NSSearchToolbarItem ---- */
++
++EXPORT
++@interface NSSearchToolbarItem : NSToolbarItem {
++    NSSearchField *_searchField;
++    CGFloat _preferredWidthForSearchField;
++    BOOL _resignsFirstResponderWithCancel;
++}
++@end
++
++@implementation NSSearchToolbarItem
++
++- (void)_sfInstallField {
++    if (_searchField == nil) {
++        _searchField = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 22)];
++    }
++    [self setView:_searchField];
++    [self setMinSize:NSMakeSize(100, 22)];
++    [self setMaxSize:NSMakeSize(_preferredWidthForSearchField > 0 ? _preferredWidthForSearchField : 180, 22)];
++}
++
++- (id)initWithItemIdentifier:(NSString *)identifier {
++    if ((self = [super initWithItemIdentifier:identifier]) != nil) {
++        _preferredWidthForSearchField = 180;
++        _resignsFirstResponderWithCancel = YES;
++        [self _sfInstallField];
++    }
++    return self;
++}
++
++- (id)initWithCoder:(NSCoder *)coder {
++    if ((self = [super initWithCoder:coder]) != nil) {
++        _preferredWidthForSearchField = 180;
++        _resignsFirstResponderWithCancel = YES;
++        if ([[self view] isKindOfClass:[NSSearchField class]])
++            _searchField = [(NSSearchField *)[self view] retain];
++        [self _sfInstallField];
++    }
++    return self;
++}
++
++- (void)dealloc {
++    [_searchField release];
++    [super dealloc];
++}
++
++- (NSSearchField *)searchField { return _searchField; }
++
++- (void)setSearchField:(NSSearchField *)field {
++    if (field != _searchField) {
++        [_searchField release];
++        _searchField = [field retain];
++        [self _sfInstallField];
++    }
++}
++
++- (CGFloat)preferredWidthForSearchField { return _preferredWidthForSearchField; }
++- (void)setPreferredWidthForSearchField:(CGFloat)width {
++    _preferredWidthForSearchField = width;
++    [self setMaxSize:NSMakeSize(width, 22)];
++}
++- (BOOL)resignsFirstResponderWithCancel { return _resignsFirstResponderWithCancel; }
++- (void)setResignsFirstResponderWithCancel:(BOOL)value { _resignsFirstResponderWithCancel = value; }
++- (void)beginSearchInteraction { [[_searchField window] makeFirstResponder:_searchField]; }
++- (void)endSearchInteraction {
++    if (_resignsFirstResponderWithCancel)
++        [[_searchField window] makeFirstResponder:nil];
++}
++
++@end
++
++/* ---- the compositional layout's descriptions ---- */
++
++EXPORT
++@interface NSCollectionLayoutDimension : NSObject <NSCopying> {
++    NSInteger _kind; /* 0 fractional width, 1 fractional height, 2 absolute, 3 estimated */
++    CGFloat _dimension;
++}
++@end
++
++@implementation NSCollectionLayoutDimension
+++ (id)_sfWithKind:(NSInteger)kind dimension:(CGFloat)d {
++    NSCollectionLayoutDimension *o = [[self alloc] init];
++    o->_kind = kind;
++    o->_dimension = d;
++    return [o autorelease];
++}
+++ (id)fractionalWidthDimension:(CGFloat)d { return [self _sfWithKind:0 dimension:d]; }
+++ (id)fractionalHeightDimension:(CGFloat)d { return [self _sfWithKind:1 dimension:d]; }
+++ (id)absoluteDimension:(CGFloat)d { return [self _sfWithKind:2 dimension:d]; }
+++ (id)estimatedDimension:(CGFloat)d { return [self _sfWithKind:3 dimension:d]; }
++- (BOOL)isFractionalWidth { return _kind == 0; }
++- (BOOL)isFractionalHeight { return _kind == 1; }
++- (BOOL)isAbsolute { return _kind == 2; }
++- (BOOL)isEstimated { return _kind == 3; }
++- (CGFloat)dimension { return _dimension; }
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++@end
++
++EXPORT
++@interface NSCollectionLayoutSize : NSObject <NSCopying> {
++    NSCollectionLayoutDimension *_width, *_height;
++}
++@end
++
++@implementation NSCollectionLayoutSize
+++ (id)sizeWithWidthDimension:(NSCollectionLayoutDimension *)w heightDimension:(NSCollectionLayoutDimension *)h {
++    NSCollectionLayoutSize *o = [[self alloc] init];
++    o->_width = [w retain];
++    o->_height = [h retain];
++    return [o autorelease];
++}
++- (void)dealloc { [_width release]; [_height release]; [super dealloc]; }
++- (NSCollectionLayoutDimension *)widthDimension { return _width; }
++- (NSCollectionLayoutDimension *)heightDimension { return _height; }
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++@end
++
++EXPORT
++@interface NSCollectionLayoutItem : NSObject <NSCopying> {
++  @public
++    NSCollectionLayoutSize *_layoutSize;
++    NSArray *_subitems;
++    NSInteger _count;
++    BOOL _vertical;
++}
++@end
++
++@implementation NSCollectionLayoutItem
+++ (id)itemWithLayoutSize:(NSCollectionLayoutSize *)size {
++    NSCollectionLayoutItem *o = [[self alloc] init];
++    o->_layoutSize = [size retain];
++    return [o autorelease];
++}
+++ (id)itemWithLayoutSize:(NSCollectionLayoutSize *)size supplementaryItems:(NSArray *)items { return [self itemWithLayoutSize:size]; }
++- (void)dealloc { [_layoutSize release]; [_subitems release]; [super dealloc]; }
++- (NSCollectionLayoutSize *)layoutSize { return _layoutSize; }
++- (void)setContentInsets:(NSEdgeInsets)insets {}
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++@end
++
++EXPORT
++@interface NSCollectionLayoutGroup : NSCollectionLayoutItem
++@end
++
++@implementation NSCollectionLayoutGroup
+++ (id)_sfGroup:(NSCollectionLayoutSize *)size subitems:(NSArray *)items count:(NSInteger)count vertical:(BOOL)v {
++    NSCollectionLayoutGroup *o = [self itemWithLayoutSize:size];
++    o->_subitems = [items copy];
++    o->_count = count;
++    o->_vertical = v;
++    return o;
++}
+++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)s subitem:(NSCollectionLayoutItem *)i count:(NSInteger)n {
++    return [self _sfGroup:s subitems:[NSArray arrayWithObject:i] count:n vertical:NO];
++}
+++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)s subitems:(NSArray *)items {
++    return [self _sfGroup:s subitems:items count:0 vertical:NO];
++}
+++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)s subitem:(NSCollectionLayoutItem *)i count:(NSInteger)n {
++    return [self _sfGroup:s subitems:[NSArray arrayWithObject:i] count:n vertical:YES];
++}
+++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)s subitems:(NSArray *)items {
++    return [self _sfGroup:s subitems:items count:0 vertical:YES];
++}
++- (NSArray *)subitems { return _subitems; }
++- (void)setInterItemSpacing:(id)spacing {}
++@end
++
++EXPORT
++@interface NSCollectionLayoutSection : NSObject <NSCopying> {
++    NSCollectionLayoutGroup *_group;
++}
++@end
++
++@implementation NSCollectionLayoutSection
+++ (id)sectionWithGroup:(NSCollectionLayoutGroup *)group {
++    NSCollectionLayoutSection *o = [[self alloc] init];
++    o->_group = [group retain];
++    return [o autorelease];
++}
++- (void)dealloc { [_group release]; [super dealloc]; }
++- (NSCollectionLayoutGroup *)group { return _group; }
++- (void)setContentInsets:(NSEdgeInsets)insets {}
++- (void)setInterGroupSpacing:(CGFloat)spacing {}
++- (id)copyWithZone:(NSZone *)zone { return [self retain]; }
++@end
++
++EXPORT
++@interface NSCollectionViewCompositionalLayout : NSObject {
++    NSCollectionLayoutSection *_section;
++    id _provider;
++}
++@end
++
++@implementation NSCollectionViewCompositionalLayout
++- (id)initWithSection:(NSCollectionLayoutSection *)section {
++    if ((self = [super init]) != nil)
++        _section = [section retain];
++    return self;
++}
++- (id)initWithSectionProvider:(id)provider {
++    if ((self = [super init]) != nil)
++        _provider = [provider copy];
++    return self;
++}
++- (void)dealloc { [_section release]; [_provider release]; [super dealloc]; }
++- (void)invalidateLayout {}
++@end
++
++@implementation NSCollectionView (SFActivityMonitor)
++static NSMutableDictionary *sfLayouts;
++- (void)setCollectionViewLayout:(id)layout {
++    if (sfLayouts == nil)
++        sfLayouts = [[NSMutableDictionary alloc] init];
++    NSValue *key = [NSValue valueWithNonretainedObject:self];
++    if (layout)
++        [sfLayouts setObject:layout forKey:key];
++    else
++        [sfLayouts removeObjectForKey:key];
++}
++- (id)collectionViewLayout {
++    return [sfLayouts objectForKey:[NSValue valueWithNonretainedObject:self]];
++}
++@end
++
++/* ---- NSUserInterfaceItemIdentification for views (a table's cell views are found by it) ---- */
++#include <objc/runtime.h>
++static const char sfViewIdentifierKey;
++@implementation NSView (SFIdentifier)
++- (NSString *)identifier { return objc_getAssociatedObject(self, &sfViewIdentifierKey); }
++- (void)setIdentifier:(NSString *)identifier { objc_setAssociatedObject(self, &sfViewIdentifierKey, identifier, OBJC_ASSOCIATION_COPY); }
++@end
