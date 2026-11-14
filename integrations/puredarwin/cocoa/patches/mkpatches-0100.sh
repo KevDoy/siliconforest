@@ -4,7 +4,8 @@
 # from the patchwork trees in runs/sf-actmon/pw (not committed):
 #   base/     = runs/cocoa/patchwork/g + the committed patches 0040..0059 (as committed on 14 November)
 #   am-0105/  = base/ + 0100..0105 (frozen)
-#   am/       = am-0105/ + 0106 on (the current tree)
+#   am-0106/  = am-0105/ + 0106 (frozen)
+#   am/       = am-0106/ + 0107 on (the current tree)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -17,6 +18,12 @@ mk base am-0105 0104-appkit-found-with-activity-monitor.patch $A/nib.subproj/NSN
 mk base am-0105 0105-appkit-asset-catalog-colors-from-finch.patch $A/PDCUIPrivate.h $A/PDCUIStore.m $A/PDCUIRendition.m
 mk base am-0105 0102-coregraphics-activity-monitor-cgs.patch src/Frameworks/CoreGraphics/CGActivityMonitorAdditions.m
 ( diff -rq base am-0105 ) | sed 's/^/differs from base: /'
-# 0106 on: am-0105 -> am
-mk am-0105 am 0106-appkit-nib-layout-standard-space-priorities.patch $A/NSLayoutConstraint.m $A/NSView.m $A/NSViewLayout.m $A/NSScrollView.m
-( diff -rq am-0105 am ) | sed 's/^/differs from am-0105: /'
+# 0106: am-0105 -> am-0106
+mk am-0105 am-0106 0106-appkit-nib-layout-standard-space-priorities.patch $A/NSLayoutConstraint.m $A/NSView.m $A/NSViewLayout.m $A/NSScrollView.m
+( diff -rq am-0105 am-0106 ) | sed 's/^/differs from am-0105: /'
+# 0107 on: am-0106 -> am
+mk am-0106 am 0107-appkit-activity-monitor-look-and-cost.patch $A/NSSymbolImages.m $A/NSImage.m $A/nib.subproj/NSCustomResource.m $A/NSImageCell.m \
+  $A/NSMenu.subproj/NSMenuView.m $A/NSTableHeaderView.m $A/NSTableView.m $A/NSTableViewViewBased.m $A/NSOutlineView.m \
+  $A/NSToolbar.subproj/NSToolbarItemView.m $A/NSToolbar.subproj/NSToolbarView.m $A/NSColor.subproj/NSColor_catalog.h \
+  $A/NSColor.subproj/NSColor_catalog.m $A/NSView.m
+( diff -rq am-0106 am ) | sed 's/^/differs from am-0106: /'

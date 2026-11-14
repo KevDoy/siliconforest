@@ -194,6 +194,17 @@
 #         10000 by 10000); a table header as wide as its clip view where no vertical scroller takes room (the
 #         last column's title was under an empty corner); PD_LAYOUT_TRACE=1 prints each layout's constraints
 #         and frames
+#   0107  AppKit: what Activity Monitor showed wrongly or slowly. Our own drawings for the few system symbol
+#         images asked for (info.circle, ellipsis.circle, xmark.octagon, magnifyingglass: SF Symbols are
+#         Apple's font and not copied); a toolbar item's view centred in its item, the toolbar with a margin
+#         above and below (an icon-only toolbar's views were pushed 4 points up and cut); a hidden menu takes no
+#         title in the window's menu strip; an image cell's image is its object value (an image set to nil
+#         showed the nib's placeholder, the application's icon, on every process); a table keeps its columns'
+#         widths unless its column autoresizing style says otherwise, and its header draws an empty header
+#         right of the last column; a view-based table reloads the rows shown in place (the cell's own view is
+#         given back to it) and draws only what changed; a dirty view scrolled out of sight is not drawn; a
+#         system catalog colour is resolved once per appearance; PD_CA_TRACE is read once (it was a getenv per
+#         -setFrame:). Activity Monitor at 5 s: 25 % of a core before, 10 % after (M1)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -259,6 +270,7 @@ let
     ./patches/0104-appkit-found-with-activity-monitor.patch
     ./patches/0105-appkit-asset-catalog-colors-from-finch.patch
     ./patches/0106-appkit-nib-layout-standard-space-priorities.patch
+    ./patches/0107-appkit-activity-monitor-look-and-cost.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

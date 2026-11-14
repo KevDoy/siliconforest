@@ -99,6 +99,7 @@ struct prev {
 	pid_t pid;
 	int64_t start_ns;
 	uint64_t cpu_ns;
+	uint64_t wakeups;   /* idle wake-ups so far */
 	uint64_t seen;   /* generation */
 };
 
@@ -348,7 +349,25 @@ struct procinfo {
 	uint64_t cpu_ns;
 	double cpu_percent;
 	bool have_cpu_percent;
+	double power, average_power;   /* the energy impact estimate (below) */
+	bool have_power, have_average_power;
 };
+
+/* Energy impact. macOS's comes from the kernel's energy accounting of each coalition (CPU, GPU,
+ * wake-ups, disk and network, weighed by a model of the machine), which this kernel does not keep.
+ * What is given here is an ESTIMATE from what it does count, stated as such in
+ * docs/roadmap/issues/SF-AA-activity-monitor.md: the process's CPU percentage plus its idle wake-ups
+ * a second (the "Idle Wake Ups" column: the package woken from idle for it; interrupt wake-ups left
+ * out, every timer tick would count), each wake-up taken as 0.5 ms of a busy core (0.05 points per
+ * wake-up a second). "12 hr Power" (average power score) is the same estimate over the process's
+ * life so far (there is no 12 hours of history: a process younger than that is averaged over its
+ * life, an older one too). */
+#define SYSMON_WAKEUP_POINTS 0.05
+static uint64_t
+wakeups_of(const struct rusage_info_v4 *ru)
+{
+	return ru->ri_pkg_idle_wkups;
+}
 
 static bool
 procinfo(pid_t pid, const struct bits *want, struct procinfo *pi)
@@ -486,6 +505,10 @@ value(uint32_t attribute, const struct procinfo *pi)
 		return u64(pi->ports);
 	if (attribute == ATTR_CPU_PERCENT && pi->have_cpu_percent)
 		return xpc_double_create(pi->cpu_percent);
+	if (attribute == ATTR_POWER_SCORE && pi->have_power)
+		return xpc_double_create(pi->power);
+	if (attribute == ATTR_AVG_POWER_SCORE && pi->have_average_power)
+		return xpc_double_create(pi->average_power);
 	return NULL;   /* not known on this system: left out, never invented */
 }
 
@@ -499,7 +522,7 @@ prev_find(OS_sysmon_request *r, pid_t pid, int64_t start_ns)
 }
 
 static void
-prev_put(OS_sysmon_request *r, pid_t pid, int64_t start_ns, uint64_t cpu_ns)
+prev_put(OS_sysmon_request *r, pid_t pid, int64_t start_ns, uint64_t cpu_ns, uint64_t wakeups)
 {
 	struct prev *p = prev_find(r, pid, start_ns);
 
@@ -518,6 +541,7 @@ prev_put(OS_sysmon_request *r, pid_t pid, int64_t start_ns, uint64_t cpu_ns)
 		p->start_ns = start_ns;
 	}
 	p->cpu_ns = cpu_ns;
+	p->wakeups = wakeups;
 	p->seen = r->generation;
 }
 
@@ -592,16 +616,34 @@ process_table(OS_sysmon_request *r)
 		if (pi.have_rusage) {
 			struct prev *p = prev_find(r, pi.pid, pi.start_ns);
 
+			uint64_t wk = wakeups_of(&pi.ru);
+			struct timespec wall;
+
 			if (p && elapsed > 0) {
 				uint64_t used = pi.cpu_ns >= p->cpu_ns ? pi.cpu_ns - p->cpu_ns : 0;
+				uint64_t woke = wk >= p->wakeups ? wk - p->wakeups : 0;
 
 				pi.cpu_percent = 100.0 * (double)used / (double)elapsed;
 				pi.have_cpu_percent = true;
+				pi.power = pi.cpu_percent + SYSMON_WAKEUP_POINTS * (double)woke * 1e9 / (double)elapsed;
+				pi.have_power = true;
 			} else if (p == NULL) {
 				pi.cpu_percent = 0;   /* first sample of this process: no interval yet */
 				pi.have_cpu_percent = true;
+				pi.power = 0;
+				pi.have_power = true;
 			}
-			prev_put(r, pi.pid, pi.start_ns, pi.cpu_ns);
+			/* over the process's life so far (wall clock, as its start time is) */
+			if (clock_gettime(CLOCK_REALTIME, &wall) == 0) {
+				int64_t life = (int64_t)wall.tv_sec * 1000000000LL + wall.tv_nsec - pi.start_ns;
+
+				if (life > 1000000000LL) {
+					pi.average_power = 100.0 * (double)pi.cpu_ns / (double)life +
+					                   SYSMON_WAKEUP_POINTS * (double)wk * 1e9 / (double)life;
+					pi.have_average_power = true;
+				}
+			}
+			prev_put(r, pi.pid, pi.start_ns, pi.cpu_ns, wk);
 		}
 		row = row_new(attributes);
 		for (uint32_t a = 0; attributes && a < attributes->size * 8; a++) {

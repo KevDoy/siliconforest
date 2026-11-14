@@ -60,6 +60,8 @@ struct sf_manager {
 	struct sf_source *sources;
 	uint64_t context;
 	pthread_mutex_t lock;
+	void (^pending)(void);      /* the completion of the query in flight */
+	uint64_t pending_context;   /* its request's context: the kernel's success message names it */
 };
 
 /* source object -> source */
@@ -138,10 +140,20 @@ static bool set_description(struct sf_source *s, uint32_t provider, const uint8_
 	const void *keys[2] = { kNStatSrcKeyPID, kNStatSrcKeyInterface }, *vals[2] = { p, i };
 	CFDictionaryRef d = CFDictionaryCreate(NULL, keys, vals, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	CFRelease(p); CFRelease(i);
-	bool first = s->properties == NULL;
+	/* the description as macOS hands it: the source's properties with its counts */
+	if (s->counts) {
+		CFMutableDictionaryRef all = CFDictionaryCreateMutableCopy(NULL, 0, d);
+		CFIndex n = CFDictionaryGetCount(s->counts);
+		const void *ck[8], *cv[8];
+		if (n > 8) n = 8;
+		CFDictionaryGetKeysAndValues(s->counts, ck, cv);
+		for (CFIndex k = 0; k < n; k++) CFDictionarySetValue(all, ck[k], cv[k]);
+		CFRelease(d);
+		d = all;
+	}
 	if (s->properties) CFRelease(s->properties);
 	s->properties = d;
-	return first;
+	return true;   /* the description block hears each description, as on macOS */
 }
 
 static void get_description(struct sf_manager *m, uint64_t srcref)
@@ -234,7 +246,15 @@ static void handle(struct sf_manager *m, const uint8_t *buf, size_t len)
 				}
 			}
 			break;
+		case NSTAT_MSG_TYPE_SUCCESS:
 		case NSTAT_MSG_TYPE_ERROR:
+			/* the end of the query in flight: its completion runs after every update it brought */
+			if (m->pending && h->context == m->pending_context) {
+				void (^done)(void) = m->pending;
+				m->pending = NULL;
+				done();
+				Block_release(done);
+			}
 			break;
 		}
 		buf += n;
@@ -335,18 +355,41 @@ EXPORT int NStatManagerAddAllUDP(CFTypeRef m) { return add_all((void *)m, NSTAT_
 EXPORT int NStatManagerQueryAllSourcesUpdate(CFTypeRef ref, void (^done)(void))
 {
 	struct sf_manager *m = (void *)ref;
+	__block uint64_t ctx = 0;
 	if (m && m->fd >= 0) {
 		nstat_msg_query_src_req q;
 		memset(&q, 0, sizeof(q));
-		q.hdr.context = ++m->context;
+		q.hdr.context = ctx = ++m->context;
 		q.hdr.type = NSTAT_MSG_TYPE_GET_UPDATE;
 		q.hdr.length = sizeof(q);
 		q.srcref = NSTAT_SRC_REF_ALL;
 		send_msg(m, &q, sizeof(q));
 	}
-	/* the updates arrive on the queue after this; the completion follows them there */
-	if (done && m)
-		dispatch_async(m->queue, done);
+	/* the updates arrive on the queue after this; the completion runs when the kernel says the query is
+	 * done (its success message), or after a second if it never does. (It was run at once, before any
+	 * update was read: Activity Monitor read every process's network bytes as 0.) */
+	if (done && m) {
+		void (^copy)(void) = Block_copy(done);
+		dispatch_async(m->queue, ^{
+			if (m->pending) {   /* an earlier query that was never answered */
+				void (^old)(void) = m->pending;
+				m->pending = NULL;
+				old();
+				Block_release(old);
+			}
+			m->pending = copy;
+			m->pending_context = ctx;
+			uint64_t mine = ctx;
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), m->queue, ^{
+				if (m->pending && m->pending_context == mine) {
+					void (^late)(void) = m->pending;
+					m->pending = NULL;
+					late();
+					Block_release(late);
+				}
+			});
+		});
+	}
 	return 0;
 }
 
