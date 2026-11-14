@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: MIT */
+/* Our declarations of public numeric facts absent from PD headers. */
+#pragma once
+enum {
+    kCGColorSpaceModelXYZ=7,
+    kCGImagePixelFormatMask=983040,
+    kCGImagePixelFormatRGB101010=196608,
+    kCGImagePixelFormatRGB555=65536,
+    kCGImagePixelFormatRGB565=131072,
+    kCGImagePixelFormatRGBCIF10=262144,
+    kCVPixelFormatType_16BE555=16,
+    kCVPixelFormatType_16BE565=1110783541,
+    kCVPixelFormatType_16Gray=1647392359,
+    kCVPixelFormatType_16LE555=1278555445,
+    kCVPixelFormatType_16LE5551=892679473,
+    kCVPixelFormatType_16LE565=1278555701,
+    kCVPixelFormatType_24BGR=842285639,
+    kCVPixelFormatType_32AlphaGray=1647522401,
+    kCVPixelFormatType_422YpCbCr10=1983000880,
+    kCVPixelFormatType_422YpCbCr16=1983000886,
+    kCVPixelFormatType_422YpCbCr8FullRange=2037741158,
+    kCVPixelFormatType_422YpCbCr_4A_8BiPlanar=1630697081,
+    kCVPixelFormatType_4444AYpCbCr16=2033463606,
+    kCVPixelFormatType_4444AYpCbCr8=2033463352,
+    kCVPixelFormatType_4444YpCbCrA8=1983131704,
+    kCVPixelFormatType_4444YpCbCrA8R=1916022840,
+    kCVPixelFormatType_444YpCbCr10=1983131952,
+    kCVPixelFormatType_444YpCbCr8=1983066168,
+    kCVPixelFormatType_48RGB=1647589490,
+    kCVPixelFormatType_OneComponent32Float=1278226534,
+    kCVPixelFormatType_TwoComponent16Half=843264104,
+    kCVPixelFormatType_TwoComponent32Float=843264102,
+};

@@ -120,6 +120,7 @@ for name,props in properties.items():
         if n in ['class','superclass','hash','isCancelled','isExecuting','isFinished']:continue
         attributes='copy' if '^' in t or t.startswith(('NSString','NSArray','NSDictionary','NSData','NSDate','NSURL','NSNumber','NSUUID','NSSet')) else ('retain' if '*' in t or t=='id' or t.startswith('id<') else 'assign')
         if name=='CKSyncEngineConfiguration' and n=='delegate':attributes='weak'
+        if n in ('longLived','atomic'):attributes+=',getter=is'+n[0].upper()+n[1:]
         declaration=t.replace('(^)', '(^'+n+')') if '^' in t else t+' '+n
         declarations.append('@property('+attributes+') '+declaration+';')
     marker='@interface '+name+' : '+classes[name]+'\n'

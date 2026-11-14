@@ -20,10 +20,10 @@ in pkgs.stdenv.mkDerivation {
     ${cc} $CF -dynamiclib objects/account_store.o objects/password_hash.o $LF -install_name ${prefix}/Libraries/libfinchaccount.dylib -lSystem -o libfinchaccount.dylib
     ${cc} $CF -c userland/OpenDirectory/CFOpenDirectory.c -o objects/cf.o
     ${cc} $CF -fno-objc-arc -c userland/OpenDirectory/CFOpenDirectoryConstants_Generated.m -o objects/cfconst.o
-    ${cc} $CF -dynamiclib objects/cf.o objects/cfconst.o $LF -L. -lfinchaccount -lCoreFoundation -lFoundation -lobjc -lSystem -install_name ${cfdir}/CFOpenDirectory -o CFOpenDirectory
+    ${cc} $CF -dynamiclib objects/cf.o objects/cfconst.o $LF -L. -lfinchaccount -lCoreFoundation -lFoundation -lobjc -lSystem -install_name ${cfdir}/CFOpenDirectory -current_version 1 -compatibility_version 1 -o CFOpenDirectory
     ${cc} $CF -fno-objc-arc -Wno-incomplete-implementation -c userland/OpenDirectory/ODObjects.m -o objects/od.o
     ${cc} $CF -fno-objc-arc -c userland/OpenDirectory/OpenDirectoryConstants_Generated.m -o objects/odconst.o
-    ${cc} $CF -dynamiclib objects/od.o objects/odconst.o $LF -L. -lfinchaccount -Wl,-reexport_library,$PWD/CFOpenDirectory -lFoundation -lCoreFoundation -lobjc -lSystem -install_name ${prefix}/OpenDirectory -o OpenDirectory
+    ${cc} $CF -dynamiclib objects/od.o objects/odconst.o $LF -L. -lfinchaccount -Wl,-reexport_library,$PWD/CFOpenDirectory -lFoundation -lCoreFoundation -lobjc -lSystem -install_name ${prefix}/OpenDirectory -current_version 1 -compatibility_version 1 -o OpenDirectory
   '';
   installPhase = ''
     od=$out${prefix}; cf=$out${cfdir}

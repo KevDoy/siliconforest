@@ -1,28 +1,38 @@
-Accelerate source port in progress. Four whole source groups (vDSP, vMisc, BLAS,
-LAPACK) build and remain staged; no Accelerate framework was installed.
+Eight whole numeric source groups build: vDSP, vMisc, BLAS, LAPACK, Quadrature,
+LinearAlgebra, SparseBLAS and Sparse. They remain staged; no Accelerate framework
+was installed. Build them with `nix-build --no-out-link build.nix --arg groups
+'[ "vDSP" "vMisc" "BLAS" "LAPACK" "Quadrature" "LinearAlgebra" "SparseBLAS" "Sparse" ]'`.
+The default whole-framework build additionally compiles all 18 vImage C files,
+but linking needs four CoreGraphics color-space exports requested from COCOA3.
+The authored whole-framework umbrella/layout has not run past that link failure.
 
-Build these explicitly with `nix-build --no-out-link build.nix --arg groups
-'[ "vDSP" "vMisc" "BLAS" "LAPACK" ]'`. `tests.nix` checks independent known
-vectors; `comparison.nix` builds the original vdsp/vmisc/blas comparison tests.
-On M1 the known-vector assertions pass; the original tests exit 0 with 300,
-207 and 614 output lines, respectively. Mac output comparisons are pending.
+Our C declarations come from preprocessed Finch definitions through
+`tools/c_functions.py`; typed headers and Sparse overload glue are ours.
+BLAS's original ABI generator consumes our signatures/symbol list. No SDK
+headers, inline implementations or .tbd files are used. Public numeric/layout
+facts were checked against maintainer bindings and Linux-built runtime probes
+on native macOS. Our catalogue is not the complete Apple SDK API catalogue.
 
-Our C declarations are derived from preprocessed Finch function definitions
-using `tools/c_functions.py`; typed headers are ours. BLAS's original ABI
-wrapper generator consumes our signatures/symbol list, never SDK headers or
-.tbd files. Legacy/new single-real return ABIs and 32/64-bit BLAS calls have
-independent M1 checks. Compiler-rt supplies local complex arithmetic helpers;
-missing sinpi entry points use PD sincospi locally, inheriting its accuracy.
+Identical Linux-built comparison binaries run on M1 and the authorized M5.
+Printed results match exactly for vDSP (300 lines), vMisc (207), BLAS (614),
+SparseBLAS (348) and Quadrature (40). Independent M1 vector checks cover FFT,
+biquad, vForce, 32/64-bit and legacy/new BLAS ABIs and LAPACK LU/inverse.
+Sparse direct/iterative solver assertions pass on both systems. The 62-line
+Sparse comparison differs on FGMRES with a diagonal preconditioner: native
+Accelerate reports a parameter error, while Finch converges. Keep this DIFF.
+Printed comparisons do not establish general numerical accuracy equivalence.
 
-The default recipe names the intended whole tree, but vImage, Quadrature,
-LinearAlgebra and both sparse groups still need declarations/runtime work.
-Finch's Sparse overload translation unit relies on SDK inline implementations;
-we must author equivalent glue. LinearAlgebra depends on private OS_object
-allocation/metaclass symbols absent from PD and needs a local lifetime adapter.
-No placeholders or successful whole-framework claim are supplied.
+LinearAlgebra's numeric/lifetime results match; its 247-line comparison differs
+only in superclass: our real NSObject-backed OS_la_object adapter replaces the
+unavailable private OS_object allocator/metaclass. Full private OS_object
+interoperability is not established. Quadrature workspace bounds and enum values
+were checked with native runtime probes; our QAGS workspace macro is a conservative
+budget, not a copied SDK macro. Compiler-rt supplies complex arithmetic helpers.
+Our local sinpi/cospi/tanpi reduction preserves integer/half-integer values;
+compile it without builtin folding. vDSP rounded int16 conversion saturates.
 
-`reference.nix` builds a runtime-only LA ABI probe here on Linux. Controller
-execution is requested through Claude; no Mac build or SDK copy is authorized.
-Public type facts can be checked against Apple API documentation, e.g.
-https://developer.apple.com/documentation/accelerate/la_count_t ; these are facts
-for our declarations, not SDK files. The controller probe will verify values.
+`tests.nix`, `comparison.nix`, `object-tests.nix`, `sparse-tests.nix` and
+`solver-tests.nix` build the corresponding CLI checks here on Linux.
+`reference.nix` builds the runtime ABI/workspace probes. Reference execution
+uses fresh /tmp directories, SHA256 verification and 30-second timeouts, with
+no Mac builds, installs, DYLD overrides or Apple files copied back.

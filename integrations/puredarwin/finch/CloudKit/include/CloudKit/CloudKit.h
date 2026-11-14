@@ -189,7 +189,7 @@ extern NSString * const CKShareTypeKey;
 @interface CKOperationConfiguration : NSObject
 @property(assign) BOOL allowsCellularAccess;
 @property(retain) CKContainer * container;
-@property(assign) BOOL longLived;
+@property(assign,getter=isLongLived) BOOL longLived;
 @property(assign) NSQualityOfService qualityOfService;
 @property(assign) NSTimeInterval timeoutIntervalForRequest;
 @property(assign) NSTimeInterval timeoutIntervalForResource;

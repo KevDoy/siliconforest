@@ -36,7 +36,9 @@ int main(void) {
     object invalid=la_matrix_from_double_buffer(data,2,1,0,0,0);
     object slice=la_matrix_slice(a,4,0,1,1,1,1);
     printf("dimension=%ld precision=%ld invalid=%ld slice=%ld\n",la_status(mismatch),la_status(precision),la_status(invalid),la_status(slice));
-    for(unsigned int type=0;type<5;type++){
+    /* Test single-bit scalar encodings without taking values from an SDK. */
+    for(unsigned i=0;i<21;i++){
+        unsigned int type=i ? 1U<<(i-1) : 0;
         object id=la_identity_matrix(2,type,0);
         printf("scalar %u status=%ld double=%ld float=%ld\n",type,la_status(id),la_matrix_to_double_buffer(out,2,id),la_matrix_to_float_buffer(fout,2,id));
         la_release(id);

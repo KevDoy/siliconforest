@@ -1,6 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 /* Own declarations from Finch implementations; no Apple SDK metadata. */
 #pragma once
+#if !defined(SF_ACCELERATE_BUILD) && !defined(SF_COMPONENT_vDSP) && !defined(SF_COMPONENT_vMisc) && !defined(SF_COMPONENT_BLAS) && !defined(SF_COMPONENT_LAPACK) && !defined(SF_COMPONENT_vImage) && !defined(SF_COMPONENT_Quadrature) && !defined(SF_COMPONENT_LinearAlgebra) && !defined(SF_COMPONENT_SparseBLAS) && !defined(SF_COMPONENT_Sparse)
+#define SF_COMPONENT_vDSP
+#define SF_COMPONENT_vMisc
+#define SF_COMPONENT_BLAS
+#define SF_COMPONENT_LAPACK
+#define SF_COMPONENT_vImage
+#define SF_COMPONENT_Quadrature
+#define SF_COMPONENT_LinearAlgebra
+#define SF_COMPONENT_SparseBLAS
+#define SF_COMPONENT_Sparse
+#endif
+
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,11 +21,17 @@
 #if defined(SF_COMPONENT_LAPACK) || defined(SF_COMPONENT_BLAS)
 typedef int __LAPACK_int;
 #endif
+#ifdef SF_COMPONENT_LinearAlgebra
+#include <vecLib/LinearAlgebra/LinearAlgebra.h>
+#endif
 #ifdef SF_COMPONENT_vImage
 #include <Accelerate/Image.h>
 #endif
 #ifdef SF_COMPONENT_Quadrature
 #include <Accelerate/Quadrature.h>
+#endif
+#ifdef SF_COMPONENT_SparseBLAS
+#include <vecLib/Sparse/BLAS.h>
 #endif
 #ifdef SF_COMPONENT_Sparse
 #include <Accelerate/Sparse.h>

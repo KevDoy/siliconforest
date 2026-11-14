@@ -23,8 +23,9 @@ def main():
     found = {}
     for path in args.inputs:
         for ret,name,params in definitions(path.read_text()):
+            if name.startswith(('vimage_','la_object_')): continue
             if name.startswith(('v','finch_','_Sparse','Sparse','sparse_','la_','quadrature_')) or re.fullmatch(r'[sdcz][a-z0-9]+_',name):
-                signature = f'{ret} {name}({params});'
+                signature = f'{ret} {name}({params})'+(' SF_LA_RETAINED' if ret=='la_object_t' else '')+';'
                 if name in found and found[name] != signature:
                     raise ValueError('Inconsistent declaration: '+name)
                 found[name] = signature

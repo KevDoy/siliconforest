@@ -44,7 +44,7 @@ in pkgs.stdenv.mkDerivation {
       -L${libsystem}/usr/lib -L${libsystem}/usr/lib/system -L${p.coreFoundation-arm64}/usr/lib -L${p.foundation-arm64}/usr/lib -F${sc}/System/Library/Frameworks \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libsystem}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -Wl,-exported_symbols_list,exports \
-      -install_name /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork \
+      -install_name /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork -current_version 3860.255.112 -compatibility_version 1 \
       ${ssl}/lib/libssl.a ${ssl}/lib/libcrypto.a -framework SystemConfiguration -Wl,-reexport_library,${p.foundation-arm64}/usr/lib/libFoundation.dylib -lCoreFoundation -lFoundation -lSystem -o CFNetwork
   '';
   installPhase = ''
