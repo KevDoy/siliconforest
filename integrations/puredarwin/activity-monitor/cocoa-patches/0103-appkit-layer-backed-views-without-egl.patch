@@ -1,15 +1,17 @@
 --- a/src/Frameworks/AppKit/NSView.m
 +++ b/src/Frameworks/AppKit/NSView.m
-@@ -43,6 +43,8 @@
+@@ -43,6 +43,10 @@
  #import <AppKit/NSViewBackingLayer.h>
  #import <CoreGraphics/CGWindow.h>
  #import <QuartzCore/CALayerContext.h>
 +#include <dlfcn.h>
 +#include <stdlib.h>
++
++static BOOL sfLayerRenderingAvailable(void);
  #import <QuartzCore/CATransaction.h>
  #import <QuartzCore/CADisplayLink.h>
  #import <QuartzCore/CAMetalLayer-Private.h>
-@@ -1684,7 +1686,33 @@
+@@ -1684,7 +1688,33 @@
     _layerContext=nil;
  }
  
@@ -43,3 +45,15 @@
     if([_superview layer]==nil){
      _layerContext=[[CALayerContext alloc] initWithFrame:[self frame]];
      [_layerContext setDelegate:self];
+@@ -1807,7 +1837,10 @@
+    else {
+     if(!_wantsLayer){
+      _wantsLayer=YES;
+-     [self _createLayersInTreeIfNeeded];
++     // without OpenGL there is nothing to render a layer tree with: the view keeps drawing into
++     // its window as an ordinary view (a layer it had no context for was never shown: black)
++     if(sfLayerRenderingAvailable())
++      [self _createLayersInTreeIfNeeded];
+     }
+    }
+ }
