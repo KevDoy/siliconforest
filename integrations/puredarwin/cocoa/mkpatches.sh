@@ -52,8 +52,8 @@ mkty 0033-appkit-scroller-look-macos26.patch $A/NSScroller.m $A/NSInterfacePart/
 ( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq e b ) | sed 's/^/differs from e: /'
 # f/ = after patches 0001-0033 (frozen). mkperf: f -> g, the Terminal.app stream's third set (0034 to 0039).
 mkperf(){ out=$1; shift; : > $P/$out; for f in "$@"; do diff -uN --label a/$f --label b/$f f/$f g/$f >> $P/$out; done; echo "$out $(wc -l < $P/$out)"; }
-# g/ = after patches 0001-0039 (frozen). mkg: g -> b, the Terminal.app stream's fourth set (0040 on).
-mkg(){ out=$1; shift; : > $P/$out; for f in "$@"; do diff -uN --label a/$f --label b/$f g/$f b/$f >> $P/$out; done; echo "$out $(wc -l < $P/$out)"; }
+# g/ = after patches 0001-0039 (frozen). mkg: g -> h, the Terminal.app stream's fourth set (0040 to 0050).
+mkg(){ out=$1; shift; : > $P/$out; for f in "$@"; do diff -uN --label a/$f --label b/$f g/$f h/$f >> $P/$out; done; echo "$out $(wc -l < $P/$out)"; }
 mkperf 0034-coretext-graphics-font-cache-font-directories.patch src/Frameworks/CoreText/KTFont.m src/Frameworks/CoreText/CTRegistry.m src/Frameworks/CoreText/CTInternal.h src/Frameworks/CoreText/CTFontManager.m src/Frameworks/CoreText/CTFont.m
 mkperf 0035-appkit-glyph-advances-font-directory-menu-archive.patch $A/NSApplication.m $A/KTFont_FT.m $A/O2Font_FT.m $A/NSMutableAttributedString.m
 mkperf 0036-windowserver-present-on-release-tab-toplevel.patch src/Frameworks/WindowServer/rpc_wayland.c src/Frameworks/WindowServer/message.h
@@ -72,4 +72,16 @@ mkg 0047-appkit-bindings-write-back.patch $A/NSControl.m $A/NSController/NSContr
 mkg 0048-appkit-find-bar.patch $A/NSTextFinder.m $A/NSMacOS26Additions.m $A/NSMacOS26Additions.h $A/NSResponder.m
 mkg 0049-appkit-font-lookups-remembered.patch $A/O2Font_FT.m $A/NSMutableAttributedString.m
 mkg 0050-appkit-tab-view-macos26.patch $A/NSInterfacePart/NSGraphicsStyle.m
-( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq g b ) | sed 's/^/differs from g: /'
+( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq g h ) | sed 's/^/differs from g: /'
+# h/ = after patches 0001-0050 (frozen, 15 November). mkh: h -> b, the Terminal.app stream's fifth set (0051 on).
+mkh(){ out=$1; shift; : > $P/$out; for f in "$@"; do diff -uN --label a/$f --label b/$f h/$f b/$f >> $P/$out; done; echo "$out $(wc -l < $P/$out)"; }
+mkh 0051-appkit-draw-once.patch $A/NSWindowMenuStrip.m $A/NSMenu.subproj/NSMenuView.m $A/NSWindowTabbing.m
+mkh 0052-appkit-full-screen-key-equivalents.patch $A/NSWindow.m $A/NSMenu.subproj/NSMenu.m $A/NSApplication.m
+mkh 0053-coretext-lines-and-fonts-remembered.patch src/Frameworks/CoreText/CTLine.m src/Frameworks/CoreText/CTTypesetter.m
+mkh 0054-onyx2d-rectangles-without-edges.patch src/Frameworks/Onyx2D/O2Context_builtin.m
+mkh 0055-appkit-save-open-panels.patch $A/PDFilePanel.m $A/NSSavePanel.m $A/NSOpenPanel.m
+mkh 0056-appkit-print-to-pdf-help.patch $A/NSDisplay.m $A/NSPrintOperation.m $A/NSHelpManager.m
+mkh 0057-appkit-rects-outside-display.patch $A/NSView.m
+mkh 0058-windowserver-activation-configure-timing.patch src/Frameworks/WindowServer/rpc_wayland.c
+mkh 0059-appkit-found-walking-the-menus.patch $A/NSFoundWithTerminalAdditions.m $A/NSCell.m $A/NSAttributedString.m
+( cd /home/chrisk/src/darwin-lab/runs/cocoa/patchwork; diff -rq h b ) | sed 's/^/differs from h: /'

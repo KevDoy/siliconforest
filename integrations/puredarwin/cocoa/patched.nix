@@ -132,6 +132,40 @@
 #         were installed, now about 195 ms
 #   0050  AppKit: tab views as on macOS 26 (rounded segments, the selected one white, a faint rounded
 #         pane with a hairline) instead of raised grey bevels, on which a disabled label vanished
+#   0051  AppKit: drawn once: a menu that opens and a tab that is switched to were drawn twice; the
+#         window's menu strip laid out its titles again whenever the content under it was drawn (at
+#         150% the content's top edge falls inside a pixel row of the strip); the strip stays in full
+#         screen; a tab bar redraws when a tab's title changes
+#   0052  AppKit: full screen through the compositor (xdg_toplevel set/unset_fullscreen, the window's
+#         state follows the compositor's, will/did notifications and delegate calls, the menu item
+#         says Enter or Exit Full Screen); Command-= is Command-+ (Bigger); a key equivalent validates
+#         the item it matches, not every menu; a title set again unchanged is no message and no redraw;
+#         a configure that a later one overtook is not applied (a drag resized the window once per
+#         pointer step, each a new backing store and a whole drawing, and fell behind)
+#   0053  CoreText: the line made for an attributed string is kept for the same text and attributes
+#         (a terminal lays out every row of every frame); the CTFont made for an NSFont is kept
+#   0055  AppKit: the save and open panels drawn by AppKit (name, folder, the folder's items, the
+#         application's accessory view, Cancel and Save/Open), macOS's API for them
+#         (-beginSheetModalForWindow:completionHandler:, -setNameFieldStringValue:, -directoryURL ...):
+#         they were left to the display, which had none (Export Text As, Export Settings, Open)
+#   0056  AppKit: printing saves a PDF (there are no printers: the print panel says so and offers
+#         Save as PDF, the operation draws its pages into a PDF context);
+#         -runOperationModalForWindow:delegate:didRunSelector:contextInfo:; a help book that is asked
+#         for says that help is not available (the alert of -showHelp:) instead of raising
+#   0057  AppKit: -getRectsBeingDrawn: and -needsToDrawRect: asked outside a display (a view drawn
+#         into an image by calling -drawRect:, Terminal's profile thumbnails) answer the whole view
+#   0058  WindowServer: a window AppKit brings to the front (kWSWindowOrder: Command-`, the Window
+#         menu) is raised and focused by the compositor through xdg_activation_v1; PD_WS_TIMING
+#         also logs each configure (the time from a configure to the frame of its size)
+#   0059  AppKit: found walking Terminal's menus: a table column can be hidden (-isHidden,
+#         -setHidden:; Terminal's inspector); a cell keeps an object value that cannot be copied
+#         (its process list); the font bindings of a cell (fontBold, fontItalic, fontName, fontSize);
+#         a foreground "colour" that is not one draws black instead of raising in every redraw
+#   0054  Onyx2D: a filled rectangle, a straight stroke along an axis and a stroked outline whose
+#         sides are straight (a rectangle, a rounded rectangle: its arcs alone go through the edge
+#         rasterizer) are covered directly, a row at a time; the rasterizer's winding buffer (2 MB at
+#         the screen's width) is kept for the next context instead of a fresh calloc per context
+#         (a window gets one at every size)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -185,6 +219,12 @@ let
     ./patches/0048-appkit-find-bar.patch
     ./patches/0049-appkit-font-lookups-remembered.patch
     ./patches/0050-appkit-tab-view-macos26.patch
+    ./patches/0051-appkit-draw-once.patch
+    ./patches/0052-appkit-full-screen-key-equivalents.patch
+    ./patches/0055-appkit-save-open-panels.patch
+    ./patches/0056-appkit-print-to-pdf-help.patch
+    ./patches/0057-appkit-rects-outside-display.patch
+    ./patches/0059-appkit-found-walking-the-menus.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -193,6 +233,7 @@ let
     ./patches/0030-windowserver-app-id-without-bundle-identifier.patch
     ./patches/0036-windowserver-present-on-release-tab-toplevel.patch
     ./patches/0043-windowserver-sheet-parent.patch
+    ./patches/0058-windowserver-activation-configure-timing.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -203,6 +244,7 @@ let
     ./patches/0026-onyx2d-copy-bits.patch
     ./patches/0037-onyx2d-font-by-name-once.patch
     ./patches/0042-tip-onyx2d-icns-png-entries.patch
+    ./patches/0054-onyx2d-rectangles-without-edges.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
@@ -212,6 +254,7 @@ let
   coretextSrc = patchedDir "src/Frameworks/CoreText" [
     ./patches/0023-coretext-fixed-pitch-families-private-draw.patch
     ./patches/0034-coretext-graphics-font-cache-font-directories.patch
+    ./patches/0053-coretext-lines-and-fonts-remembered.patch
   ];
   coretext = optimised (pd."coretext-arm64".override { src = coretextSrc; });
   coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [
@@ -225,18 +268,18 @@ let
     buildPhase = builtins.replaceStrings
       [ "cc=\"" "rpc_wayland.o xdg-shell-protocol.o" ]
       [ ''
-        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter; do
+        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1; do
           n=$(basename $x)
           wayland-scanner client-header ${wp}/$x.xml $n-client-protocol.h
           wayland-scanner private-code ${wp}/$x.xml $n-protocol.c
         done
         cc="''
-        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-shell-protocol.o" ]
+        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o xdg-shell-protocol.o" ]
       (builtins.replaceStrings
         [ "$cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o" ]
         [ ''
           $cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o
-              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
+              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
   }));
   appkit = optimised (pd."appkit-msm-arm64".override { src = appkitSrc; inherit windowserver; });
