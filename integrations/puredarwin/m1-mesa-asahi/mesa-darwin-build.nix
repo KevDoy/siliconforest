@@ -3,12 +3,13 @@
 # X11, Wayland or GBM in the closure.  libagx's OpenCL C is compiled by the native build's tools.
 #
 #   nix-build ... mesa-darwin.nix (no window system) / mesa-darwin-wayland.nix
-{ wayland ? false }:
+# `vulkan`, `c`, `nativeTools` and `extraPatches` are for ../m1-vulkan (another Mesa source and its
+# host tools, Honeykrisp added); left at their defaults the derivation is the one it always was.
+{ wayland ? false, vulkan ? false, c ? import ./common.nix, nativeTools ? import ./mesa-native.nix
+, extraPatches ? [ ] }:
 let
-  c = import ./common.nix;
   inherit (c) pkgs p triple sdkRoot;
   lib = pkgs.lib;
-  nativeTools = import ./mesa-native.nix;
   libdrm = p.libdrm-dri-arm64;
   zlib = p.zlib-arm64;
   expat = p.expat-arm64;
@@ -30,6 +31,8 @@ let
     "\nexport PKG_CONFIG_PATH_FOR_BUILD=\"${lib.getDev pkgs.wayland-scanner}/lib/pkgconfig\"" +
     "\nexport PKG_CONFIG_LIBDIR_FOR_BUILD=\"\$PKG_CONFIG_PATH_FOR_BUILD\"");
 
+  # vulkan builds: every translation unit sees ETIME as ETIMEDOUT (pd-etime.h, made in preConfigure)
+  etimeArg = lib.optionalString vulkan ", '-include', '$PWD/pd-compat/pd-etime.h'";
   q = s: "'${s}'";
   list = xs: lib.concatMapStringsSep ", " q xs;
   common = [ "-isysroot" sdkRoot "-mmacosx-version-min=26.5" ];
@@ -46,8 +49,8 @@ let
     "-Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${libSystem}/usr/lib/system/libdyld.dylib"
     "-Wl,-platform_version,macos,26.5,26.5" "-Wl,-fixup_chains"
   ] ++ lib.optional wayland "-L${wl}/lib";
-in pkgs.stdenv.mkDerivation {
-  pname = "darwin-lab-mesa-asahi${lib.optionalString wayland "-wayland"}-arm64-darwin";
+in pkgs.stdenv.mkDerivation ({
+  pname = "darwin-lab-mesa-asahi${lib.optionalString vulkan "-vk"}${lib.optionalString wayland "-wayland"}-arm64-darwin";
   version = c.mesaVersion;
   src = c.mesaSrc;
 
@@ -66,7 +69,7 @@ in pkgs.stdenv.mkDerivation {
     ./patches/0008-egl-pointer-check-without-mincore-on-darwin.patch
     ./patches/0009-report-why-a-window-buffer-could-not-be-exported.patch
     ./patches/0010-asahi-export-wait-for-writer-when-fence-import-fails.patch
-  ];
+  ] ++ extraPatches;
 
   postPatch = ''
     patchShebangs .
@@ -94,9 +97,9 @@ in pkgs.stdenv.mkDerivation {
     install_name_tool = '${tc}/bin/${triple}-install_name_tool'
 
     [built-in options]
-    c_args = [${list cflags}, '-I$PWD/pd-compat']
-    cpp_args = [${list cflags}, '-I$PWD/pd-compat', '-nostdinc++', '-I${cxx}/usr/include/c++/v1']
-    objc_args = [${list cflags}, '-I$PWD/pd-compat']
+    c_args = [${list cflags}, '-I$PWD/pd-compat'${etimeArg}]
+    cpp_args = [${list cflags}, '-I$PWD/pd-compat'${etimeArg}, '-nostdinc++', '-I${cxx}/usr/include/c++/v1']
+    objc_args = [${list cflags}, '-I$PWD/pd-compat'${etimeArg}]
     c_link_args = [${list ldflags}, '-lSystem']
     objc_link_args = [${list ldflags}, '-lSystem']
     cpp_link_args = [${list ldflags}, '-L${cxx}/usr/lib', '-L${cxxabi}/usr/lib', '-lc++', '-lc++abi', '-lSystem']
@@ -120,7 +123,7 @@ in pkgs.stdenv.mkDerivation {
       --buildtype=release \
       -Ddefault_library=shared \
       -Dgallium-drivers=asahi,softpipe \
-      -Dvulkan-drivers= \
+      -Dvulkan-drivers=${lib.optionalString vulkan "asahi"} \
       -Dplatforms=${lib.optionalString wayland "wayland"} \
       -Degl-native-platform=surfaceless \
       -Dopengl=true \
@@ -170,4 +173,26 @@ in pkgs.stdenv.mkDerivation {
 
   dontFixup = true;
   dontStrip = true;
-}
+} // lib.optionalAttrs vulkan {
+  # The generated entrypoint tables take weak references to every entrypoint, which Mach-O can
+  # only leave unresolved through dynamic lookup (PureDarwin's mesa-powervr.nix does the same);
+  # postInstall lists what is left unresolved.
+  preConfigure = ''
+    # The kernel's LinuxKPI turns Linux's ETIME into ETIMEDOUT (60), as FreeBSD's does; Darwin's
+    # <errno.h> has a STREAMS ETIME (101) that no kernel path returns. Mesa compares DRM wait
+    # results with ETIME (vk_drm_syncobj.c, wsi_common_drm.c, hk_query_pool.c, agx_fence.c, ...):
+    # a syncobj wait that times out became VK_ERROR_UNKNOWN on the M1 (vk-tri, first fence wait).
+    # Mesa uses no STREAMS, so ETIME means the DRM timeout everywhere in it.
+    printf '%s\n' '#include <errno.h>' '#undef ETIME' '#define ETIME ETIMEDOUT' > pd-compat/pd-etime.h
+    substituteInPlace src/vulkan/meson.build \
+      --replace-fail "vulkan_icd_link_args = []" \
+                     "vulkan_icd_link_args = host_machine.system() == 'darwin' ? ['-Wl,-undefined,dynamic_lookup'] : []"
+  '';
+  # the ICD names the driver where the image keeps it; a staged copy brings its own JSON
+  postInstall = ''
+    for icd in "$out"/usr/share/vulkan/icd.d/*.json; do
+      sed -i "s|\"library_path\": \".*/\([^/]*\.dylib\)\"|\"library_path\": \"/usr/lib/\1\"|" "$icd"
+    done
+    ${tc}/bin/${triple}-nm -m -u "$out"/usr/lib/libvulkan_asahi.dylib > "$out"/usr/share/vulkan/libvulkan_asahi.undefined.txt
+  '';
+})
