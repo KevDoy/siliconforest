@@ -561,6 +561,9 @@ row_append(OS_sysmon_row *row, xpc_object_t v)
 	row->values[row->nvalues++] = v;
 }
 
+static int debugging(void);
+API xpc_object_t sysmon_row_get_value(OS_sysmon_row *row, uint32_t attribute);
+
 static OS_sysmon_table *
 process_table(OS_sysmon_request *r)
 {
@@ -608,6 +611,18 @@ process_table(OS_sysmon_request *r)
 		t->rows[t->count++] = row;
 	}
 	prev_sweep(r);
+	if (debugging()) {
+		double top = 0;
+		pid_t toppid = -1;
+		for (uint64_t i = 0; i < t->count; i++) {
+			xpc_object_t p = sysmon_row_get_value(t->rows[i], ATTR_PID), c = sysmon_row_get_value(t->rows[i], ATTR_CPU_PERCENT);
+			if (p && c && xpc_double_get_value(c) > top) {
+				top = xpc_double_get_value(c);
+				toppid = (pid_t)xpc_uint64_get_value(p);
+			}
+		}
+		fprintf(stderr, "sysmon: busiest pid %d %.2f%% over %.2f s\n", toppid, top, elapsed / 1e9);
+	}
 	r->prev_time_ns = now;
 	free(pids);
 	return t;
@@ -690,6 +705,8 @@ disks(uint64_t *rops, uint64_t *wops, uint64_t *rbytes, uint64_t *wbytes)
 	return any;
 }
 
+static int debugging(void);
+
 static OS_sysmon_table *
 system_table(OS_sysmon_request *r)
 {
@@ -762,6 +779,9 @@ system_table(OS_sysmon_request *r)
 		row_append(row, v);
 	}
 	t->rows[t->count++] = row;
+	if (debugging())
+		fprintf(stderr, "sysmon: system threads %llu (asked %d) used pages %llu\n", (unsigned long long)threads,
+		    has(attributes, SYS_THREADS), have_vm ? (unsigned long long)vs.active_count : 0ULL);
 	return t;
 }
 
@@ -907,8 +927,9 @@ sysmon_row_apply(OS_sysmon_row *row, bool (^applier)(uint32_t, xpc_object_t))
 		xpc_object_t v = rank < row->nvalues ? row->values[rank] : NULL;
 
 		rank++;
-		if (!applier(a, v))
-			break;
+		/* every attribute, whatever the applier returns (Activity Monitor's applier returns nothing
+		   it means: stopping at its first answer left all but the first attribute out) */
+		applier(a, v);
 	}
 }
 

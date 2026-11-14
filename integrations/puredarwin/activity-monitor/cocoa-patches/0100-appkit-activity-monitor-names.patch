@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
 +++ b/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
-@@ -0,0 +1,406 @@
+@@ -0,0 +1,462 @@
 +/* SPDX-License-Identifier: MIT */
 +/* What Apple's Activity Monitor (macOS 26.5) imports from AppKit that this AppKit lacked
 +   (docs/roadmap/issues/SF-AA-activity-monitor.md):
@@ -263,18 +263,67 @@
 +@implementation NSColor (SFActivityMonitor)
 ++ (NSColor *)systemCyanColor { return [NSColor colorWithCatalogName:@"System" colorName:@"systemCyanColor"]; }
 ++ (NSColor *)systemMintColor { return [NSColor colorWithCalibratedRed:0.0 green:0.78 blue:0.75 alpha:1.0]; }
-+/* An application's own named colours live in its asset catalog (Assets.car), which nothing here
-+   reads. A name that says its colour ("DockChartBlueColor") gets that system colour; others none. */
++/* An application's named colours, from its asset catalog (Contents/Resources/Assets.car), read with
++   Finch's catalog reader (PDCUIStore.m, PDCUIRendition.m): the colour rendition of the name for the
++   light appearance (or the one without an appearance), its components in its colour space, or the
++   system colour it names. A name the catalog does not have is nil, as on macOS. */
++#include "PDCUIPrivate.h"
++static NSMutableDictionary *sfCatalogs;   /* bundle path -> NSValue of cui_store * (or NSNull) */
++
++static cui_store *sfCatalogOfBundle(NSBundle *bundle) {
++    NSString *key = [bundle bundlePath];
++    if (key == nil)
++        return NULL;
++    if (sfCatalogs == nil)
++        sfCatalogs = [[NSMutableDictionary alloc] init];
++    id v = [sfCatalogs objectForKey:key];
++    if (v == nil) {
++        NSString *path = [bundle pathForResource:@"Assets" ofType:@"car"];
++        cui_store *store = path ? cui_store_open([path fileSystemRepresentation]) : NULL;
++        v = store ? (id)[NSValue valueWithPointer:store] : (id)[NSNull null];
++        [sfCatalogs setObject:v forKey:key];
++    }
++    return [v isKindOfClass:[NSValue class]] ? [v pointerValue] : NULL;
++}
++
 ++ (NSColor *)colorNamed:(NSString *)name bundle:(NSBundle *)bundle {
-+    static const struct { const char *word, *system; } words[] = {
-+        { "Blue", "systemBlueColor" }, { "Red", "systemRedColor" }, { "Green", "systemGreenColor" },
-+        { "Yellow", "systemYellowColor" }, { "Orange", "systemOrangeColor" }, { "Purple", "systemPurpleColor" },
-+        { "Pink", "systemPinkColor" }, { "Cyan", "systemCyanColor" }, { "Teal", "systemTealColor" },
-+        { "Gray", "systemGrayColor" }, { "Grey", "systemGrayColor" },
-+    };
-+    for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); i++)
-+        if ([name rangeOfString:[NSString stringWithUTF8String:words[i].word]].location != NSNotFound)
-+            return [NSColor colorWithCatalogName:@"System" colorName:[NSString stringWithUTF8String:words[i].system]];
++    cui_store *store = sfCatalogOfBundle(bundle ? bundle : [NSBundle mainBundle]);
++    const cui_facet *facet = (store && name) ? cui_store_facet(store, [name UTF8String]) : NULL;
++    if (facet == NULL)
++        return nil;
++    uint16_t aqua = 0, dark = 0;
++    BOOL haveAqua = cui_store_appearance(store, "NSAppearanceNameAqua", &aqua);
++    BOOL haveDark = cui_store_appearance(store, "NSAppearanceNameDarkAqua", &dark);
++    size_t first = 0, n = cui_store_renditions_for_identifier(store, facet->attrs.v[CUI_ATTR_IDENTIFIER], &first);
++    const cui_csi *best = NULL;
++    cui_csi csi, chosen;
++    int bestScore = -1;
++    for (size_t i = first; i < first + n; i++) {
++        const cui_rendition *r = &store->rends[i];
++        if (!cui_csi_parse(r->csi, r->len, &csi) || csi.layout != CUI_LAYOUT_COLOR)
++            continue;
++        uint16_t app = r->key.v[CUI_ATTR_APPEARANCE];
++        int score = (haveAqua && app == aqua) ? 3 : (app == 0 ? 2 : ((haveDark && app == dark) ? 0 : 1));
++        if (score > bestScore) {
++            bestScore = score;
++            chosen = csi;
++            best = &chosen;
++        }
++    }
++    unsigned space = 0, ncomps = 0;
++    double comps[8];
++    char sysname[128];
++    if (best == NULL || !cui_csi_color(best, &space, comps, &ncomps, sysname, sizeof(sysname)))
++        return nil;
++    if (sysname[0]) {
++        NSColor *c = [NSColor colorWithCatalogName:@"System" colorName:[NSString stringWithUTF8String:sysname]];
++        if (c != nil)
++            return c;
++    }
++    if (ncomps >= 4)       /* sRGB, Display P3, extended sRGB: red, green, blue, alpha */
++        return [NSColor colorWithCalibratedRed:comps[0] green:comps[1] blue:comps[2] alpha:comps[3]];
++    if (ncomps == 2)       /* grey, alpha */
++        return [NSColor colorWithCalibratedWhite:comps[0] alpha:comps[1]];
 +    return nil;
 +}
 ++ (NSColor *)colorNamed:(NSString *)name { return [self colorNamed:name bundle:nil]; }
@@ -378,8 +427,12 @@
 +@implementation SFViewTreeDumper
 +static void sfDumpView(NSView *v, int depth) {
 +    NSRect f = [v frame];
-+    NSLog(@"%*s%@ %p {{%.0f,%.0f},{%.0f,%.0f}}%@%@", depth * 2, "", [v class], v, f.origin.x, f.origin.y, f.size.width, f.size.height,
-+        [v isHidden] ? @" hidden" : @"", [v respondsToSelector:@selector(identifier)] && [(id)v identifier] ? [NSString stringWithFormat:@" id=%@", [(id)v identifier]] : @"");
++    NSLog(@"%*s%@ %p {{%.0f,%.0f},{%.0f,%.0f}}%@%@%@", depth * 2, "", [v class], v, f.origin.x, f.origin.y, f.size.width, f.size.height,
++        [v isHidden] ? @" hidden" : @"", [v translatesAutoresizingMaskIntoConstraints] ? @"" : @" constrained", [v respondsToSelector:@selector(identifier)] && [(id)v identifier] ? [NSString stringWithFormat:@" id=%@", [(id)v identifier]] : @"");
++    if (depth <= 8 && getenv("PDViewTreeConstraints"))
++        for (NSLayoutConstraint *c in [v constraints])
++            NSLog(@"%*s  constraint %@.%ld %ld %@.%ld x%.2f %+.1f @%.0f%@", depth * 2, "", [[c firstItem] class], (long)[c firstAttribute], (long)[c relation],
++                [c secondItem] ? (id)[[c secondItem] class] : (id)@"-", (long)[c secondAttribute], [c multiplier], [c constant], [c priority], [c isActive] ? @"" : @" inactive");
 +    if (depth > 14)
 +        return;
 +    NSArray *subs = [v subviews];
@@ -403,7 +456,10 @@
 +    [self performSelector:@selector(dump:) withObject:nil afterDelay:s ? atof(s) : 10];
 +}
 ++ (void)load {
-+    if (getenv("PDViewTreeDump"))
-+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(schedule:) name:NSApplicationDidFinishLaunchingNotification object:nil];
++    const char *s = getenv("PDViewTreeDump");
++    if (s)
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(atof(s) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++            [SFViewTreeDumper dump:nil];
++        });
 +}
 +@end

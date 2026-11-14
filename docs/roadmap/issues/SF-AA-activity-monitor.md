@@ -10,6 +10,16 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, third round (M1, synthetic input, captures `runs/sf-actmon/shots/am22.png`): the
+  CPU tab shows real %CPU (Activity Monitor itself 43.6, the compositor 13.3, kernel_task 5.4 ...),
+  sorted by %CPU as macOS's default, CPU time as m:ss.hh, idle wake-ups, names cut with an
+  ellipsis; the bottom pane has the real System/User/Idle percentages (4.63 % / 14.22 % / 81.15 %),
+  the CPU load graph, Threads 181 and Processes 33. Faults behind it (table below): NIBArchive
+  booleans read inverted, a cell's line break mode cut to two bits, custom views' constraints not
+  decoded, value transformers named by class not made, the number formatter's styles, libsysmon's
+  row applier stopping early, a whole-window constraint solve per table cell (AM at 100-200 % CPU).
+  Open: the table header draws black, AM's own CPU cost, the toolbar's symbol images, an action
+  menu that sometimes shows at launch.
 - 14 November, second round (on the M1, synthetic input only, nobody looked at the panel): dyld
   reaches `main` from the stage (`sf-prof` samples: `NSApplicationMain` -> `-[NSApplication init]`);
   the main window is on the compositor with its toolbar (CPU, Memory, Energy, Disk, Network), the
@@ -34,6 +44,12 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | The first process table came after one update interval (5 s) | a running request's new interval also moved its next table | `libs/sysmon.m`: a table at once |
 | Values after the first unknown attribute were missing | this libxpc keeps no null object in an array | `libs/sysmon.m`: the row keeps its values itself |
 | Thread count 15360 | `kern.num_threads` is the limit | sum of the processes' threads |
+| AM at 100-200 % CPU, the main thread in the constraint solver | every cell view's constraints made the whole window be solved, at each display | cocoa 0101: a table row view is the top of its own layouts and left out of the window's |
+| %CPU 0.0, the bottom pane 102 points below the window | every BOOL of a NIBArchive nib read inverted (type 4 is false, 5 true: separator menu items carry `NSIsSeparator` as 5) | cocoa 0104 (`NSNibArchiveUnarchiver.m`; told TERM, `requests-for-TERM.md`) |
+| Long process names blank | a cell's line break mode read from two of its three bits: truncating tail became word wrapping | cocoa 0104 (`NSCell.m`) |
+| The summary box black, its figures one digit wide | a custom view (NSCustomView) lost its archived constraints; the box's colour is a named colour of the app's catalog | cocoa 0104 (`NSCustomView.m`); 0105 (Finch's catalog reader) |
+| Percentages printed as 0.0583911453518234, threads 0 | bindings did not make value transformers named by class; the number formatter printed every style as `%.3f`; libsysmon's row applier stopped at the first attribute's answer | cocoa 0104 (`NSBinder.m`); `libs/Foundation-am.m`; `libs/sysmon.m` |
+| A figure stayed as wide as its first value | a new value did not invalidate a constrained label's intrinsic size | cocoa 0104 (`NSControl.m`) |
 
 ## The binary
 | | |
@@ -109,6 +125,7 @@ Finch (`sources/finch`, "MIT OR Apache-2.0"), commit `2d9b1bb`:
 | Finch file | Where here | What |
 |---|---|---|
 | `userland/libsysmon/sysmon.m` | `activity-monitor/libs/sysmon.m` (Finch's notice at the top, our changes listed under it) | the request/table/row model (attribute bit arrays, values in an XPC array in attribute order, interval rounding, the appliers), the in-process process table from libproc and sysctl and its first attributes. Not taken: its OS_object layouts (this libSystem has no `_os_object_alloc`; our objects are Objective-C objects) |
+| `userland/CoreUI/CUIStore.c` (whole), `CUIRendition.c` (`cui_csi_parse`, `cui_csi_tlv`, `cui_csi_color`), `CUIPrivate.h` | cocoa patch 0105: `AppKit/PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h` (notices kept) | the compiled asset catalog reader (BOM store, trees, facets, renditions) and colour renditions, for `+[NSColor colorNamed:]` |
 | `userland/UniformTypeIdentifiers/UTType.m`, `UTCoreTypes.m`, `UTAdditions.m`, `UTTypeTable.inc` | `activity-monitor/libs/UniformTypeIdentifiers/` (unchanged, a line saying so under the SPDX line) | UTType and the system's declared types; the header (`include/`) is ours, from the names |
 
 ## Cocoa patches (ACTMON's numbers 0100..0149)
@@ -121,6 +138,9 @@ series, `am/` = with ours), `cocoa-patches/mkpatches.sh` writes them; test build
 | 0100 | AppKit: `NSWorkspaceDidWakeNotification`, NSSearchToolbarItem, the compositional layout's description objects (kept as data), views' `identifier`; `+[NSColor colorNamed:]` (an application's asset catalog is not read: a name that says its colour gets that system colour), `systemCyanColor`, `monospacedDigitSystemFontOfSize:weight:`, `-[NSBundle imageForResource:]`, `-[NSSavePanel setAllowedContentTypes:]`, `-[NSPrintOperation runOperationModalForWindow:...]`, `-[NSTouchBar setItemIdentifiers:]` |
 | 0101 | AppKit: view-based NSTableView/NSOutlineView (NSTableCellView, NSTableRowView, `makeViewWithIdentifier:owner:`, the table's archived cell-view nibs, row views laid out before each display, reuse), hidden table columns (`NSHidden`, no space in table or header), the header's sort indicator |
 | 0102 | CoreGraphics: `CGSEventIsAppUnresponsive`, `CGSRegisterNotifyProc` |
+| 0103 | AppKit: without EGL a layer-backed view is drawn as an ordinary view (no layer context) |
+| 0104 | AppKit: NIBArchive booleans (4 false, 5 true), a cell's three line-break bits, custom views' constraints and identifier, value transformers named by class, constrained labels re-measured on a new value |
+| 0105 | AppKit: an application's named colours from its `Assets.car`, with Finch's catalog reader (`PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h`) |
 
 ## Tools
 - `tools/sf_actmon.sh libs | stage | push | run | scan | probe`

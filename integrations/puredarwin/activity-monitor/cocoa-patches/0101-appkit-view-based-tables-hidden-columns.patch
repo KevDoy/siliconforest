@@ -902,3 +902,62 @@
          columnRect.origin.x += [column width] + spacing.width;
      }
  }
+--- a/src/Frameworks/AppKit/NSLayoutConstraint.m
++++ b/src/Frameworks/AppKit/NSLayoutConstraint.m
+@@ -165,6 +165,24 @@
+ }
+ 
+ // the constraints every view in the subtree holds, those that are active
++/* A view whose subtree is laid out on its own (a table's row view: the constraints of the cell views
++ * in it name only views of that row) is the top of its own layouts and is left out of its window's:
++ * a window of a hundred rows otherwise solved every row's constraints whenever any one row's view
++ * asked, at each display. (Activity Monitor: docs/roadmap/issues/SF-AA-activity-monitor.md.) */
++static BOOL pdIsLayoutBoundary(NSView *view) {
++    static Class rowView;
++
++    if (rowView == Nil)
++        rowView = NSClassFromString(@"NSTableRowView");
++    return rowView != Nil && [view isKindOfClass:rowView];
++}
++
++static NSView *pdLayoutTop(NSView *view) {
++    while ([view superview] != nil && !pdIsLayoutBoundary(view))
++        view = [view superview];
++    return view;
++}
++
+ static void collectConstraints(NSView *view, NSMutableArray *into) {
+     NSArray *held = objc_getAssociatedObject(view, &constraintsKey);
+ 
+@@ -173,7 +191,8 @@
+             [into addObject:c];
+     }
+     for (NSView *subview in [view subviews])
+-        collectConstraints(subview, into);
++        if (!pdIsLayoutBoundary(subview))
++            collectConstraints(subview, into);
+ }
+ 
+ // a view's place in the bounds of one above it, as an alignment rectangle from that one's top left
+@@ -292,10 +311,8 @@
+         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(_pdLayoutPending) object:nil];
+     }
+     if (outermost) {
+-        NSView *top = self;
++        NSView *top = pdLayoutTop(self);
+ 
+-        while ([top superview] != nil)
+-            top = [top superview];
+         for (int pass = 0; pass < 2 && pdLayoutApplying == 0; pass++)
+             [top _pdLayoutTreeFitting:NO apply:YES];
+         pdLayoutSubtreePass = YES;
+@@ -534,8 +551,7 @@
+ 
+     if (pdLayoutApplying > 0 || pdLayoutSubtreePass || [[self _pdConstraints:NO] count] == 0)
+         return;
+-    while ([top superview] != nil)
+-        top = [top superview];
++    top = pdLayoutTop(self);
+     if (pdResizeDepth > 1) {
+         // inside a resize cascade: once, at its end
+         if (pdResizePending != top) {

@@ -323,7 +323,7 @@ static const char sf_readability_key;
 - (void (^)(NSFileHandle *))readabilityHandler { return nil; }
 @end
 
-static const char sf_minint_key, sf_round_key, sf_format_key;
+static const char sf_minint_key, sf_round_key, sf_format_key, sf_grouping_key;
 
 @implementation NSNumberFormatter (SFActivityMonitor)
 - (void)setMinimumIntegerDigits:(NSUInteger)n { objc_setAssociatedObject(self, &sf_minint_key, [NSNumber numberWithUnsignedInteger:n], OBJC_ASSOCIATION_RETAIN); }
@@ -332,6 +332,78 @@ static const char sf_minint_key, sf_round_key, sf_format_key;
 - (NSUInteger)roundingMode { return [objc_getAssociatedObject(self, &sf_round_key) unsignedIntegerValue]; }
 - (void)setFormat:(NSString *)f { objc_setAssociatedObject(self, &sf_format_key, f, OBJC_ASSOCIATION_COPY); }
 - (NSString *)format { return objc_getAssociatedObject(self, &sf_format_key); }
+- (BOOL)usesGroupingSeparator {
+    NSNumber *v = objc_getAssociatedObject(self, &sf_grouping_key);
+    return v ? [v boolValue] : [self numberStyle] == NSNumberFormatterDecimalStyle;
+}
+- (void)setUsesGroupingSeparator:(BOOL)b { objc_setAssociatedObject(self, &sf_grouping_key, [NSNumber numberWithBool:b], OBJC_ASSOCIATION_RETAIN); }
+
+/* As macOS: setting a style sets that style's fraction digits (decimal: 0 to 3; percent and none:
+   none), which a later -setMinimum/MaximumFractionDigits: changes. libFoundation's setter only
+   kept the style. */
+- (void)sf_setNumberStyle:(NSNumberFormatterStyle)style {
+    Ivar iv = class_getInstanceVariable([NSNumberFormatter class], "_numberStyle");
+    if (iv)
+        *(NSNumberFormatterStyle *)((char *)self + ivar_getOffset(iv)) = style;
+    [self setMinimumFractionDigits:0];
+    [self setMaximumFractionDigits:style == NSNumberFormatterDecimalStyle ? 3 : (style == NSNumberFormatterPercentStyle || style == NSNumberFormatterNoStyle ? 0 : 2)];
+}
+
+/* The styles a number is formatted in (libFoundation printed every style as "%.3f"): none (the
+   integer), decimal (grouped in threes), percent (times a hundred, "%"), each with the minimum and
+   maximum fraction digits and the minimum integer digits; the rest as decimal. English symbols. */
+- (NSString *)sf_stringFromNumber:(NSNumber *)number {
+    if (number == nil)
+        return nil;
+    NSNumberFormatterStyle style = [self numberStyle];
+    double v = [number doubleValue];
+    if (v != v)
+        return @"NaN";
+    if (style == NSNumberFormatterPercentStyle)
+        v *= 100;
+    NSUInteger minf = [self minimumFractionDigits], maxf = [self maximumFractionDigits];
+    if (style == NSNumberFormatterNoStyle)
+        minf = maxf = 0;
+    if (minf > maxf)
+        maxf = minf;
+    if (maxf > 15)
+        maxf = 15;
+    BOOL negative = v < 0;
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.*f", (int)maxf, negative ? -v : v);
+    char *dot = strchr(buf, '.');
+    /* drop trailing zeros down to the minimum */
+    if (dot) {
+        char *end = buf + strlen(buf) - 1;
+        while (end > dot && (NSUInteger)(end - dot) > minf && *end == '0')
+            *end-- = '\0';
+        if (end == dot)
+            *end = '\0';
+    }
+    NSString *digits = [NSString stringWithUTF8String:buf];
+    NSRange point = [digits rangeOfString:@"."];
+    NSString *integer = point.location == NSNotFound ? digits : [digits substringToIndex:point.location];
+    NSString *fraction = point.location == NSNotFound ? @"" : [digits substringFromIndex:point.location];
+    NSUInteger minint = [self minimumIntegerDigits];
+    while ([integer length] < minint)
+        integer = [@"0" stringByAppendingString:integer];
+    if ([self usesGroupingSeparator] && [integer length] > 3) {
+        NSMutableString *g = [NSMutableString string];
+        NSUInteger n = [integer length];
+        for (NSUInteger i = 0; i < n; i++) {
+            if (i > 0 && (n - i) % 3 == 0)
+                [g appendString:@","];
+            [g appendFormat:@"%C", [integer characterAtIndex:i]];
+        }
+        integer = g;
+    }
+    NSMutableString *out = [NSMutableString stringWithString:negative && ![[integer stringByAppendingString:fraction] isEqualToString:@"0"] ? @"-" : @""];
+    [out appendString:integer];
+    [out appendString:fraction];
+    if (style == NSNumberFormatterPercentStyle)
+        [out appendString:@"%"];
+    return out;
+}
 @end
 
 /* formatters' formatting context (capitalisation of a formatted string at the start of a sentence,
@@ -340,4 +412,21 @@ static const char sf_context_key;
 @implementation NSFormatter (SFFormattingContext)
 - (NSInteger)formattingContext { return [objc_getAssociatedObject(self, &sf_context_key) integerValue]; }
 - (void)setFormattingContext:(NSInteger)c { objc_setAssociatedObject(self, &sf_context_key, [NSNumber numberWithInteger:c], OBJC_ASSOCIATION_RETAIN); }
+@end
+
+/* libFoundation's own -setNumberStyle: and -stringFromNumber: are replaced by the two above when
+   this library loads (a category method of the same name in this image did not take their place) */
+@interface SFNumberFormatterMethods : NSObject
+@end
+@implementation SFNumberFormatterMethods
++ (void)load {
+    Class c = [NSNumberFormatter class];
+    SEL pairs[2][2] = { { @selector(setNumberStyle:), @selector(sf_setNumberStyle:) },
+                        { @selector(stringFromNumber:), @selector(sf_stringFromNumber:) } };
+    for (int i = 0; i < 2; i++) {
+        Method original = class_getInstanceMethod(c, pairs[i][0]), ours = class_getInstanceMethod(c, pairs[i][1]);
+        if (original && ours)
+            method_setImplementation(original, method_getImplementation(ours));
+    }
+}
 @end

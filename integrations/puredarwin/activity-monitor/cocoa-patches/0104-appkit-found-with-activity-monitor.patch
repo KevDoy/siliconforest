@@ -1,0 +1,189 @@
+--- a/src/Frameworks/AppKit/nib.subproj/NSNibArchiveUnarchiver.m
++++ b/src/Frameworks/AppKit/nib.subproj/NSNibArchiveUnarchiver.m
+@@ -6,7 +6,10 @@
+ #include <string.h>
+ 
+ // the file: "NIBArchive", two format words, then count and offset of the objects, keys, values and class names
+-enum { NIB_INT8, NIB_INT16, NIB_INT32, NIB_INT64, NIB_TRUE, NIB_FALSE, NIB_FLOAT, NIB_DOUBLE, NIB_DATA, NIB_NIL, NIB_OBJECT };
++// value types: 4 is false and 5 true (a separator menu item carries NSIsSeparator as type 5; read
++// the other way round every BOOL of a NIBArchive nib was inverted: Activity Monitor's views with
++// constraints came out as translating their autoresizing masks, docs/roadmap/issues/SF-AA-activity-monitor.md)
++enum { NIB_INT8, NIB_INT16, NIB_INT32, NIB_INT64, NIB_FALSE, NIB_TRUE, NIB_FLOAT, NIB_DOUBLE, NIB_DATA, NIB_NIL, NIB_OBJECT };
+ 
+ typedef struct {
+     uint32_t key;
+@@ -222,7 +225,7 @@
+         return 0;
+     if (v->type == NIB_FLOAT || v->type == NIB_DOUBLE)
+         return (int64_t)v->d;
+-    return v->type <= NIB_FALSE ? v->i : 0;
++    return v->type <= NIB_TRUE ? v->i : 0;
+ }
+ 
+ static double doubleOf(NibValue *v) {
+@@ -230,7 +233,7 @@
+         return 0;
+     if (v->type == NIB_FLOAT || v->type == NIB_DOUBLE)
+         return v->d;
+-    return v->type <= NIB_FALSE ? (double)v->i : 0;
++    return v->type <= NIB_TRUE ? (double)v->i : 0;
+ }
+ 
+ - (BOOL)decodeBoolForKey:(NSString *)key {
+--- a/src/Frameworks/AppKit/nib.subproj/NSCustomView.m
++++ b/src/Frameworks/AppKit/nib.subproj/NSCustomView.m
+@@ -8,6 +8,8 @@
+ #import "NSCustomView.h"
+ #import <Foundation/NSString.h>
+ #import <Foundation/NSKeyedArchiver.h>
++#import <AppKit/NSLayoutConstraint.h>
++#include <objc/runtime.h>
+ 
+ @implementation NSCustomView
+ 
+@@ -54,6 +56,25 @@
+ 
+          [newView setWantsLayer:[coder decodeBoolForKey:@"NSViewIsLayerTreeHost"]];
+          [newView setLayerContentsRedrawPolicy:[coder decodeIntegerForKey:@"NSViewLayerContentsRedrawPolicy"]];
++         // auto layout, as NSView's own -initWithCoder: reads it: the constraints IB archived on the
++         // view and whether its frame comes from them (Activity Monitor's summary box, a custom view,
++         // lost its 33 constraints and its figures kept the widths of the nib)
++         // (the constraints were decoded while this placeholder was the object being decoded: those
++         // that name it are given the view that replaces it, without retaining, as a constraint holds them)
++         NSArray *constraints=[coder decodeObjectForKey:@"NSViewConstraints"];
++         Ivar first=class_getInstanceVariable([NSLayoutConstraint class],"_firstItem");
++         Ivar second=class_getInstanceVariable([NSLayoutConstraint class],"_secondItem");
++         for(NSLayoutConstraint *c in constraints){
++          if(first!=NULL && object_getIvar(c,first)==self)
++           object_setIvar(c,first,newView);
++          if(second!=NULL && object_getIvar(c,second)==self)
++           object_setIvar(c,second,newView);
++         }
++         [newView addConstraints:constraints];
++         if([coder containsValueForKey:@"NSDoNotTranslateAutoresizingMask"])
++          [newView setTranslatesAutoresizingMaskIntoConstraints:![coder decodeBoolForKey:@"NSDoNotTranslateAutoresizingMask"]];
++         if([coder containsValueForKey:@"NSReuseIdentifierKey"] && [newView respondsToSelector:@selector(setIdentifier:)])
++          [(id)newView setIdentifier:[coder decodeObjectForKey:@"NSReuseIdentifierKey"]];
+          [self release];
+          return newView;
+       }
+--- a/src/Frameworks/AppKit/NSCell.m
++++ b/src/Frameworks/AppKit/NSCell.m
+@@ -124,7 +124,9 @@
+        _sendsActionOnEndEditing = (flags2 &0x00400000) ? YES : NO;
+ 
+        // Odd this isn't in flags - it's near other items in flags in the Cocoa struct from which these are derived.
+-       _lineBreakMode   = (flags2 & 0x00000600) >> 9 & 0x7;
++       // three bits (0x0E00): with two, truncating tail (4) read as word wrapping, and a label too narrow
++       // for its text drew its first line only, or nothing (Activity Monitor's process names)
++       _lineBreakMode   = (flags2 & 0x00000E00) >> 9;
+        _controlSize     = (flags2 & 0x000E0000) >> 17;
+ 
+ 
+--- a/src/Frameworks/AppKit/NSControl.m
++++ b/src/Frameworks/AppKit/NSControl.m
+@@ -275,46 +275,81 @@
+    [self setNeedsDisplay:YES];
+ }
+ 
++// a view laid out by constraints is as wide as its value: a new value has its intrinsic size invalidated
++// so the layout runs again (Activity Monitor's summary figures were as wide as the first value they
++// were given, a digit). Not for the cells of a table's rows, whose frames the row gives them.
++static BOOL sfSizesToValue(NSControl *self) {
++    static Class rowView;
++
++    if ([self translatesAutoresizingMaskIntoConstraints] || [self superview] == nil)
++        return NO;
++    if (rowView == Nil)
++        rowView = NSClassFromString(@"NSTableRowView");
++    for (NSView *v = [self superview]; v != nil; v = [v superview])
++        if (rowView != Nil && [v isKindOfClass:rowView])
++            return NO;
++    return YES;
++}
++
++static void sfValueMayResize(NSControl *self, NSSize before) {
++    if (sfSizesToValue(self))
++        [self invalidateIntrinsicContentSize];
++}
++
+ -(void)setObjectValue:(id <NSCopying>)object {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [(NSCell *)[self selectedCell] setObjectValue:object];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setStringValue:(NSString *)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setStringValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setIntValue:(int)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setIntValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setFloatValue:(CGFloat)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setFloatValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setDoubleValue:(double)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setDoubleValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setIntegerValue:(NSInteger)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setIntegerValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)setAttributedStringValue:(NSAttributedString *)value {
++    NSSize sfBefore=NSZeroSize;
+     [self abortEditing];
+     [[self selectedCell] setAttributedStringValue:value];
+     [self setNeedsDisplay:YES];
++    sfValueMayResize(self,sfBefore);
+ }
+ 
+ -(void)takeObjectValueFrom:sender {
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
+@@ -89,7 +89,19 @@
+      return nil;
+      
+     result=[NSValueTransformer valueTransformerForName:name];
+-    
++
++    // as on macOS: a name nothing registered that names a subclass of NSValueTransformer gets an
++    // instance of it, registered under that name (Activity Monitor names its own transformers so)
++    if(result==nil){
++     Class cls=NSClassFromString(name);
++
++     if(cls!=Nil && [cls isSubclassOfClass:[NSValueTransformer class]]){
++      result=[[[cls alloc] init] autorelease];
++      if(result!=nil)
++       [NSValueTransformer setValueTransformer:result forName:name];
++     }
++    }
++
+ 	   if(result==nil) {
+ 		   NSBindingDebugLog(kNSBindingDebugLogLevel1, @"[NSValueTransformer valueTransformerForName:%@] failed in NSBinder.m",name);
+ 	   }
