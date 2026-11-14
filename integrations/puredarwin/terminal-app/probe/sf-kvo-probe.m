@@ -5,9 +5,10 @@
 // November also: key-value coding reaches a scalar instance variable and the accessors named
 // -_key and -_setKey:, a subclass of NSAttributedString keeps its own object, and a bundle's
 // resource paths are whole paths (the second build of that patch; the first passes only the
-// observing part, so the installer replaces it). Since 15 November also: -valueForKey: keeps where
-// it found a key of a class (the third build, which says so with the symbol
-// PDFoundationKeyValueCodingCache), and the values read through it stay right.
+// observing part, so the installer replaces it). The third build also: -valueForKey: keeps where
+// it found a key of a class (it says so with the symbol PDFoundationKeyValueCodingCache), and the
+// values read through it stay right. The fourth: +[NSURL fileURLWithPath:] of a directory ends in
+// "/", as on macOS (Terminal opens a folder's parent otherwise), and of a file does not.
 #include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -86,6 +87,16 @@ static int third_build(void)
     return bad;
 }
 
+static int fourth_build(void)
+{
+    int bad = 0;
+
+    if (![[[NSURL fileURLWithPath:@"/usr"] absoluteString] hasSuffix:@"/"]) bad |= 1;
+    if ([[[NSURL fileURLWithPath:@"/usr/lib/dyld"] absoluteString] hasSuffix:@"/"]) bad |= 2;
+    if (![[[NSURL fileURLWithPath:@"/no/such/dir/"] absoluteString] hasSuffix:@"/"]) bad |= 4;
+    return bad;
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -102,7 +113,7 @@ int main(void)
     int end = root->heard;
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
-    int more = second_build() | (third_build() << 4);
+    int more = second_build() | (third_build() << 4) | (fourth_build() << 8);
     BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0;
     printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, ok ? "ok" : "FAIL");
     [pool release];

@@ -2235,7 +2235,40 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  #import <Foundation/NSURL.h>
  #import <Foundation/NSArray.h>
  #import <Foundation/NSNumber.h>
-@@ -274,3 +278,73 @@
+@@ -35,10 +39,22 @@
+     return [[[self alloc] initWithString:string] autorelease];
+ }
+ 
++/* As on macOS: a path that ends in "/" is a directory; otherwise the file system says whether
++ * it is one, and a directory's URL ends in "/" (Terminal's -openFolder: keeps a URL ending in
++ * "/" and takes the parent of any other, so without this `open -a Terminal <folder>` opened the
++ * folder's parent). */
++static BOOL pathIsDirectory(NSString *path) {
++    struct stat st;
++
++    if ([path hasSuffix:@"/"])
++        return YES;
++    return [path length] > 0 && stat([path fileSystemRepresentation], &st) == 0 && S_ISDIR(st.st_mode);
++}
++
+ + (instancetype)fileURLWithPath:(NSString *)path {
+     return [(id)CFURLCreateWithFileSystemPath(kCFAllocatorDefault,
+                                               (CFStringRef)path,
+-                                              kCFURLPOSIXPathStyle, false) autorelease];
++                                              kCFURLPOSIXPathStyle, pathIsDirectory(path)) autorelease];
+ }
+ 
+ - (nullable instancetype)initWithString:(NSString *)string {
+@@ -191,6 +207,8 @@
+     return (id)CFURLCreateWithString(kCFAllocatorDefault, (CFStringRef)string, (CFURLRef)base);
+ }
+ 
++/* Not yet as on macOS (which asks the file system here too): with that, Terminal's Preferences
++ * window stayed empty (14 November; the caller that needs a directory URL without "/" was not found). */
+ - (instancetype)initFileURLWithPath:(NSString *)path {
+     return (id)CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)path, kCFURLPOSIXPathStyle, [path hasSuffix:@"/"]);
+ }
+@@ -274,3 +292,73 @@
      _CFRuntimeBridgeClasses(CFURLGetTypeID(), "NSURL");
  }
  #endif
