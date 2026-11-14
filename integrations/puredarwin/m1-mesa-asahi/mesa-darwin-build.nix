@@ -4,7 +4,9 @@
 #
 #   nix-build ... mesa-darwin.nix (no window system) / mesa-darwin-wayland.nix
 # `vulkan`, `c`, `nativeTools` and `extraPatches` are for ../m1-vulkan (another Mesa source and its
-# host tools, Honeykrisp added); left at their defaults the derivation is the one it always was.
+# host tools, Honeykrisp added). Since 14 November every build also carries patch 0011 (Mesa's
+# monotonic clock is the kernel's) and ETIME=ETIMEDOUT (pd-etime.h): both GL derivations changed
+# then; the GL Mesa installed on the M1 is the one built before (../m1-vulkan/README.md).
 { wayland ? false, vulkan ? false, c ? import ./common.nix, nativeTools ? import ./mesa-native.nix
 , extraPatches ? [ ] }:
 let
@@ -31,8 +33,8 @@ let
     "\nexport PKG_CONFIG_PATH_FOR_BUILD=\"${lib.getDev pkgs.wayland-scanner}/lib/pkgconfig\"" +
     "\nexport PKG_CONFIG_LIBDIR_FOR_BUILD=\"\$PKG_CONFIG_PATH_FOR_BUILD\"");
 
-  # vulkan builds: every translation unit sees ETIME as ETIMEDOUT (pd-etime.h, made in preConfigure)
-  etimeArg = lib.optionalString vulkan ", '-include', '$PWD/pd-compat/pd-etime.h'";
+  # every translation unit sees ETIME as ETIMEDOUT (pd-etime.h, made in postPatch)
+  etimeArg = ", '-include', '$PWD/pd-compat/pd-etime.h'";
   q = s: "'${s}'";
   list = xs: lib.concatMapStringsSep ", " q xs;
   common = [ "-isysroot" sdkRoot "-mmacosx-version-min=26.5" ];
@@ -63,6 +65,7 @@ in pkgs.stdenv.mkDerivation ({
     ./patches/0003-os-file-same-file-via-F_PD_SAMEFILE.patch
     ./patches/0004-u-screen-query-DRM_CAP_PRIME-on-darwin.patch
     ./patches/0005-asahi-ioc-field-accessors-for-bsd-ioccom.patch
+    ./patches/0011-c11-monotonic-time-is-the-kernels-uptime-on-darwin.patch
   ] ++ lib.optionals wayland [
     ./patches/0006-egl-wayland-open-render-node-without-feedback.patch
     ./patches/0007-loader-wayland-ppoll-for-darwin.patch
@@ -77,6 +80,12 @@ in pkgs.stdenv.mkDerivation ({
     # values are XNU's: 8-bit major, 24-bit minor (PDDRMDri puts the open slot above the low byte).
     mkdir -p pd-compat/sys
     cp ${./compat/sys/sysmacros.h} pd-compat/sys/sysmacros.h
+    # The kernel's LinuxKPI turns Linux's ETIME into ETIMEDOUT (60), as FreeBSD's does; Darwin's
+    # <errno.h> has a STREAMS ETIME (101) that no kernel path returns. Mesa compares DRM wait
+    # results with ETIME (vk_drm_syncobj.c, wsi_common_drm.c, hk_query_pool.c, agx_fence.c, ...):
+    # a syncobj wait that times out became VK_ERROR_UNKNOWN on the M1 (vk-tri, first fence wait).
+    # Mesa uses no STREAMS, so ETIME means the DRM timeout everywhere in it.
+    printf '%s\n' '#include <errno.h>' '#undef ETIME' '#define ETIME ETIMEDOUT' > pd-compat/pd-etime.h
   '';
 
   configurePhase = ''
@@ -178,12 +187,6 @@ in pkgs.stdenv.mkDerivation ({
   # only leave unresolved through dynamic lookup (PureDarwin's mesa-powervr.nix does the same);
   # postInstall lists what is left unresolved.
   preConfigure = ''
-    # The kernel's LinuxKPI turns Linux's ETIME into ETIMEDOUT (60), as FreeBSD's does; Darwin's
-    # <errno.h> has a STREAMS ETIME (101) that no kernel path returns. Mesa compares DRM wait
-    # results with ETIME (vk_drm_syncobj.c, wsi_common_drm.c, hk_query_pool.c, agx_fence.c, ...):
-    # a syncobj wait that times out became VK_ERROR_UNKNOWN on the M1 (vk-tri, first fence wait).
-    # Mesa uses no STREAMS, so ETIME means the DRM timeout everywhere in it.
-    printf '%s\n' '#include <errno.h>' '#undef ETIME' '#define ETIME ETIMEDOUT' > pd-compat/pd-etime.h
     substituteInPlace src/vulkan/meson.build \
       --replace-fail "vulkan_icd_link_args = []" \
                      "vulkan_icd_link_args = host_machine.system() == 'darwin' ? ['-Wl,-undefined,dynamic_lookup'] : []"

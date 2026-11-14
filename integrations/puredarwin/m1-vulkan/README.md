@@ -8,7 +8,7 @@ how the pieces are built and run.
 | Piece | Source | Licence |
 |---|---|---|
 | Mesa (Honeykrisp, Vulkan runtime, Wayland WSI, gallium asahi) | omacom/mesa `integration/aurora` `b7b03c5b3b8` (what omarchy-pkgs `mesa-aurora`/`vulkan-aurora` package with `-Dvulkan-drivers=asahi`), GitHub archive, sha256 in `common.nix` | MIT |
-| Patches | `../m1-mesa-asahi/patches/0001`-`0010` (apply to `b7b03c5` unchanged), `patches/0011`-`0012` here | MIT (Mesa's) |
+| Patches | `../m1-mesa-asahi/patches/0001`-`0011` (shared with the GL builds; apply to `b7b03c5` unchanged), `patches/0101`-`0103` here (Vulkan only) | MIT (Mesa's) |
 | Vulkan loader, vulkaninfo, vkcube | Khronos 1.4.341 from the flake's nixpkgs, through PureDarwin's recipes (`nix/pkgs/mesa/vulkan-loader.nix`, `vulkan-tools.nix`) | Apache-2.0 |
 | `test/vk-tri.c`, `test/sync-probe.c`, `tools/*` | original | MIT |
 
@@ -25,17 +25,23 @@ nix-build $F test/test.nix -A linux --no-out-link
 ```
 
 `mesa-darwin.nix` is `../m1-mesa-asahi/mesa-darwin-build.nix` called with `vulkan = true`, this
-directory's `common.nix` and `mesa-native.nix`, and `patches/*.patch` added. With its default
-arguments that recipe still produces the GL Mesa it always did (the `.drv` paths of
-`mesa-darwin.nix` and `mesa-darwin-wayland.nix` there were compared before and after: equal).
+directory's `common.nix` and `mesa-native.nix`, and `patches/*.patch` added. The new arguments
+alone left the GL derivations unchanged (`.drv` paths compared); the clock and ETIME fixes below
+then went into the shared part on purpose, so the GL builds of `../m1-mesa-asahi` (147a62f) carry
+them too from now on. **The GL Mesa installed on the M1 is still the one built before them**: the
+compositor's `/usr/local/lib/mesa-asahi/` libraries (`libgallium-26.3.0-devel.dylib`,
+`libEGL.1.dylib`, `libGLESv2.2.dylib`, from 12 November; `libdrm.2.dylib` is not affected) would change when it is next rebuilt and installed; that has
+not been done (SF-AC).
 
 | Patch | Why |
 |---|---|
-| `0011-vulkan-image-drm-format-modifier-on-darwin` | `vk_image.drm_format_mod` exists only for Linux/BSD; PureDarwin is a DRM system (patch 0001), Honeykrisp and the WSI need it |
-| `0012-asahi-vulkan-icd-link-args` | Honeykrisp was the one ICD not linked with `vulkan_icd_link_args`; on Darwin that carries `-undefined dynamic_lookup` (weak entrypoint tables), as PureDarwin's PowerVR build does |
-| `0013-hk-instance-accept-mach-o-uuid-as-build-id` | `vkCreateInstance` returned `VK_ERROR_INITIALIZATION_FAILED` on the M1: Mach-O's build id is the 16-byte `LC_UUID`, Honeykrisp wanted a 20-byte SHA-1 |
+| `0101-vulkan-image-drm-format-modifier-on-darwin` | `vk_image.drm_format_mod` exists only for Linux/BSD; PureDarwin is a DRM system (patch 0001), Honeykrisp and the WSI need it |
+| `0102-asahi-vulkan-icd-link-args` | Honeykrisp was the one ICD not linked with `vulkan_icd_link_args`; on Darwin that carries `-undefined dynamic_lookup` (weak entrypoint tables), as PureDarwin's PowerVR build does |
+| `0103-hk-instance-accept-mach-o-uuid-as-build-id` | `vkCreateInstance` returned `VK_ERROR_INITIALIZATION_FAILED` on the M1: Mach-O's build id is the 16-byte `LC_UUID`, Honeykrisp wanted a 20-byte SHA-1 |
 
-Not a patch file: with `vulkan = true` the recipe force-includes `pd-compat/pd-etime.h`
+| `../m1-mesa-asahi/patches/0011-c11-monotonic-time-is-the-kernels-uptime-on-darwin` (shared) | Mesa's absolute DRM deadlines come from `CLOCK_MONOTONIC`; the kernel's DRM layer counts `CLOCK_UPTIME_RAW` (mach_absolute_time), and Darwin's `CLOCK_MONOTONIC` was 10.06 s behind it on the M1: every finite `vkWaitForFences` returned `VK_TIMEOUT` at once (`test/wait-probe`) |
+
+Not a patch file (shared with the GL builds as well): the recipe force-includes `pd-compat/pd-etime.h`
 (`#define ETIME ETIMEDOUT`). The kernel's LinuxKPI returns Linux's `ETIME` as `ETIMEDOUT` (60),
 as FreeBSD's does; Darwin's `<errno.h>` has a STREAMS `ETIME` (101). Mesa compares DRM wait results
 with `ETIME`, so a syncobj wait that timed out became `VK_ERROR_UNKNOWN` on the M1.
@@ -68,7 +74,18 @@ tools/sfvk.sh run vulkaninfo --summary
 tools/sfvk.sh run sync-probe
 tools/sfvk.sh run vk-tri 100
 tools/sfvk.sh revert                       # sfvk.prev back
+tools/sfvk-careful.sh <name> '<command>'   # a GPU run that might take the machine down (see below)
 ```
+
+Any run that submits GPU work goes through `tools/sfvk-careful.sh`: it refuses while
+`runs/m1-coord/gui.lock` or `core.lock` is held, writes the announcement to `runs/m1-coord/log.txt`,
+runs `sync` on the M1, and streams the kernel log and the command's output to
+`runs/sfvk/<name>.txt` on the workstation once a second, during the run and for 110 s after it (the
+GPU scheduler's job timeout is 100 s). A crash leaves the last second of kernel log here. It also
+routes the M1's uart0 to the USB-C debug pins (`macvdmtool serial` on the M5, no reset) and captures
+`/dev/cu.debug-console` there (`tools/m5_uart_capture.py`) for the whole run: the installed kernel's
+console is uart0 (`serial=0x13`), so a panic's text lands in `runs/sfvk/<name>-uart.txt`. The routing
+does not survive a reboot of the M1. Results of every run: `runs/sfvk/` (not committed).
 
 `run` sets `VK_ICD_FILENAMES=/private/var/db/sfvk/icd.d/asahi_icd.json`,
 `DYLD_LIBRARY_PATH=/private/var/db/sfvk/lib` (vulkaninfo and vkcube `dlopen` the loader by leaf
@@ -82,5 +99,11 @@ name) and puts `bin/` first in `PATH`. Removing the stage: `rm -rf /private/var/
   `VKTRI PASS` (flat 0x5965baca, full 0xcdfedca7, interpolation max difference 1); Honeykrisp on
   the noop drm-shim `VKTRI FAIL` (the shim renders nothing; the test does fail when nothing is
   drawn).
+- `vk-tri` options (all in its header): `VKTRI_MODE=copy|linear|fill`, `VKTRI_TIMEOUT_MS`,
+  `VKTRI_HOLD_S` (stay alive after a failure), `VKTRI_EXIT_AFTER_SUBMIT=<n>` (submit n times and
+  `_exit` without waiting: a process dying with GPU work in flight, for the kernel teardown bug).
+- `wait-probe`: finite syncobj waits with deadlines from `CLOCK_MONOTONIC` and from `CLOCK_UPTIME_RAW`
+  (no GPU work); prints the clocks. On the M1 before patch 0011: 0.0 ms and 302 ms for a 300 ms wait.
+- `agx-params`: `GET_PARAMS` group 0, every field and the feature bits (read-only).
 - `sync-probe`: timeline syncobj ioctls, sync_file export/import/poll, syncobj fds, SCM_RIGHTS of
   syncobj/sync_file/dma-buf descriptors, `DMA_BUF_IOCTL_EXPORT/IMPORT_SYNC_FILE`, poll on a dma-buf.

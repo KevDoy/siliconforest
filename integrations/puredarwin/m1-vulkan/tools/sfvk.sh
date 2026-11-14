@@ -19,8 +19,9 @@ ENV="export VK_ICD_FILENAMES=$D/icd.d/asahi_icd.json DYLD_LIBRARY_PATH=$D/lib PA
 case "${1:-}" in
 push)
   export PATH=$HOME/.nix-profile/bin:$PATH
-  out=$(nix-build --extra-experimental-features nix-command --extra-experimental-features flakes \
-        "$HERE/../stage.nix" --no-out-link)
+  # SFVK_STAGE=<store path>: push a stage built earlier instead of building ../stage.nix now
+  out=${SFVK_STAGE:-$(nix-build --extra-experimental-features nix-command --extra-experimental-features flakes \
+        "$HERE/../stage.nix" --no-out-link)}
   echo "stage $out"
   (cd "$out" && find . -type f | xargs sha256sum) | LC_ALL=C sort -k2 > /tmp/sfvk.$$.sums
   tar -C "$out" -cf - . | "${SSH[@]}" "rm -rf $D.new && mkdir -p $D.new && cd $D.new && tar xf - && chmod -R u+w ."

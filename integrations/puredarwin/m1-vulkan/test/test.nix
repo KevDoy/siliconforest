@@ -47,5 +47,12 @@ in {
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${p.libsystem-arm64}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 -L${libdrm}/lib \
       ${./agx-params.c} -ldrm -lSystem -o $out/bin/agx-params
+    ${tc}/bin/${triple}-clang -O2 -Wall -isysroot ${sdkRoot} -mmacosx-version-min=26.5 \
+      -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector \
+      -I${p.libsystem-arm64}/usr/include -I${libdrm}/include -I${libdrm}/include/libdrm \
+      -fuse-ld=${p.native-ld}/bin/ld -nostdlib -L${p.libsystem-arm64}/usr/lib \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${p.libsystem-arm64}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 -L${libdrm}/lib \
+      ${./wait-probe.c} -ldrm -lSystem -o $out/bin/wait-probe
   '';
 }

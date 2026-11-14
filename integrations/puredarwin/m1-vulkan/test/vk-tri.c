@@ -20,12 +20,16 @@
 //   VKTRI_MODE=linear      linear host-visible target read directly: render work only
 //   VKTRI_MODE=fill        no triangle: vkCmdFillBuffer of a host-visible buffer (compute only)
 //   VKTRI_TIMEOUT_MS=<ms>  fence timeout (default 5000)
+//   VKTRI_HOLD_S=<s>       after a failure, stay alive s seconds before exiting
+//   VKTRI_EXIT_AFTER_SUBMIT=<n>  submit the frame n times without waiting, then _exit(0): a
+//                          process dying with GPU work in flight (kernel teardown test)
 // Last line: "VKTRI PASS" or "VKTRI FAIL <reason>"; exit status 0 only for PASS.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <vulkan/vulkan.h>
 
 #include "tri_vert.h"
@@ -37,6 +41,14 @@
 static void fail(const char *what, VkResult r)
 {
 	printf("VKTRI FAIL %s (VkResult %d)\n", what, r);
+	// VKTRI_HOLD_S=<s>: stay alive that long before exiting (the queue and its scheduler
+	// with it), so what the kernel does with an unfinished job can be watched in its log
+	const char *hold = getenv("VKTRI_HOLD_S");
+	if (hold && atoi(hold) > 0) {
+		printf("VKTRI holding %d s before exit\n", atoi(hold));
+		fflush(stdout);
+		sleep(atoi(hold));
+	}
 	exit(1);
 }
 #define CK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) fail(#x, r_); } while (0)
@@ -348,6 +360,16 @@ int main(int argc, char **argv)
 	CK(vkCreateFence(dev, &fci, NULL, &fence));
 	VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
 	double t_s0 = now_ms();
+	const char *dying = getenv("VKTRI_EXIT_AFTER_SUBMIT");
+	if (dying && atoi(dying) > 0) {
+		// a process that dies with GPU work queued: N submits, no wait, _exit
+		// (the kernel must survive the teardown; this is the bench reproduction of 14 Nov)
+		printf("VKTRI submitting %d times and exiting without waiting\n", atoi(dying));
+		fflush(stdout);
+		for (int i = 0; i < atoi(dying); i++)
+			CK(vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE));
+		_exit(0);
+	}
 	printf("VKTRI submit\n");
 	CK(vkQueueSubmit(q, 1, &si, fence));
 	CK(vkWaitForFences(dev, 1, &fence, VK_TRUE, timeout_ns));

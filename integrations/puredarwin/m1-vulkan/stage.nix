@@ -28,7 +28,7 @@ in pkgs.runCommand "sfvk-stage" { nativeBuildInputs = [ pkgs.python3 ]; } ''
      ${mesa}/usr/lib/libgallium-*.dylib $out/lib/
   cp ${loader}/usr/lib/libvulkan.1.*.*.dylib $out/lib/libvulkan.1.dylib
   cp ${p.libdrm-dri-arm64}/lib/libdrm.2.dylib ${p.wayland-arm64}/lib/libwayland-client.0.dylib $out/lib/
-  cp ${info}/usr/bin/vulkaninfo ${tri}/bin/vk-tri ${tri}/bin/sync-probe ${tri}/bin/agx-params ${cube}/usr/bin/vkcube ${cube}/usr/bin/vkcubepp $out/bin/
+  cp ${info}/usr/bin/vulkaninfo ${tri}/bin/vk-tri ${tri}/bin/sync-probe ${tri}/bin/agx-params ${tri}/bin/wait-probe ${cube}/usr/bin/vkcube ${cube}/usr/bin/vkcubepp $out/bin/
   chmod -R u+w $out
   # every reference to one of our libraries, whatever directory it names, goes to the prefix;
   # the loader's versioned name (libvulkan.1.4.341.dylib) is the file libvulkan.1.dylib
