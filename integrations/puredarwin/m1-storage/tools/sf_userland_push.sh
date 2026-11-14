@@ -9,7 +9,7 @@
 #   sf_userland_push.sh known <console.bin>  write the known-hosts file from the public host key the
 #                                          install boot printed (SF_USERLAND hostkey ...)
 #   sf_userland_push.sh ssh [command...]   a command (or a shell) on the running system
-#   sf_userland_push.sh push <part>        send one part (gtar first, then sys, brew, claude) as a tar stream, unpack it at /,
+#   sf_userland_push.sh push <part>        send one part (gtar first, then sys, brew, claude, apps) as a tar stream, unpack it at /,
 #                                          then compare the SHA-256 of every file there with the list made here
 #   sf_userland_push.sh verify <part>      the comparison alone
 #   sf_userland_push.sh libsystem <new libSystem.B.dylib> <sf-xpc-probe>
@@ -27,6 +27,19 @@
 #   claude  the Claude Code CLI as its vendor ships it (runs/homebrew/cli/claude-bin, fetched by the
 #           Homebrew stream from downloads.claude.ai and checked against its manifest), at
 #           /usr/local/lib/claude-code/<version>/claude with /usr/local/bin/claude pointing at it
+#   apps    what macOS applications need of the system beyond `sys` (../../terminal-app/
+#           build-macos-apps-root.nix; docs/roadmap/issues/SF-Y-terminal-app.md): the application stack
+#           with its patches, the Swift runtime, the framework wrappers, /usr/bin/open and /usr/bin/login.
+#           Unlike the other parts it replaces files the root has, so it goes on by the guarded
+#           procedures of ../../terminal-app/tools/sf_terminal.sh, in this order: `install new` (paths the
+#           root lacks), `install core` (libSystem, libFoundation, the CoreFoundation and Foundation
+#           framework paths, dyld: each proven on the target before it takes the name, the file in use
+#           kept), `install direct` (the rest, existing files kept as .old-sfy or .pd). The five files
+#           every program loads are only sent when their SHA-256 is in
+#           ../../terminal-app/core-rehearsed.sha256, the record of the QEMU rehearsals that passed
+#           (sf_terminal.sh qemu <name>, then qemu <name> second). `stage` does not build this part:
+#           `push apps` builds it (sf_terminal.sh install-stage) when runs/sf-terminal/install is not there.
+#           SF_USERLAND_DRY=1 push apps: check the hashes and print what would be run, send nothing.
 # Nothing here is committed: runs/ holds bottles and binaries.
 # The address is the one the M1 gets from the router whichever system runs (SF_HOST); the
 # host key is SiliconForest's own, kept in a file of its own (SF_KNOWN), never in ~/.ssh/known_hosts.
@@ -114,7 +127,42 @@ known)
   echo "$SF_KNOWN: $(ssh-keygen -l -f "$SF_KNOWN" | cut -d' ' -f1,2,4)";;
 ssh) shift; exec "${SSH[@]}" "$@";;
 push|verify)
-  P=${2:?gtar|sys|brew|claude}; D=$ST/$P; [ -d "$D" ] && [ -s "$D.sha256" ] || { echo "no $D: run stage" >&2; exit 2; }
+  P=${2:?gtar|sys|brew|claude|apps}
+  if [ "$P" = apps ]; then
+    TT=integrations/puredarwin/terminal-app/tools/sf_terminal.sh; IN=runs/sf-terminal/install
+    REH=integrations/puredarwin/terminal-app/core-rehearsed.sha256
+    [ -s "$IN/core/replace.list" ] && [ -s "$IN/direct/manifest" ] || "$TT" install-stage
+    # the files every program loads: only as the files a rehearsal passed with
+    bad=0
+    while read -r path sum _; do
+      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation)
+        if grep -q "^$sum  $path " "$REH" 2>/dev/null; then echo "SFPUSH apps core $path $(echo "$sum" | cut -c1-12): rehearsed ($(grep "^$sum  $path " "$REH" | cut -d' ' -f4- | head -1))"
+        else echo "SFPUSH apps core $path $(echo "$sum" | cut -c1-12): NOT in $REH"; bad=1; fi;;
+      esac
+    done < "$IN/core/replace.list"
+    sum=$(cat "$IN/core/dyld.sha256")
+    if grep -q "^$sum  /usr/lib/dyld " "$REH" 2>/dev/null; then echo "SFPUSH apps core /usr/lib/dyld $(echo "$sum" | cut -c1-12): rehearsed"
+    else echo "SFPUSH apps core /usr/lib/dyld $(echo "$sum" | cut -c1-12): NOT in $REH"; bad=1; fi
+    [ "$bad" = 0 ] || { echo "SFPUSH apps: a file every program loads has not passed a rehearsal (sf_terminal.sh qemu <name>, qemu <name> second); nothing sent" >&2; exit 1; }
+    if [ "$1" = push ]; then
+      if [ -n "${SF_USERLAND_DRY:-}" ]; then
+        echo "SFPUSH apps (dry): would run $TT install new, install core, install direct: $(grep -c . "$IN/direct/manifest") files, $(grep -c . "$IN/direct/links") links, $(grep -c . "$IN/core/replace.list") guarded replacements and dyld"; exit 0
+      fi
+      "$TT" install new && "$TT" install core && "$TT" install direct || { echo "SFPUSH apps: an install step failed (see above)" >&2; exit 1; }
+    fi
+    [ -z "${SF_USERLAND_DRY:-}" ] || exit 0
+    # every file of the part there, hashed there, compared here (a wrapped library <name>.pd is the root's own)
+    grep -v '\.pd$' "$IN/direct/manifest" | sed 's/^\([0-9a-f]*\) \(.*\)$/\1  \2/' > "$W/apps.sha256"
+    while read -r path sum _; do
+      case "$path" in /usr/lib/libSystem.B.dylib|/usr/lib/libFoundation.dylib|*/CoreFoundation.framework/Versions/A/CoreFoundation|*/Foundation.framework/Versions/C/Foundation) echo "$sum  ${path#/}" >> "$W/apps.sha256";; esac
+    done < "$IN/core/replace.list"
+    echo "$(cat "$IN/core/dyld.sha256")  usr/lib/dyld" >> "$W/apps.sha256"
+    cut -c67- "$W/apps.sha256" | tr '\n' '\0' | "${SSH[@]}" 'cd / && xargs -0 sha256sum 2>&1' > "$W/apps.remote.sha256" || true
+    if diff "$W/apps.sha256" "$W/apps.remote.sha256" > "$W/apps.diff"; then echo "SFPUSH apps verified: $(grep -c . "$W/apps.sha256") files equal on the target"
+    else echo "SFPUSH apps DIFFERS: $(grep -c '^[<>]' "$W/apps.diff") lines, e.g. $(head -3 "$W/apps.diff" | cut -c1-160 | tr '\n' ' ')"; exit 1; fi
+    exit 0
+  fi
+  D=$ST/$P; [ -d "$D" ] && [ -s "$D.sha256" ] || { echo "no $D: run stage" >&2; exit 2; }
   if [ "$1" = push ]; then
     OWN=(--owner=0 --group=0); [ "$P" != brew ] || OWN=(--owner=501 --group=20)
     t0=$(date +%s)

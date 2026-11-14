@@ -26,9 +26,9 @@
          if (newIndex == NSNotFound) {
              [[_selectedItem view] removeFromSuperview];
              _selectedItem = nil;
---- a/src/Frameworks/AppKit/NSAttributedStringURL.m
-+++ b/src/Frameworks/AppKit/NSAttributedStringURL.m
-@@ -0,0 +1,74 @@
+--- a/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
++++ b/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
+@@ -0,0 +1,88 @@
 +/* SPDX-License-Identifier: MIT
 + *
 + * -[NSAttributedString URLAtIndex:effectiveRange:] (AppKit's addition for automatic link
@@ -100,6 +100,20 @@
 +    if (url != nil && effectiveRange != NULL)
 +        *effectiveRange = NSMakeRange(start, end - start);
 +    return url;
++}
++
++@end
++
++#import <AppKit/NSCell.h>
++
++/* -[NSCell interiorBackgroundStyle]: the background a cell's interior is drawn on (light, unless
++ * the cell is highlighted in a list, where it is the selection's dark fill). A table's custom cell
++ * asks before it draws. */
++@implementation NSCell (PDInteriorBackgroundStyle)
++
++- (NSInteger)interiorBackgroundStyle
++{
++    return [self isHighlighted] ? 1 /* NSBackgroundStyleDark */ : 0 /* NSBackgroundStyleLight */;
 +}
 +
 +@end
@@ -230,3 +244,22 @@
     return [path pathExtension];
  }
  
+--- a/src/Frameworks/AppKit/NSDisplay.m
++++ b/src/Frameworks/AppKit/NSDisplay.m
+@@ -331,8 +331,15 @@
+    return standard;
+ }
+ 
++// NSBeep(): there is no system alert sound on this system yet. Said once; the caller goes on
++// (raising here ended up as an exception report for every bell of a terminal).
+ -(void)beep {
+-   NSUnimplementedMethod();
++   static BOOL said=NO;
++
++   if(!said){
++    said=YES;
++    NSLog(@"AppKit: NSBeep() makes no sound on this system (no system alert sound)");
++   }
+ }
+ 
+ -(NSSet *)allFontFamilyNames {

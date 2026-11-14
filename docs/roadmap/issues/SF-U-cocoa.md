@@ -217,24 +217,48 @@ only; this stream's own checks (popups, Firefox, the scorecard) were NOT re-run 
   as they are called, with arguments, results and times), the compositor's inject module
   (`terminal-app/compositor/wm-darwin-inject.patch`: requested key and pointer records and a capture
   of the real screen, on the M1 and in QEMU alike) with `terminal-app/tools/sf_inject.sh`.
-- Menus: nothing built. Key equivalents of the main menu were seen working in Terminal
-  (Command-C, Command-V).
+- Menus: built on 14 November, see "Menus" below (it was: nothing built).
 
-### Menus (proposal; nothing built, key equivalents work today)
-AppKit already serialises an application's menu bar (titles, enabled and checked state, key
-equivalents, submenus) for upstream's MenuBar.app and takes "item at this index path chosen"
-back, over Distributed Objects. Three ways to show it on our desktop:
-1. A menu strip inside our frame, under the title bar, drawn by the compositor from that
-   tree (themed and scaled like the frame; the tree and the activation travel over a small
-   Wayland protocol from the WindowServer instead of Distributed Objects). Each window carries
-   its own menus, as our conventions have no global bar. Recommended: visible where the user
-   looks, no second look, works for every Mac application unchanged.
-2. A global bar at the top of the screen, as on macOS and in upstream's desktop. Costs a strip
-   of every screen and is a second convention next to ours.
-3. The focused application's menus as a branch of our right-click / Command-Space menu.
-   Nothing on screen until asked for; cheap to add on top of (1) with the same protocol, poor
-   as the only way (not discoverable).
-Recommendation: (1), with (3) added afterwards from the same data.
+### 14 November: what the Terminal.app stream changed next (patches 0028 to 0032)
+- AppKit 0028: the main menu as a strip in each window (section "Menus"); an application ends
+  with its last window on such a desktop; a fixed-size window grows for its toolbar.
+- AppKit 0029: `-[NSTabView removeTabViewItem:]` (selected item -1), nib toolbars (items lost when
+  the delegate outlet was connected, visibility classes), `-[NSAttributedString URLAtIndex:effectiveRange:]`,
+  `-[NSWorkspace typeOfFile:error:]` from the application's declared types, `-[NSCell interiorBackgroundStyle]`,
+  `NSBeep()` says once that it makes no sound.
+- WindowServer 0030: an app id for programs without a bundle identifier.
+- AppKit 0031: the content bindings of NSPopUpButton (content, contentObjects, contentValues,
+  selectedObject; the selection follows content that arrives later).
+- AppKit 0032: the size of an unbounded one-style string is remembered (a measurement was 5 ms on
+  the M1); a title up to an eighth too wide for its place is drawn narrower instead of cut.
+- Foundation (every AppKit program sees it): key-value coding finds `-_key`, `-_getKey`, `-_isKey`
+  and `-_setKey:` (AppKit's binding accessors: bindings of pop-up buttons, matrices and tab views
+  now reach their views), scalar instance variables, subclasses of NSAttributedString.
+- The compositor on the M1 has this stream's popup commits (`terminal-app/compositor/README.md`).
+- Checks re-run on this stack: see "Results" (rows dated 14 November).
+
+### Menus (built 14 November: proposal 1, drawn by AppKit)
+The desktop has no global menu bar, so the main menu of a Mac application is the first row inside
+the frame of each of its titled windows that is not a panel (`NSWindowMenuStrip.m`, patch 0028):
+- The strip is the application's own `NSMenu` in a horizontal `NSMenuView`. A title's menu is the
+  ordinary popup (an `xdg_popup` of the window, the same tracking loop as every other menu), so
+  the compositor needs nothing beyond popups and no protocol was added. (The proposal had the
+  compositor draw the strip from a serialised tree; drawing it in the client gives the same picture
+  with the theme AppKit already has and keeps one menu implementation. The serialised tree for
+  upstream's MenuBar.app is still published where that process exists.)
+- The strip belongs to the frame: `-frameRectForContentRect:` and `-contentRectForFrameRect:` count
+  it, so a window sized from its content keeps its content size (Terminal: 80x24 stays 80x24).
+- Pointer: a press on a title opens its menu at once, the open menu follows the pointer along the
+  bar, a second press on the open title closes it. Keyboard: Control-F2 (macOS: "move focus to the
+  menu bar") opens the first menu; Left and Right go to the neighbouring menu, Up, Down, Return and
+  Escape as in every menu. The application menu is shown under the application's name.
+- Only where the compositor draws the frames (`NSWindowFrameIsDrawnByServer`); the default
+  `PDWindowMenuStrip=NO` turns it off. On such a desktop an application without windows cannot be
+  reached, so it ends (through `-terminate:`) 0.7 s after its last window closed
+  (`PDQuitsWithLastWindow=NO` keeps it).
+- Seen with Apple's Terminal on the M1 (`docs/roadmap/issues/SF-Y-terminal-app.md`); the `hello`
+  check passes with it (its window has the strip). Not done: the application name in bold, a menu
+  taller than the screen, proposal 3 (the menus as a branch of the desktop menu).
 
 ### Firefox's title bar
 Firefox by default draws its tabs in the title bar (a full-size content view) and expects the
@@ -362,7 +386,7 @@ How it got there, kept because each step was a real fault:
 | Our frames around Mac windows, Mac semantics of the buttons | see Results |
 | Scale 100% to 200% including fractional steps, live change | see Results |
 | Upstream Terminal and Calculator on our desktop | see Results |
-| Menus | not visible (proposal above); key equivalents work |
+| Menus | a strip in each window (section "Menus"), pointer and keyboard |
 | Popup windows (menus, context menus, submenus, pop-up and pull-down buttons, combo boxes, tool tips) | `xdg_popup`s with one tracking loop, pointer and keyboard; see "Popups" and "Popup results". Firefox's menus and panels: see there |
 | Firefox on arm64 | official 160.0, sandboxes off, software WebRender in the main process: the browser window with its chrome, a local page with text and an image, keyboard into a page's field, pointer on a page's button (12 November, below). a page over HTTP, https://example.com. Not yet: sandbox on, GPU process, system trust store |
 | Auto Layout | layout API on NSView and the controls, constraint activation, a Cassowary solver (patch 0011); three constraint layouts equal in structure to macOS |

@@ -70,6 +70,13 @@ chown 0:0 "$R/opt" "$R/usr/local" "$R/usr/local/bin" 2>/dev/null
 grep -q '^sf:' "$R/etc/passwd" || echo 'sf:*:501:20:SiliconForest User:/Users/sf:/bin/zsh' >> "$R/etc/passwd"
 grep -q '^sf:' "$R/etc/master.passwd" || echo 'sf:*:501:20::0:0:SiliconForest User:/Users/sf:/bin/zsh' >> "$R/etc/master.passwd"
 chown 501:20 "$R/Users/sf" "$R/opt/homebrew" || rc=1
+# root's shell is zsh, as an account's on macOS: /bin/sh here is zsh in sh emulation, without line
+# editing, and a terminal emulator starts the shell the user database names (login -pf root)
+for f in etc/passwd etc/master.passwd; do
+    if [ -e "$R/$f" ] && [ -x "$R/bin/zsh" ] && grep -q '^root:.*:/bin/sh$' "$R/$f"; then
+        sed 's|^\(root:.*\):/bin/sh$|\1:/bin/zsh|' "$R/$f" > "$R/$f.sf-new" && chmod 644 "$R/$f.sf-new" && mv -f "$R/$f.sf-new" "$R/$f" || rc=1
+    fi
+done
 # login shells read the environment file
 for f in etc/profile etc/zshenv; do
     [ -e "$R/$f" ] && ! grep -q '/etc/sf-environment' "$R/$f" && echo '[ -r /etc/sf-environment ] && . /etc/sf-environment' >> "$R/$f"

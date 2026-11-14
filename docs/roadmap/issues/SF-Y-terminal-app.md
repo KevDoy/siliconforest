@@ -9,29 +9,26 @@ step that makes it run is part of SiliconForest. Phases: 1 measure (done by the 
 Test copy: `private/terminal-app/m5-26.5.2/Terminal.app` (macOS 26.5.2, from the controller Mac;
 git-ignored). The final binary comes from the M1's macOS 27.0: nothing below may depend on one build.
 
-## State (13 November 2026, night)
+## State (14 November 2026)
 **On the M1, booted from its disk: the unmodified Terminal.app (the macOS 26.5.2 copy, 129 files
-hash-equal to the copy here, at `/Applications/Utilities/Terminal.app`) is started with
-`open -a Terminal`, opens an 80x24 window in the compositor's frame, draws with the font of its own
-bundle, runs the user's shell on a pty and takes what is typed.** Seen after a fresh boot
-(`runs/sf-terminal/shots/v1.png`: launched over SSH; `w1.png`: launched by typing the command into
-the desktop's own terminal). The five files every program loads (dyld, libSystem, libFoundation and
-the two framework paths) were replaced on the M1 by the guarded procedure after a QEMU pass with a
-fresh boot of its result; the two regression checks give what they gave before. Everything is
-built by recipes; the libSystem recipe that every root uses now carries the dyld and libSystem
-changes.
+hash-equal to the copy here, at `/Applications/Utilities/Terminal.app`) is started from the desktop
+menu (Applications > Terminal) or with `open -a Terminal`. It shows its menu bar as the first row
+inside the window's frame, opens windows with its twelve built-in profiles (the default is Clear
+Dark, as on macOS 26), runs root's zsh through `/usr/bin/login`, and ends when its last window is
+closed.** Everything below was seen in captures of the screen as the compositor rendered it
+(`runs/sf-terminal/shots/`, not committed); input in every test is synthetic (the compositor's
+inject module, a test instrument: `terminal-app/compositor/README.md`). Nobody looked at the panel
+and no physical keyboard or trackpad was used.
 
-| Phase | State | Evidence |
+| What | State | Evidence (`runs/sf-terminal/shots/`) |
 |---|---|---|
-| 2 load | done on the M1 | scanner: 733 imports, 0 missing (`homebrew/gapscan/terminal-after.md`); dyld binds all of them and runs the initializers |
-| 3 launch | done on the M1 | an 80x24 window in the compositor's frame, title "Terminal — sh — 80×24" (`runs/sf-terminal/shots/n1.png`, a capture of the screen) |
-| 4 shell | done on the M1 for what the table below does not list | text, colours and bold drawn; typing, Return, Backspace, arrows, Ctrl-C, Ctrl-D, Tab; scrollback (PageUp), window resize (the shell sees 100x31), selection by dragging, Command-C and Command-V: `runs/sf-terminal/shots/{m2,s6,r6,c1,c4,f1}-crop.png` |
-
-Pictures: `runs/sf-terminal/shots/` (not committed). Those named above are captures of the whole
-screen as the compositor rendered it (its inject module, below); the older `t*`, `m1-window*` ones
-are what the application handed to the compositor (`PD_WS_DUMP_DIR`). Nobody looked at the panel.
-Input in every test is synthetic: key and pointer records the compositor generates on request at
-the layer of its HID device nodes and labels so. No physical keyboard or trackpad was used.
+| Menu bar | done: every titled window that is not a panel carries the main menu as a strip (AppKit 0028, one mechanism for all Mac applications). Pointer: press a title, move along the bar, choose. Keyboard: Control-F2, arrows, Return, Escape | `mb`, `mc2`..`mc4` (pointer), `md1`..`md6` (keyboard; Shell > New Window chosen by Return opened a window), `qt1`, `qt2` (Terminal > Quit Terminal ended the program and both shells) |
+| Windows | Command-N, Command-W, closing the last window (the program ends, no shell is left), Terminal > Quit. Not right: Command-Q (below), Command-T | `cw1`..`cw3`, `pr6` |
+| Profiles | the twelve built-in profiles are imported at first launch; Shell > New Window > <profile> opens a window with that look (Ocean: blue); the default window is Clear Dark, 120x30 | `pr4`, `pr5`, `pr6` |
+| Preferences | Command-comma; the toolbar shows General, Profiles, Window Groups, Encodings and switches panes; the pop-ups and checkboxes show the stored values (bindings work since key-value coding finds AppKit's `_key` accessors); the window grows for its toolbar; titles that were cut are drawn up to an eighth narrower instead. Open: below | `ph2` (General), `ph3` (Profiles: font, colour wells, cursor) |
+| Desktop | the desktop menu has Applications (one row per bundle in `/Applications`, `/Applications/Utilities`) | `ap1`..`ap3` |
+| Shell | `login -pf root` (ours) starts root's shell as a login shell; root's shell is zsh (`/etc/passwd`, `/etc/master.passwd`); `TERM=xterm-256color`, `TERM_PROGRAM=Apple_Terminal` | `pr4`, `th1` |
+| In the terminal | 256 colours, italic, underline, reverse, dim; htop full screen; text selection, paste, scrollback, resize as before | `tc2`, `th2` |
 
 ### What was wrong with text and keys (all in the system, none in Terminal)
 | Symptom | Cause | Fix |
@@ -47,20 +44,39 @@ the layer of its HID device nodes and labels so. No physical keyboard or trackpa
 ### What stands between this and "perfectly working" (in the order a person meets it)
 | Item | What is known | Estimate |
 |---|---|---|
-| Launch takes 2.3 s to the shell | measured from `open` to the shell's process on the installed bundle. It was about 7 s: Terminal loads its preferences window at launch to import its default profiles, and decoding that nib's tab view ran the Cocoa stream's layout solver 388 times over the whole tree (4.8 s on the main thread, measured with `sf-trace`). AppKit 0027 solves once per resize cascade. Real Terminal on this hardware is under a second | 1 to 2 days for the rest (the solver itself, nib decoding) |
-| No menu bar | the main menu loads from the nib and its key equivalents work (Command-C, Command-V, and the rest by the same path); nothing shows it. SF-U's proposal (a strip in the compositor's frame fed by a small Wayland protocol) is not built | SF-U item, about a week |
-| Root's shell is `/bin/sh` | Terminal starts the user's shell from the password file; this root's `/bin/sh` (zsh in sh emulation) has no line editing, so arrows echo `^[[A` until `exec zsh`. Not Terminal's: a login user with `/bin/zsh` | a decision about users, not code |
-| Resize handle is 2 pixels | the compositor's frame has a 2-pixel border as its resize zone for this window; resizing itself works and Terminal reflows | compositor |
-| Preferences window | Command-comma opens it and its General pane is laid out and readable (`shots/p4-crop.png`). It came up empty until two faults were fixed (a nib without a maximum size decoded as "no larger than 0 by 0"; fonts archived without a size were drawn at size 0). Open: no toolbar is shown, so the other panes (Profiles, Encodings) cannot be chosen; labels are cut off at the right ("New window with profi…": the system font here is wider than the nib was laid out for); bindings to `NSMatrix.selectedTag` and `NSPopUpButton.content`, `.contentObjects`, `.contentValues` have no such keys; `data source ... does not respond to numberOfRowsInTableView:`. Changing a setting was not tried | 1 week |
-| Symbol images, `Assets.car` | `Could not find image named 'gearshape'` and others: SF Symbols and the CoreUI catalogue are not read; AppKit's `NSColorPanel.nib` is missing from its resources | 1 week for a `.car` reader, symbols need an open symbol font |
-| Scroller look | Terminal drives its scroller through `NSScrollerImpPair` (private), which answers nothing; the knob is drawn by AppKit's own scroller and follows the position, in the Cocotron look | 3 days |
-| Tabs, new windows, find, bookmarks, Look Up, Quick Look, help | not tried; 213 selectors no class implements (static count), 130 of them delegate callbacks Terminal answers itself | as they are met |
-| Sound | `AudioServices*` answer errors: the bell is silent | 2 days over the sound stream's server |
-| Mouse reporting, drag and drop, services, AppleScript | not tried | unknown |
-| Private frameworks | DataDetectorsCore (no links found in output), CoreAnalytics (nothing collected), libScreenReader (empty): by design | - |
-| Swift | the 5.4.3 overlay subset plus `swift/SFBridging.swift`; nothing of Terminal's Swift code beyond `swift_getObjectType` at launch was seen running | unknown |
-| A burst of keys once stalled for 0.6 s | seen once with the tracer loaded (25 keys per second otherwise arrive in step); not reproduced without it | not established |
-| The M1's own Terminal (macOS 27.0) | pending: macOS was not running, so the bundle could not be fetched. Nothing here names a symbol address or an offset of the 26.5.2 build; rescan with `sf_terminal.sh scan` once it is there | rescan |
+| Launch takes 5 s to the shell | 2.5 s with one profile; with the twelve built-in profiles Terminal measures and prepares each. Measured (`sf-trace`): the preferences nib 2.0 s (decoding, connections), text measuring 0.6 s after AppKit 0032 (it was 6.9 s: 1384 measurements at 5 ms), first display 0.5 s; about 2 s not attributed | 2 to 3 days (nib decoding, the text system's cost per string) |
+| A screenful appears late | after Return on `ls` of 27 lines the capture of the screen shows the output between 1.9 and 3.4 s later, although Terminal's own drawing ends 0.5 s after the key (trace: data at +70 ms, `-drawRect:` 235 ms). Where the rest goes (WindowServer presenting, the compositor) is not found. A menu takes about 0.4 s to open (10 to 25 ms per row of text) | 2 to 4 days; needs a profiler on the M1 |
+| Command-Q | the compositor takes Command-Q ("quit application": it asks windows to close) and the request reaches only the focused window, though both carry the app id `com.apple.Terminal` (seen with `WAYLAND_DEBUG`). Not found why. Terminal > Quit Terminal works; closing the last window ends the program | half a day in the compositor |
+| Tabs | Command-T opens a window. Terminal uses AppKit's window tabbing (`addTabbedWindow:ordered:`, `tabGroup`, `selectNextTab:` ...), which this AppKit does not have. Design that fits Wayland: a tab group is one toplevel; switching hands the surface from one window's WindowServer record to the other (swap of the records' identities and backing stores), the tab bar is a second strip under the menu strip | 3 to 4 days |
+| Preferences, rest | the profile list is drawn empty (its custom cell, `TTSettingsSourceCell`; the selected profile's values show); the inner tab view and the scrollers have the Cocotron look; bold section titles and two long labels are cut (they need more than an eighth); toolbar icons are blank (symbol images); bindings `enabled2` (a second condition) and `NSMenuItem.value` have no key; changing a setting and reading it back after a relaunch was not tried (the preferences file is written: window frames, profiles) | 1 week |
+| True colour | `48;2;r;g;b` draws a few wide bands instead of 64 cells | not looked into |
+| Bold, strike-through | bold text is drawn in the regular face (no bold face is derived for the bundle's font); strike-through is not drawn | 1 to 2 days |
+| Wide characters | Chinese text is not drawn and most emoji are missing: no installed font has the glyphs (Inter, Source Code Pro, URW, DejaVu); box drawing sits off the baseline | open fonts (Noto CJK, Noto Emoji) by recipe, fallback: 2 days |
+| First key after a click | the first character typed right after the click that focuses the window was lost once (`ls` arrived as `s`, `pr4`) | not looked into |
+| Symbol images, `Assets.car` | `Could not find image named 'gearshape'` and others: SF Symbols and the CoreUI catalogue are not read; AppKit's `NSColorPanel.nib` is missing | 1 week for a `.car` reader, symbols need an open symbol font |
+| Scroller look | Terminal drives its scroller through `NSScrollerImpPair` (private), which answers nothing; the knob is drawn by AppKit's own scroller, in the Cocotron look | 3 days |
+| Bell | `NSBeep()` and `AudioServices*` make no sound (said once in the log); Terminal's own visual bell was not tried | 2 days over the sound stream's server |
+| Root's home in new windows | none: `login` starts in the home directory | - |
+| Resize handle is 2 pixels | the compositor's frame has a 2-pixel border as its resize zone | compositor |
+| Not tried | find (Command-F opened nothing visible), mouse reporting (htop drew its full screen, `th2`; vim was started and its screen was not there yet in a capture 3 s later; whether clicks reached either was not established), drag and drop, services, Secure Keyboard Entry, `open -a Terminal <directory>` and `.command` files (no Apple Events here: `open` starts a new instance), AppleScript, bookmarks, Look Up, help (`-[NSHelpManager openHelpAnchor:inBook:]` is not implemented) | as they are met |
+| Private frameworks | DataDetectorsCore, CoreAnalytics, libScreenReader: by design | - |
+| The M1's own Terminal (macOS 27.0) | pending: macOS was not running. Rescan with `sf_terminal.sh scan` once it is there | rescan |
+
+### Faults found on 14 November (all in the system, none in Terminal)
+| Symptom | Cause | Fix |
+|---|---|---|
+| No menu was shown | the desktop has no menu bar process | AppKit 0028: the main menu as a strip of each window; needs `xdg_popup` in the compositor (`compositor/wm-darwin-popups.patch`, the Cocoa stream's commits, now in the M1's compositor) |
+| Terminal started `sh` although the user database said zsh | Terminal runs `/usr/bin/login -pf <user>`; there was no `login` | `system/login.c` |
+| Closing a window ended the program | `-[NSTabView removeTabViewItem:]` compared an `int` with `NSNotFound` and selected item -1 | AppKit 0029 |
+| Closing the last window crashed in `CFRelease` | `-[NSAttributedString init]` replaced an application's subclass instance by a CoreFoundation string, into which the application then wrote its instance variables; `-retain`/`-release` of a subclass went to CoreFoundation | Foundation |
+| Bindings of scalar properties raised | key-value coding reached only object instance variables | Foundation: scalars and structs in place |
+| No binding of a pop-up button, matrix or tab view found its key | AppKit keeps those accessors as `-_key`/`-_setKey:`, which Apple's key-value coding searches and ours did not | Foundation |
+| One profile, "New profile" | `-[NSBundle pathsForResourcesOfType:inDirectory:]` returned leaf names; `-[NSWorkspace typeOfFile:error:]` returned the extension, not the type the application declares | Foundation; AppKit 0029 |
+| Preferences without a toolbar | a nib's toolbar lost its items when its delegate outlet was connected (a delegate that names no items); item visibility classes | AppKit 0029 |
+| Pop-ups of Preferences empty or wrong | content arrays were handed to `-addItemsWithTitles:` as strings; the selection was not re-applied when the content came later | AppKit 0031 |
+| `-[__NSCFBoolean longLongValue]` unrecognized | CoreFoundation's boolean class answered only `-boolValue` | Foundation |
+| 20 s of processor time at launch | every string measurement is a pass of the whole text system (5 ms); Terminal measures 1384 strings for its profiles | AppKit 0032: sizes of unbounded one-style strings are remembered |
+| Each bell an exception report | `-[NSDisplay beep]` raised "not implemented" | AppKit 0029: said once |
 
 ## The binary (scanner, `integrations/puredarwin/homebrew/sf_gapscan.py --app`)
 The scanner now reads universal files (`--arch arm64e`), the import table of chained fixups, the
@@ -183,14 +199,22 @@ from a scratch prefix; `install-stage` splits it for installing.
 | AppKit, CoreText, CoreGraphics, Onyx2D, libWindowServer | `cocoa/patched.nix` (patches 0001 to 0027) | yes: the Cocoa stream's root recipes (`build-desktop-root.nix`, `build-firefox-root.nix`) take all five from `patched.nix`, and `macos-compat/build-appkit.nix` is a selection of that root. That stream's own checks were not re-run on 0019 to 0027 |
 | the wrappers (CoreFoundation, Foundation, QuartzCore, Carbon, CoreServices, AudioToolbox), ColorSync, DataDetectorsCore, CoreAnalytics, libScreenReader | `terminal-app/build-compat.nix` | new; links against recipes (libSystem, libobjc, CoreFoundation, Foundation, ICU, the Swift runtime, the Cocoa root, `macos-compat/build-coreservices.nix`, the sound stream's AudioToolbox), not against a copy of a running root |
 | ApplicationServices, ImageIO | `cocoa/build-firefox-root.nix` | the Cocoa stream's |
-| `/usr/bin/open` | `terminal-app/system/open.c` | new |
+| `/usr/bin/open` | `terminal-app/system/open.c` (`open --listen <pipe>`: the session's listener for the desktop menu's Applications rows) | new |
+| `/usr/bin/login` | `terminal-app/system/login.c` (`login -pf <user>`, `-pfl <user> <program> ...`: only pre-authenticated logins; no utmpx, no "Last login") | new |
 | the installer's probes (`/usr/share/sf-test/sf-*-probe`) | `terminal-app/probe/` | new |
 
 `macos-compat/build-compat-root.nix` ("what a SiliconForest root gets for macOS programs") lays the
-tree over its AppKit and Perl parts. Not wired: the tools that make a disk root from it lay only
-paths the base lacks, so on a root made anew libFoundation, the two framework paths and the wrapped
-frameworks are still the base's until `sf_terminal.sh install core` and `install direct` have run
-on it (the image builder of the storage stream is not this job's to change).
+tree over its AppKit and Perl parts. The storage stream's tools lay only paths the base lacks
+(`sf_userland_push.sh push sys`), so the files that replace the base's go on as a part of their own:
+**`m1-storage/tools/sf_userland_push.sh push apps`** runs `sf_terminal.sh install new`, `install core`
+and `install direct` in that order on the running root (and `verify apps` compares every file
+there with the tree). The five files every program loads are only sent when their SHA-256 is in
+`terminal-app/core-rehearsed.sha256`, the record of the QEMU rehearsals that passed
+(`SF_USERLAND_DRY=1 ... push apps` checks that and prints what it would run). A fresh root also
+gets root's shell (`m1-storage/userland/sf-userland-install.sh`: zsh where `/bin/zsh` is there),
+the session's listener (`m1-storage/system/sf-session`) and, once it is installed as the desktop,
+the compositor with popups and the Applications menu (`terminal-app/compositor/README.md`: built
+from patches against the local repository, not by a recipe yet).
 
 ## Installing
 Five files are loaded by every program: dyld, libSystem, libFoundation, and the two framework paths
@@ -254,12 +278,15 @@ used in every test) and libobjc, libCoreFoundation (unchanged).
 - `/private/var/db/sfy` (the scratch prefix, `/private/tmp/sfy` links to it after `ln -sfn`): remove.
 
 ## Launching
-`open -a Terminal` or `open /Applications/Utilities/Terminal.app` (`/usr/bin/open`, new: the bundle's
-executable in a session of its own with the desktop's environment, output in
-`~/Library/Logs/<name>.log`), typed in the desktop's terminal or over SSH. The desktop menu has no
-entry for applications: its rows are the compositor's own (Terminal, Theme, Wallpaper, Display,
-Wi-Fi, Sound, End Session) and its launch path admits only its own terminal; an "Applications" row
-that runs `open` is the natural next step and is not built.
+From the desktop menu (right click on the desktop, or Command-Space): **Applications > Terminal**.
+The submenu has one row per bundle in `/Applications` and `/Applications/Utilities`
+(`compositor/wm-darwin-applications.patch`). The compositor starts no program: it writes the
+bundle's path into the pipe `$XDG_RUNTIME_DIR/open-requests`, and the session's listener
+(`open --listen`, started by `sf-session` with the desktop's environment) opens it; without a
+listener the row says that the session takes no requests. Or type `open -a Terminal` /
+`open /Applications/Utilities/Terminal.app` in a terminal or over SSH (`/usr/bin/open`: the bundle's
+executable in a session of its own, output in `~/Library/Logs/<name>.log`). Each `open` starts a
+new instance: there are no Apple Events to hand a request to a running one.
 
 ## Tools
 - `tools/sf_terminal.sh`: stage, push, run, shot, scan (scratch prefix); install-stage, qemu,

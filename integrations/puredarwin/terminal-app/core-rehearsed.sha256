@@ -1,0 +1,6 @@
+# The files every program loads (dyld, libSystem, libFoundation, the CoreFoundation and Foundation
+# framework paths) as they passed a QEMU rehearsal: replaced on the M1's root image as on the M1,
+# the macOS-compatibility check, then a fresh boot of the result (tools/sf_terminal.sh qemu <name>,
+# qemu <name> second; logs in runs/m1-storage/qemu-dr/<name>, <name>-2). Only files listed here are
+# sent by m1-storage/tools/sf_userland_push.sh push apps.
+# <sha256>  <path> <rehearsal> <date>

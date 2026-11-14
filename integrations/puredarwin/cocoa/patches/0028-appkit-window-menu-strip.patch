@@ -552,7 +552,20 @@
      return self;
  }
  
-@@ -1801,6 +1802,9 @@
+@@ -1334,6 +1335,12 @@
+ 
+    frame.size.height+=contentHeightDelta;
+    frame.origin.y-=contentHeightDelta;
++   // the toolbar is part of the frame: the limits of the frame move with it (a window whose nib
++   // fixes its size could not grow for its toolbar, and its content was cut off at the bottom)
++   if(_minSize.height>0)
++    _minSize.height=MAX(0,_minSize.height+contentHeightDelta);
++   if(_maxSize.height<32767)
++    _maxSize.height=MAX(0,_maxSize.height+contentHeightDelta);
+ 
+    NSPoint toolbarOrigin;
+    NSRect backgroundBounds=[self _backgroundView].bounds;
+@@ -1801,6 +1808,9 @@
  
     if([_toolbar _view]!=nil && ![[_toolbar _view] isHidden])
      result.size.height+=[[_toolbar _view] frame].size.height;
@@ -562,7 +575,7 @@
  
      return result;
  }
-@@ -1810,6 +1814,8 @@
+@@ -1810,6 +1820,8 @@
  
     if([_toolbar _view]!=nil && ![[_toolbar _view] isHidden])
      result.size.height-=[[_toolbar _view] frame].size.height;

@@ -63,6 +63,14 @@
 #         connected); -[NSWorkspace typeOfFile:error:] answers the type the application declares
 #   0030  WindowServer: a window of a program without a bundle identifier gets the program's name as
 #         its app id
+#   0031  AppKit: the content bindings of a pop-up button (content, contentObjects, contentValues,
+#         selectedObject): arrays of objects were taken for titles; the bound selection is applied
+#         again when the content arrives after it
+#   0032  AppKit: the size of an unbounded one-style string is remembered (a measurement is a pass of
+#         the whole text system: 5 ms on the M1, and Terminal.app made 1384 at launch); a title up to
+#         an eighth too wide for its place is drawn narrower instead of cut with an ellipsis
+#   0033  AppKit: scrollers in the macOS 26 look (no arrow buttons, a rounded bar); PDControlLook=15
+#         keeps the old one
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
 #         errSecItemNotFound when nothing was found (Firefox crashed on the unwritten result)
 #   (0007 and 0008 are libSystem's sandbox profile compiler: ./build-libsystem-cocoa.nix)
@@ -99,6 +107,9 @@ let
     ./patches/0027-appkit-layout-once-per-resize.patch
     ./patches/0028-appkit-window-menu-strip.patch
     ./patches/0029-appkit-fixes-found-with-terminal-2.patch
+    ./patches/0031-appkit-popup-button-content-bindings.patch
+    ./patches/0032-appkit-measured-sizes-remembered.patch
+    ./patches/0033-appkit-scroller-look-macos26.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
