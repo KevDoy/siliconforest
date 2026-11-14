@@ -90,10 +90,48 @@
  }
 --- a/src/Frameworks/CoreText/CTRegistry.m
 +++ b/src/Frameworks/CoreText/CTRegistry.m
-@@ -768,6 +768,21 @@
-     return ok;
+@@ -228,6 +228,8 @@
+ static CFIndex recordCount;
+ static bool registryBuilt;
+ static CFMutableDictionaryRef fallbackCache;
++// the record a name no face carries was aliased to (kCFNull: none), until the registry changes
++static CFMutableDictionaryRef aliasCache;
+ 
+ static void initRegistryLock(void) {
+     pthread_mutexattr_t attr;
+@@ -408,6 +410,8 @@
+     registryBuilt = false;
+     if (fallbackCache != NULL)
+         CFDictionaryRemoveAllValues(fallbackCache);
++    if (aliasCache != NULL)
++        CFDictionaryRemoveAllValues(aliasCache);
  }
  
+ static bool CTRegistryAddFileUnlocked(const char *path) {
+@@ -630,7 +634,17 @@
+     }
+     // names no installed face carries go through fontconfig's aliases, Helvetica to Nimbus Sans and so on
+     if (count == 0 && name != NULL && family == NULL && !hasPath) {
+-        const CTFontRecord *alias = aliasRecordForName(name);
++        /* a fontconfig substitution and match each time: AppKit makes fonts by such names for
++         * every string it measures (a third of Terminal.app's launch); kept until the registry changes */
++        const void *cached = aliasCache ? CFDictionaryGetValue(aliasCache, name) : NULL;
++        const CTFontRecord *alias = cached == (const void *)kCFNull ? NULL : cached;
++
++        if (cached == NULL) {
++            alias = aliasRecordForName(name);
++            if (aliasCache == NULL)
++                aliasCache = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, NULL);
++            CFDictionarySetValue(aliasCache, name, alias ? (const void *)alias : (const void *)kCFNull);
++        }
+ 
+         if (alias != NULL) {
+             matches[0].record = alias;
+@@ -767,6 +781,21 @@
+     CTRegistryUnlock();
+     return ok;
+ }
++
 +/* Every font file of a directory, through fontconfig's cache of that directory: a font file
 + * added alone is scanned each time (a variable font: every glyph of every named instance, for
 + * its spacing; the fonts Apple's Terminal carries took a second per configuration at each
@@ -108,10 +146,9 @@
 +    CTRegistryUnlock();
 +    return ok;
 +}
-+
+ 
  bool CTRegistryRemoveFile(const char *path) {
      bool ok;
- 
 --- a/src/Frameworks/CoreText/CTInternal.h
 +++ b/src/Frameworks/CoreText/CTInternal.h
 @@ -57,6 +57,7 @@

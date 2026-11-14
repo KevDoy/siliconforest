@@ -81,6 +81,8 @@
 #   0036  WindowServer: a flush that finds every frame busy is presented when the compositor releases
 #         one (it waited up to 100 ms on the main thread and was then dropped); PD_WS_TIMING=1 prints
 #         the wall time of each commit and release
+#   0037  Onyx2D: one font per name (each was a fontconfig match, the whole file read and a FreeType
+#         face opened: AppKit makes an NSFont by name for every string it measures)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -138,6 +140,7 @@ let
     ./patches/0006-onyx2d-glyphs-at-device-scale.patch
     ./patches/0013-onyx2d-png-straight-alpha-byte-order.patch
     ./patches/0026-onyx2d-copy-bits.patch
+    ./patches/0037-onyx2d-font-by-name-once.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {

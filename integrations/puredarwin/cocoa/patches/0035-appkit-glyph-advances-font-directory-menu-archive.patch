@@ -73,3 +73,89 @@
  }
  
  #pragma mark GPOS pair kerning
+--- a/src/Frameworks/AppKit/O2Font_FT.m
++++ b/src/Frameworks/AppKit/O2Font_FT.m
+@@ -9,6 +9,7 @@
+ #import "O2Font_FT.h"
+ #import <Onyx2D/O2Font_freetype.h>
+ #include <stdlib.h>
++#include <pthread.h>
+ 
+ O2FontRef O2FontCreateWithFontName_platform(NSString *name) {
+     O2FontRef result=[[O2Font_FT alloc] initWithFontName:name];
+@@ -58,7 +59,32 @@
+    return fontConfig;
+ }
+ 
++/* The file a name resolves to, found once per name: every NSFont made by name was a fontconfig
++ * substitution and match (a third of Terminal.app's launch went to sizing its menu strip that way).
++ * Names that resolve to nothing are not kept: an application's own fonts are added later. */
+ +(NSString*)filenameForPattern:(NSString *)pattern {
++   static NSMutableDictionary *found;
++   static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
++   NSString *key=pattern ? pattern : @"";
++   NSString *result;
++
++   pthread_mutex_lock(&lock);
++   result=[[found objectForKey:key] retain];
++   pthread_mutex_unlock(&lock);
++   if(result!=nil)
++    return [result autorelease];
++   result=[self _filenameForPattern:pattern];
++   if(result!=nil){
++    pthread_mutex_lock(&lock);
++    if(found==nil)
++     found=[[NSMutableDictionary alloc] init];
++    [found setObject:result forKey:key];
++    pthread_mutex_unlock(&lock);
++   }
++   return result;
++}
++
+++(NSString*)_filenameForPattern:(NSString *)pattern {
+    int i;
+    FcPattern *pat=NULL;
+ 
+--- a/src/Frameworks/AppKit/NSMutableAttributedString.m
++++ b/src/Frameworks/AppKit/NSMutableAttributedString.m
+@@ -10,6 +10,7 @@
+ #import <AppKit/NSMutableAttributedString.h>
+ #import <AppKit/NSFontManager.h>
+ #import <AppKit/NSFont.h>
++#import <CoreText/CoreText.h>
+ 
+ @implementation NSMutableAttributedString(NSMutableAttributedString_AppKit)
+ 
+@@ -54,12 +55,27 @@
+     NSArray *list = [NSFont preferredFontNames];
+     NSFont *bestFont = [self _bestFontForCharacter:c userFont:font usingFontNames:list];
+     if (bestFont == nil) {
+-        // We couldn't find any prefered font - try all of them
+-        static NSArray *sAllFonts = nil;
+-        if (sAllFonts == nil) {
+-            sAllFonts = [[[NSFontManager sharedFontManager] availableFonts] retain];
++        /* No preferred font has it: CoreText's fallback (one fontconfig query by character set,
++         * remembered per character) instead of making a font of every installed face to read its
++         * character set (a quarter of a second the first time, at the launch of any application
++         * whose menus show a character the system face lacks). */
++        UniChar      one = c;
++        CFStringRef  text = CFStringCreateWithCharacters(NULL, &one, 1);
++        CTFontRef    base = CTFontCreateWithName((CFStringRef)[font fontName], [font pointSize], NULL);
++        CTFontRef    found = (text && base) ? CTFontCreateForString(base, text, CFRangeMake(0, 1)) : NULL;
++        CGGlyph      glyph = 0;
++
++        if (found != NULL && CTFontGetGlyphsForCharacters(found, &one, &glyph, 1) && glyph != 0) {
++            CFStringRef name = CTFontCopyPostScriptName(found);
++
++            if (name != NULL) {
++                bestFont = [NSFont fontWithName:(NSString *)name size:[font pointSize]];
++                CFRelease(name);
++            }
+         }
+-        bestFont = [self _bestFontForCharacter:c userFont:font usingFontNames:sAllFonts];
++        if (found) CFRelease(found);
++        if (base) CFRelease(base);
++        if (text) CFRelease(text);
+     }
+     
+     return bestFont;
