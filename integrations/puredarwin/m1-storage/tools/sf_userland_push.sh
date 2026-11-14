@@ -159,7 +159,19 @@ push|verify)
     echo "$(cat "$IN/core/dyld.sha256")  usr/lib/dyld" >> "$W/apps.sha256"
     cut -c67- "$W/apps.sha256" | tr '\n' '\0' | "${SSH[@]}" 'cd / && xargs -0 sha256sum 2>&1' > "$W/apps.remote.sha256" || true
     if diff "$W/apps.sha256" "$W/apps.remote.sha256" > "$W/apps.diff"; then echo "SFPUSH apps verified: $(grep -c . "$W/apps.sha256") files equal on the target"
-    else echo "SFPUSH apps DIFFERS: $(grep -c '^[<>]' "$W/apps.diff") lines, e.g. $(head -3 "$W/apps.diff" | cut -c1-160 | tr '\n' ' ')"; exit 1; fi
+    else
+      echo "SFPUSH apps DIFFERS: $(grep -c '^>' "$W/apps.diff") files"
+      # each file that differs: how much. (A file the kernel maps executable can read back with a few
+      # instructions changed: upstream's kernel rewrites pointer-authentication instructions in the pages
+      # it maps, and on the M1 that showed through read(2) for libSystem: 4 words, xpaclri as nop.)
+      grep '^<' "$W/apps.diff" | cut -c69- | while read -r f; do
+        "${SSH[@]}" "cat '/$f'" < /dev/null > "$W/apps.there" 2>/dev/null || true
+        here=$IN/direct/files/$f; case "$f" in usr/lib/dyld) here=$IN/core/dyld.new;; usr/lib/libSystem.B.dylib|usr/lib/libFoundation.dylib) here=$IN/core/replace/$(basename "$f").new;; */CoreFoundation|*/Foundation) [ -e "$here" ] || here=$IN/core/replace/$(basename "$f").new;; esac
+        if [ "$(stat -c %s "$W/apps.there")" = "$(stat -c %s "$here")" ]; then echo "SFPUSH apps differs: /$f in $(cmp -l "$W/apps.there" "$here" | wc -l) bytes of $(stat -c %s "$here")"
+        else echo "SFPUSH apps differs: /$f is $(stat -c %s "$W/apps.there") bytes there, $(stat -c %s "$here") here"; fi
+      done
+      rm -f "$W/apps.there"; exit 1
+    fi
     exit 0
   fi
   D=$ST/$P; [ -d "$D" ] && [ -s "$D.sha256" ] || { echo "no $D: run stage" >&2; exit 2; }

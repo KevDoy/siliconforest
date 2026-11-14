@@ -4,3 +4,8 @@
 # qemu <name> second; logs in runs/m1-storage/qemu-dr/<name>, <name>-2). Only files listed here are
 # sent by m1-storage/tools/sf_userland_push.sh push apps.
 # <sha256>  <path> <rehearsal> <date>
+472fd9a36d776f082e298913b810e4d394bf397b53d765b9ccfce54d1342887e  /usr/lib/dyld ty4, ty6 2026-11-14
+dfc854f15b2a7418854e24fc493e58db7396eba2fb78aa2b73a24b3f24bc463c  /usr/lib/libSystem.B.dylib ty4, ty6 2026-11-14
+ad2e75a9a5e0f8ad645ec4b0fcb1da68d42b62f7bc0b1ebc810233576142c091  /usr/lib/libFoundation.dylib ty6 2026-11-14
+525419adb10ba42a00e8626e659e40d3459fadd5d77c5274e8e2a8840e3ab92f  /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation ty4, ty6 2026-11-14
+c4d12d0ddc20616316931d06ddde9cb6bbd613329228702159471171e7980b8b  /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation ty4, ty6 2026-11-14

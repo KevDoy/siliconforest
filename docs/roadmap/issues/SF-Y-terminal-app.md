@@ -248,16 +248,36 @@ otherwise) and records what it did in `/private/var/db/sf-macos-apps.installed`.
 | M1: `install direct` | AppKit, CoreText, CoreGraphics, Onyx2D, libWindowServer replaced (kept as `.old-sfy`), QuartzCore, Carbon, CoreServices, AudioToolbox wrapped (the library kept as `.pd`), `/usr/bin/open` new | `direct.txt` |
 | M1: regression, before and after | `macos-compat/tools/sf_compat_push.sh check`: 18 of 18 ok both times; `sf-claude-check.sh`: the same statuses and the same two TUI screens | `runs/sf-terminal/regress/` |
 | M1: restart, then `open -a Terminal` | the unmodified bundle runs, commands typed into it run | `shots/v1.png`, `w1.png` |
+| 14 November. QEMU `ty6`, `ty6-2` | the second libFoundation (`ad2e75a9…`) with the unchanged other four: replaced as on the M1, `COMPAT_VERDICT failed=0`, `QDDESK_PASS`; fresh boot of the result: 38 verdicts ok, `failed=0`, `QDDESK_PASS` | `runs/m1-storage/qemu-dr/ty6/serial.log`, `ty6-2/serial.log`; `terminal-app/core-rehearsed.sha256` |
+| M1: `sf_userland_push.sh push apps` | libFoundation replaced (`SFLIB 3 installed`, the one of before is `.old2`; its probe ends with status 139 on the first build and 0 on the second); the other four and dyld `already installed`; 80 direct files as they were | `runs/sf-terminal/m1-install/push-apps-2.txt` |
+| M1: `sf_terminal.sh revert direct`, then `push apps` again | 56 entries reverted (47 new files and links removed, 5 replaced and 4 wrapped files renamed back: Terminal then stops at the first missing framework); installed again: 36 new files, 11 links, 5 replaced, 4 wrapped | `revert-direct.txt`, `push-apps-3.txt` |
+| M1: `verify apps` | 80 of 81 files equal, one differs: `/usr/lib/libSystem.B.dylib` in 4 bytes (below) | `push-apps-3.txt` |
+| M1: regression | `sf_compat_push.sh check`: 18 of 18 ok, `failed=0` | `runs/sf-terminal/regress/compat-check-1114.txt` |
+| M1: the compositor | `/usr/bin/chonkstep-darwin-desktop` is the build with popups and Applications and without the inject module (`9115579a…`; the one of before, `721574af…`, is `.old-daily`); `.next` is the same source with the inject module (`810a1569…`) | `runs/m1-desktop-010/wm-darwin-apps-keep/` |
+| M1: restart (test build, one marked boot) | from the desktop menu: Applications > Terminal; a command; Shell > New Window > Pro; Command-W twice ends the program | `shots/fin1`..`fin6` |
+| M1: restart (installed build, no marks) | the session runs `/usr/bin/chonkstep-darwin-desktop` and the listener; no inject directory; a bundle path written into the session's pipe starts Terminal with zsh on a pty (the menu row itself was exercised in the test build of the same source). No capture of the screen exists for this boot: the installed build cannot make one | process list over SSH |
 
-The dyld and libSystem that were rehearsed and installed are byte for byte what
+The dyld and libSystem that were rehearsed and installed are what
 `libsystem-default/build-libsystem.nix` builds (sha256 `472fd9a3…` and `dfc854f1…`); libFoundation
-`ac8a048b…`, the wrappers `525419ad…` and `c4d12d0d…`. Not replaced: `/usr/lib/system/libdyld.dylib`
-(the recipe's differs from the installed one in 539 bytes of its symbol table; the installed one was
-used in every test) and libobjc, libCoreFoundation (unchanged).
+`ad2e75a9…` (13 November: `ac8a048b…`), the wrappers `525419ad…` and `c4d12d0d…`. Not replaced:
+libobjc, libCoreFoundation (unchanged) and `/usr/lib/system/libdyld.dylib`: the recipe's and the
+installed one have the same code and data. Their 570 differing bytes are the modification times of
+31 object files in the debugging symbol table (`N_OSO` entries: two builds of the same source, 12
+and 14 November) and the code signature's hashes of the 15 pages that hold them. Nothing to install.
+
+**The installed libSystem reads back with 4 bytes changed.** `/usr/lib/libSystem.B.dylib` on the M1
+was verified as `dfc854f1…` before it was installed; read now it is `e5267447…`: four instruction
+words in one page of `__text` (file offsets 0x27c000, 0x27c0a8, 0x27c210, 0x27c31c) are `nop`
+(`d503201f`) where the file has `xpaclri` (`d50320ff`). That is what upstream's kernel does to
+pointer-authentication instructions in pages it maps executable (section "arm64e"), here visible
+through `read(2)`. Whether the page on the disk changed or only the cached page was not established
+(it needs the raw block; the kernel is not this job's). Consequences: a hash of a library in use
+is not a reliable check on this kernel, and `verify apps` names this file each time.
 
 ## On the M1's disk and how to revert
 - The five core files: `ln <path>.old <path>.back && mv -f <path>.back <path>` each (libSystem's is
-  `.old3`; for the two framework paths the kept file is a link: `ln -s "$(readlink <path>.old)"
+  `.old3`; libFoundation's `.old2` is the first patched build, `.old` the base's; for the two
+  framework paths the kept file is a link: `ln -s "$(readlink <path>.old)"
   <path>.back && mv -f <path>.back <path>`). dyld first if all are to go: the old dyld starts every
   program with any of the libraries.
 - Everything `install new` and `install direct` put there: `sf_terminal.sh revert direct`
@@ -265,10 +285,20 @@ used in every test) and libobjc, libCoreFoundation (unchanged).
   `.pd` files renamed back).
 - `/Applications/Utilities/Terminal.app`: remove it. `/var/root/Library/Preferences/com.apple.Terminal.plist`
   and `/var/root/Library/Logs/Terminal.log` are what running it leaves.
-- The session script: `/usr/libexec/sf-session.old` is the one of before. The trial compositor is
-  `/usr/bin/chonkstep-darwin-desktop.next` (the installed compositor was not touched); the marks
-  `/private/var/db/desktop-inject` (the inject directory) and `desktop-next-tried`: remove all three
-  to be rid of it. With the mark renamed to `desktop-next-try` the next boot runs the trial build once.
+- `/usr/bin/login`: remove it (it was put there before the installer's list existed and is not on
+  it; Terminal then starts `/bin/sh` again).
+- Root's shell: `/etc/passwd.old-sfy` and `/etc/master.passwd.old-sfy` are the files of before
+  (`/bin/sh`).
+- The session script: `/usr/libexec/sf-session.before-apps` is the one without the listener,
+  `sf-session.old` the one of 13 November morning.
+- The compositor: `ln /usr/bin/chonkstep-darwin-desktop.old-daily /usr/bin/chonkstep-darwin-desktop.back
+  && mv -f /usr/bin/chonkstep-darwin-desktop.back /usr/bin/chonkstep-darwin-desktop` brings back the
+  build of 12 November (no popups: then Mac applications have no menus, and no Applications row).
+- The test compositor is `/usr/bin/chonkstep-darwin-desktop.next`. It runs only in the one boot that
+  finds `/private/var/db/desktop-next-try`, and takes requests only when `/private/var/db/desktop-inject`
+  exists. Both marks were removed on 14 November: the M1 runs the installed build, which has no
+  inject module. To test again: `touch` both marks as root and restart (the first is renamed to
+  `desktop-next-tried` when it is used).
 - From the first day, from the Cocoa stream's root: `/System/Library/Fonts/{Inter,SourceCodePro,URW}`,
   `/etc/fonts/**`, `/share/fontconfig/**`, `/System/Library/Themes/Default.plist`,
   `/var/cache/fontconfig` (`runs/sf-terminal/m1-data-files.txt`, 129 paths). Fonts are open:

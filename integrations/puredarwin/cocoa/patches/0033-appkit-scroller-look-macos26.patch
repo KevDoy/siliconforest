@@ -1,24 +1,24 @@
 --- a/src/Frameworks/AppKit/NSScroller.m
 +++ b/src/Frameworks/AppKit/NSScroller.m
-@@ -16,6 +16,8 @@
+@@ -16,6 +16,14 @@
  #import <AppKit/NSGraphicsStyle.h>
  #import <Foundation/NSKeyedArchiver.h>
  #import <AppKit/NSRaise.h>
 +#import <AppKit/NSAppearance.h>
 +#import <AppKit/NSBezierPath.h>
- 
- @implementation NSScroller
- 
-@@ -223,7 +225,27 @@
-    return (int)value;
- }
- 
++
 +extern BOOL PDControlLookIs26(void);
 +
 +@interface NSAppearance (PDScrollerDark)
 +-(BOOL)_isDark;
 +@end
-+
+ 
+ @implementation NSScroller
+ 
+@@ -223,7 +231,21 @@
+    return (int)value;
+ }
+ 
 +/* In the macOS 26 look a scroller has no arrow buttons: its slot is its whole length and the knob
 + * is a rounded bar in it (drawn in -drawRect:). The macOS 15 look (PDControlLook=15) keeps the
 + * buttons. Not measured against a Mac: a scroller is shown there only while scrolling. */

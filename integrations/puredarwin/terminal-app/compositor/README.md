@@ -34,6 +34,18 @@ JOBS=10 DESKTOP_FEATURES=test-inject $B compositor <name> <source with patches 1
 3. The directory is in the session's runtime directory, mode 0700, root's.
 A fresh root has neither mark and no `.next` file.
 
+On the M1 (14 November): `/usr/bin/chonkstep-darwin-desktop` is the build without the module
+(sha256 `9115579a…`; strings: `WMINJECT absent` once, `WMINJECT armed` and `request.taken` not at
+all), `.old-daily` the build of 12 November (`721574af…`), `.next` the test build (`810a1569…`).
+Both marks are removed. Both builds are from `runs/m1-desktop-010/wm-darwin-apps-build-001/source`
+(patches 1 to 4 applied); copies of the two binaries are in `runs/m1-desktop-010/wm-darwin-apps-keep/`.
+`../../chonkstep-darwin/tools/build_desktop_binaries.sh` (the `DESKTOP_FEATURES` variable) is a
+file of the storage stream that is not committed yet: the one line this job added to it is there
+in the working tree.
+
+Not run: the crate's own tests (`cargo test -p wm-darwin`); two test expectations were edited by
+hand for the new Applications row.
+
 ## Terminal (`chonk-terminal-darwin`)
 Base: the source of `terminal-application-build-008`.
 
