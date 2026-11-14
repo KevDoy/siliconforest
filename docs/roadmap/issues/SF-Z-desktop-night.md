@@ -445,3 +445,86 @@ marked "bound, not exercised"; real keys and fingers.
 6. Control-Right / Control-Left with two Spaces; three fingers left/right on the trackpad.
 7. Click the dock's Terminal and Activity Monitor tiles (opened, or brought forward); click the clock
    (digital <-> analog); maximise a window (Control-Option-Return): it ends at the right column.
+
+## Owner's first hands-on round (DESK3, 14 November, night)
+The owner used the desktop by hand for the first time and reported seven things (cursor first: "the
+most frustrating"); the coordinator added the clock and, later, the thin red line around Terminal.app.
+
+**Truthfulness.** "Observed" = seen on the M1's disk system with **synthetic input** (the inject module of the
+test build `.next`, and `--desktop-request` over the same-uid socket from SSH), judged from the compositor's own
+captures (looked at, zoomed) and its log. Nobody looked at the panel; no real key, trackpad or finger. The owner
+re-tests by hand (checklist at the end). Captures: `runs/m1-desktop-010/desk3-tests/shots/` (not committed).
+
+| # | Owner's finding | Cause found | Fix | State |
+|---|---|---|---|---|
+| 1 | the pointer vanishes over the terminal after some resizes | (a) a client that set the same cursor surface again without a new buffer got no pointer at all (the compositor had taken the buffer at the first import and then only moved the hotspot of "nothing"); (b) a client's hide (`set_cursor(NULL)`) lasted forever: **Terminal.app hides the pointer while one types** (observed: `WMCURSOR hidden by the client` after two keys) and nothing showed it again; (c) when a move/resize grab ended over a window, that window got no `enter` until the next movement | the cursor surface keeps its last image (shown again whenever it is set); a client's hide lasts until the pointer moves 6 px or enters another surface (macOS's hide-while-typing); entering a window from nothing starts with the arrow; a destroyed or empty cursor surface shows the arrow; at the end of a grab the window under the pointer is entered at once. `WMCURSOR` log lines | **observed** (synthetic): pointer drawn over a terminal before, during and after an interactive resize (`d3-b`, `d3-c`, `d3-d`); typed into Terminal.app: pointer hidden (`d3-e-typed`), moved 30 px: arrow back (`d3-f-moved`, log `the pointer moved after a client hid it`). Host test `a_cursor_surface_set_again_and_a_hidden_pointer_that_moves_stay_visible` and `a_window_under_the_pointer_is_entered_when_a_grab_ends` (both **fail on the old source**, pass now) |
+| 2 | the old bottom border stays during a resize | the Darwin backend never called wm-core's `flush_decorations()`: chrome repainted during an interactive drag (deferred to "before the next frame") waited until the drag ended | `flush_decorations()` before every frame; and during a resize each frame is drawn as it was for the size the client's picture has (the scene keeps the last few frame layouts and draws the one matching the picture), so frame and content change together: no old edge, no gap, no content under the frame | **observed** (synthetic): mid-drag capture `d3-c-resize-mid` (the frame around the terminal's picture, nothing left at the old bottom). Host test `the_frame_follows_an_interactive_resize_and_matches_the_clients_picture` (**fails on the old source**: row 84 shows the old edge across the content) |
+| 3 | a thin white/grey line on the terminal over Activity Monitor | not reproduced with a native terminal over Activity Monitor at 150 % (`d3-d`: the overlap is one flat colour). With **Terminal.app** over Activity Monitor its terminal area is not opaque: the inject `dump` of its buffer has alpha 242 (0.95) in 865,595 of its 916,725 pixels (native terminals: 255 everywhere), and Activity Monitor's rows, grid lines and title show through it as faint lines (`d3-a-start`; also in COCOA4's `runs/sf-cocoa4/shots/m2-overlap.png`, through Terminal.app's scroller track). The client's alpha, not the compositor's blending (the GL renderer repaints the whole frame every frame: no stale damage). The old frame edge left across a window during a resize (finding 2) is the other way a grey line appeared on a terminal; fixed. Separately, client popups (menus, tool tips) were drawn above *every* window | popups are now drawn with their own window (a window stacked above covers its menus and tool tips; the pointer goes to a popup only where its window is uncovered). Translucency: request to COCOA4 (make the background opaque unless the profile asks for it; the desk has no blur) | popup stacking host-tested (lib/wire suites; no dedicated test) and **not observed** on the M1 (no lingering popup reproduced). The owner's line: probable cause (Terminal.app translucency) **not confirmed** — re-test by hand |
+| 3b | a thin red line around Terminal.app (coordinator) | in **Terminal.app's own buffer** (inject `dump`: columns 0 and 1274 below the menu strip and the last row are (189,28,37) over a (24,28,37) background — red channel only; the rounded corners carry red-only coverage values) | evidence and request to COCOA4 (`runs/m1-coord/requests-for-CLAUDE.md`); compositor unchanged (frames identical for Mac and native windows) | open (AppKit/Onyx2D) |
+| 4 | a double click on a launcher opens twice | nothing remembered a launch in progress | compositor: a repeated open of the same bundle (or of the desk terminal) while its first window has not come is ignored for up to 10 s (dock tiles, the Command-Space launcher and now the Applications menu, which also brings a running application forward instead of opening it again); dock: the tile's running dot pulses while the application starts and a second click is not a launch | **observed** (synthetic socket requests): three Activity Monitor requests 43 ms and 424 ms apart -> `WMMAC open ...` once and `ignored: already opening` twice, one process; two desk-terminal requests -> `WMCONTROL terminal requested` and `WMMAC terminal request ignored: one is starting (212 ms ago)`. Dock double click: host test `a_tile_clicked_twice_while_its_application_starts_launches_once`; compositor: `a_launch_repeated_before_its_window_comes_is_ignored` |
+| 5 | right-click on a window title: maximise, show/hide the Mac menu bar, the app's menus | the standalone desk's window menu offered only Close (and the release of the opening click, which lands on the new menu, closed it at once) | the window menu (right click or Control-click on the title bar): Maximize/Restore, Minimize, Enter/Exit Full Screen, Move to Space ▸ (Spaces + New Space), Close (`xdg_toplevel.close` of that window only); it stays open after a click. For a Mac application: "Hide/Show Menu Bar" and its main menu as submenus (key equivalents right-aligned, disabled rows dimmed, ✓ for checked), fetched when the menu opens from the application's socket `$XDG_RUNTIME_DIR/app-menu/<pid>` (protocol in `wm-darwin/src/appmenu.rs`, proposed to COCOA4); no socket = the window verbs only | **observed** (synthetic): the menu on Terminal.app's and a terminal's title (`d3-g`, `d3-h`), Maximize then Restore from it (`d3-i`, `d3-j`); `WMAPPMENU ... no menu socket (the window's own verbs only)` — the application side does not exist yet. Host tests: `a_right_click_on_the_title_opens_the_window_menu_and_maximize_works` (wire), `the_menu_is_fetched_and_an_item_invoked_over_the_applications_socket` (a fake application on a real socket) |
+| 6 | closing a child window ends Activity Monitor | compositor side checked: the close button, Command-W on a desk window and the menu's Close send `xdg_toplevel.close` to that one window; nothing signals a process (now logged `WMCLOSE window=... close request to this window only`). Command-W and Command-1…5 of a focused Mac application go to it (since DESK2) | the log line | quitting on a child's close is AppKit's (COCOA4) |
+| 7 | clock hard to read; "1 . 1 G", "SAT 1 4"; NET "0 K"; "Activity …" | the dock's labels asked for the theme's face (Space Grotesk for Relay), absent from SiliconForest (fonts: DejaVu Sans, Inter, Noto Emoji, Noto Sans Mono CJK, Source Code Pro, URW): figures and punctuation came from another face, widely spaced. The clock's seven-segment digits were narrow, thin and drawn over ghost 8s. en0's receive counter is 0 in the kernel (the Wi-Fi driver counts what it sends only) | the dock loads the faces wm-theme carries (IBM Plex Mono/Sans, Space Grotesk) into its font database; all LED readouts use solid chamfered segments of a legible shape; the clock shows lit segments only, as tall as the glass allows, in every theme; NET shows no figure (blank digits) for receiving on an interface whose receive counter never moved while its transmit counter did (en0 today: **receive is not available from the kernel counters**; transmit is shown); a long name on a launcher tile is set smaller (to 3/4) before it is cut | host previews (`DOCK_PREVIEW_DIR=… cargo test -p chonk-dock column_preview -- --ignored`, `-p chonk-dock-theme launcher_label_preview`) looked at in four themes; **observed on the M1** (desk3-dock-004, nextstep-classic, `d4-a-start` zoomed): "17%  0.5G", "EN0", "SAT 14" evenly set, the clock "21:53" in solid segments, NET's receive readout blank and transmit "1 K"; the launcher tile reads "Activity Monitor" in full. A hover tool tip was tried (desk3-dock-004) and removed: the dock's popups are parented to its right-hand column, so the tip was slid to x=0 over the tile and its dismiss backdrop took the pointer, the tip flickering every 0.6 s (`WMPOPUP new at=0,32 ... gone`, capture `d4-b-tip`); not in the installed dock |
+
+Also (DESK2's list): Command-Tab switcher: the pointer over an application selects it, a click switches to
+it, H hides the selected application and the switcher stays (wm-core `hide_application_of`, host test
+`hiding_an_application_that_is_not_focused_keeps_the_focus`); **observed** (synthetic): the pointer over Terminal.app's icon selected it (`WMMAC switcher selected=0 app=com.apple.Terminal`), H hid its window with the switcher still open (`d4-d`, `d4-e`), releasing Command switched to it. Not done: a running dot
+for a Mac application without windows (the dock knows toplevels only), stale minimised tiles.
+
+### For the owner, at the M1 (real keys and fingers; one line per finding)
+1. Pointer: type in Terminal.app (the pointer hides), move the trackpad: the pointer is back; resize a terminal by
+   its corner and move into it: the pointer stays visible over it, before, during and after.
+2. Resize a window by its bottom edge or corner and hold: the frame's edges follow the window while you drag; no
+   bottom border left behind.
+3. Put a terminal (Chonkstep's, then Terminal.app) over Activity Monitor: a thin line still showing through
+   Terminal.app is its own translucency (COCOA4); one on the Chonkstep terminal would be a compositor fault: tell me.
+4. Double-click the dock's Activity Monitor tile (or Command-Space "act" Return twice) while it is closed: one
+   Activity Monitor; the tile's dot pulses until its window comes.
+5. Right-click or Control-click a window's title: Maximize/Restore, Minimize, Enter Full Screen, Move to Space,
+   Close; the Mac menu bar row and the application's menus appear once AppKit answers (not yet).
+6. Close a second Activity Monitor window (its title-bar X): the application must stay (the compositor sends the
+   close to that window only; if it quits, that is AppKit's). The clock column: the time, "SAT 14" and "17%  0.5G" read
+   clearly; NET shows the send rate and no receive figure; the Activity Monitor tile reads its whole name.
+
+### Host tests (final source, `runs/m1-desktop-010/desk3-tests/`)
+wm-darwin (`--features desktop-shell`): lib 137/137 (with the launch-debounce and app-menu tests); wayland_shm 16/17,
+wayland_scale 3/4, wayland_dmabuf 5/5, wayland_theme 3/3. The two failures are the base's
+(`autopilot_exercises_the_whole_desktop_against_a_real_window`, `a_window_too_large_for_the_panel_at_a_scale_is_
+shrunk_and_gets_its_size_back`); the autopilot's failure point varies from run to run (its idle phase overflowed in
+three of three runs of the final source on an idle machine, and in one of two runs of the source without the
+switcher change, which reached its settings picks in the other; once, under a load of three builds, the final
+source's settings picks failed): timing-dependent, not caused by this round as far as these runs show.
+New tests that fail on the old source (`desk3-basecheck`): the pointer, the grab-end enter, the resize frame, the
+window menu. chonk-shell 303/303 (+4 ignored), wm-core's new switcher-hide test, chonk-dock 206, chonk-dock-theme
+110, chonk-instruments 254 (+1). `python3 tools/check.py --sanitize --cross`: rc 0.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop` = desk3-daily-006 `aa92e5e4…` (no inject; running; `/private/var/db/desktop-inject`
+  and the runtime inject directory removed), before: `.before-desk3` (desk2-daily-008 `3e89453a…`); `.next` =
+  desk3-next-006 `c69a173a…` (inject), before: `.next.before-desk3` (desk2-next-008); `/usr/bin/chonkstep-dock` =
+  desk3-dock-006 `8378a65e…`, before: `.before-desk3` (desk2-dock-008 `53601217…`); `.safe` unchanged (`b1104b75…`).
+  Hashes taken right after each copy, before anything ran them (a running binary reads back with its PAC
+  instructions lowered to NOPs: the daily then hashes `1b0eca59…`, not a change on the disk).
+- Revert: `ln -f <path>.before-desk3 <path>.back && mv -f <path>.back <path>` for the three binaries, then
+  `echo relaunch > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop`.
+- Source: compositor patch 13 `integrations/puredarwin/terminal-app/compositor/wm-darwin-owner-round.patch` (applied
+  to a fresh copy of `desk2-src` it gives the build sources of desk3-next-006, desk3-daily-006 and desk3-dock-006
+  exactly, `diff -r`).
+- Captures (`runs/m1-desktop-010/desk3-tests/shots/`): `d3-a-start` (Terminal.app over Activity Monitor), `d3-b`/`d3-c`/
+  `d3-d` (pointer and frame before/during/after a resize), `d3-e-typed`/`d3-f-moved` (hidden while typing, back on
+  moving), `d3-g`/`d3-h` (window menus), `d3-i`/`d3-j` (Maximize/Restore from it), `d4-a-start` (the dock column and
+  strip), `d4-c`..`d4-f` (switcher: pointer, H), `d5-final-daily` (the daily build, through the socket), window dumps
+  `d3a-*`, `d4a.txt`.
+
+### Protocol for the application's menu (compositor side done, AppKit side asked of COCOA4)
+`$XDG_RUNTIME_DIR/app-menu/<pid>` (the session's runtime directory, `/private/var/run/gpu-desktop`): a Unix socket
+the application listens on, owned by the session's user. The compositor connects only when the title-bar menu of a
+window of that pid opens (checks: socket owner = its uid, peer pid = the window's client pid; 200 ms timeout), sends
+`menubar` (answer `shown`/`hidden`) and `menu 1` (answer: `item <id> <depth> <flags> <key> <title>` lines, then
+`end`; flags `s` submenu, `d` disabled, `c` checked, `m` mixed, `p` separator, `a` the application menu; key
+`cmd+shift+opt+ctrl+<char>` or `-`), and on a pick `invoke <id>` or `menubar toggle` (answer `ok …`/`error …`).
+Nothing is sent at any other time. COCOA4 had proposed a private Wayland protocol (`pd_app_menu_v1`) at the same
+time; the answer in `runs/m1-coord/answers-from-DESK3.md` asks for this socket instead (already exercised here).
+
+### Taken from Finch (DESK3)
+Nothing.

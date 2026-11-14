@@ -23,6 +23,7 @@ the desktop menu ...").
 | 10 | `wm-darwin-mac-command-chords.patch` | with a Mac application focused every Command chord goes to it (Find, New Tab, Save, its window numbers, text size, ...) except the desk's: Command-Space, Command-(Shift/Control-)Tab, Command-Shift-<digit>, Command-Option-Shift-<digit>, Command-Control-Shift-3/4/5 | `desk-next-010`, `desk-daily-010` |
 | 11 | `wm-darwin-fullscreen-covers-dock.patch` | a full-screen window on the Space shown hides the top layer-shell layer (the dock), the overlay layer stays | `desk-next-011`, `desk-daily-011` |
 | 12 | `wm-darwin-macos-desk.patch` | DESK2, 14 November evening (`docs/roadmap/issues/SF-Z-desktop-night.md`, "macOS key map and recording"): macOS's key map (`chonk-shell` `standalone_darwin_keybindings`, Mac interaction mode); the application switcher, the launcher and Force Quit (`wm-darwin/src/macdesk.rs`); the capture toolbar, window pick, save location and timer (`capture.rs`); screen recording to Photo-JPEG QuickTime movies with the GPU scaling the frame (`record.rs`, `glrender.rs` `read_back_scaled`); applications' icons from their bundles (`wm-theme/src/app_icon.rs`) in the dock, switcher, launcher, minimised tiles and Overview; the SiliconForest dock column (the mark, CPU/MEM with figures, NET, the themed digital/analog clock, real Darwin counters, the desktop's theme, as tall as its tiles) and the dock's round running dot; faults: layer-surface pointer units at fractional scales (dock tiles launched the wrong tile), a stale full-screen buffer after Exit Full Screen, labels elided by an estimate, a held Command reported to a client after the switcher, the window capture (the window alone) | `desk2-next-008`, `desk2-daily-008`; dock `desk2-dock-008` |
+| 13 | `wm-darwin-owner-round.patch` | DESK3, 14 November night (`docs/roadmap/issues/SF-Z-desktop-night.md`, "Owner's first hands-on round"): the pointer never left invisible (a cursor surface keeps its image; a client's hide lasts until the pointer moves; the arrow on entering a window, on a vanished or empty cursor surface; `enter` when a move/resize grab ends); the frame follows an interactive resize every frame (`flush_decorations`) and is drawn for the size of the client's picture; client popups drawn with their own window; a launch repeated before its window comes is ignored (dock tiles, launcher, Applications menu, desk terminal) and the dock tile pulses while it starts; the standalone window menu (title-bar right/Control-click: Maximize/Restore, Minimize, Full Screen, Move to Space, Close; a Mac application's menu bar toggle and main menu over `$XDG_RUNTIME_DIR/app-menu/<pid>`, `appmenu.rs`); Command-Tab: pointer selects/clicks, H hides; `WMCLOSE`/`WMCURSOR`/`WMAPPMENU` log lines; the inject `dump` step (client pictures, alpha, scene surfaces); dock: the themes' own faces loaded, solid chamfered LED digits, a legible clock, no receive figure where the driver counts none, long names set smaller before they are cut | `desk3-next-006`, `desk3-daily-006`; dock `desk3-dock-006` |
 
 Builds:
 ```sh
@@ -71,6 +72,12 @@ Every build is first host-tested: `cargo test --offline --locked -p wm-darwin --
 nothing had) and, with a host build of the dock, `CHONK_DOCK_BIN=... cargo test ... --test dock_host -- --ignored`.
 `/usr/bin/chonkstep-darwin-desktop.safe` is a build that ran on the M1 (desk-daily-001): the session
 starts it when a compositor ends by itself within 20 s (`m1-storage/system/sf-session`).
+
+### 14 November, night (DESK3)
+Source: `runs/m1-desktop-010/desk3-src` (`desk2-src` + patch 13); the patch applied to a fresh copy of `desk2-src`
+gives the build sources of `desk3-next-006`, `desk3-daily-006` and `desk3-dock-006` exactly (`diff -r`). Host tests
+in `runs/m1-desktop-010/desk3-tests/` (wm-darwin lib 137/137, wayland_shm 16/17 and wayland_scale 3/4 with the two
+failures of the base, chonk-shell 303, dock crates all passing).
 
 ### 14 November, evening (DESK2)
 Source: `runs/m1-desktop-010/desk2-src` (`desk-src` + patch 12, one local commit); the patch applied to a
