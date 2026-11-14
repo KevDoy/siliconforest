@@ -91,6 +91,13 @@
 #   0039  AppKit: window tabs (NSWindowTabGroup, NSWindowTab, addTabbedWindow:ordered:, Show Next/Previous
 #         Tab, Move Tab to New Window, Merge All Windows) as one toplevel per group, with a tab bar under
 #         the menu strip; structure from Finch's NSWindowTabbing.m (MIT OR Apache-2.0, commit 2d9b1bb)
+#   0040  AppKit: -getRectsBeingDrawn: answers the rect that is drawn (Onyx2D clips to one rectangle, so
+#         the views behind fill all of it: Terminal filled only the dirty rows and the rows between kept
+#         the window's grey); dirty rects far apart are drawn one at a time; dirty rects are whole
+#         device pixels (at 150% a rect of whole points left a seam of the grey at each row edge)
+#   0041  AppKit: a window starts opaque, as on macOS (Terminal turns a window with a translucent profile
+#         clear only when -setOpaque:NO changes that), and its background is copied, not drawn over
+#         what the backing store held
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -135,6 +142,8 @@ let
     ./patches/0035-appkit-glyph-advances-font-directory-menu-archive.patch
     ./patches/0038-appkit-found-with-terminal-3.patch
     ./patches/0039-appkit-window-tabs.patch
+    ./patches/0040-appkit-dirty-rects-as-drawn.patch
+    ./patches/0041-appkit-window-opaque-background-copied.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
