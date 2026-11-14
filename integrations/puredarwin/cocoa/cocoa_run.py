@@ -130,19 +130,32 @@ class Driver:
         return int(fields[1]), int(fields[2]), data[pos:]
 
     def locate(self, rgb, tolerance=10):
-        """Bounding box (x0, y0, x1, y1, inclusive) of the pixels within `tolerance` of a colour."""
+        """Bounding box (x0, y0, x1, y1, inclusive) of the pixels within `tolerance` of a colour.
+        Rows and columns that hold only a few such pixels (under a twentieth of the fullest, and
+        at most 2) are left out: the edge pixels of other text can fall within the tolerance (the
+        amber-phosphor theme draws window titles in an amber whose anti-aliased edges match
+        macOS's orange operator keys, and the box took in the Calculator's title bar)."""
         got = self.pixels()
         if got is None:
             return None
         w, h, px = got
-        x0, y0, x1, y1 = w, h, -1, -1
+        rows, cols, hits = {}, {}, []
         for y in range(h):
             row = px[y * w * 3:(y + 1) * w * 3]
             for x in range(w):
                 if abs(row[x * 3] - rgb[0]) <= tolerance and abs(row[x * 3 + 1] - rgb[1]) <= tolerance and abs(row[x * 3 + 2] - rgb[2]) <= tolerance:
-                    x0, x1 = min(x0, x), max(x1, x)
-                    y0, y1 = min(y0, y), max(y1, y)
-        return None if x1 < 0 else (x0, y0, x1, y1)
+                    rows[y] = rows.get(y, 0) + 1
+                    cols[x] = cols.get(x, 0) + 1
+                    hits.append((x, y))
+        if not hits:
+            return None
+        keep_rows = {y for y, n in rows.items() if n > 2 or n * 20 >= max(rows.values())}
+        keep_cols = {x for x, n in cols.items() if n > 2 or n * 20 >= max(cols.values())}
+        kept = [(x, y) for x, y in hits if y in keep_rows and x in keep_cols]
+        if not kept:
+            return None
+        xs, ys = [x for x, _ in kept], [y for _, y in kept]
+        return (min(xs), min(ys), max(xs), max(ys))
 
     def text_rows(self, box, dark=110):
         """Heights in pixels of the runs of rows that hold dark (text) pixels strictly inside a
