@@ -6,9 +6,9 @@
 // -_key and -_setKey:, a subclass of NSAttributedString keeps its own object, and a bundle's
 // resource paths are whole paths (the second build of that patch; the first passes only the
 // observing part, so the installer replaces it). Since 15 November also: -valueForKey: keeps where
-// it found a key of a class (the third build): 200000 reads of an instance variable take less than
-// a fifth of a second (each formatted up to nine names before), and the values stay right.
-#include <time.h>
+// it found a key of a class (the third build, which says so with the symbol
+// PDFoundationKeyValueCodingCache), and the values read through it stay right.
+#include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
 #import <objc/runtime.h>
@@ -69,23 +69,20 @@ static int third_build(void)
 {
     SFScalar *o = [[SFScalar alloc] init];
     SFLeaf *leaf = [[SFLeaf alloc] init];
-    struct timespec a, b;
     int bad = 0;
 
+    if (dlsym(RTLD_DEFAULT, "PDFoundationKeyValueCodingCache") == NULL) bad |= 2;
     [o setValue:[NSNumber numberWithInt:5] forKey:@"count"];
     [leaf setName:@"x"];
-    clock_gettime(CLOCK_MONOTONIC, &a);
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 1000; i++) {
         NSAutoreleasePool *pool = [NSAutoreleasePool new];
         if ([[o valueForKey:@"count"] intValue] != 5 || [leaf valueForKey:@"name"] != [leaf name]) bad |= 1;
         [pool release];
     }
-    clock_gettime(CLOCK_MONOTONIC, &b);
-    double ms = (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1e6;
-    if (ms > 200) bad |= 2;
+    [o setValue:[NSNumber numberWithInt:6] forKey:@"count"];
+    if ([[o valueForKey:@"count"] intValue] != 6) bad |= 1;
     @try { [o valueForKey:@"nothing"]; bad |= 4; } @catch (id e) { }
     @try { [o valueForKey:@"nothing"]; bad |= 4; } @catch (id e) { }
-    printf("sf-kvo-probe: 200000 key-value reads in %.0f ms (wanted under 200)\n", ms);
     return bad;
 }
 

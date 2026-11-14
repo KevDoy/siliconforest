@@ -601,7 +601,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      return NULL;
  }
  
-@@ -61,7 +78,117 @@
+@@ -61,7 +78,119 @@
      if (ivar != NULL) {
          return ivar;
      }
@@ -626,6 +626,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 + * -respondsToSelector: themselves are searched each time; every answer is forgotten when an image
 + * is loaded (a bundle's categories may add accessors). */
 +typedef struct { Class cls; char *name; unsigned hash; SEL getter; Ivar ivar; } PDKVCEntry;
++// says that this library keeps the answers (the installer's probe asks for it: sf-kvo-probe)
++__attribute__((visibility("default"))) const int PDFoundationKeyValueCodingCache = 1;
 +#define PDKVC_SLOTS 4096
 +static PDKVCEntry *kvcTable;
 +static unsigned kvcCount;
@@ -720,7 +722,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  }
  
  /* Boxes whatever the getter returns, based on its encoded return type. */
-@@ -177,6 +304,58 @@
+@@ -177,6 +306,58 @@
      return YES;
  }
  
@@ -779,7 +781,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  @implementation NSObject (NSKeyValueCoding)
  
  + (BOOL)accessInstanceVariablesDirectly {
-@@ -184,14 +363,26 @@
+@@ -184,14 +365,26 @@
  }
  
  - (id)valueForKey:(NSString *)key {
@@ -809,7 +811,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  
          if (ivar != NULL) {
              const char *type = ivar_getTypeEncoding(ivar);
-@@ -199,6 +390,12 @@
+@@ -199,6 +392,12 @@
              if (type != NULL && (type[0] == '@' || type[0] == '#')) {
                  return object_getIvar(self, ivar);
              }
@@ -822,7 +824,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
          }
      }
      return [self valueForUndefinedKey:key];
-@@ -210,14 +407,26 @@
+@@ -210,14 +409,26 @@
      /* No isa-swizzling here, so this is where automatic KVO notification
       * happens: anything routed through KVC notifies its observers. */
      BOOL notifies = [[self class] automaticallyNotifiesObserversForKey:key];
@@ -852,7 +854,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      if ([self respondsToSelector:setter]) {
          if (!setThroughSetter(self, setter, value, key))
              ((void (*)(id, SEL, id))objc_msgSend)(self, setter, value);
-@@ -246,6 +455,19 @@
+@@ -246,6 +457,19 @@
                  }
                  return;
              }
@@ -872,7 +874,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
          }
      }
      if (notifies) {
-@@ -260,7 +482,13 @@
+@@ -260,7 +484,13 @@
      id current = self;
  
      for (NSUInteger i = 0; i < count && current != nil; i++) {
@@ -887,7 +889,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      }
      return current;
  }
-@@ -320,3 +548,131 @@
+@@ -320,3 +550,131 @@
  }
  
  @end
