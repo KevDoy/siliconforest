@@ -1,0 +1,50 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# The desktop stream's M1 chores (SiliconForest on the disk), from the workstation.
+#   desk_m1.sh state                       compositor, marks, inject directory, dock
+#   desk_m1.sh install <next-bin> <daily-bin> [tag]
+#                                          /usr/bin/chonkstep-darwin-desktop.next and /usr/bin/chonkstep-darwin-desktop
+#                                          replaced; the files of before are kept as <path>.before-<tag> (hard links)
+#   desk_m1.sh put <local> <remote> [tag]  any other file, the one of before kept as <remote>.before-<tag>
+#   desk_m1.sh relaunch next|daily         the session starts its compositor again (sf-session of 14 November,
+#                                          night, or later): every window ends. Take runs/m1-coord/gui.lock first.
+#   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
+#                                          wait for SiliconForest with .next and the inject directory (gui.lock first)
+set -euo pipefail
+SF=(ssh -o UserKnownHostsFile="$HOME/.ssh/known_hosts_m1_siliconforest" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes
+    -o HostKeyAlias=m1-siliconforest -o BatchMode=yes -o ConnectTimeout=6 root@10.1.1.211)
+LX=(ssh -o HostKeyAlias=10.1.1.127 -o BatchMode=yes -o ConnectTimeout=6 chrisk@10.1.1.211)
+D=/usr/bin/chonkstep-darwin-desktop
+state() {
+  "${SF[@]}" "ls -la $D $D.next /private/var/db/desktop-* /usr/bin/chonkstep-dock 2>&1 | grep -v '^total'; ls -d /private/var/run/gpu-desktop/inject 2>&1;
+    ps axo pid,etime,command | grep -E 'chonkstep-darwin-desktop|chonkstep-dock|sf-session' | grep -v grep | cut -c1-150; shasum -a 256 $D $D.next 2>/dev/null | cut -c1-16"
+}
+put() {
+  local src=$1 dst=$2 tag=$3
+  "${SF[@]}" "cat > $dst.desk-new && chmod 755 $dst.desk-new" < "$src"
+  "${SF[@]}" "[ -e $dst ] && [ ! -e $dst.before-$tag ] && ln $dst $dst.before-$tag; mv -f $dst.desk-new $dst; shasum -a 256 $dst | cut -c1-16"
+}
+case "${1:-}" in
+  state) state;;
+  install) put "$2" $D.next "${4:-desk}"; put "$3" $D "${4:-desk}";;
+  put) put "$2" "$3" "${4:-desk}";;
+  relaunch)
+    case "$2" in next) word=relaunch-next;; daily) word=relaunch;; *) echo "next|daily" >&2; exit 2;; esac
+    "${SF[@]}" "grep -q relaunch-next /usr/libexec/sf-session || { echo 'the running session has no relaunch: reboot-next'; exit 1; }
+      [ -e /private/var/db/desktop-inject ] || touch /private/var/db/desktop-inject
+      echo $word > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop || pkill -TERM -x chonkstep-darwin-desktop.next
+      i=0; while [ \$i -lt 60 ]; do sleep 0.5; i=\$((i+1)); [ -S /private/var/run/gpu-desktop/wayland-0 ] && [ ! -e /private/var/run/gpu-desktop/session-end-request ] && break; done; sleep 2"
+    echo "$(date -u +%FT%TZ) DESK compositor relaunch ($2)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
+    state;;
+  reboot-next)
+    "${SF[@]}" "touch /private/var/db/desktop-next-try /private/var/db/desktop-inject; sync; (sleep 1; /bin/reboot) > /dev/null 2>&1 &" || true
+    echo "$(date -u +%FT%TZ) DESK reboot (SiliconForest -> Linux -> SiliconForest, .next with inject)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
+    sleep 25
+    for i in $(seq 1 40); do "${LX[@]}" true 2>/dev/null && break; sleep 9; done
+    "${LX[@]}" 'sudo asahi-bless --next --set-boot SiliconForest -y && (sleep 1; sudo systemctl reboot) > /dev/null 2>&1 &'
+    sleep 30
+    for i in $(seq 1 60); do "${SF[@]}" true 2>/dev/null && break; sleep 9; done
+    for i in $(seq 1 30); do "${SF[@]}" 'pgrep -x chonkstep-darwin-desktop.next > /dev/null && [ -d /private/var/run/gpu-desktop/inject ]' && break; sleep 5; done
+    state;;
+  *) sed -n 3,15p "$0"; exit 2;;
+esac

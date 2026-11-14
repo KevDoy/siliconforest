@@ -5,6 +5,13 @@
 #   key:<name>      return, backspace, tab, esc, up, down, left, right, space, pageup, pagedown, home, end, delete, f1..f12
 #   chord:<mods>+<key>   mods of ctrl, shift, alt, cmd (e.g. chord:ctrl+c, chord:cmd+n)
 #   wait:<ms>  capture:<name>  click:<x>,<y> (panel pixels of 2560x1600)  move:<x>,<y>  rclick:<x>,<y>  down:<x>,<y>  up:
+#   wheel:<n>       n wheel detents, one per 30 ms (positive: up/away, negative: down/towards you)
+#   hwheel:<n>      n horizontal detents (positive: right)
+#   scroll:<dx>,<dy>[,<steps>]   finger scrolling: dx, dy logical units (positive: content moves up/left,
+#                   i.e. wl_pointer axis down/right) spread over steps frames (default 10), then the fingers lift
+#   swipe:<fingers>,<dx>,<dy>[,<steps>]   a multi-finger swipe of dx, dy panel pixels in steps updates (default 12)
+#   The wheel needs a compositor with the inject module of 14 November or later; hwheel, scroll and swipe one of
+#   the night of 14 November (DESK) or later.
 import sys
 L = {c: 0x04 + i for i, c in enumerate('abcdefghijklmnopqrstuvwxyz')}
 D = {c: 0x1e + i for i, c in enumerate('1234567890')}
@@ -43,5 +50,17 @@ for item in sys.argv[1:]:
     elif kind == 'down':
         x, y = map(int, arg.split(',')); out += [at(x, y), 'wait 60', 'buttons 1', 'wait 60']
     elif kind == 'up': out += ['buttons 0', 'wait 60']
+    elif kind in ('wheel', 'hwheel'):
+        n = int(arg); one = 1 if n > 0 else -1
+        for _ in range(abs(n)): out += ['%s %d' % (kind, one), 'wait 30']
+    elif kind == 'scroll':
+        v = [int(a) for a in arg.split(',')]; dx, dy, steps = v[0], v[1], (v[2] if len(v) > 2 else 10)
+        for i in range(steps): out += ['scroll %d %d' % (dx * (i + 1) // steps - dx * i // steps, dy * (i + 1) // steps - dy * i // steps), 'wait 16']
+        out += ['scroll stop', 'wait 30']
+    elif kind == 'swipe':
+        v = [int(a) for a in arg.split(',')]; f, dx, dy, steps = v[0], v[1], v[2], (v[3] if len(v) > 3 else 12)
+        out += ['swipe begin %d 0 0' % f, 'wait 12']
+        for i in range(steps): out += ['swipe update %d %d %d' % (f, dx * (i + 1) // steps - dx * i // steps, dy * (i + 1) // steps - dy * i // steps), 'wait 12']
+        out += ['swipe end %d 0 0' % f, 'wait 30']
     else: raise SystemExit('unknown item ' + item)
 print(';'.join(out))

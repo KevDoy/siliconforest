@@ -144,13 +144,45 @@ if [ -x /usr/bin/open ]; then
         PATH=/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/bin:/usr/bin:/sbin:/usr/sbin \
         /usr/bin/open --listen "$runtime/open-requests" > /dev/null 2>&1 &
 fi
-printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s\n' "$seconds" "$(date +%s)" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}"
-# The desktop's own exit status, not that of the filter it is piped through.
-{
-    "$desktop" --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
-    echo "$?" > "$runtime/desktop.rc"
-} | grep -v 'chonkstep-gl: step:'
-printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
+# The dock (a separate program, a client of the compositor like any other): started once the
+# compositor's socket is there, with the desktop's environment; it ends with the compositor.
+dock() {
+    [ -x /usr/bin/chonkstep-dock ] || return 0
+    (
+        until_ok 300 test -S "$runtime/wayland-0" || exit 0
+        sleep 1
+        XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-0 HOME=/var/root LANG=en_US.UTF-8 XDG_STATE_HOME=$state \
+            PATH=/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/bin:/usr/bin:/sbin:/usr/sbin \
+            exec /usr/bin/chonkstep-dock > /var/log/chonkstep-dock.log 2>&1
+    ) &
+}
+# The session can start its compositor again without a restart of the machine: root leaves
+# `relaunch` (the installed build) or `relaunch-next` (/usr/bin/chonkstep-darwin-desktop.next) in
+# $XDG_RUNTIME_DIR/session-end-request and ends the compositor (SIGTERM). Every window ends with it.
+# Anything else in the file (restart, poweroff, nothing) ends the session as before.
+launch=1
+while :; do
+    printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s launch=%s\n' "$seconds" "$(date +%s)" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}" "$launch"
+    dock
+    # The desktop's own exit status, not that of the filter it is piped through.
+    {
+        "$desktop" --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
+        echo "$?" > "$runtime/desktop.rc"
+    } | grep -v 'chonkstep-gl: step:'
+    printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
+    case "$(cat "$runtime/session-end-request" 2>/dev/null)" in
+        relaunch) desktop=/usr/bin/chonkstep-darwin-desktop;;
+        relaunch-next) desktop=/usr/bin/chonkstep-darwin-desktop.next; [ -x "$desktop" ] || desktop=/usr/bin/chonkstep-darwin-desktop;;
+        *) break;;
+    esac
+    launch=$((launch + 1))
+    pkill -x chonkstep-dock 2>/dev/null
+    # the records of the launch before are kept beside the new ones
+    mv "$records" "$records.launch$((launch - 1))" && mkdir -m 0700 "$records"
+    rm -f "$runtime/desktop.rc" "$runtime/session-end-request" "$runtime/wayland-0" "$runtime/wayland-0.lock"
+    printf 'SF_SESSION relaunch desktop=%s launch=%s\n' "$desktop" "$launch"
+    sleep 1
+done
 [ -r "$records/session-result.txt" ] && grep -v ' gate=\| kernel_messages=\| cs_at_spawn=\| exit_reason=' "$records/session-result.txt" | cut -c1-260 | sed 's/^/GPUDESK_RESULT /' | head -60
 printf 'GPUDESK_SOUND_END speakers=%s trips=%s sessions=%s | touchbar=%s key_events=%s reports=%s spi_errors=%s dart_faults=%s\n' "$(get kern.pd_speaker.state | cut -c1-40)" "$(get kern.pd_speaker.trips)" "$(get kern.pd_speaker.sessions)" "$(get kern.pd_touchbar.state)" "$(get kern.pd_touchbar.key_events)" "$(get kern.pd_touchbar.reports)" "$(get kern.pd_touchbar.spi_errors)" "$(get kern.pd_touchbar.dart_faults)"
 printf 'GPUDESK_END_%s\n' "$nonce"
