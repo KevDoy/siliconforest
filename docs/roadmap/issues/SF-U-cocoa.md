@@ -22,10 +22,13 @@ runs/cocoa/rep.sh popups NAME 2 5                                  # scratch: 5 
 bash runs/cocoa/build-compositor.sh                                # compositor from the worktree into runs/cocoa/target
 runs/cocoa/run-ff.sh firefox-sandbox-page NAME $(nix-build ... build-firefox-root.nix)   # a Firefox check
 ```
-Patches are made from three trees under `runs/cocoa/patchwork/` (not committed): `a/` the pin,
-`c/` the state after patches 0001 to 0015 (frozen), `b/` now. Edit `b/`, then
-`bash runs/cocoa/patchwork/mkpatches.sh`; a file belongs to one patch of 0016 and later. If that
-directory is lost, `b/` is the pin with every patch of `patched.nix` applied.
+Patches are made from trees under `runs/cocoa/patchwork/` (not committed): `a/` the pin, frozen
+trees after each set of patches (`c/` after 0015, `d/` 0018, `e/` 0027, `f/` 0033, `g/` 0039; the
+later sets are the Terminal.app stream's, docs/roadmap/issues/SF-Y-terminal-app.md), `b/` now. Edit
+`b/`, then `bash integrations/puredarwin/cocoa/mkpatches.sh` (the script names which file belongs
+to which patch; within one set a file belongs to one patch). If that directory is lost, `a/` is
+the pin's files, each frozen tree the pin with the patches up to its number applied, and `b/` the
+pin with every patch of `patched.nix` applied.
 
 Traps met (keep the checks honest):
 - Never run a batch while the workstation is loaded: at a load of 40 the desktop itself fails
