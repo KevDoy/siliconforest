@@ -56,6 +56,7 @@ stage)
   LS=$(nb $A build-libsystem-am.nix); cp $LS/usr/lib/libSystem.B.dylib $ST/root/usr/lib/libSystem.B.dylib
   LDF="-fuse-ld=$LD -nostdlib -Wl,-syslibroot,$LINKROOT -L$LINKROOT/usr/lib -Wl,-platform_version,macos,26.5,26.5"
   $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 -isystem $SDK/usr/include $INC $A/probe/sf-am-probe.c $LDF -lSystem -o $ST/sf-am-probe
+  $CC -isysroot $SDK -mmacosx-version-min=26.5 -O1 -fblocks -isystem $SDK/usr/include $INC $A/probe/sf-sysmon-test.c $LDF -L$ROOT/$W/libs/usr/lib -lsysmon -lSystem -o $ST/sf-sysmon-test
   cp $W/tstage/sf-catch $W/tstage/libsfprof.dylib $W/tstage/libsftrace.dylib $ST/ 2>/dev/null || true
   install -m755 $A/guest/run.sh $ST/run.sh
   du -sh $ST | cut -f1;;

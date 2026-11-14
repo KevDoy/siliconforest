@@ -10,6 +10,7 @@ mk(){ out=$1; shift; : > $P/$out; for f in "$@"; do diff -uN --label a/$f --labe
 A=src/Frameworks/AppKit
 mk 0100-appkit-activity-monitor-names.patch $A/NSActivityMonitorAdditions.m
 mk 0101-appkit-view-based-tables-hidden-columns.patch $A/NSTableViewViewBased.m $A/NSTableView.m $A/NSOutlineView.m $A/NSTableColumn.h $A/NSTableColumn.m $A/NSTableHeaderView.m
+mk 0103-appkit-layer-backed-views-without-egl.patch $A/NSView.m
 mk 0102-coregraphics-activity-monitor-cgs.patch src/Frameworks/CoreGraphics/CGActivityMonitorAdditions.m
 # every file that differs between base/ and am/ must be named above
 diff -rq base am | sed 's/^/differs: /'

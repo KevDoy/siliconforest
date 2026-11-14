@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
 +++ b/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,406 @@
 +/* SPDX-License-Identifier: MIT */
 +/* What Apple's Activity Monitor (macOS 26.5) imports from AppKit that this AppKit lacked
 +   (docs/roadmap/issues/SF-AA-activity-monitor.md):
@@ -315,5 +315,95 @@
 +        void (*f)(id, SEL, NSPrintOperation *, BOOL, void *) = (void *)[delegate methodForSelector:selector];
 +        f(delegate, selector, self, ok, info);
 +    }
++}
++@end
++
++/* ---- a pan recogniser as the nibs carry one (Activity Monitor's graphs); like the others here it
++   keeps its configuration and recognises nothing (NSMacOS26Additions.m) ---- */
++#import <AppKit/NSMacOS26Additions.h>
++EXPORT
++@interface NSPanGestureRecognizer : NSGestureRecognizer {
++    NSUInteger _buttonMask;
++    NSInteger _numberOfTouchesRequired;
++}
++@end
++@implementation NSPanGestureRecognizer
++- (NSUInteger)buttonMask { return _buttonMask; }
++- (void)setButtonMask:(NSUInteger)m { _buttonMask = m; }
++- (NSInteger)numberOfTouchesRequired { return _numberOfTouchesRequired; }
++- (void)setNumberOfTouchesRequired:(NSInteger)n { _numberOfTouchesRequired = n; }
++- (NSPoint)translationInView:(NSView *)view { return NSZeroPoint; }
++- (void)setTranslation:(NSPoint)t inView:(NSView *)view {}
++- (NSPoint)velocityInView:(NSView *)view { return NSZeroPoint; }
++@end
++
++/* ---- NSSearchField's search-string options: kept; this field sends its action as it is set up to
++   (continuously or on Return), which is what "immediately" asks for when it is continuous ---- */
++static const char sfSendsImmediatelyKey, sfSendsWholeKey;
++@implementation NSSearchField (SFSearchOptions)
++- (BOOL)sendsSearchStringImmediately { return [objc_getAssociatedObject(self, &sfSendsImmediatelyKey) boolValue]; }
++- (void)setSendsSearchStringImmediately:(BOOL)b {
++    objc_setAssociatedObject(self, &sfSendsImmediatelyKey, [NSNumber numberWithBool:b], OBJC_ASSOCIATION_RETAIN);
++    if (b)
++        [self setContinuous:YES];
++}
++- (BOOL)sendsWholeSearchString { return [objc_getAssociatedObject(self, &sfSendsWholeKey) boolValue]; }
++- (void)setSendsWholeSearchString:(BOOL)b {
++    objc_setAssociatedObject(self, &sfSendsWholeKey, [NSNumber numberWithBool:b], OBJC_ASSOCIATION_RETAIN);
++    if (b)
++        [self setContinuous:NO];
++}
++@end
++
++/* ---- a window's subtitle (macOS 11): the compositor's title bar shows one line, so the subtitle is
++   kept and not shown; a table column's title as its header cell's string ---- */
++static const char sfSubtitleKey;
++@implementation NSWindow (SFSubtitle)
++- (NSString *)subtitle { NSString *s = objc_getAssociatedObject(self, &sfSubtitleKey); return s ? s : @""; }
++- (void)setSubtitle:(NSString *)s { objc_setAssociatedObject(self, &sfSubtitleKey, s, OBJC_ASSOCIATION_COPY); }
++@end
++
++@implementation NSTableColumn (SFTitle)
++- (NSString *)title { return [[self headerCell] stringValue]; }
++- (void)setTitle:(NSString *)title {
++    [[self headerCell] setStringValue:title ? title : @""];
++    [[[self tableView] headerView] setNeedsDisplay:YES];
++}
++@end
++
++/* ---- a diagnostic: PDViewTreeDump=<seconds> logs every window's view tree (class, frame, hidden)
++   that many seconds after launch, for finding where a view's layout differs from what is expected ---- */
++@interface SFViewTreeDumper : NSObject
++@end
++@implementation SFViewTreeDumper
++static void sfDumpView(NSView *v, int depth) {
++    NSRect f = [v frame];
++    NSLog(@"%*s%@ %p {{%.0f,%.0f},{%.0f,%.0f}}%@%@", depth * 2, "", [v class], v, f.origin.x, f.origin.y, f.size.width, f.size.height,
++        [v isHidden] ? @" hidden" : @"", [v respondsToSelector:@selector(identifier)] && [(id)v identifier] ? [NSString stringWithFormat:@" id=%@", [(id)v identifier]] : @"");
++    if (depth > 14)
++        return;
++    NSArray *subs = [v subviews];
++    NSUInteger n = [subs count];
++    for (NSUInteger i = 0; i < n && i < 40; i++)
++        sfDumpView([subs objectAtIndex:i], depth + 1);
++    if (n > 40)
++        NSLog(@"%*s... %lu more", (depth + 1) * 2, "", (unsigned long)(n - 40));
++}
+++ (void)dump:(id)unused {
++    for (NSWindow *w in [NSApp windows]) {
++        if (![w isVisible])
++            continue;
++        NSRect f = [w frame];
++        NSLog(@"window %@ \"%@\" {{%.0f,%.0f},{%.0f,%.0f}}", [w class], [w title], f.origin.x, f.origin.y, f.size.width, f.size.height);
++        sfDumpView([w contentView], 1);
++    }
++}
+++ (void)schedule:(NSNotification *)note {
++    const char *s = getenv("PDViewTreeDump");
++    [self performSelector:@selector(dump:) withObject:nil afterDelay:s ? atof(s) : 10];
++}
+++ (void)load {
++    if (getenv("PDViewTreeDump"))
++        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(schedule:) name:NSApplicationDidFinishLaunchingNotification object:nil];
 +}
 +@end

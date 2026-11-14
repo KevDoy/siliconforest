@@ -4,7 +4,7 @@
  *
  * libsysmon for SiliconForest (docs/roadmap/issues/SF-AA-activity-monitor.md, GitHub issue 53).
  * Taken from Finch (userland/libsysmon/sysmon.m, commit 2d9b1bb): the request/table/row model
- * (a request with a bit array of attributes, rows whose values sit in an XPC array in attribute
+ * (a request with a bit array of attributes, rows whose values sit in attribute
  * order, the interval rounding, the appliers), the process table built in the calling process
  * from libproc and sysctl (no sysmond daemon), and the first attributes (flags, pid, ppid, uid,
  * ruid, rgid, comm, pgid, tdev, start, arguments).
@@ -46,6 +46,7 @@
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <xpc/xpc.h>
+#include <stdio.h>
 
 #define API __attribute__((visibility("default")))
 
@@ -64,12 +65,12 @@ static const size_t attribute_bytes[] = { 10, 5, 2 };
 enum {
 	ATTR_FLAGS = 1, ATTR_STATUS = 2, ATTR_PID = 4, ATTR_PPID = 5, ATTR_UID = 6, ATTR_RUID = 8, ATTR_RGID = 9,
 	ATTR_COMM = 12, ATTR_NAME = 13, ATTR_PGID = 15, ATTR_TDEV = 17, ATTR_START = 20,
-	ATTR_VSIZE = 21, ATTR_FOOTPRINT = 22, ATTR_USER_NS = 23, ATTR_SYSTEM_NS = 24,
+	ATTR_VSIZE = 21, ATTR_RESIDENT = 22, ATTR_USER_NS = 23, ATTR_SYSTEM_NS = 24,
 	ATTR_FAULTS = 28, ATTR_PAGEINS = 29, ATTR_MSGS_SENT = 31, ATTR_MSGS_RCVD = 32,
 	ATTR_MACH_CALLS = 33, ATTR_UNIX_CALLS = 34, ATTR_CSW = 35, ATTR_THREADS = 36,
 	ATTR_ARGUMENTS = 44, ATTR_IDLE_WAKEUPS = 46, ATTR_PORTS = 50, ATTR_CPU_PERCENT = 51,
 	ATTR_POWER_SCORE = 52, ATTR_PRIVATE = 53, ATTR_SHARED = 54, ATTR_RESPONSIBLE_PID = 55,
-	ATTR_APP_SLEEP = 56, ATTR_PURGEABLE = 59, ATTR_AVG_POWER_SCORE = 62, ATTR_ANONYMOUS = 66,
+	ATTR_APP_SLEEP = 56, ATTR_PURGEABLE = 59, ATTR_AVG_POWER_SCORE = 62, ATTR_FOOTPRINT = 66,
 	ATTR_BYTES_READ = 72, ATTR_BYTES_WRITTEN = 73, ATTR_COMPRESSED = 74,
 };
 
@@ -137,7 +138,8 @@ API
 @interface OS_sysmon_row : OS_sysmon_object {
   @public
 	struct bits *attributes;
-	xpc_object_t values;
+	xpc_object_t *values;   /* in attribute order; NULL where the value is not known */
+	size_t nvalues, capvalues;
 }
 @end
 
@@ -174,8 +176,10 @@ API
 - (void)dealloc
 {
 	free(attributes);
-	if (values)
-		xpc_release(values);
+	for (size_t i = 0; i < nvalues; i++)
+		if (values[i])
+			xpc_release(values[i]);
+	free(values);
 	[super dealloc];
 }
 @end
@@ -265,8 +269,8 @@ sysmon_request_set_interval(OS_sysmon_request *r, uint64_t interval_ms)
 			rounded += 500;
 	}
 	r->interval = rounded;
-	if (r->timer)   /* a running request takes the new interval */
-		dispatch_source_set_timer(r->timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)rounded * NSEC_PER_MSEC),
+	if (r->timer)   /* a running request takes the new interval, with a table now */
+		dispatch_source_set_timer(r->timer, dispatch_time(DISPATCH_TIME_NOW, 0),
 		    rounded * NSEC_PER_MSEC, 50 * NSEC_PER_MSEC);
 }
 
@@ -395,7 +399,7 @@ procinfo(pid_t pid, const struct bits *want, struct procinfo *pi)
 	/* CPU time: the rusage times are in Mach time units, as on macOS */
 	if (pi->have_rusage)
 		pi->cpu_ns = ticks_to_ns(pi->ru.ri_user_time) + ticks_to_ns(pi->ru.ri_system_time);
-	if (has(want, ATTR_PORTS) || has(want, ATTR_COMPRESSED) || has(want, ATTR_PURGEABLE) || has(want, ATTR_ANONYMOUS)) {
+	if (has(want, ATTR_PORTS) || has(want, ATTR_COMPRESSED) || has(want, ATTR_PURGEABLE)) {
 		mach_port_t task = MACH_PORT_NULL;
 
 		if (pid != 0 && task_for_pid(mach_task_self(), pid, &task) == KERN_SUCCESS) {
@@ -462,7 +466,8 @@ value(uint32_t attribute, const struct procinfo *pi)
 		}
 	if (pi->have_rusage)
 		switch (attribute) {
-		case ATTR_FOOTPRINT: return u64(pi->ru.ri_phys_footprint);
+		case ATTR_FOOTPRINT: return u64(pi->ru.ri_phys_footprint);   /* the Memory column (anonymousMemory) */
+		case ATTR_RESIDENT: return u64(pi->ru.ri_resident_size);     /* Real Mem */
 		case ATTR_USER_NS: return u64(ticks_to_ns(pi->ru.ri_user_time));
 		case ATTR_SYSTEM_NS: return u64(ticks_to_ns(pi->ru.ri_system_time));
 		case ATTR_IDLE_WAKEUPS: return u64(pi->ru.ri_pkg_idle_wkups);
@@ -473,7 +478,6 @@ value(uint32_t attribute, const struct procinfo *pi)
 		switch (attribute) {
 		case ATTR_COMPRESSED: return u64(pi->vm.compressed);
 		case ATTR_PURGEABLE: return u64(pi->vm.purgeable_volatile_pmap);
-		case ATTR_ANONYMOUS: return u64(pi->vm.internal);
 		}
 	if (attribute == ATTR_PORTS && pi->have_ports)
 		return u64(pi->ports);
@@ -534,8 +538,27 @@ row_new(const struct bits *attributes)
 	row->attributes = calloc(1, bytes);
 	if (attributes && row->attributes)
 		memcpy(row->attributes, attributes, bytes);
-	row->values = xpc_array_create(NULL, 0);
+	row->values = NULL;
 	return row;
+}
+
+/* the row takes the value (NULL: not known; this libxpc keeps no null object in an array) */
+static void
+row_append(OS_sysmon_row *row, xpc_object_t v)
+{
+	if (row->nvalues == row->capvalues) {
+		size_t cap = row->capvalues ? row->capvalues * 2 : 32;
+		xpc_object_t *n = realloc(row->values, cap * sizeof(*n));
+
+		if (n == NULL) {
+			if (v)
+				xpc_release(v);
+			return;
+		}
+		row->values = n;
+		row->capvalues = cap;
+	}
+	row->values[row->nvalues++] = v;
 }
 
 static OS_sysmon_table *
@@ -580,9 +603,7 @@ process_table(OS_sysmon_request *r)
 				continue;
 			xpc_object_t v = value(a, &pi);
 
-			xpc_array_append_value(row->values, v ? v : xpc_null_create());
-			if (v)
-				xpc_release(v);
+			row_append(row, v);
 		}
 		t->rows[t->count++] = row;
 	}
@@ -687,9 +708,21 @@ system_table(OS_sysmon_request *r)
 	host_page_size(mach_host_self(), &page);
 	if (sysctlbyname("hw.memsize", &memsize, &n, NULL, 0) != 0)
 		memsize = 0;
-	n = sizeof(nthreads);
-	if (sysctlbyname("kern.num_threads", &nthreads, &n, NULL, 0) == 0)
-		threads = (uint64_t)nthreads;
+	/* the threads of every process (kern.num_threads is the limit, not the count) */
+	if (has(attributes, SYS_THREADS)) {
+		int cap = proc_listallpids(NULL, 0) + 64, np;
+		pid_t *pids = cap > 64 ? calloc((size_t)cap, sizeof(pid_t)) : NULL;
+
+		np = pids ? proc_listallpids(pids, cap * (int)sizeof(pid_t)) : 0;
+		for (int i = 0; i < np; i++) {
+			struct proc_taskinfo ti;
+
+			if (proc_pidinfo(pids[i], PROC_PIDTASKINFO, 0, &ti, sizeof(ti)) == sizeof(ti))
+				threads += (uint64_t)(uint32_t)ti.pti_threadnum;
+		}
+		free(pids);
+	}
+	(void)nthreads;
 	if (has(attributes, SYS_NET_PACKETS_IN) || has(attributes, SYS_NET_BYTES_IN) || has(attributes, SYS_NET_PACKETS_OUT) || has(attributes, SYS_NET_BYTES_OUT))
 		have_net = interfaces(&net[0], &net[1], &net[2], &net[3]);
 	if (has(attributes, SYS_DISK_READ_OPS) || has(attributes, SYS_DISK_WRITE_OPS) || has(attributes, SYS_DISK_READ_BYTES) || has(attributes, SYS_DISK_WRITE_BYTES))
@@ -726,18 +759,30 @@ system_table(OS_sysmon_request *r)
 		case SYS_DISK_READ_BYTES: if (have_disk) v = u64(disk[2]); break;
 		case SYS_DISK_WRITE_BYTES: if (have_disk) v = u64(disk[3]); break;
 		}
-		xpc_array_append_value(row->values, v ? v : xpc_null_create());
-		if (v)
-			xpc_release(v);
+		row_append(row, v);
 	}
 	t->rows[t->count++] = row;
 	return t;
+}
+
+static int
+debugging(void)
+{
+	static int debug = -1;
+
+	if (debug < 0)
+		debug = getenv("SYSMON_DEBUG") != NULL;
+	return debug;
 }
 
 static void
 deliver(OS_sysmon_request *r)
 {
 	OS_sysmon_table *t;
+	int debug = debugging();
+
+	if (debug)
+		fprintf(stderr, "sysmon: type %llu: building a table\n", (unsigned long long)r->type);
 
 	if (r->type == 1) {
 		t = process_table(r);
@@ -750,6 +795,9 @@ deliver(OS_sysmon_request *r)
 			r->handler(nil);
 		return;
 	}
+	if (debug)
+		fprintf(stderr, "sysmon: type %llu table of %llu rows, interval %llu ms\n", (unsigned long long)r->type,
+		    (unsigned long long)t->count, (unsigned long long)r->interval);
 	if (r->error_handler)
 		r->error_handler(t, NULL);
 	else if (r->handler)
@@ -757,9 +805,14 @@ deliver(OS_sysmon_request *r)
 	[t release];
 }
 
+static int debugging(void);
+
 API void
 sysmon_request_execute(OS_sysmon_request *r)
 {
+	if (debugging())
+		fprintf(stderr, "sysmon: execute type %llu interval %llu timer %p\n", (unsigned long long)r->type,
+		    (unsigned long long)r->interval, (void *)r->timer);
 	[r retain];
 	if (r->interval == 0) {
 		dispatch_async(r->queue, ^{
@@ -839,8 +892,8 @@ sysmon_row_get_value(OS_sysmon_row *row, uint32_t attribute)
 		return NULL;
 	for (uint32_t a = 0; a < attribute; a++)
 		rank += has(row->attributes, a);
-	v = xpc_array_get_value(row->values, rank);
-	return v == xpc_null_create() ? NULL : v;
+	v = rank < row->nvalues ? row->values[rank] : NULL;
+	return v;
 }
 
 API void
@@ -851,9 +904,10 @@ sysmon_row_apply(OS_sysmon_row *row, bool (^applier)(uint32_t, xpc_object_t))
 	for (uint32_t a = 0; row->attributes && a < row->attributes->size * 8; a++) {
 		if (!has(row->attributes, a))
 			continue;
-		xpc_object_t v = xpc_array_get_value(row->values, rank++);
+		xpc_object_t v = rank < row->nvalues ? row->values[rank] : NULL;
 
-		if (!applier(a, v == xpc_null_create() ? NULL : v))
+		rank++;
+		if (!applier(a, v))
 			break;
 	}
 }

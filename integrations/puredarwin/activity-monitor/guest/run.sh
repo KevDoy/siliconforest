@@ -6,6 +6,7 @@
 P=/private/var/db/sfam; R=$P/root; F=System/Library/Frameworks
 export DYLD_FRAMEWORK_PATH=$R/$F:$R/System/Library/PrivateFrameworks
 export DYLD_LIBRARY_PATH=$R/usr/lib
-export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/private/var/run/gpu-desktop} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+# the desktop session's compositor (an SSH session has its own XDG_RUNTIME_DIR): SFAM_XDG, SFAM_WAYLAND to choose another
+export XDG_RUNTIME_DIR=${SFAM_XDG:-/private/var/run/gpu-desktop} WAYLAND_DISPLAY=${SFAM_WAYLAND:-wayland-0}
 export HOME=${HOME:-/var/root}
 exec $CATCH "$P/Activity Monitor.app/Contents/MacOS/Activity Monitor" "$@"

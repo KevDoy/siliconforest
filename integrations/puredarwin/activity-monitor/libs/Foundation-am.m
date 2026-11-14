@@ -333,3 +333,11 @@ static const char sf_minint_key, sf_round_key, sf_format_key;
 - (void)setFormat:(NSString *)f { objc_setAssociatedObject(self, &sf_format_key, f, OBJC_ASSOCIATION_COPY); }
 - (NSString *)format { return objc_getAssociatedObject(self, &sf_format_key); }
 @end
+
+/* formatters' formatting context (capitalisation of a formatted string at the start of a sentence,
+   in a list ...): kept; these formatters' strings do not depend on it in English */
+static const char sf_context_key;
+@implementation NSFormatter (SFFormattingContext)
+- (NSInteger)formattingContext { return [objc_getAssociatedObject(self, &sf_context_key) integerValue]; }
+- (void)setFormattingContext:(NSInteger)c { objc_setAssociatedObject(self, &sf_context_key, [NSNumber numberWithInteger:c], OBJC_ASSOCIATION_RETAIN); }
+@end

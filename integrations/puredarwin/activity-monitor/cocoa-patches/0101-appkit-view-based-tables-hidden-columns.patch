@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSTableViewViewBased.m
 +++ b/src/Frameworks/AppKit/NSTableViewViewBased.m
-@@ -0,0 +1,571 @@
+@@ -0,0 +1,579 @@
 +/* SPDX-License-Identifier: MIT */
 +/* View-based table and outline views (docs/roadmap/issues/SF-AA-activity-monitor.md; first user:
 +   Apple's Activity Monitor, whose process list is a view-based NSOutlineView with 38 archived cell
@@ -136,7 +136,7 @@
 +    [self setNeedsDisplay:YES];
 +}
 +- (BOOL)isEmphasized { return _emphasized; }
-+- (void)setEmphasized:(BOOL)b { _emphasized = b; [self setNeedsDisplay:YES]; }
++- (void)setEmphasized:(BOOL)b { if (b != _emphasized) { _emphasized = b; [self setNeedsDisplay:YES]; } }
 +- (BOOL)isGroupRowStyle { return _groupRowStyle; }
 +- (void)setGroupRowStyle:(BOOL)b { _groupRowStyle = b; }
 +- (BOOL)isFloating { return _floating; }
@@ -391,6 +391,12 @@
 +    SFViewBasedState *s = [self _sfViewState];
 +    NSInteger nrows = [self numberOfRows], ncols = [[self tableColumns] count];
 +    NSRange visible = [self rowsInRect:[self visibleRect]];
++    static int debug = -1;
++    if (debug < 0)
++        debug = getenv("PDTableDebug") != NULL;
++    if (debug)
++        NSLog(@"view-based %@: rows %ld, columns %ld, visible %@, frame %@, dirty %d", [self class], (long)nrows, (long)ncols,
++            [NSString stringWithFormat:@"{%lu, %lu}", (unsigned long)visible.location, (unsigned long)visible.length], NSStringFromRect([self frame]), s->dirty);
 +    if (s->dirty) {
 +        [self _sfRemoveAllRowViews];
 +        s->dirty = NO;
@@ -415,7 +421,9 @@
 +            [s->rows setObject:rv forKey:key];
 +            fresh = YES;
 +        }
-+        [rv setFrame:[self rectOfRow:r]];
++        NSRect rowRect = [self rectOfRow:r];
++        if (!NSEqualRects([rv frame], rowRect))
++            [rv setFrame:rowRect];
 +        if (fresh) {
 +            for (NSInteger c = 0; c < ncols; c++) {
 +                NSTableColumn *tc = [[self tableColumns] objectAtIndex:c];
@@ -742,7 +750,17 @@
  @implementation NSOutlineView
  
  static inline BOOL isItemExpanded(NSOutlineView *self,id item){
-@@ -711,7 +715,7 @@
+@@ -442,7 +446,8 @@
+         @selector(outlineView:child:ofItem:),
+         @selector(outlineView:isItemExpandable:),
+         @selector(outlineView:numberOfChildrenOfItem:),
+-        @selector(outlineView:objectValueForTableColumn:byItem:),
++        // -outlineView:objectValueForTableColumn:byItem: is not required: a view-based outline
++        // view's data source need not answer it (macOS asks for it only where it is implemented)
+         NULL};
+     int i;
+ 
+@@ -711,7 +716,7 @@
        NSFrameRectWithWidth(_editingBorder, 2.0);
       }
      }

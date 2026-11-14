@@ -10,10 +10,30 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, second round (on the M1, synthetic input only, nobody looked at the panel): dyld
+  reaches `main` from the stage (`sf-prof` samples: `NSApplicationMain` -> `-[NSApplication init]`);
+  the main window is on the compositor with its toolbar (CPU, Memory, Energy, Disk, Network), the
+  CPU tab's columns, and **rows for SiliconForest's real processes**: name, CPU time, threads, Kind
+  ("Apple"), PID, user (`runs/sf-actmon/shots/am8.png`: kernel_task 120 threads 55.93 s, launchd,
+  sshd, Terminal, pd-netd, coreaudiod, ...). Open at this point: %CPU shows 0.0 everywhere, three
+  rows have no name, the bottom summary pane is not visible, toolbar symbols are blank (SF Symbols).
+  Faults found on the way (all in the system): below, "Faults found".
 - 14 November, first round: gap scan, all 101 missing imports provided in a stage
   (`runs/sf-actmon/stage`, scratch prefix `/private/var/db/sfam` on the target). Scanner against the
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
+
+## Faults found (all in the system, none in Activity Monitor)
+| Symptom | Cause | Fix |
+|---|---|---|
+| Waits for ever in `-[NSApplication init]` | the SSH session's `XDG_RUNTIME_DIR` won over the desktop's | `guest/run.sh` sets the session's |
+| `-[NSByteCountFormatter setFormattingContext:]` raised | formatters had no formatting context | `libs/Foundation-am.m` (NSFormatter) |
+| SIGSEGV at a NULL function in OpenGL from `-[BatteryGraphView awakeFromNib]` (`setWantsLayer:`) | a layer context renders through CGL, which calls into EGL; the disk's root has no libEGL | cocoa 0103: without EGL a layer-backed view draws as an ordinary view |
+| No rows: the outline view's data source stayed nil | `-[NSOutlineView setDataSource:]` raised for a source without `outlineView:objectValueForTableColumn:byItem:` (a view-based source does not answer it); the nib's outlet connection swallowed it | cocoa 0101 |
+| No cells drawn | this AppKit had no view-based tables | cocoa 0101 |
+| The first process table came after one update interval (5 s) | a running request's new interval also moved its next table | `libs/sysmon.m`: a table at once |
+| Values after the first unknown attribute were missing | this libxpc keeps no null object in an array | `libs/sysmon.m`: the row keeps its values itself |
+| Thread count 15360 | `kern.num_threads` is the limit | sum of the processes' threads |
 
 ## The binary
 | | |
@@ -60,14 +80,15 @@ Process request (type 1, every 0.5 s, then its update interval):
 |---|---|---|
 | 1, 2, 4, 5, 6, 8, 9, 12, 13, 15, 17, 20 | flags, procStatus, pid, ppid, uid, ruid, rgid, comm, name, pgid, tdev, start | `proc_pidinfo(PROC_PIDTASKALLINFO)` (short form and `kinfo_proc` otherwise) |
 | 21 | virtualSize | `pti_virtual_size` |
-| 22 | residentSize (the Memory column) | `proc_pid_rusage` `ri_phys_footprint` |
+| 22 | residentSize ("Real Mem") | `proc_pid_rusage` `ri_resident_size` |
 | 23, 24 | CPU time (user, system; ns) | `ri_user_time`, `ri_system_time` (Mach time units, converted) |
 | 28, 29, 31, 32, 33, 34, 35, 36 | faults, pageIns, msgsSent, msgsRcvd, machCalls, unixSyscalls, contextSwitches, threads | `proc_taskinfo` |
 | 44 | arguments | `kern.procargs2` |
 | 46 | idleWakeups | `ri_pkg_idle_wkups` |
 | 50 | ports | `mach_port_names` count (through `task_for_pid`) |
 | 51 | CPU % | difference of 23+24 between two tables of the request over the time between them |
-| 59, 66, 74 | purgeableMemory, anonymousMemory, compressedMemory | `task_info(TASK_VM_INFO)`: `purgeable_volatile_pmap`, `internal`, `compressed` |
+| 66 | anonymousMemory (the "Memory" column, the Memory tab's default sort) | `ri_phys_footprint` |
+| 59, 74 | purgeableMemory, compressedMemory ("VM Compressed") | `task_info(TASK_VM_INFO)`: `purgeable_volatile_pmap`, `compressed` |
 | 72, 73 | bytesRead, bytesWritten | `ri_diskio_bytesread`, `ri_diskio_byteswritten` |
 | 56 | AppSleep | false (there is no App Nap) |
 | 52, 62 | powerScore, averagePowerScore | not known here: left out |
@@ -76,7 +97,7 @@ Process request (type 1, every 0.5 s, then its update interval):
 
 System request (type 2, every 1 s): 4 wired pages, 14 purgeable, 20 compressor, 33 external,
 34 internal, 38 pages in use (active+inactive+speculative+throttled+wired+compressor), 36 total
-pages (`hw.memsize`), 24 threads (`kern.num_threads`), 25..28 disk operations and bytes (the block
+pages (`hw.memsize`), 24 threads (the sum of every process's `pti_threadnum`: `kern.num_threads` is the limit, 15360 on the M1), 25..28 disk operations and bytes (the block
 storage drivers' `Statistics`), 29..32 packets and bytes in and out (`NET_RT_IFLIST2`, not lo0).
 Activity Monitor computes: Memory Used = (38 - 33) pages, App Memory = 34 - 14, Cached Files =
 33 + 14, Wired = 4, Compressed = 20, Swap from `vm.swapusage`, pressure from `memorystatus_get_level`;
