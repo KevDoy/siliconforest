@@ -1,26 +1,25 @@
 --- a/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
 +++ b/src/Frameworks/AppKit/NSFoundWithTerminalAdditions.m
-@@ -114,3 +114,85 @@
+@@ -114,3 +114,99 @@
  }
  
  @end
 +
 +/* A column that is hidden (macOS 10.5): Terminal's inspector hides some of its table's columns.
-+ * The table here has no hidden columns of its own, so a hidden column is one of width 0; showing it
-+ * again gives it back its width. */
++ * Where the table has no hidden columns of its own a hidden column is one of width 0, and showing it
++ * again gives it back its width. Added only where NSTableColumn has no -isHidden (a table that lays
++ * out hidden columns brings its own). */
 +#import <AppKit/NSTableColumn.h>
 +#include <objc/runtime.h>
 +
 +static char PDColumnHiddenKey;
 +
-+@implementation NSTableColumn (PDHidden)
-+
-+- (BOOL)isHidden
++static BOOL pdColumnIsHidden(id self, SEL _cmd)
 +{
 +    return objc_getAssociatedObject(self, &PDColumnHiddenKey) != nil;
 +}
 +
-+- (void)setHidden:(BOOL)hidden
++static void pdColumnSetHidden(id self, SEL _cmd, BOOL hidden)
 +{
 +    NSNumber *width = objc_getAssociatedObject(self, &PDColumnHiddenKey);
 +
@@ -35,6 +34,21 @@
 +        objc_setAssociatedObject(self, &PDColumnHiddenKey, nil, OBJC_ASSOCIATION_RETAIN);
 +        [self setWidth:[width doubleValue]];
 +    }
++}
++
++@interface PDHiddenColumnsInstaller : NSObject
++@end
++
++@implementation PDHiddenColumnsInstaller
++
+++ (void)load
++{
++    Class column = [NSTableColumn class];
++
++    if (!class_getInstanceMethod(column, @selector(isHidden)))
++        class_addMethod(column, @selector(isHidden), (IMP)pdColumnIsHidden, "c@:");
++    if (!class_getInstanceMethod(column, @selector(setHidden:)))
++        class_addMethod(column, @selector(setHidden:), (IMP)pdColumnSetHidden, "v@:c");
 +}
 +
 +@end
