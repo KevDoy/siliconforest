@@ -135,6 +135,28 @@ SPDX notice kept in the file that carries it:
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
 
+## Sixth round (14 November, evening; COCOA3): the leak every program had, toolbar, scrollers, symbols
+Seen on the M1 (synthetic input through the inject module while DESK2's test compositor ran; captures
+`runs/sf-am3/shots/c3-t-*`, `c3-ts-*`, not committed):
+- libFoundation's convenience constructors leaked every object (PureDarwin CoreFoundation's `CFAutorelease` never
+  autoreleases a CF-owned object). Fixed in libFoundation (`PDAutoreleaseCF.h`), core round QEMU `c3b`/`c3b-2`
+  (failed=0, QDDESK_PASS both), guarded install (libFoundation e77c9824, `.old6`; Foundation wrapper a660d750,
+  `.old3`). Terminal ended at launch with it until cocoa 0108 (NSMenuItem's getters retained and autoreleased:
+  Terminal keeps a removed menu item's key equivalent, which macOS keeps as a never-freed tagged pointer).
+  Terminal with the new libraries: launch, 300,000 lines twice, Preferences, a new tab, the Inspector: alive
+  (`c3-t-n2`, `n3`, `n4`). `sf_compat_push.sh check` after the installs: 18 of 18, `failed=0`.
+- The Preferences toolbar shows its icons (Finch's symbol glyphs, cocoa 0111: General, Profiles, Encodings;
+  Window Groups' symbol is none of them and stays blank) and the selected pane in a soft rounded rectangle (0113).
+- Overlay scrollers (0114) for every application: no track, a thin knob shown when the user scrolls, faded a
+  second later; the legacy look with `AppleShowScrollBars=Always` in the defaults or `PD_SCROLLERS=legacy`.
+  Checked in Activity Monitor's table (`c3-sd-*`); in Terminal's scrollback the knob was not captured (the window
+  sat partly off the screen and the inject compositor was then taken down at the end of DESK2's night).
+- Finch's constraint solver in place of ours was measured with `PD_SOLVE_TIME=1` (cocoa 0112): Terminal's
+  Preferences, 206 whole-tree solves, 1574 ms with ours; with Finch's as a throwaway solver, 104 solves had taken
+  10075 ms after 9 s. Not taken; it would pay off only with an incremental driver (keep the solver between layouts,
+  change constants), which is not written.
+- Revert: SF-AA, "Installed on the M1's disk, sixth round".
+
 ## Fifth round (14 November, afternoon): Activity Monitor's changes merged, Terminal checked
 Activity Monitor's cocoa patches are in the main series now (0100..0107, `cocoa/patched.nix`;
 docs/roadmap/issues/SF-AA-activity-monitor.md). The merge attempt of the night had been taken back

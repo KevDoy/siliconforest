@@ -44,4 +44,5 @@ mk am-0109 am 0113-appkit-toolbar-buttons-macos26.patch $A/NSButtonCell.m $A/NST
   $A/NSToolbar.subproj/NSToolbarItemView.m
 mk am-0109 am 0114-appkit-overlay-scrollers.patch $A/NSScroller.m $A/NSScrollView.m $A/NSScrollView.h $A/NSView.m \
   $A/NSMacOS26Additions.m $A/NSModernAppKit.m
+mk am-0109 am 0115-appkit-cgevent-autoreleased.patch $A/NSEvent.subproj/NSEvent_Modern.m
 ( diff -rq am-0109 am ) | sed 's/^/differs from am-0109: /'

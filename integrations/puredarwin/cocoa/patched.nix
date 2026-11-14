@@ -237,6 +237,8 @@
 #         track while dragged, shown when the user scrolls (-flashScrollers) and faded a second later (a one-shot
 #         timer, then a fade that stops itself: nothing runs at rest); no room taken, no corner, a scroller
 #         with nothing to scroll hidden; in the legacy style the square where two scrollers meet is painted
+#   0115  AppKit: -[NSEvent CGEvent] autoreleases with -autorelease (CoreFoundation's CFAutorelease does not
+#         autorelease a CF-owned object: every CGEvent asked for leaked)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -309,6 +311,7 @@ let
     ./patches/0112-appkit-solve-time-trace.patch
     ./patches/0113-appkit-toolbar-buttons-macos26.patch
     ./patches/0114-appkit-overlay-scrollers.patch
+    ./patches/0115-appkit-cgevent-autoreleased.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

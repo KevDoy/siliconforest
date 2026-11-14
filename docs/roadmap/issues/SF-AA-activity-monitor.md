@@ -10,6 +10,20 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, sixth round (COCOA3; on the M1 booted from its disk; synthetic input through the inject module
+  while DESK2's test compositor ran, nobody looked at the panel; captures in `runs/sf-am3/shots/c3-*`, crops in
+  `runs/sf-cocoa3/`, not committed). **A leak every program had is gone**: PureDarwin's CoreFoundation's
+  `CFAutorelease` returned its own objects without autoreleasing them, so every Foundation convenience
+  constructor (`+array`, `+stringWith...`, `+dictionary`...) leaked. Activity Monitor grew 14 MB a minute
+  (77.8 to 97.2 MB over 80 s); with the fixed libFoundation it stayed at 75.3 MB (same bundle, same 80 s,
+  `runs/sf-cocoa3/amrss.sh`). Core round: QEMU `c3b`, `c3b-2` (failed=0, QDDESK_PASS both), guarded install.
+  Then AppKit: the toolbar's stop/info/actions buttons as macOS 26 draws them (owner's photo: one capsule,
+  borderless glyphs, one height and centre line, even spacing, a small down chevron; before/after:
+  `runs/sf-cocoa3/toolbar-before-zoom.png`, `toolbar-after2-zoom.png`); overlay scrollers (no horizontal
+  scroller where the columns fit, no black corner square, a thin knob that appears when scrolled and fades a
+  second later: `c3-sd-rest/scroll/faded`); Window > CPU Usage and CPU History open (they ended the
+  application or did not open) with Finch's NSCollectionView, but show no content yet (below); images of the
+  application's `Assets.car` (`CPUUsagePill` is found). Measurements: table "Performance", second part.
 - 14 November, fifth round (one agent; on the M1 booted from its disk; synthetic input through the
   compositor's inject module, nobody looked at the panel; captures in `runs/sf-am3/shots`, not
   committed). **The installed, unmodified bundle runs without any stage or `DYLD_*`**: on a fresh boot,
@@ -65,6 +79,17 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
   (`runs/sf-actmon/stage`, scratch prefix `/private/var/db/sfam` on the target). Scanner against the
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
+
+## Installed on the M1's disk, sixth round (14 November, evening; `/private/var/db/sfcocoa3/installed.txt`)
+- Core files by the guarded installer after QEMU `c3b`/`c3b-2`: `/usr/lib/libFoundation.dylib` e77c9824 (the one of
+  before, bed36b5d, is `.old6`), the Foundation wrapper a660d750 (without its own NSIndexPath; `.old3`).
+  `sf_compat_push.sh check` after: 18 of 18, `failed=0` (`runs/sf-cocoa3/check-after-core.txt`).
+- Replaced directly: AppKit cfd8699a (0108..0115; `.pre-c3` = 17180649 the fifth round's, `.pre-c3b` = 1978825a
+  with 0108 only, `.pre-c3c` = bdc54d59 with 0108..0114), CoreGraphics 87682a2e (0109; `.pre-c3` = 235b866c). AppKit needs this libFoundation (NSIndexPath).
+- New path: `/usr/lib/libcompression.dylib` a70c5411 (Codex's whole Finch libcompression; licences in
+  `/usr/share/licenses/finch-libcompression`).
+- Revert: AppKit/CoreGraphics `ln -f <path>.pre-c3 <path>.back && mv -f <path>.back <path>` (AppKit first: an
+  AppKit of this round with the libFoundation of before does not load); core files as SF-Y; libcompression `rm`.
 
 ## Installed on the M1's disk (fifth round, 14 November; replaces the section of 13:14Z)
 - The unmodified bundle at `/System/Applications/Utilities/Activity Monitor.app` (a link in
@@ -156,6 +181,11 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | AM at 25 % CPU (5 s) | each reload removed and rebuilt every row view (all drawn again); a system colour looked up in the display's table at every fill; a getenv per `-setFrame:`; key-value observing asked `+keyPathsForValuesAffectingValueForKey:` (a selector built and looked up, the class chain walked) for every observation at every change | cocoa 0107: rows reloaded in place, the cell's own view given back (`NSTableViewViewBased.m`); colours resolved once per appearance (`NSColor_catalog.m`); libFoundation: the affecting keys remembered (`terminal-app/patches/foundation-macos-applications.patch`, core: rehearsed `am2`) |
 | Send Signal sent nothing | the sheet's pop-up had no selected item (the nib archived none, items were put in its menu directly), Activity Monitor read the tag of no item: `kill(pid, 0)` | cocoa 0107 (`NSPopUpButtonCell.m`: a pop-up with items has one selected) |
 | Per-process network bytes 0 | NetworkStatistics ran a query's completion at once, before the kernel's updates were read | `libs/NetworkStatistics.c`: the completion runs on the kernel's success message (or after a second) |
+| (sixth round) AM grew 14 MB a minute; Terminal and every Foundation program leaked | PureDarwin CF's `CFAutorelease` returns a CF-owned object without autoreleasing it (the Linux runtime's hook, `argon_cf`, is not there on Darwin); libFoundation called it in every convenience constructor | libFoundation: `PDAutoreleaseCF.h` before every source (`CFAutorelease` sends `-autorelease`); the root cause in CoreFoundation is not changed (AppKit's NSEvent, CoreGraphics' CGEvent, CoreText's font manager and programs still call it) |
+| (sixth round) Terminal ended at launch with the leak fixed | Terminal keeps a menu item's key equivalent after removing the item (on macOS a one-letter string is a tagged pointer, never freed) | cocoa 0108: NSMenuItem's object getters retained and autoreleased, as macOS's atomic properties |
+| (sixth round) Window > CPU Usage ended the application; CPU History did not open | no modern NSCollectionView; nothing registered for the item identifier (macOS falls back to a nib or class of that name) | cocoa 0110 |
+| (sixth round) toolbar buttons of different heights, bevelled, uneven, an up triangle on the pull-down | Cocotron's bezels; item views kept the nib's sizes; the leftover width went to the pull-down | cocoa 0113 |
+| (sixth round) horizontal scroller and a black square where the columns fit | legacy scrollers always take room; the corner between them was never painted | cocoa 0114 |
 | Energy tab without rows (its default filter, Applications in last 12 hours) | that list comes from systemstats' 12-hour history, which SiliconForest does not keep | not fixed: View > All Processes lists every process with the estimate (libsysmon) |
 
 ## Menus and tabs (fifth round, walked on the M1 with the installed bundle; synthetic input)
@@ -184,8 +214,8 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | | Show Deltas, Clear CPU History | not inspected |
 | Window | the menu | opens (`m-window2`) |
 | | Activity Monitor (Command-1), CPU Usage (Command-2) ... (Command-5) | the keys belong to the desktop (Spaces 1 to 5); from the menu: |
-| | CPU Usage | broken: the application ends (its nib's NSCollectionViewFlowLayout is not in this AppKit) |
-| | CPU History | broken: no window, `-[NSCollectionView reloadData]` unrecognized (reported, the application goes on) |
+| | CPU Usage | opens (sixth round, `c3-cu3b`); empty: its items draw through layers (Still wrong) |
+| | CPU History | opens (sixth round); empty: compositional layout not here (Still wrong) |
 | | GPU History, Afterburner History, Keep CPU Windows on Top, Arrange in Front, Minimize, Zoom | not inspected |
 | Help | Activity Monitor Help | works: "Help isn't available for Activity Monitor." (`w-help2`) |
 | Tabs | CPU, Memory, Disk | works (third and fourth rounds; CPU again this round) |
@@ -206,6 +236,22 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | 0107 in a test prefix, with the key-value observing cache (and a shortcut for views out of sight, taken out again: it left a black band) | 10 % | - |
 | installed 0107, libFoundation of before | 17.5 to 19.7 % | Energy tab 7.5 %, Network 14.6 % |
 | installed 0107 and libFoundation with the cache (final) | 10.3 % (42 processes) | - |
+Sixth round, 10 minutes on the M1 (installed bundles started with `open -a`, AM at its default 5 s interval with
+about 30 processes, Terminal one idle window with a blinking cursor; `ps` every 30 s,
+`/private/var/db/sfcocoa3/measure-idle.txt`; no input during the run, nobody at the panel):
+
+| | AM RSS | AM CPU | Terminal RSS | Terminal CPU |
+|---|---|---|---|---|
+| fifth round's libFoundation (leak), 80 s | 77.8 -> 97.2 MB (+14.6 MB/min) | - | - | - |
+| this round, 540 s | 81.5 -> 88.8 MB (+0.8 MB/min) | 13.0 % | 61.5 -> 64.5 MB (+0.33 MB/min) | 1.1 % |
+| with a pool drained each time the main run loop waits (tried, not installed), 330 s | 81.8 -> 85.2 MB (+0.6 MB/min) | 14.7 % | 58.0 -> 59.7 MB (+0.3 MB/min) | 0.9 % |
+
+Still growing slowly, cause not found (a pool per run-loop wait, as macOS's AppKit keeps, changed little and was
+taken out again: not walked through menus and modal panels without the inject compositor). AM's CPU went from
+10.3 % (fifth round) to 13 %: the objects the leak kept are now freed (dealloc work), not attributed with sf-prof.
+Terminal under continuous output was not measured. `-[NSEvent CGEvent]` leaked its event for the same reason
+as libFoundation (cocoa 0115, installed).
+
 Found with `probe/sf-prof.c` (main thread samples) and `sf-trace` (calls and times of chosen methods):
 row views rebuilt and drawn at every reload, colour lookups, key-value observing's affecting keys,
 a getenv per frame change. What is left: drawing text through the text system for each changed
@@ -213,11 +259,14 @@ label, the layout solve after a label's length changes, Activity Monitor's own f
 
 ## Still wrong (in the order a person meets it)
 - The dock tile does not start Activity Monitor (`open -a` and the session's listener do).
-- Window > CPU Usage ends the application; CPU History and GPU History windows do not open: they are
-  modern `NSCollectionView`s (flow layout, `-reloadData`, items), which this AppKit does not have.
-- The inspector: Executable Path empty; the Memory pane's rows overlap; Real/Private/Shared memory
-  sizes are not computed (libsysmon leaves 53/54 out: a walk of every region of every process at each
-  update).
+- Window > CPU Usage and CPU History open (sixth round) but stay empty: CPU Usage's 8 items are laid out by the
+  flow layout (`PD_CV_TRACE=1`: 8 attributes, 296x106) and draw nothing (Activity Monitor draws them through
+  layers; without EGL this AppKit draws a layer-backed view as an ordinary view, and layer contents set directly
+  are not drawn); CPU History sets an `NSCollectionViewCompositionalLayout` in code, which is a stub here (it
+  places no items; Finch's `NSCollectionViewCompositionalLayout.m` is the candidate). GPU History not tried.
+- The inspector: Executable Path empty (Activity Monitor calls `proc_pidpath` itself, which answers on the M1:
+  /sbin/launchd, /bin/zsh ...; the path goes into an NSTextView that does not show it: not traced further); the
+  Memory pane's rows overlap; Private/Shared memory not computed (libsysmon leaves 53/54 out).
 - Energy: the default filter (Applications in last 12 hours) is empty: no history. Energy Impact is an
   estimate (libsysmon above), labelled so here, not a measurement.
 - The system's network counters: Packets in, Packets out and Data received are 0 because the kernel's
@@ -225,16 +274,18 @@ label, the layout solve after a label's length changes, Activity Monitor's own f
   on the M1). The Wi-Fi receive path is the PCIe Wi-Fi stream's kext (`puredarwin-patches/0001`,
   uncommitted work of that stream) and a fix needs a kernel collection and an SFBOOT install: not done.
 - Kind says "Apple" (Apple silicon, as macOS says for a native process) for most processes and
-  "Unknown" for some started after Activity Monitor (its `sysctl` for the process's CPU type failed;
-  cause not established).
+  "Unknown" for some started after Activity Monitor. `sysctl.proc_cputype` answers for every one of 35-37
+  processes when asked later (`runs/sf-cocoa3` probe `cputype`); suspected, not established: Activity
+  Monitor asked while the process was between fork and exec and keeps the answer.
 - The process name column is as wide as the nib says (100 points): long names are cut, as on macOS
   at that width.
 - Sample, Spindump, System Diagnostics, Open Files: no tools here; the helper replies with an error.
-- Assets.car: its images are the application icon only (Activity Monitor asks no image of it by name);
-  its named colours are read (0105). Nothing more of Finch's CoreUI was needed.
+- Assets.car: images are read since cocoa 0111 (`CPUUsagePill`); vector (PDF) and half-float renditions are not drawn.
+- Idle Wake Ups blank on many rows: Activity Monitor leaves the cell empty for these processes; libsysmon gives
+  every process its `ri_pkg_idle_wkups` (the rows with figures are the ones with wake-ups); not traced further.
 - The Send Signal sheet is a separate panel, not attached to the window.
-- The table's horizontal scroller shows (and the black corner square between the scrollers) where the
-  columns fit: scrollers are not the overlay kind of macOS 26.
+- (fixed, sixth round: overlay scrollers, cocoa 0114) Hover over an invisible overlay scroller does not reveal
+  it (it appears when scrolling or dragging); a faded scroller lets clicks through.
 - AM's own CPU at the target's edge: 10.3 % of a core with 42 processes (target "under 10 %").
 
 ## The binary
@@ -313,9 +364,14 @@ Finch (`sources/finch`, "MIT OR Apache-2.0"), commit `2d9b1bb`:
 | `userland/libsysmon/sysmon.m` | `activity-monitor/libs/sysmon.m` (Finch's notice at the top, our changes listed under it) | the request/table/row model (attribute bit arrays, values in an XPC array in attribute order, interval rounding, the appliers), the in-process process table from libproc and sysctl and its first attributes. Not taken: its OS_object layouts (this libSystem has no `_os_object_alloc`; our objects are Objective-C objects) |
 | `userland/CoreUI/CUIStore.c` (whole), `CUIRendition.c` (`cui_csi_parse`, `cui_csi_tlv`, `cui_csi_color`), `CUIPrivate.h` | cocoa patch 0105: `AppKit/PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h` (notices kept) | the compiled asset catalog reader (BOM store, trees, facets, renditions) and colour renditions, for `+[NSColor colorNamed:]` |
 | `userland/CoreAutoLayout/NSLayoutConstraint.m` (`-constant`), `FinchLayoutItem.h` | cocoa 0106: `AppKit/NSLayoutConstraint.m` (a comment names the source) | the values of a nib's standard space: 20 points to the superview, 8 between siblings, and the rule which applies (no code taken) |
+| `userland/Foundation/NSDecimal.m` (whole), `NSPointerCollections.m` (to its C API), `NSForSwiftFoundation.m` (NSPersonNameComponents), `NSLocalizedFormatters.m` (NSPersonNameComponentsFormatter) | libFoundation (`terminal-app/patches/foundation-macos-applications.patch`: `Numeric.subproj/NSDecimal.m`, `Collections.subproj/NSPointerCollections.m`, `Formatters.subproj/NSPersonNameComponents.m`) | NSDecimalNumber and the NSDecimal functions; NSHashTable/NSMapTable object API (categories on PureDarwin's classes, whose C API stays), NSPointerArray, NSPointerFunctions; the name components and their formatter (sixth round) |
+| `userland/AppKit/NSCollectionView.m`, `NSCollectionViewLayout.m` | cocoa 0110 (`NSCollectionView/`) | the modern collection view, flow and grid layouts; a nib or class of the identifier's name when nothing is registered, the grid's archived settings read (ours) |
+| `userland/CoreUI/CUIRendition.c` (bitmaps, raw data, links), `CUIDeepmap.c` (whole), `CUICatalog.m` (rendition choice, image from a rendition) | cocoa 0111 (`PDCUIRendition.m`, `PDCUIDeepmap.m`, `PDCUIImage.m`) | images of an application's asset catalog for `+imageNamed:`; libcompression and zlib looked up at run time |
+| `userland/AppKit/NSSystemImages.m` (drawing helpers, symbol glyph table, name parser) | cocoa 0111 (`PDSymbolGlyphs.m`) | about 150 symbol names drawn in code (Terminal's Preferences toolbar: gearshape, doc with a badge, globe); filled enclosures draw wrongly (Onyx2D's transparency layer) |
+| `userland/CoreAutoLayout/FinchLayoutSolver.c` | not taken | measured as the core under our whole-tree driver: Terminal's Preferences took over 10 s of solving (104 solves at 9 s) against 1.57 s (206 solves) with ours; it needs the incremental driver to pay off |
 | `userland/UniformTypeIdentifiers/UTType.m`, `UTCoreTypes.m`, `UTAdditions.m`, `UTTypeTable.inc` | `activity-monitor/libs/UniformTypeIdentifiers/` (unchanged, a line saying so under the SPDX line) | UTType and the system's declared types; the header (`include/`) is ours, from the names |
 
-## Cocoa patches (0100..0107, in the main series since the fifth round)
+## Cocoa patches (0100..0114; 0108..0114 the sixth round, regenerated by the same script from `am-0107`, `am-0109`, `am`)
 Since the fifth round they are `integrations/puredarwin/cocoa/patches/0100..0107` in `cocoa/patched.nix` (0102 on
 CoreGraphics), regenerated by `cocoa/patches/mkpatches-0100.sh` from `runs/sf-actmon/pw` (`base`, `am-0105`, `am-0106`,
 `am`). The history of the night:
@@ -338,6 +394,14 @@ series, `am/` = with ours), `cocoa-patches/mkpatches.sh` writes them; test build
 | 0104 | AppKit: NIBArchive booleans (4 false, 5 true), a cell's three line-break bits, custom views' constraints and identifier, value transformers named by class, constrained labels re-measured when the shown string's length changes (on the main thread), bindings apply changes made off the main thread on it, the window menu strip also on full-size-content windows |
 | 0105 | AppKit: an application's named colours from its `Assets.car`, with Finch's catalog reader (`PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h`) |
 | 0106 | AppKit: a nib's standard-space constraints, archived hugging and compression priorities, NSMatrix's intrinsic size, the table header as wide as its clip view without a vertical scroller; `PD_LAYOUT_TRACE=1` (the fault that kept the merge out: Terminal's panes) |
+| 0108 | AppKit: NSMenuItem's object getters retained and autoreleased (with libFoundation's CFAutorelease fix) |
+| 0109 | CoreGraphics: ImageIO's thumbnail call and image metadata (Finch's Contacts and MediaAccessibility) |
+| 0110 | AppKit: Finch's modern NSCollectionView, flow and grid layouts; `-[NSViewController isViewLoaded]`; `PD_CV_TRACE=1` |
+| 0111 | AppKit: asset-catalog images (Finch's CoreUI decoders and rendition choice), Finch's symbol glyphs |
+| 0112 | AppKit: `PD_SOLVE_TIME=1` (each constraint solve's time and the sum) |
+| 0113 | AppKit: macOS 26 toolbar buttons (glyphs in one capsule, one height, even spacing, chevron); a preferences toolbar's selected item in a soft rounded rectangle |
+| 0115 | AppKit: `-[NSEvent CGEvent]` autoreleased with -autorelease (CoreFoundation's CFAutorelease leaves it) |
+| 0114 | AppKit: overlay scrollers (legacy with `AppleShowScrollBars=Always` or `PD_SCROLLERS=legacy`); the legacy corner painted |
 | 0107 | AppKit: symbol stand-ins, toolbar item placement and margins, hidden menus out of the strip, image cell value, column widths kept, stripes and header past the columns and rows, view-based rows reloaded in place, catalog colours resolved once, a pop-up with items has one selected, PD_CA_TRACE read once |
 
 ## Tools
