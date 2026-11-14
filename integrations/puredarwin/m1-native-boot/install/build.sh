@@ -131,7 +131,9 @@ grep -a -q 'sf/kernel.bin' "$OUT/sf-stage2.bin" || die "stage 2 does not name sf
 ARGS="-v debug=0x14e keepsyms=1 serial=0x13 serial-device-name=uart0 disable-uart-irq=1 serial_video_mirror=0 pdtextboot=0 -noprogress"
 ARGS="$ARGS pdm1kbd=1 pdm1trackpadenum=1 pdm1trackpadchild=1 cpus=8 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2"
 ARGS="$ARGS rd=uuid boot-uuid=$SF_FSUUID wdt=-1 pdnvme=3 pdnvme_ttl=0 pdnvme_part=$SF_PARTUUID pdnvme_part_lba=$SF_PART_LBA pdnvme_part_blocks=$SF_PART_BLOCKS"
-ARGS="$ARGS pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 pdthermal_delay=4 pdcpuheld=1 pdapciebridge=1${SF_EXTRA_BOOTARGS:+ $SF_EXTRA_BOOTARGS}"
+ARGS="$ARGS pdnvme_write=1 pdnvme_readfence=1 pd_quiet_wait=0 pd_rtc_wait=0 pdthermal_delay=4 pdcpuheld=1 pdapciebridge=1"
+# the video decoder (PDAppleAVD, in the collection): /dev/pdavd; nothing is powered before its first open
+ARGS="$ARGS pdavd=1${SF_EXTRA_BOOTARGS:+ $SF_EXTRA_BOOTARGS}"
 pack() { # <command line> <output> [--m1n1 <stage>]
   local args=$1 out=$2; shift 2
   python3 -B "$B1/pdsf_pack.py" pack "$@" --kernel "$KC/kernel" --bootargs "$args" \
