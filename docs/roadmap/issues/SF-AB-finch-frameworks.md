@@ -1,0 +1,26 @@
+# SF-AB: Finch non-GUI frameworks
+
+Finch source pin: `2d9b1bb1af57e14462e4621d194929188a8845b0`, MIT OR Apache-2.0.
+Recipes and patches: `integrations/puredarwin/finch/`. Tests execute only on the real
+M1 through CLI SSH, under `/private/var/db/sffinch/`; no screen or boot changes.
+No existing disk file is replaced. A build or symbol inventory is not a runtime pass.
+
+| Framework | Finch files taken | What we changed | Existing SiliconForest library and reconciliation | Test result on the M1 | Not done |
+|---|---|---|---|---|---|
+| Security | `userland/Security/{SecObjects,SecKeychain,SecKeychainCrypto,SecTrustSettings,SecRevocation}.c`, their internal headers; `SecAccess.c`, `gen-constants.py`; `userland/certificates/ca-bundle.h` (through pinned source recipe) | PureDarwin cross build, local keychain backend, exclude Network declarations from the core slice; extra declarations from published open-source headers | Installed PureDarwin Security has 3,479 exports. Finch's export whitelist has 588 entries including wildcard patterns; it is not a count of actual exports. Merge candidate re-exports the retained PureDarwin image as `Security.pd`; no disk replacement. Core object types must be exercised before broad use of mixed APIs. | PASS core (RSA/EC/tamper/trust/authorization/invalid item query); PASS storage (create/update/reopen, corrupt files, symlinks, ownership). Encryption test FAIL: Foundation lacks `-[NSData rangeOfData:options:range:]`. | Full conformance, service-backed keychain, SecureTransport/Network, authorization changes, system installation |
+| corecrypto | `userland/corecrypto/abi/*.[ch]`, `digest.c`, `include/`, `exports.txt`, `tools/seal-corecrypto.py` (through pinned source recipe) | Cross build arm64; integrity parser accepts arm64 as well as arm64e; exact OpenSSL 3.5.9 backend | No separate library at `/usr/lib/system/libcorecrypto.dylib` on M1. PureDarwin embeds its corecrypto in libSystem: leave it intact; candidate loads separately. | PASS: 40,990 digest comparisons/0 failures against installed CommonCrypto; OpenSSL backend 26 checks; keychain crypto helper (M1 CLI). Shared-library SHA256/HMAC/AES128/192/256/RNG vectors and entropy failure-path checks PASS. Private ABI comparisons against PD Security FAIL (digest/RNG differences and missing functions; GCM test SIGSEGV). | Private ABI compatibility is absent: do not pass PD private contexts into Finch or replace PD libSystem. CommonCrypto runtime checks and installation pending. |
+| CommonCrypto | `userland/corecrypto/compat/`, comparison tests, build method; published CommonCrypto-600035 source fetched by hash | Separate dispatch_once state; use public dyld SDK version query; cross build | Existing CommonCrypto stays inside libSystem; staged standalone library uses Finch corecrypto | FAIL: differential suite SIGBUS; keys suite missing reference CCDHCreate | Diagnose standalone candidate; no installation or replacement |
+| Accounts | `userland/Accounts/*.m` whole | Source-derived declarations, own block types and enums; Linux cross build | Absent on M1; new path only; current-root gap scan has no missing import | PASS staged and installed without DYLD overrides: value model/access refusal; Finch accounts-test exits 0 (reference Mac output not yet obtained). Installed at new paths with hashes. | No account service (Finch returns empty account list / access errors) |
+| LocalAuthentication | `userland/LocalAuthentication/*.m` whole | Source-derived declarations and own type definitions; Linux cross build | Absent on M1; new path only; current-root gap scan has no missing import | PASS staged and installed without DYLD overrides: policy errors, property round-trip, reuse-duration bound. Installed at new paths with hashes. | No biometry or authentication prompt (Finch returns explicit errors) |
+| SystemConfiguration / CFNetwork / Network | None yet | None | M1 has SystemConfiguration; inventory others before porting | Not run | Whole slice |
+| ImageIO / ColorSync / CoreImage | None yet | None | Must compare PureDarwin ImageIO and Terminal's ColorSync wrapper | Not run | Whole slice |
+| Accelerate | None yet | None | Must compare Cocoa's existing vDSP additions | Not run | Whole slice |
+| CoreData / OpenScripting / libsandbox / others | None yet | None | Must compare before selecting code | Not run | Whole slice |
+
+Revised priority after the survey (14 November): finish this evidence; missing drop-in frameworks, whole Accelerate, staged libcompression, CFNetwork, comparison harness. SystemConfiguration is deferred because the survey rates ours stronger. No Mac-side build is authorized.
+
+Runtime evidence stays in `runs/sffinch/` (not committed). Finch's copyright and
+SPDX notices remain in its pinned source and patch context. OpenSSL retains its
+Apache-2.0 license. No Apple SDK, bundle resources or binaries are imported.
+
+Uninstall the new frameworks on the M1 with `python3 /private/var/db/sffinch/runtime/uninstall-new.py`; the matching installer must remain beside it. It verifies each recorded file before removing it. Six AGENTS.md local checks passed (274 Python tests, 77 C groups, cross ABI, six mutation detections, validate/plan/source/publication dry runs).
