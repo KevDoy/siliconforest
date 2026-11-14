@@ -202,28 +202,7 @@
  #import "NSBinder.h"
  #import "NSObject+BindingSupport.h"
  #import <Foundation/NSString.h>
-@@ -89,7 +91,19 @@
-      return nil;
-      
-     result=[NSValueTransformer valueTransformerForName:name];
--    
-+
-+    // as on macOS: a name nothing registered that names a subclass of NSValueTransformer gets an
-+    // instance of it, registered under that name (Activity Monitor names its own transformers so)
-+    if(result==nil){
-+     Class cls=NSClassFromString(name);
-+
-+     if(cls!=Nil && [cls isSubclassOfClass:[NSValueTransformer class]]){
-+      result=[[[cls alloc] init] autorelease];
-+      if(result!=nil)
-+       [NSValueTransformer setValueTransformer:result forName:name];
-+     }
-+    }
-+
- 	   if(result==nil) {
- 		   NSBindingDebugLog(kNSBindingDebugLogLevel1, @"[NSValueTransformer valueTransformerForName:%@] failed in NSBinder.m",name);
- 	   }
-@@ -218,6 +232,16 @@
+@@ -230,6 +232,16 @@
  }
  
  - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -310,7 +289,7 @@
  #import "NSMultipleValueBinder.h"
  #import <Foundation/NSDictionary.h>
  #import <Foundation/NSException.h>
-@@ -181,6 +183,16 @@
+@@ -183,6 +185,16 @@
  
  - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context
  {
@@ -327,7 +306,7 @@
  	if(context==&NSMultipleValueBinderWholeArrayChangeContext)
  	{
        [self stopObservingChanges];
-@@ -287,6 +299,16 @@
+@@ -289,6 +301,16 @@
  }
  
  - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -346,15 +325,17 @@
  	if(context==&NSTableViewContentBinderChangeContext)
 --- a/src/Frameworks/AppKit/NSWindowMenuStrip.m
 +++ b/src/Frameworks/AppKit/NSWindowMenuStrip.m
-@@ -146,7 +146,10 @@
+@@ -153,8 +153,11 @@
          return NO;
      if ([self isKindOfClass:[NSPanel class]] || [self isSheet])
          return NO;
--    if (!(_styleMask & NSTitledWindowMask) || (_styleMask & (NSFullScreenWindowMask | NSFullSizeContentViewWindowMask)))
-+    // a full-size-content window (a unified toolbar: Activity Monitor's) gets one too: the compositor
-+    // draws the title bar, so the content starts below it either way, and without the strip the
-+    // application's menus could not be reached at all
-+    if (!(_styleMask & NSTitledWindowMask) || (_styleMask & NSFullScreenWindowMask))
+-    // in full screen too: there is no menu bar to show at the top of the screen
+-    if (!(_styleMask & NSTitledWindowMask) || (_styleMask & NSFullSizeContentViewWindowMask))
++    // in full screen too: there is no menu bar to show at the top of the screen. A full-size-content
++    // window (a unified toolbar: Activity Monitor's) gets one too: the compositor draws the title bar,
++    // so the content starts below it either way, and without the strip the application's menus could
++    // not be reached at all
++    if (!(_styleMask & NSTitledWindowMask))
          return NO;
      return NSWindowFrameIsDrawnByServer(_styleMask);
  }

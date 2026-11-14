@@ -19,6 +19,10 @@
 #                                synthetic input and screen captures through the compositor's inject
 #                                module (../../terminal-app/tools/sf_inject.sh, its items); captures
 #                                are fetched to runs/sf-actmon/shots/<name>.png. Inside gui.lock only.
+#   sf_actmon.sh install         after push: the bundle to /System/Applications/Utilities (a link in
+#                                /Applications/Utilities) and the stage's libraries whose paths the disk
+#                                lacks; never replaces a file of the disk; checks the bundle's hashes
+#   sf_actmon.sh uninstall       removes what install put there (/private/var/db/sfam/installed.txt)
 # SF_ACTMON_APP: the bundle (default private/mac-apps/m5-26.5.2/Activity Monitor.app; never committed).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../../.." && pwd); cd "$ROOT"
@@ -37,7 +41,7 @@ toolchain() {
   X=$(nix-build --extra-experimental-features 'nix-command flakes' --no-out-link -E '(import ./integrations/puredarwin/rebase/pd.nix).pd.packages.x86_64-linux.xnu-headers-arm64' 2>/dev/null | tail -1)
   export NTSTAT_INC=$X/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders
 }
-case "${1:?libs|stage|push|run|scan|probe|inject}" in
+case "${1:?libs|stage|push|run|scan|probe|inject|install|uninstall}" in
 libs)
   toolchain; chmod -R u+w $W/libs 2>/dev/null || true; rm -rf $W/libs; mkdir -p $W/libs
   bash $A/libs/build.sh $ROOT/$W/libs > $W/libs.log 2>&1 || { tail -30 $W/libs.log; exit 1; }
@@ -80,5 +84,39 @@ inject)
     "${SSH[@]}" "cat /private/var/run/gpu-desktop/inject/$n.ppm" > "$W/shots/$n.ppm" < /dev/null
     python3 -c "from PIL import Image; import sys; im = Image.open(sys.argv[1]); im.save(sys.argv[2]); print(sys.argv[2], im.size)" "$W/shots/$n.ppm" "$W/shots/$n.png" && rm -f "$W/shots/$n.ppm";;
   esac; done;;
-*) echo "libs|stage|push|run|scan|probe|inject" >&2; exit 2;;
+install)
+  # the unmodified bundle at macOS's place (/System/Applications/Utilities, linked from
+  # /Applications/Utilities) and the libraries at paths the disk does not have yet, from the pushed
+  # stage; a path the disk already has is never replaced (AppKit, CoreGraphics, the CF/Foundation/
+  # CoreServices/IOKit wrappers and libSystem are other streams' and core files: they reach the disk
+  # by their owners' pipelines). The list: /private/var/db/sfam/installed.txt.
+  # The bundle is written from the private copy, never copied on the target from a copy that has run:
+  # this kernel reads back the pages of a program it has executed with its pointer-authentication
+  # instructions lowered to nop (docs/roadmap/issues/SF-Y-terminal-app.md), and a copy of those bytes
+  # is no longer Apple's binary (the first install here had 1236 bytes so changed; replaced).
+  # Root's shell there is zsh (no word splitting): read loops.
+  NEW=$(cd $ST/root && find . \( -type f -o -type l \) | sed 's#^\.##' | grep -Ev '/(AppKit|CoreFoundation|CoreGraphics|CoreServices|Foundation|IOKit)\.framework/|/libSystem\.B\.dylib$' | sort)
+  echo "$NEW" > $W/install-list.txt
+  "${SSH[@]}" "cat > $TP/install-list.txt" < $W/install-list.txt
+  "${SSH[@]}" "L=$TP/installed.txt; N=$TP/install-list.txt
+    bad=\$(while read -r f; do if [ -e \"\$f\" ] || [ -L \"\$f\" ]; then grep -qxF \"\$f\" \$L 2>/dev/null || echo \"\$f\"; fi; done < \$N)
+    [ -z \"\$bad\" ] || { echo \"refused, on the disk already: \$bad\"; exit 1; }
+    while read -r f; do mkdir -p \"\$(dirname \"\$f\")\"; rm -f \"\$f\"; cp -P \"$TP/root\$f\" \"\$f\"; done < \$N
+    { cat \$N; echo '/System/Applications/Utilities/Activity Monitor.app'; echo '/Applications/Utilities/Activity Monitor.app'; } > \$L
+    while read -r f; do if [ -L \"\$f\" ]; then echo \"link \$f -> \$(readlink \"\$f\")\"; else shasum -a 256 \"\$f\"; fi; done < \$N" < /dev/null
+  tar -C "$(dirname "$APP")" -cf - "$(basename "$APP")" | "${SSH[@]}" "set -e; B='/System/Applications/Utilities/Activity Monitor.app'
+    mkdir -p /System/Applications/Utilities; cd /System/Applications/Utilities
+    if [ -e \"\$B\" ]; then rm -rf \"\$B.old-actmon\"; mv \"\$B\" \"\$B.old-actmon\"; fi
+    /opt/homebrew/bin/gtar -xf -; rm -rf \"\$B.old-actmon\"
+    [ -e '/Applications/Utilities/Activity Monitor.app' ] || ln -s \"\$B\" '/Applications/Utilities/Activity Monitor.app'
+    sync; cd \"\$B\"; find . -type f | while read -r f; do shasum -a 256 \"\$f\"; done" > $W/bundle-installed.sha256
+  ( cd "$APP" && find . -type f | while read -r f; do sha256sum "$f"; done ) > $W/bundle-private.sha256
+  if diff <(sort -k2 $W/bundle-private.sha256) <(sort -k2 $W/bundle-installed.sha256) > /dev/null; then
+    echo "bundle: $(wc -l < $W/bundle-installed.sha256) files, every hash equal to the private copy's (runs/sf-actmon/bundle-*.sha256)"
+  else echo "bundle: hashes DIFFER from the private copy (runs/sf-actmon/bundle-*.sha256)"; exit 1; fi;;
+uninstall)
+  "${SSH[@]}" "L=$TP/installed.txt; [ -f \$L ] || { echo 'nothing installed'; exit 0; }
+    while read -r f; do case \"\$f\" in */'Activity Monitor.app') rm -rf \"\$f\";; *) rm -f \"\$f\";; esac; done < \$L
+    mv \$L \$L.removed; sync; echo removed" < /dev/null;;
+*) echo "libs|stage|push|run|scan|probe|inject|install|uninstall" >&2; exit 2;;
 esac

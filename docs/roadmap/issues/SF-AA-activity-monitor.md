@@ -51,6 +51,26 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
 
+## Installed on the M1's disk (14 November, 13:14Z; `tools/sf_actmon.sh install`)
+- The unmodified bundle at `/System/Applications/Utilities/Activity Monitor.app` (macOS's place), a link
+  to it at `/Applications/Utilities/Activity Monitor.app`. Its 35 files read back with the private copy's
+  SHA-256 each (`runs/sf-actmon/bundle-private.sha256`, `bundle-installed.sha256`), read before anything
+  executed them. The bundle is streamed from the private copy: the first install copied it on the M1 from
+  a copy that had run, and this kernel reads such a program back with its pointer-authentication
+  instructions lowered to `nop` (1236 bytes differed); that copy was replaced and removed.
+- The libraries at paths the disk did not have: `/usr/lib/libsysmon.dylib`, `libIOReport.dylib`,
+  `libsystemstats.dylib`, `libquit.dylib`, `libLaunchServicesSupport.dylib`; frameworks Metal, OpenCL,
+  SecurityFoundation, UniformTypeIdentifiers; private frameworks AssetCacheServicesExtensions,
+  CoreSymbolication, CrashReporterSupport, NetworkStatistics, RemoteServiceDiscovery, SafeEjectGPU,
+  Suggestions (list and hashes: `/private/var/db/sfam/installed.txt`). No file of the disk was replaced.
+- Not installed (other streams' or core files; merge steps in `runs/m1-coord/requests-for-TERM.md`,
+  "From ACTMON, 2"): AppKit (0100-0105), CoreGraphics (0102), the CoreFoundation/Foundation/CoreServices
+  wrapper additions, the IOKit wrapper, libSystem's `memorystatus_get_level`. Until they are merged,
+  `open -a "Activity Monitor"` finds the bundle (rc 0) but the program ends in dyld
+  (`_IOPMCopyAssertionActivityAggregate` not in IOKit); it runs only from the stage
+  (`/private/var/db/sfam`, DYLD_*).
+- Revert: `tools/sf_actmon.sh uninstall` (removes every listed path, the bundle and the link).
+
 ## Faults found (all in the system, none in Activity Monitor)
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -154,6 +174,12 @@ Finch (`sources/finch`, "MIT OR Apache-2.0"), commit `2d9b1bb`:
 | `userland/UniformTypeIdentifiers/UTType.m`, `UTCoreTypes.m`, `UTAdditions.m`, `UTTypeTable.inc` | `activity-monitor/libs/UniformTypeIdentifiers/` (unchanged, a line saying so under the SPDX line) | UTType and the system's declared types; the header (`include/`) is ours, from the names |
 
 ## Cocoa patches (ACTMON's numbers 0100..0149)
+Rebased on 14 November (~13:20Z) over TERM's committed 0051..0059: they apply after 0059 and, applied to
+a fresh copy of that tree, reproduce ACTMON's tree exactly. Dropped in the rebase: 0104's value
+transformer by class name in NSBinder.m (TERM's 0059 does the same). Checked on the M1 with the rebased
+build: sorting by Process Name, the Memory tab, search (`shots/rebased.png`); Terminal.app's Preferences
+and Inspector with 0103+0104 (`shots/tPrefs.png`, `tInsp.png`).
+
 Made in ACTMON's own copy of the patchwork tree (`runs/sf-actmon/pw`: `base/` = TERM's committed
 series, `am/` = with ours), `cocoa-patches/mkpatches.sh` writes them; test builds
 `runs/sf-actmon/appkit-dev.sh`, `cg-dev.sh` (stage only; not installed on the disk).
