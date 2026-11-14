@@ -1094,7 +1094,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  }
  @end
  
-@@ -44,47 +84,172 @@
+@@ -44,53 +84,182 @@
  
  - (void)dealloc {
      [_keyPath release];
@@ -1283,11 +1283,64 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  @implementation NSObject (NSKeyValueObserving)
  
  + (BOOL)automaticallyNotifiesObserversForKey:(NSString *)key {
-@@ -153,27 +318,60 @@
+     return YES;
+ }
+ 
++static CFMutableDictionaryRef affectingKeysCache;
++// says that this build remembers +keyPathsForValuesAffectingValueForKey: (the installer's probe asks)
++__attribute__((visibility("default"))) const int PDFoundationKVOAffectingKeysCache = 1;
++
+ // dependent keys registered with +setKeys:triggerChangeNotificationsForDependentKey:, per class name
+ static NSMutableDictionary *dependentKeysByClass(void) {
+     static NSMutableDictionary *shared = nil;
+@@ -116,6 +285,8 @@
+         [table setObject:affecting forKey:dependentKey];
+     }
+     [affecting addObjectsFromArray:keys];
++    if (affectingKeysCache != NULL)
++        CFDictionaryRemoveAllValues(affectingKeysCache);
+     [observationLock() unlock];
+ }
+ 
+@@ -153,27 +324,94 @@
      return result;
  }
  
 -// an observation of KEYPATH also hears about the keys that affect it
++// +keyPathsForValuesAffectingValueForKey: of a class and key, remembered: it was asked for every
++// observation of an object at each change of any of its keys, and builds a selector name, looks it
++// up and walks the class's superclasses each time (a third of Activity Monitor's time in key-value
++// observing). Forgotten when +setKeys:triggerChangeNotificationsForDependentKey: adds keys.
++// (affectingKeysCache, declared above: Class -> NSMutableDictionary: key -> NSSet or NSNull)
++
++static NSSet *affectingKeys(Class class, NSString *key) {
++    NSMutableDictionary *byKey;
++    id cached;
++    NSSet *result;
++
++    [observationLock() lock];
++    if (affectingKeysCache == NULL)
++        affectingKeysCache = CFDictionaryCreateMutable(NULL, 0, NULL, &kCFTypeDictionaryValueCallBacks);
++    byKey = (NSMutableDictionary *)CFDictionaryGetValue(affectingKeysCache, class);
++    if (byKey == nil) {
++        byKey = [NSMutableDictionary dictionary];
++        CFDictionarySetValue(affectingKeysCache, class, byKey);
++    }
++    cached = [[byKey objectForKey:key] retain];
++    [observationLock() unlock];
++    if (cached != nil)
++        return [cached autorelease] == (id)[NSNull null] ? nil : cached;
++
++    result = [class keyPathsForValuesAffectingValueForKey:key];
++    result = result != nil ? [[result copy] autorelease] : nil;
++    [observationLock() lock];
++    byKey = (NSMutableDictionary *)CFDictionaryGetValue(affectingKeysCache, class);
++    if (byKey != nil)
++        [byKey setObject:result != nil ? (id)result : (id)[NSNull null] forKey:key];
++    [observationLock() unlock];
++    return result;
++}
++
 +// an observation hears about its own first key and about the plain keys that affect it
 +// (affecting key paths have forwarders of their own: -addObserver:...)
  static BOOL observationMatches(id object, NSKVOObservation *entry, NSString *key) {
@@ -1295,7 +1348,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +    if ([entry->_head isEqualToString:key])
          return YES;
 -    return [[[object class] keyPathsForValuesAffectingValueForKey:entry->_keyPath] containsObject:key];
-+    return [[[object class] keyPathsForValuesAffectingValueForKey:entry->_head] containsObject:key];
++    return [affectingKeys([object class], entry->_head) containsObject:key];
  }
  
  - (void)addObserver:(NSObject *)observer
@@ -1347,7 +1400,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      [entry release];
  
      if (options & NSKeyValueObservingOptionInitial) {
-@@ -182,10 +380,9 @@
+@@ -182,10 +420,9 @@
          [change setObject:[NSNumber numberWithUnsignedInteger:NSKeyValueChangeSetting]
                     forKey:NSKeyValueChangeKindKey];
          if (options & NSKeyValueObservingOptionNew) {
@@ -1361,7 +1414,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
          }
          [observer observeValueForKeyPath:keyPath ofObject:self change:change context:context];
      }
-@@ -198,22 +395,35 @@
+@@ -198,22 +435,35 @@
  - (void)removeObserver:(NSObject *)observer
              forKeyPath:(NSString *)keyPath
                 context:(void *)context {
@@ -1400,7 +1453,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  }
  
  - (void)observeValueForKeyPath:(NSString *)keyPath
-@@ -223,77 +433,182 @@
+@@ -223,77 +473,182 @@
  }
  
  - (void)willChangeValueForKey:(NSString *)key {
@@ -1413,7 +1466,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 -    NSUInteger count = [list count];
 -    for (NSUInteger i = 0; i < count; i++) {
 -        NSKVOObservation *entry = [list objectAtIndex:i];
--
++    NSArray *list = copyObservations(self);
+ 
 -        if (!observationMatches(self, entry, key)) {
 -            continue;
 -        }
@@ -1423,8 +1477,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 -        }
 -        if (entry->_options & NSKeyValueObservingOptionPrior) {
 -            NSMutableDictionary *change = [NSMutableDictionary dictionary];
-+    NSArray *list = copyObservations(self);
- 
+-
 -            [change setObject:[NSNumber numberWithUnsignedInteger:NSKeyValueChangeSetting]
 -                       forKey:NSKeyValueChangeKindKey];
 -            [change setObject:[NSNumber numberWithBool:YES]

@@ -10,6 +10,21 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, fifth round (one agent; on the M1 booted from its disk; synthetic input through the
+  compositor's inject module, nobody looked at the panel; captures in `runs/sf-am3/shots`, not
+  committed). **The installed, unmodified bundle runs without any stage or `DYLD_*`**: on a fresh boot,
+  `open -a "Activity Monitor"` (with only the session's environment: `env -i HOME XDG_RUNTIME_DIR
+  WAYLAND_DISPLAY PATH`) shows its window with SiliconForest's processes (`b2-open`). What made it run:
+  cocoa 0100..0105 in the main series, 0106 (below: the layout fault the nib booleans exposed in
+  Terminal), the CoreFoundation/Foundation/CoreServices wrappers with Activity Monitor's additions, the
+  new IOKit wrapper and libSystem's `memorystatus_get_level`, the core files through the QEMU rehearsal
+  (`am1`, `am1-2`: `COMPAT_VERDICT failed=0`, `QDDESK_PASS` both) and the guarded installer. Terminal on
+  the same boot: Preferences, Inspector, tabs, View menu, full screen as before (`t3-*`, `t4-*`, `t5-*`);
+  `sf_compat_push.sh check` 18 of 18, `failed=0`, before and after. Then 0107 and the libraries:
+  toolbar symbols (our drawings), the toolbar no longer cut, no "Hidden" menu title, rows without a
+  stray icon, no black area right of the last column or below the last row, Energy tab rows (with View >
+  All Processes; an estimate, see libsysmon), per-process network bytes, Send Signal, Sample's window
+  opening (no sample), AM's own CPU (table "Performance"). Menus and tabs walked: table "Menus and tabs".
 - 14 November, fourth round (M1, synthetic input only, captures in `runs/sf-actmon/shots`, nobody
   looked at the panel): clicking a column header sorts (AM sorts in its
   `-outlineView:shouldSelectTableColumn:`, which this AppKit never asked; `sort1/sort2`); typing in
@@ -51,7 +66,42 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
 
-## Installed on the M1's disk (14 November, 13:14Z; `tools/sf_actmon.sh install`)
+## Installed on the M1's disk (fifth round, 14 November; replaces the section of 13:14Z)
+- The unmodified bundle at `/System/Applications/Utilities/Activity Monitor.app` (a link in
+  `/Applications/Utilities`), as installed at 13:14Z: 35 files with the private copy's hashes. The dock's
+  `com.apple.ActivityMonitor` tile shows now that the bundle is there (its click did not start the
+  application on this boot: the dock never ran its `Exec`, see "Still wrong").
+- The new libraries of 13:14Z at paths the disk lacked (`/private/var/db/sfam/installed.txt`), three of
+  them replaced since, each file of before kept beside it as `<path>.pre-am`: `/usr/lib/libsysmon.dylib`
+  (energy estimate), `/usr/lib/libquit.dylib` (the helper in process),
+  `/System/Library/PrivateFrameworks/NetworkStatistics.framework/Versions/A/NetworkStatistics`.
+- Replaced directly (not loaded by every program), the file of before kept beside it:
+  `/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit` (`.pre-am` = 527784f2, TERM's of the
+  fourth round; `.pre-am2` = 223acb2e, 0100..0106; `.pre-am3` = 4f88ae87; `.pre-am4` = c16162e4;
+  installed 17180649 = `cocoa/patched.nix` with 0100..0107), `CoreGraphics.framework/Versions/A/CoreGraphics`
+  (`.pre-am` = 6adb5f7f; installed 235b866c = with 0102), `CoreServices.framework/Versions/A/CoreServices`
+  (the wrapper; `.pre-am` = fbd50608; installed ece77c8b; the real library stays `CoreServices.pd`).
+- Core files, by the guarded installer after the rehearsals (`terminal-app/core-rehearsed.sha256`):
+  `/usr/lib/libSystem.B.dylib` ba8013eb (the one of before is `.old5`), the CoreFoundation wrapper
+  6f280f66 (`.old2`), the Foundation wrapper d25ed0b1 (`.old2`), `IOKit.framework/Versions/A/IOKit` b5a239e7
+  (the link of before to `/usr/lib/libIOKitCF.dylib` is kept as `IOKit.old`), libFoundation bed36b5d (key-value
+  observing remembers the affecting keys; rehearsed `am2`, `am2-2`: `failed=0`, `QDDESK_PASS` both; the one of before,
+  193b520a, is `.old5`). `sf_compat_push.sh check` 18 of 18, `failed=0`, after each install.
+  libSystem reads back as 64b36b12 once it has run: the kernel's lowering of pointer-authentication
+  instructions (SF-Y, "arm64e"), verified before anything loaded it.
+- Test copies (remove): `/private/var/db/sfam3` (test prefixes, logs, probes), `/private/tmp/sfam-victim`.
+  Activity Monitor's preferences of before this round: `/var/root/Library/Preferences/com.apple.ActivityMonitor.plist.before-am3`
+  (its column widths had been grown by the old `-tile`).
+
+### Revert
+- AppKit/CoreGraphics/CoreServices wrapper and the three libraries: `ln -f <path>.pre-am <path>.back && mv -f
+  <path>.back <path>` (AppKit: `.pre-am` is the build of before this round).
+- Core files: as SF-Y "On the M1's disk and how to revert" (`ln <path>.oldN <path>.back && mv -f <path>.back
+  <path>`; for IOKit the kept file is a link: `ln -s "$(readlink <path>.old)" <path>.back && mv -f <path>.back <path>`).
+  The CoreFoundation and Foundation wrappers of before (`.old2`) carry Terminal's additions only.
+- The bundle and the libraries of 13:14Z: `tools/sf_actmon.sh uninstall`.
+
+### The install of 13:14Z (for the record)
 - The unmodified bundle at `/System/Applications/Utilities/Activity Monitor.app` (macOS's place), a link
   to it at `/Applications/Utilities/Activity Monitor.app`. Its 35 files read back with the private copy's
   SHA-256 each (`runs/sf-actmon/bundle-private.sha256`, `bundle-installed.sha256`), read before anything
@@ -95,6 +145,97 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | An abort at start in some runs: `-[NSArray sortedArrayWithOptions:usingComparator:]` | missing from libFoundation's NSArray; AM's GPU handler calls it on a dispatch queue | `libs/Foundation-am.m` (a stable merge sort) |
 | CoreFoundation halts in `CFArrayCreateCopy` under `-[NSNotificationCenter postNotification:]` at start (5 of about 15 launches) | bindings applied AM's model changes on its sampling queue: the text field binder took its notification observers off and on there while the main thread posted (found with `SFAM_NC_DEBUG=1`) | cocoa 0104 (`NSKVOBinder.m`, `NSCachingBinder.m`, `NSMultipleValueBinder.m`, `NSBinder.m`: a change made off the main thread is applied on it); 8 launches after it without a halt |
 | AM at 41 % CPU at 5 s | a layout pass of the whole window for every changed figure | cocoa 0104 (`NSControl.m`: only when the shown string's length changes, and on the main thread): 27 % |
+| (fifth round) Terminal's Preferences General and Inspector Info panes overlapped once 0104 read nib booleans right (their views now laid out by constraints) | a nib's standard-space constraints (`NSSymbolicConstant` "NSSpace", 246 of 692 in Terminal's preferences) were 0 points: Foundation's decoder does not read the key; the hugging and compression priorities nibs archive ("{250, 750}") were not read; `NSMatrix` answered NSControl's cell size, 10000 by 10000, as its intrinsic size (radio buttons squeezed the labels beside them) | cocoa 0106 (`NSLayoutConstraint.m`, `NSView.m`, `NSViewLayout.m`); found with `PD_LAYOUT_TRACE=1` (the solver's constraints and frames), compared with the nib's archived frames |
+| Terminal's Inspector: the last column's title under an empty corner | the header clip view was always narrower by a scroller's width, the corner view drawn over it, also where no vertical scroller takes room | cocoa 0106 (`NSScrollView.m`) |
+| `open -a "Activity Monitor"` ended in dyld (`_IOPMCopyAssertionActivityAggregate`) | IOKit's framework path was a link to libIOKitCF | the IOKit wrapper (`terminal-app/compat/build.sh` with `libs/IOKit-am.c`), a core file: rehearsed (`am1`), guarded install |
+| Toolbar buttons cut at the top, symbols missing | an icon-only toolbar's item views were placed 4 points above their item (the label's padding without a label); SF Symbols are not here | cocoa 0107 (`NSToolbarItemView.m`, `NSToolbarView.m`; `NSSymbolImages.m`: our drawings of info.circle, ellipsis.circle, xmark.octagon, magnifyingglass, arrow.forward.circle.fill) |
+| A "Hidden" menu in the menu strip | the strip's grouped bar left out hidden items only in the other path | cocoa 0107 (`NSMenuView.m`) |
+| Every process row showed Activity Monitor's icon | `-[NSImageCell setImage:nil]` left the nib's archived object value (NSApplicationIcon) to draw | cocoa 0107 (`NSImageCell.m`): the image is the object value |
+| Columns grew (Idle Wake Ups 267 points) and were saved so | `-[NSTableView tile]` fitted the last shown column whatever the autoresizing style; Activity Monitor's is none, and it hides columns per tab | cocoa 0107 (`NSTableView.m`) |
+| Black right of the last column (maximised, other tabs) and black bands below few rows (search) | stripes were drawn only as wide as the columns, and below the last row from the dirty rect's top for its height | cocoa 0107 (`NSTableView.m`, `NSTableHeaderView.m`: an empty header there; row views span the table) |
+| AM at 25 % CPU (5 s) | each reload removed and rebuilt every row view (all drawn again); a system colour looked up in the display's table at every fill; a getenv per `-setFrame:`; key-value observing asked `+keyPathsForValuesAffectingValueForKey:` (a selector built and looked up, the class chain walked) for every observation at every change | cocoa 0107: rows reloaded in place, the cell's own view given back (`NSTableViewViewBased.m`); colours resolved once per appearance (`NSColor_catalog.m`); libFoundation: the affecting keys remembered (`terminal-app/patches/foundation-macos-applications.patch`, core: rehearsed `am2`) |
+| Send Signal sent nothing | the sheet's pop-up had no selected item (the nib archived none, items were put in its menu directly), Activity Monitor read the tag of no item: `kill(pid, 0)` | cocoa 0107 (`NSPopUpButtonCell.m`: a pop-up with items has one selected) |
+| Per-process network bytes 0 | NetworkStatistics ran a query's completion at once, before the kernel's updates were read | `libs/NetworkStatistics.c`: the completion runs on the kernel's success message (or after a second) |
+| Energy tab without rows (its default filter, Applications in last 12 hours) | that list comes from systemstats' 12-hour history, which SiliconForest does not keep | not fixed: View > All Processes lists every process with the estimate (libsysmon) |
+
+## Menus and tabs (fifth round, walked on the M1 with the installed bundle; synthetic input)
+"works" = observed on the M1 in this round or the fourth (captures in `runs/sf-am3/shots` or
+`runs/sf-actmon/shots`); "not inspected" = not tried; "broken" = tried and wrong.
+
+| Menu / place | Item | State |
+|---|---|---|
+| Activity Monitor | the menu (About, Services, Hide, Hide Others, Show All, Quit) | works: opens with macOS's items (`m-app`) |
+| | About Activity Monitor, Services, Hide, Hide Others, Show All, Quit | not inspected |
+| File | Close (Command-W) | works, but differs from macOS: the window closes and the application then ends (SiliconForest ends an application whose last window closes, `PDQuitsWithLastWindow`); macOS keeps it running |
+| | Page Setup, Print | not inspected |
+| Edit | the menu (Undo, Redo, Cut, Copy, Paste, Delete, Select All, Find) | opens (`m-edit`); items not inspected |
+| View | Columns | the submenu opens with the column list and check marks (`m-columns`); choosing a column not inspected |
+| | Dock Icon | the submenu opens (`m-dockicon`); not applicable for now: the Chonkstep dock draws its own tile and shows no application's dock-tile content |
+| | Update Frequency | works (fourth round: 1 s takes effect) |
+| | All Processes | works (Energy tab lists every process) |
+| | Applications in last 12 hours (the Energy tab's default) | broken: empty, there is no 12-hour history (systemstats) |
+| | the other filters (Hierarchically, My, System, Other Users', Active, Inactive, GPU, Windowed) | not inspected |
+| | Filter Processes (the search field) | works (typing filters: `s1`, `c17`) |
+| | Inspect Process (Command-I) | works: the inspector of a selected process (`s3-insp`); its Executable Path is empty and its Memory pane's rows overlap (still wrong) |
+| | Sample Process (Option-Command-S) | fails gracefully: the sample window opens and stays empty (`s15-sample`); there is no sample tool |
+| | Run Spindump, Run System Diagnostics | not inspected (the in-process helper replies with an error) |
+| | Quit Process (Option-Command-Q) | works: "Are you sure you want to quit this process?", Quit ended a test process (`s4-quit`) |
+| | Send Signal to Process | works: the sheet (shown as a panel of its own, not attached), Hangup sent, the test process ended (`s13`, `s14`) |
+| | Show Deltas, Clear CPU History | not inspected |
+| Window | the menu | opens (`m-window2`) |
+| | Activity Monitor (Command-1), CPU Usage (Command-2) ... (Command-5) | the keys belong to the desktop (Spaces 1 to 5); from the menu: |
+| | CPU Usage | broken: the application ends (its nib's NSCollectionViewFlowLayout is not in this AppKit) |
+| | CPU History | broken: no window, `-[NSCollectionView reloadData]` unrecognized (reported, the application goes on) |
+| | GPU History, Afterburner History, Keep CPU Windows on Top, Arrange in Front, Minimize, Zoom | not inspected |
+| Help | Activity Monitor Help | works: "Help isn't available for Activity Monitor." (`w-help2`) |
+| Tabs | CPU, Memory, Disk | works (third and fourth rounds; CPU again this round) |
+| | Energy | works with All Processes (estimate, see libsysmon); empty with its default filter |
+| | Network | works: per-process bytes and packets (an SSH session: 4 KB sent, 5 KB received, `c17`); the system's Packets in/out and Data received are 0 (below) |
+| Toolbar | symbols, search, tabs | works (drawn: `d1`); the Stop, Info and Actions buttons were not clicked this round |
+| Table | header click sorts, row click selects | works (fourth round); double-click on a row not inspected |
+| Launch | `open -a "Activity Monitor"` | works (fresh boot, no stage, `b2-open`) |
+| | the dock tile | broken: a (synthetic) click did not start it; the dock ran no `Exec` (its log shows nothing) |
+| | desktop menu > Applications | not inspected |
+| (fourth round's faults) | the Actions menu open at launch, a "quit these processes?" alert | did not recur in this round's launches (about 15) |
+
+## Performance (Activity Monitor's own CPU, `ps` time over 40 s, default 5 s interval, M1)
+| Build | CPU tab | Other |
+|---|---|---|
+| fourth round (ACTMON's stage) | 27 % | - |
+| this round, before 0107 (installed bundle, test prefix) | 25 % | - |
+| 0107 in a test prefix, with the key-value observing cache (and a shortcut for views out of sight, taken out again: it left a black band) | 10 % | - |
+| installed 0107, libFoundation of before | 17.5 to 19.7 % | Energy tab 7.5 %, Network 14.6 % |
+| installed 0107 and libFoundation with the cache (final) | 10.3 % (42 processes) | - |
+Found with `probe/sf-prof.c` (main thread samples) and `sf-trace` (calls and times of chosen methods):
+row views rebuilt and drawn at every reload, colour lookups, key-value observing's affecting keys,
+a getenv per frame change. What is left: drawing text through the text system for each changed
+label, the layout solve after a label's length changes, Activity Monitor's own formatting.
+
+## Still wrong (in the order a person meets it)
+- The dock tile does not start Activity Monitor (`open -a` and the session's listener do).
+- Window > CPU Usage ends the application; CPU History and GPU History windows do not open: they are
+  modern `NSCollectionView`s (flow layout, `-reloadData`, items), which this AppKit does not have.
+- The inspector: Executable Path empty; the Memory pane's rows overlap; Real/Private/Shared memory
+  sizes are not computed (libsysmon leaves 53/54 out: a walk of every region of every process at each
+  update).
+- Energy: the default filter (Applications in last 12 hours) is empty: no history. Energy Impact is an
+  estimate (libsysmon above), labelled so here, not a measurement.
+- The system's network counters: Packets in, Packets out and Data received are 0 because the kernel's
+  `en0` counters are (`ipackets`, `ibytes`, `opackets` 0, `obytes` counted; read with `NET_RT_IFLIST2`
+  on the M1). The Wi-Fi receive path is the PCIe Wi-Fi stream's kext (`puredarwin-patches/0001`,
+  uncommitted work of that stream) and a fix needs a kernel collection and an SFBOOT install: not done.
+- Kind says "Apple" (Apple silicon, as macOS says for a native process) for most processes and
+  "Unknown" for some started after Activity Monitor (its `sysctl` for the process's CPU type failed;
+  cause not established).
+- The process name column is as wide as the nib says (100 points): long names are cut, as on macOS
+  at that width.
+- Sample, Spindump, System Diagnostics, Open Files: no tools here; the helper replies with an error.
+- Assets.car: its images are the application icon only (Activity Monitor asks no image of it by name);
+  its named colours are read (0105). Nothing more of Finch's CoreUI was needed.
+- The Send Signal sheet is a separate panel, not attached to the window.
+- The table's horizontal scroller shows (and the black corner square between the scrollers) where the
+  columns fit: scrollers are not the overlay kind of macOS 26.
+- AM's own CPU at the target's edge: 10.3 % of a core with 42 processes (target "under 10 %").
 
 ## The binary
 | | |
@@ -119,7 +260,7 @@ Before: `runs/sf-actmon/scan/actmon-before.md` (against Terminal's stage, the M1
 | AppKit | 8 | cocoa patch 0100 | NSSearchToolbarItem real; compositional layout objects kept as data |
 | AssetCacheServicesExtensions | 4 (absent) | `libs/AssetCacheServicesExtensions.m` | minimal: no content cache |
 | libIOReport | 4 (absent) | `libs/IOReport.c` | minimal: no channels |
-| IOKit | 3 | `libs/IOKit-am.c`, a wrapper at the framework path re-exporting `/usr/lib/libIOKitCF.dylib` | minimal: no power-management daemon, no power source known |
+| IOKit | 3 | `libs/IOKit-am.c` in a wrapper at the framework path re-exporting `/usr/lib/libIOKitCF.dylib`, built by `terminal-app/compat/build.sh` (core: rehearsed, guarded install) | minimal: no power-management daemon, no power source known |
 | UniformTypeIdentifiers | 3 (absent) | Finch's UTType (`libs/UniformTypeIdentifiers/`) with our own header | real (Finch's table of system types) |
 | CoreFoundation | 2 | `libs/CoreFoundation-am.m` in the CF wrapper: NSCache, `__NSDictionary0__struct` | real |
 | Foundation | 2 | `libs/Foundation-am.m` in the Foundation wrapper: NSIndexPath, NSDateComponentsFormatter, some methods libFoundation lacks | real |
@@ -127,10 +268,10 @@ Before: `runs/sf-actmon/scan/actmon-before.md` (against Terminal's stage, the M1
 | Metal | 2 (absent) | `libs/Metal.m` (only these two names) | minimal: no devices |
 | libLaunchServicesSupport | 2 (absent) | `libs/LaunchServicesSupport.c` | minimal: no LS server; Activity Monitor falls back to libquit |
 | RemoteServiceDiscovery | 2 (absent) | `libs/RemoteServiceDiscovery.c` | minimal: no remote devices |
-| libquit | 2 (absent) | `libs/quit.c` | `LQForceQuit` real (SIGKILL); hang reports go nowhere |
+| libquit | 2 (absent) | `libs/quit.c`, `libs/ActivityMonitorHelper.m` | `LQForceQuit` real (SIGKILL); hang reports go nowhere; the helper service `com.apple.activitymonitor.helper` answered in process: `sendSignal:...` is `kill(2)`, sample/spindump/sysdiagnose/lsof reply with an error (no such tools) |
 | libsystemstats | 2 (absent) | `libs/systemstats.c` | minimal: no history |
 | SafeEjectGPU | 1 (absent) | `libs/SafeEjectGPU.m` | minimal: no GPU reported |
-| libSystem | 1 | `libsystem-memorystatus-level.patch` (`build-libsystem-am.nix`) | real: the wrapper of system call 453 |
+| libSystem | 1 | `libsystem-default/patches/memorystatus-level.patch` in the default recipe (core: rehearsed, guarded install) | real: the wrapper of system call 453 |
 | SecurityFoundation, Suggestions, OpenCL, CrashReporterSupport | 0 (absent) | `libs/empty.c` | empty libraries |
 
 ## libsysmon: what each attribute is and where it comes from
@@ -152,7 +293,7 @@ Process request (type 1, every 0.5 s, then its update interval):
 | 59, 74 | purgeableMemory, compressedMemory ("VM Compressed") | `task_info(TASK_VM_INFO)`: `purgeable_volatile_pmap`, `compressed` |
 | 72, 73 | bytesRead, bytesWritten | `ri_diskio_bytesread`, `ri_diskio_byteswritten` |
 | 56 | AppSleep | false (there is no App Nap) |
-| 52, 62 | powerScore, averagePowerScore | not known here: left out |
+| 52, 62 | powerScore, averagePowerScore (Energy Impact, 12 hr Power) | **an estimate, not measured energy**: the CPU percentage over the interval plus 0.05 points per idle wake-up a second (a wake-up taken as 0.5 ms of a busy core; `ri_pkg_idle_wkups`); 62 the same over the process's life so far (there is no 12-hour history). macOS's comes from the kernel's coalition energy model, which this kernel does not keep |
 | 53, 54 | privateMemory, sharedMemory | not computed (a walk of every region of every process): left out |
 | 55 | responsible_pid | the process's own pid (the kernel keeps no responsibility; macOS gives the same for a process nobody launched on another's behalf). Left out, the Energy tab ended in a CoreFoundation halt (`objectForKey:` nil) |
 
@@ -171,9 +312,13 @@ Finch (`sources/finch`, "MIT OR Apache-2.0"), commit `2d9b1bb`:
 |---|---|---|
 | `userland/libsysmon/sysmon.m` | `activity-monitor/libs/sysmon.m` (Finch's notice at the top, our changes listed under it) | the request/table/row model (attribute bit arrays, values in an XPC array in attribute order, interval rounding, the appliers), the in-process process table from libproc and sysctl and its first attributes. Not taken: its OS_object layouts (this libSystem has no `_os_object_alloc`; our objects are Objective-C objects) |
 | `userland/CoreUI/CUIStore.c` (whole), `CUIRendition.c` (`cui_csi_parse`, `cui_csi_tlv`, `cui_csi_color`), `CUIPrivate.h` | cocoa patch 0105: `AppKit/PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h` (notices kept) | the compiled asset catalog reader (BOM store, trees, facets, renditions) and colour renditions, for `+[NSColor colorNamed:]` |
+| `userland/CoreAutoLayout/NSLayoutConstraint.m` (`-constant`), `FinchLayoutItem.h` | cocoa 0106: `AppKit/NSLayoutConstraint.m` (a comment names the source) | the values of a nib's standard space: 20 points to the superview, 8 between siblings, and the rule which applies (no code taken) |
 | `userland/UniformTypeIdentifiers/UTType.m`, `UTCoreTypes.m`, `UTAdditions.m`, `UTTypeTable.inc` | `activity-monitor/libs/UniformTypeIdentifiers/` (unchanged, a line saying so under the SPDX line) | UTType and the system's declared types; the header (`include/`) is ours, from the names |
 
-## Cocoa patches (ACTMON's numbers 0100..0149)
+## Cocoa patches (0100..0107, in the main series since the fifth round)
+Since the fifth round they are `integrations/puredarwin/cocoa/patches/0100..0107` in `cocoa/patched.nix` (0102 on
+CoreGraphics), regenerated by `cocoa/patches/mkpatches-0100.sh` from `runs/sf-actmon/pw` (`base`, `am-0105`, `am-0106`,
+`am`). The history of the night:
 Rebased on 14 November (~13:20Z) over TERM's committed 0051..0059: they apply after 0059 and, applied to
 a fresh copy of that tree, reproduce ACTMON's tree exactly. Dropped in the rebase: 0104's value
 transformer by class name in NSBinder.m (TERM's 0059 does the same). Checked on the M1 with the rebased
@@ -192,8 +337,16 @@ series, `am/` = with ours), `cocoa-patches/mkpatches.sh` writes them; test build
 | 0103 | AppKit: without EGL a layer-backed view is drawn as an ordinary view (no layer context) |
 | 0104 | AppKit: NIBArchive booleans (4 false, 5 true), a cell's three line-break bits, custom views' constraints and identifier, value transformers named by class, constrained labels re-measured when the shown string's length changes (on the main thread), bindings apply changes made off the main thread on it, the window menu strip also on full-size-content windows |
 | 0105 | AppKit: an application's named colours from its `Assets.car`, with Finch's catalog reader (`PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h`) |
+| 0106 | AppKit: a nib's standard-space constraints, archived hugging and compression priorities, NSMatrix's intrinsic size, the table header as wide as its clip view without a vertical scroller; `PD_LAYOUT_TRACE=1` (the fault that kept the merge out: Terminal's panes) |
+| 0107 | AppKit: symbol stand-ins, toolbar item placement and margins, hidden menus out of the strip, image cell value, column widths kept, stripes and header past the columns and rows, view-based rows reloaded in place, catalog colours resolved once, a pop-up with items has one selected, PD_CA_TRACE read once |
 
 ## Tools
 - `tools/sf_actmon.sh libs | stage | push | run | scan | probe`
+- `PD_LAYOUT_TRACE=1` (cocoa 0106): every constraint of each layout and every frame it sets, on
+  standard error; with the nib's archived frames it showed what the solver got wrong in Terminal's panes.
+- `PDTableDebug=1` (cocoa 0101): a view-based table's rows, visible range and frame at each layout.
+- Scratch, not committed: `runs/sf-am3/` (`amopen.sh`: end Activity Monitor and start the installed one
+  with `open -a` and the session's environment only; `amclick.sh`/`locate.py`: find the window in a
+  capture by its title and click relative to it; `cpu.sh`: CPU seconds over an interval).
 - `probe/sf-am-probe.c`: what the kernel answers to each call libsysmon makes
 - `runs/sf-actmon/tools/nibdump.py` (scratch, not committed): a NIBArchive reader for looking at the nibs

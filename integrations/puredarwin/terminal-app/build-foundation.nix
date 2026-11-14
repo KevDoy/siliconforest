@@ -10,6 +10,8 @@
 #   -[NSAttributedString init], -[NSString cStringUsingEncoding:] that converts, and the
 #     methods Terminal.app sends that were missing (strings, index sets, URLs, coders ...)
 #   NSUnrecognizedSelectorBacktrace=1 / NSExceptionRaiseBacktrace=1: where a failure comes from
+#   key-value observing remembers +keyPathsForValuesAffectingValueForKey: per class and key (it was
+#     asked for each observation at every change; Apple's Activity Monitor, GitHub issue 53)
 # A file every Objective-C program loads: QEMU pass and the guarded procedure before it replaces
 # the disk root's; until then it is tried from a scratch prefix (DYLD_LIBRARY_PATH).
 #

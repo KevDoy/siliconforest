@@ -135,6 +135,41 @@ SPDX notice kept in the file that carries it:
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
 
+## Fifth round (14 November, afternoon): Activity Monitor's changes merged, Terminal checked
+Activity Monitor's cocoa patches are in the main series now (0100..0107, `cocoa/patched.nix`;
+docs/roadmap/issues/SF-AA-activity-monitor.md). The merge attempt of the night had been taken back
+because Terminal's Preferences General pane and Inspector Info pane overlapped with them. The cause:
+with 0104's NIBArchive booleans read the right way round, those views are laid out by their
+constraints, and three inputs to the solver were wrong. 0106 fixes them: a nib's standard-space
+constraints (`NSSymbolicConstant` "NSSpace"; 246 of the 692 constraints of `TTAppPreferences.nib`)
+were 0 points; archived hugging and compression priorities were not read; `NSMatrix` reported
+10000 by 10000 as its intrinsic size. The Inspector's table header also lost its last column's title
+under an empty corner.
+- Seen on the M1 with the installed Terminal after the installs (fresh boot, synthetic input):
+  Preferences General (`runs/sf-am3/shots/t3-prefs.png`, `t5-prefs.png`) and Inspector Info
+  (`t4-info.png`, `t5-info.png`) are laid out as in `merge-before-*`, with the radio buttons and the
+  checkbox in the accent colour and the Command field's placeholder. Tabs (`t4-tabs`), the View menu
+  (`t4-view`) and full screen in and out (`t4-fs`, `t4-fsback`) also look right. The window comes back
+  larger after full screen, as in the fourth round's `fsOff`.
+- `sf_compat_push.sh check`: 18 of 18, `failed=0`, before and after the core installs
+  (`runs/sf-am3/regress/`).
+- Core files, rehearsed in QEMU `am1`/`am1-2` (failed=0, QDDESK_PASS both) and installed by the
+  guarded installer: libSystem ba8013eb (`memorystatus_get_level`; `.old5` is the one of before),
+  the CoreFoundation and Foundation wrappers with Activity Monitor's additions (6f280f66, d25ed0b1;
+  `.old2`), and a new IOKit wrapper at `IOKit.framework/Versions/A/IOKit` (b5a239e7; the link of
+  before is `IOKit.old`). IOKit's path is now one of the files the guarded installer handles
+  (`sf_terminal.sh`, `sf_userland_push.sh`), with its probe. libFoundation bed36b5d: key-value
+  observing remembers `+keyPathsForValuesAffectingValueForKey:` per class and key (rehearsed `am2`,
+  `am2-2`; the one of before, 193b520a, is `.old5`; the probe's fifth check is the symbol
+  `PDFoundationKVOAffectingKeysCache`). Found while writing that check, not fixed: a dependent key
+  declared with `+keyPathsForValuesAffecting<Key>` is not heard when its affecting key changes through a
+  plain setter, with this build and the one of before alike. `sf_compat_push.sh check` 18 of 18 after it.
+- Replaced directly, with the file of before kept beside it: AppKit (`.pre-am` is TERM's 527784f2),
+  CoreGraphics (`.pre-am`), the CoreServices wrapper (`.pre-am`). Details and how to revert are in
+  SF-AA, "Installed on the M1's disk".
+- Foundation-am replaces NSNumberFormatter's decimal and percent styles for every program that loads
+  the Foundation wrapper, Terminal included; nothing in Terminal's checks changed with it.
+
 ## Fourth round (night of 14 November): performance, text size and keys, full screen
 Everything here was done on the M1 booted from its disk. The input was synthetic (the compositor's
 inject module); nobody looked at the panel. Pictures are in `runs/sf-terminal/shots/` (not committed).
