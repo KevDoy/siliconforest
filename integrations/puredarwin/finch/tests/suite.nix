@@ -17,6 +17,8 @@ let
   colorTests = import ../ColorSync/tests.nix;
   cloudkit = import ../CloudKit/build.nix;
   opendirectory = import ../OpenDirectory/build.nix;
+  storekit = import ../StoreKit/build.nix;
+  storekitTests = import ../StoreKit/tests.nix;
   network = import ../CFNetwork/build.nix;
   networkTests = import ../CFNetwork/tests.nix;
   entry = name: store: mode: extra: {
@@ -45,6 +47,8 @@ let
     })
     { name = "cloudkit-getter-probe"; argv = [ "bin/cloudkit-getter-probe" ]; mode = "exit"; timeout = 30;
       source = "${ck}/bin/probe"; env = { DYLD_FRAMEWORK_PATH = "@ROOT@/System/Library/Frameworks"; }; }
+    { name = "storekit-probe"; argv = [ "bin/storekit-probe" ]; mode = "exit"; timeout = 30;
+      source = "${storekitTests}/bin/probe"; env = { DYLD_FRAMEWORK_PATH = "@ROOT@/System/Library/Frameworks"; }; }
     (entry "sparseblas-test" sparseTests "reference" { skip_lines = 0; env = { DYLD_LIBRARY_PATH = "@ROOT@/lib"; }; })
     (entry "sparse-test" solverTests "reference" { skip_lines = 0; env = { DYLD_LIBRARY_PATH = "@ROOT@/lib"; }; })
     (entry "solver-probe" solverTests "exit" { env = { DYLD_LIBRARY_PATH = "@ROOT@/lib"; }; })
@@ -65,6 +69,7 @@ in pkgs.runCommand "siliconforest-finch-cli-conformance-arm64" { nativeBuildInpu
   cp -r ${network}/System $out/
   chmod -R u+w $out/System
   cp -r ${colors}/System/Library/Frameworks/ColorSync.framework $out/System/Library/Frameworks/
+  cp -r ${storekit}/System/Library/Frameworks/StoreKit.framework $out/System/Library/Frameworks/
   cp -r ${cloudkit}/System/Library/Frameworks/CloudKit.framework $out/System/Library/Frameworks/
   cp -r ${opendirectory}/System/Library/Frameworks/OpenDirectory.framework $out/System/Library/Frameworks/
   cp ${manifest} $out/manifest.json

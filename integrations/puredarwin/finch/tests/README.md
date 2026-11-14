@@ -40,8 +40,8 @@ compare every line. It does not launch Finch's window server, use system_profile
 exercise cross-store CoreData, compile Swift, or claim to port the entire suite.
 Blocked source ports and unselected tests remain outside this initial manifest.
 
-The expanded bundle contains 20 CLI programs, including all eight numeric groups,
+The expanded bundle contains 21 CLI programs, including all eight numeric groups,
 ColorSync and the staged CloudKit getter correction. Three pinned expected checks
-and three assertion-only probes have separate classifications. Raw differences
+and four assertion-only probes have separate classifications. Raw differences
 in CFNetwork, CloudKit formatting, LA superclass and Sparse FGMRES remain visible;
 the Accounts reference remains BLOCKED. See the handover table for actual results.

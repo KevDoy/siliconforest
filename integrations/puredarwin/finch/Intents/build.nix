@@ -2,6 +2,7 @@
 let e = import ../environment.nix;
 in import ../objc-framework.nix {
   name = "Intents";
+  foundation = import ../../terminal-app/build-foundation.nix;
   arc = false;
   patches = [ ./patches/0001-own-declarations-input.patch ];
   prepare = ''

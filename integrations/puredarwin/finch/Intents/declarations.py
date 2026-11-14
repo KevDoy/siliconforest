@@ -58,6 +58,7 @@ properties = {
 @property INIntentHandlingStatus intentHandlingStatus;
 @property INInteractionDirection direction;''',
 'INPaymentMethod': '@property INPaymentMethodType type;',
+'INFile': '@property(readonly, copy) NSString *filename, *typeIdentifier;',
 'INShortcut': '''@property(copy) NSUserActivity *userActivity;
 @property(copy) INIntent *intent;
 - (instancetype)initWithUserActivity:(NSUserActivity *)userActivity;
@@ -73,4 +74,5 @@ header = header.replace('@interface INAnswerCallIntentResponse', '@interface INI
 header += '\n'+base+rest
 for name in set(classes) - {'INPreferences', 'INVoiceShortcutCenter', 'INRelevantShortcutStore', 'INFocusStatusCenter'}:
     header = header.replace('@interface '+name+' : '+classes[name]+'\n', '@interface '+name+' : '+classes[name]+' <NSCopying, NSSecureCoding>\n')
+header += '\n@interface NSString (SFFinchIntentsLocalization)\n+ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format, ...;\n+ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format fromTable:(NSString *)table, ...;\n+ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format fromTable:(NSString *)table arguments:(va_list)arguments;\n@end\n'
 out.write_text(header)

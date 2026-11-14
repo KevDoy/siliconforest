@@ -147,6 +147,7 @@ extern NSString * const INPersonRelationshipDaughter;
 @end
 
 @interface INFile : NSObject <NSCopying, NSSecureCoding>
+@property(readonly, copy) NSString *filename, *typeIdentifier;
 + (INFile *)fileWithData:(NSData *)data filename:(NSString *)filename typeIdentifier:(NSString *)typeIdentifier;
 + (INFile *)fileWithFileURL:(NSURL *)fileURL filename:(NSString *)filename typeIdentifier:(NSString *)typeIdentifier;
 - (NSData *)data;
@@ -225,4 +226,10 @@ extern NSString * const INPersonRelationshipDaughter;
 @interface INRelevantShortcut : NSObject <NSCopying, NSSecureCoding>
 @property(copy) INShortcut *shortcut;
 - (instancetype)initWithShortcut:(INShortcut *)shortcut;
+@end
+
+@interface NSString (SFFinchIntentsLocalization)
++ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format, ...;
++ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format fromTable:(NSString *)table, ...;
++ (NSString *)deferredLocalizedIntentsStringWithFormat:(NSString *)format fromTable:(NSString *)table arguments:(va_list)arguments;
 @end
