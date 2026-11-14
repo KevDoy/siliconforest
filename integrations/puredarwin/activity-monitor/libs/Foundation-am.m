@@ -430,3 +430,128 @@ static const char sf_context_key;
     }
 }
 @end
+
+/* -[NSValue initWithCoder:] for keyed archives (a nib's NSIBUserDefinedRuntimeAttributesConnector
+ * carries sizes as NSValue: NS.special 1 point, 2 size, 3 rect, 4 range, the geometry as a string
+ * "{w, h}"). libFoundation's NSValue has none (the Process Inspector's nib raised). Added, not
+ * replaced: the class has no such method. */
+@implementation NSValue (SFKeyedCoding)
+- (id)initWithCoder:(NSCoder *)coder {
+    NSValue *value = nil;
+    if ([coder allowsKeyedCoding]) {
+        switch ([coder decodeIntForKey:@"NS.special"]) {
+        case 1: value = [NSValue valueWithPoint:NSPointFromString([coder decodeObjectForKey:@"NS.pointval"])]; break;
+        case 2: value = [NSValue valueWithSize:NSSizeFromString([coder decodeObjectForKey:@"NS.sizeval"])]; break;
+        case 3: value = [NSValue valueWithRect:NSRectFromString([coder decodeObjectForKey:@"NS.rectval"])]; break;
+        case 4: value = [NSValue valueWithRange:NSMakeRange([coder decodeIntegerForKey:@"NS.rangeval.location"],
+                                                            [coder decodeIntegerForKey:@"NS.rangeval.length"])]; break;
+        }
+    }
+    [self release];
+    return [value retain];
+}
+@end
+
+/* diagnostic, only with SFAM_NC_DEBUG set: notification-centre calls made off the main thread, with
+ * their caller (libFoundation's centre copies its observer list unlocked while posting; CoreFoundation
+ * halted in that copy) */
+#include <execinfo.h>
+#include <pthread.h>
+@interface SFNotificationCenterDebug : NSObject
+@end
+@implementation SFNotificationCenterDebug
+static IMP sfAddObserver, sfRemoveObserver, sfRemoveObserverNamed, sfPost;
+static void sfReport(const char *what, NSString *name) {
+    if (pthread_main_np())
+        return;
+    void *pcs[6];
+    int n = backtrace(pcs, 6);
+    char **names = backtrace_symbols(pcs, n);
+    fprintf(stderr, "SFAM-NC off-main %s %s from %s | %s | %s\n", what, name ? [name UTF8String] : "-",
+            n > 2 ? names[2] : "?", n > 3 ? names[3] : "?", n > 4 ? names[4] : "?");
+    free(names);
+}
+static void sfAdd(id self, SEL _cmd, id observer, SEL selector, NSString *name, id object) {
+    sfReport("addObserver", name);
+    ((void (*)(id, SEL, id, SEL, NSString *, id))sfAddObserver)(self, _cmd, observer, selector, name, object);
+}
+static void sfRemove(id self, SEL _cmd, id observer) {
+    sfReport("removeObserver", nil);
+    ((void (*)(id, SEL, id))sfRemoveObserver)(self, _cmd, observer);
+}
+static void sfRemoveNamed(id self, SEL _cmd, id observer, NSString *name, id object) {
+    sfReport("removeObserver:name:", name);
+    ((void (*)(id, SEL, id, NSString *, id))sfRemoveObserverNamed)(self, _cmd, observer, name, object);
+}
+static IMP sfAddBlockObserver;
+static id sfAddBlock(id self, SEL _cmd, NSString *name, id object, NSOperationQueue *queue, void (^block)(NSNotification *)) {
+    if (queue != [NSOperationQueue mainQueue] || block == nil)
+        return ((id (*)(id, SEL, NSString *, id, NSOperationQueue *, id))sfAddBlockObserver)(self, _cmd, name, object, queue, block);
+    void (^copied)(NSNotification *) = [block copy];
+    NSString *kept = [name copy];
+    void (^checked)(NSNotification *) = [^(NSNotification *note) {
+        if (!pthread_main_np())
+            fprintf(stderr, "SFAM-NC main-queue block for %s runs OFF the main thread\n", kept ? [kept UTF8String] : "-");
+        copied(note);
+    } copy];
+    return ((id (*)(id, SEL, NSString *, id, NSOperationQueue *, id))sfAddBlockObserver)(self, _cmd, name, object, queue, checked);
+}
+static void sfPostNote(id self, SEL _cmd, NSNotification *note) {
+    sfReport("post", [note name]);
+    ((void (*)(id, SEL, NSNotification *))sfPost)(self, _cmd, note);
+}
++ (void)load {
+    if (getenv("SFAM_NC_DEBUG") == NULL)
+        return;
+    Class c = [NSNotificationCenter class];
+    Method m;
+    if ((m = class_getInstanceMethod(c, @selector(addObserver:selector:name:object:))) != NULL)
+        sfAddObserver = method_setImplementation(m, (IMP)sfAdd);
+    if ((m = class_getInstanceMethod(c, @selector(removeObserver:))) != NULL)
+        sfRemoveObserver = method_setImplementation(m, (IMP)sfRemove);
+    if ((m = class_getInstanceMethod(c, @selector(removeObserver:name:object:))) != NULL)
+        sfRemoveObserverNamed = method_setImplementation(m, (IMP)sfRemoveNamed);
+    if ((m = class_getInstanceMethod(c, @selector(postNotification:))) != NULL)
+        sfPost = method_setImplementation(m, (IMP)sfPostNote);
+    if ((m = class_getInstanceMethod(c, @selector(addObserverForName:object:queue:usingBlock:))) != NULL)
+        sfAddBlockObserver = method_setImplementation(m, (IMP)sfAddBlock);
+}
+@end
+
+/* -[NSArray sortedArrayWithOptions:usingComparator:] where libFoundation's NSArray has none (Activity
+ * Monitor's GPU-change handler calls it on a dispatch queue; uncaught there it ended the program). A
+ * stable merge sort, so NSSortStable holds; NSSortConcurrent is a hint and is not used. Added only
+ * when the class lacks it. */
+static void sfMergeSort(id *a, id *tmp, NSUInteger n, NSComparator cmp) {
+    if (n < 2)
+        return;
+    NSUInteger h = n / 2, i = 0, j = h, k = 0;
+    sfMergeSort(a, tmp, h, cmp);
+    sfMergeSort(a + h, tmp, n - h, cmp);
+    while (i < h && j < n)
+        tmp[k++] = cmp(a[j], a[i]) == NSOrderedAscending ? a[j++] : a[i++];
+    while (i < h) tmp[k++] = a[i++];
+    while (j < n) tmp[k++] = a[j++];
+    memcpy(a, tmp, n * sizeof(id));
+}
+static NSArray *sfSortedWithOptions(NSArray *self, SEL _cmd, NSUInteger options, NSComparator cmp) {
+    NSUInteger n = [self count];
+    id *a = malloc((n + 1) * sizeof(id)), *tmp = malloc((n + 1) * sizeof(id));
+    for (NSUInteger i = 0; i < n; i++)
+        a[i] = [self objectAtIndex:i];
+    sfMergeSort(a, tmp, n, cmp);
+    NSArray *sorted = [NSArray arrayWithObjects:a count:n];
+    free(a);
+    free(tmp);
+    return sorted;
+}
+@interface SFArraySorting : NSObject
+@end
+@implementation SFArraySorting
++ (void)load {
+    SEL s = @selector(sortedArrayWithOptions:usingComparator:);
+    if (![NSArray instancesRespondToSelector:s])
+        class_addMethod([NSArray class], s, (IMP)sfSortedWithOptions, "@@:Q@?");
+}
+@end
+

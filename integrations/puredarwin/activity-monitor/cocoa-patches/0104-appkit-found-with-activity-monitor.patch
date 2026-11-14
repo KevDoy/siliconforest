@@ -82,7 +82,16 @@
  
 --- a/src/Frameworks/AppKit/NSControl.m
 +++ b/src/Frameworks/AppKit/NSControl.m
-@@ -275,46 +275,81 @@
+@@ -18,6 +18,8 @@
+ #import <AppKit/NSTextView.h>
+ #import <AppKit/NSTextStorage.h>
+ #import <Foundation/NSKeyedArchiver.h>
++#import <Foundation/NSThread.h>
++#include <dispatch/dispatch.h>
+ #import <AppKit/NSRaise.h>
+ #import <AppKit/NSObject+BindingSupport.h>
+ 
+@@ -275,46 +277,99 @@
     [self setNeedsDisplay:YES];
  }
  
@@ -102,13 +111,31 @@
 +    return YES;
 +}
 +
-+static void sfValueMayResize(NSControl *self, NSSize before) {
-+    if (sfSizesToValue(self))
++// the length of what the control shows, or NSNotFound when its size does not follow its value
++static NSUInteger sfValueLength(NSControl *self) {
++    return sfSizesToValue(self) ? [[[self selectedCell] stringValue] length] : NSNotFound;
++}
++
++// a new layout only when the shown string's length changed: a pass solves the window's constraints
++// (Activity Monitor's summary figures change every refresh, in digits of one width, and a pass for
++// each cost a sixth of a core)
++// Activity Monitor sets some values off the main thread (bindings fed from its sampling queue): the
++// layout pass is asked for on the main thread, else it ran on a dispatch worker and measured text
++// with the shared string drawer while the main thread drew (CoreFoundation halted in CFArrayCreateCopy
++// under -[NSTextStorage processEditing])
++static void sfValueMayResize(NSControl *self, NSUInteger before) {
++    if (before == NSNotFound || sfValueLength(self) == before)
++        return;
++    if ([NSThread isMainThread])
 +        [self invalidateIntrinsicContentSize];
++    else {
++        [self retain];
++        dispatch_async(dispatch_get_main_queue(), ^{ [self invalidateIntrinsicContentSize]; [self release]; });
++    }
 +}
 +
  -(void)setObjectValue:(id <NSCopying>)object {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [(NSCell *)[self selectedCell] setObjectValue:object];
      [self setNeedsDisplay:YES];
@@ -116,7 +143,7 @@
  }
  
  -(void)setStringValue:(NSString *)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setStringValue:value];
      [self setNeedsDisplay:YES];
@@ -124,7 +151,7 @@
  }
  
  -(void)setIntValue:(int)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setIntValue:value];
      [self setNeedsDisplay:YES];
@@ -132,7 +159,7 @@
  }
  
  -(void)setFloatValue:(CGFloat)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setFloatValue:value];
      [self setNeedsDisplay:YES];
@@ -140,7 +167,7 @@
  }
  
  -(void)setDoubleValue:(double)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setDoubleValue:value];
      [self setNeedsDisplay:YES];
@@ -148,7 +175,7 @@
  }
  
  -(void)setIntegerValue:(NSInteger)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setIntegerValue:value];
      [self setNeedsDisplay:YES];
@@ -156,7 +183,7 @@
  }
  
  -(void)setAttributedStringValue:(NSAttributedString *)value {
-+    NSSize sfBefore=NSZeroSize;
++    NSUInteger sfBefore=sfValueLength(self);
      [self abortEditing];
      [[self selectedCell] setAttributedStringValue:value];
      [self setNeedsDisplay:YES];
@@ -166,7 +193,16 @@
  -(void)takeObjectValueFrom:sender {
 --- a/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
 +++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSBinder.m
-@@ -89,7 +89,19 @@
+@@ -5,6 +5,8 @@
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
++#include <dispatch/dispatch.h>
++#import <Foundation/NSThread.h>
+ #import "NSBinder.h"
+ #import "NSObject+BindingSupport.h"
+ #import <Foundation/NSString.h>
+@@ -89,7 +91,19 @@
       return nil;
       
      result=[NSValueTransformer valueTransformerForName:name];
@@ -187,6 +223,127 @@
  	   if(result==nil) {
  		   NSBindingDebugLog(kNSBindingDebugLogLevel1, @"[NSValueTransformer valueTransformerForName:%@] failed in NSBinder.m",name);
  	   }
+@@ -218,6 +232,16 @@
+ }
+ 
+ - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
++   // applied on the main thread when the change was made elsewhere (see NSKVOBinder.m)
++   if(![NSThread isMainThread]){
++    [self retain]; [kp retain]; [object retain]; [change retain];
++    dispatch_async(dispatch_get_main_queue(), ^{
++     [self observeValueForKeyPath:kp ofObject:object change:change context:context];
++     [self release]; [kp release]; [object release]; [change release];
++    });
++    return;
++   }
++
+ 
+ 	NSBindingDebugLog(kNSBindingDebugLogLevel1, @"keyPath: %@\n   object: %@\n   change: %@\n    context: %p", kp, object, change, context);
+    if([self allowsReverseTransformation]){
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSKVOBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSKVOBinder.m
+@@ -5,6 +5,8 @@
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
++#include <dispatch/dispatch.h>
++#import <Foundation/NSThread.h>
+ #import "NSKVOBinder.h"
+ #import <Foundation/NSKeyValueObserving.h>
+ #import <Foundation/NSKeyValueCoding.h>
+@@ -294,6 +296,19 @@
+ {
+ 	NSBindingDebugLog(kNSBindingDebugLogLevel1, @"keyPath: %@\n   object: %@\n   change: %@\n    context: %p", kp, object, change, context);
+ 	
++   // A change made off the main thread (Activity Monitor feeds its bound figures from its sampling
++   // queue) is applied on the main thread: applying it sets the view's value and takes the binder's
++   // notification observers off and on again, and the notification centre's observer lists are not
++   // safe against the main thread posting meanwhile (CoreFoundation halted copying one).
++   if(![NSThread isMainThread]){
++    [self retain]; [kp retain]; [object retain]; [change retain];
++    dispatch_async(dispatch_get_main_queue(), ^{
++     [self observeValueForKeyPath:kp ofObject:object change:change context:context];
++     [self release]; [kp release]; [object release]; [change release];
++    });
++    return;
++   }
++
+ // We want changes to propogate one way so we stop observing for both our handling and super's,
+ // otherwise our change will generate a change for the super's observation and it will write a value
+ // back the value we just got here which causes a problem for read only values
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSCachingBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSCachingBinder.m
+@@ -7,6 +7,8 @@
+  
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
+ 
++#include <dispatch/dispatch.h>
++#import <Foundation/NSThread.h>
+ #import "NSCachingBinder.h"
+ 
+ #import <Foundation/Foundation.h>
+@@ -166,6 +168,16 @@
+                         change:(NSDictionary *)change 
+                        context:(void *)context
+ {
++   // applied on the main thread when the change was made elsewhere (see NSKVOBinder.m)
++   if(![NSThread isMainThread]){
++    [self retain]; [kp retain]; [object retain]; [change retain];
++    dispatch_async(dispatch_get_main_queue(), ^{
++     [self observeValueForKeyPath:kp ofObject:object change:change context:context];
++     [self release]; [kp release]; [object release]; [change release];
++    });
++    return;
++   }
++
+    [self stopObservingChanges];
+    
+   if (context == NSCachingBinderChangeContext)
+--- a/src/Frameworks/AppKit/NSKeyValueBinding/NSMultipleValueBinder.m
++++ b/src/Frameworks/AppKit/NSKeyValueBinding/NSMultipleValueBinder.m
+@@ -5,6 +5,8 @@
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+ 
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
++#include <dispatch/dispatch.h>
++#import <Foundation/NSThread.h>
+ #import "NSMultipleValueBinder.h"
+ #import <Foundation/NSDictionary.h>
+ #import <Foundation/NSException.h>
+@@ -181,6 +183,16 @@
+ 
+ - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+ {
++   // applied on the main thread when the change was made elsewhere (see NSKVOBinder.m)
++   if(![NSThread isMainThread]){
++    [self retain]; [kp retain]; [object retain]; [change retain];
++    dispatch_async(dispatch_get_main_queue(), ^{
++     [self observeValueForKeyPath:kp ofObject:object change:change context:context];
++     [self release]; [kp release]; [object release]; [change release];
++    });
++    return;
++   }
++
+ 	if(context==&NSMultipleValueBinderWholeArrayChangeContext)
+ 	{
+       [self stopObservingChanges];
+@@ -287,6 +299,16 @@
+ }
+ 
+ - (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
++   // applied on the main thread when the change was made elsewhere (see NSKVOBinder.m)
++   if(![NSThread isMainThread]){
++    [self retain]; [kp retain]; [object retain]; [change retain];
++    dispatch_async(dispatch_get_main_queue(), ^{
++     [self observeValueForKeyPath:kp ofObject:object change:change context:context];
++     [self release]; [kp release]; [object release]; [change release];
++    });
++    return;
++   }
++
+ 	[self stopObservingChanges];
+ 
+ 	if(context==&NSTableViewContentBinderChangeContext)
 --- a/src/Frameworks/AppKit/NSWindowMenuStrip.m
 +++ b/src/Frameworks/AppKit/NSWindowMenuStrip.m
 @@ -146,7 +146,10 @@

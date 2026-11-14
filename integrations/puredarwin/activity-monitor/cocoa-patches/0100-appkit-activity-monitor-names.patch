@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
 +++ b/src/Frameworks/AppKit/NSActivityMonitorAdditions.m
-@@ -0,0 +1,462 @@
+@@ -0,0 +1,469 @@
 +/* SPDX-License-Identifier: MIT */
 +/* What Apple's Activity Monitor (macOS 26.5) imports from AppKit that this AppKit lacked
 +   (docs/roadmap/issues/SF-AA-activity-monitor.md):
@@ -401,6 +401,13 @@
 +    objc_setAssociatedObject(self, &sfSendsWholeKey, [NSNumber numberWithBool:b], OBJC_ASSOCIATION_RETAIN);
 +    if (b)
 +        [self setContinuous:NO];
++}
++// Apple's search field sends its action while the user types (incremental search) unless it sends the
++// whole search string only (then on Return, NSTextField's own behaviour)
++- (void)textDidChange:(NSNotification *)note {
++    [super textDidChange:note];
++    if (![self sendsWholeSearchString] && [self action] != NULL)
++        [self sendAction:[self action] to:[self target]];
 +}
 +@end
 +

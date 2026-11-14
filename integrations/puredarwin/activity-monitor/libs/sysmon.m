@@ -18,9 +18,10 @@
  *     percentage over the last interval, memory (footprint, virtual, compressed, purgeable,
  *     internal), threads, ports, faults, page-ins, messages, system calls, context switches,
  *     idle wake-ups, disk bytes;
+ *   - the responsible process is the process itself (this kernel keeps no responsibility);
  *   - attributes this kernel cannot answer are left out of the row (NULL), never invented: the
- *     energy scores, the responsible process, private and shared memory (not computed: a walk
- *     of every region of every process each interval).
+ *     energy scores, private and shared memory (not computed: a walk of every region of every
+ *     process each interval).
  * The attribute numbers are those Apple's Activity Monitor 10.14 (macOS 26.5) requests and the
  * names it reads them under; the table of them is in the hand-over document.
  */
@@ -432,7 +433,9 @@ u64(uint64_t v)
 static xpc_object_t
 value(uint32_t attribute, const struct procinfo *pi)
 {
-	if (attribute == ATTR_PID)
+	/* this kernel keeps no "responsible process": every process answers for itself, which is also
+	 * what macOS reports for a process nobody launched on its behalf (the Energy tab groups by it) */
+	if (attribute == ATTR_PID || attribute == ATTR_RESPONSIBLE_PID)
 		return u64((uint64_t)pi->pid);
 	if (attribute == ATTR_ARGUMENTS)
 		return arguments(pi->pid);

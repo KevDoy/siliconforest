@@ -10,6 +10,24 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 ## State
 (kept current below; the newest round first)
 
+- 14 November, fourth round (M1, synthetic input only, captures in `runs/sf-actmon/shots`, nobody
+  looked at the panel): clicking a column header sorts (AM sorts in its
+  `-outlineView:shouldSelectTableColumn:`, which this AppKit never asked; `sort1/sort2`); typing in
+  the search field filters the table (`search2`: only `sleep`, PID 380); a click selects a row
+  (`sel2`); Command-I opens the Process Inspector (`inspect1`: "sleep (380)", parent launchd (1),
+  user root (0), process group, Real Memory 3.3 MB, Virtual 391.08 GB); Option-Command-Q on a test
+  `sleep` started over SSH shows "Are you sure you want to quit this process?" with Cancel / Force
+  Quit / Quit (`quit1`), Return quits it (the process was gone 10 s later, `pgrep`); Force Quit on a
+  second test process (`/private/tmp/sfam-victim`, a copy of sleep) ended it too (`fq1`); the View
+  menu and its Update Frequency submenu open (`m1`, `m2`, `steps`), "Very often (1 sec)" takes
+  effect; the title bar's maximise button resizes the window and AM lays out again (`max1`); wheel
+  scrolling moves the table (`scroll1`); the Energy tab opens (`energy2`) but lists no rows. AM's
+  own CPU at the default 5 s interval: 41 % of a core before this round's changes, 27 % after
+  (`ps` time over 30 s); at 1 s, 86 %. Open: the Energy tab's rows; per-process network bytes 0;
+  right of the last column stays black after maximising; the Actions pull-down's menu shows open at
+  launch, and after the first clicks a "quit these processes?" confirmation (the Stop button's
+  `quitProcess:`, nothing selected) appears in some runs (cause not found; Cancel dismisses it);
+  toolbar symbol images blank (SF Symbols).
 - 14 November, third round (M1, synthetic input, captures `runs/sf-actmon/shots/am22.png`): the
   CPU tab shows real %CPU (Activity Monitor itself 43.6, the compositor 13.3, kernel_task 5.4 ...),
   sorted by %CPU as macOS's default, CPU time as m:ss.hh, idle wake-ups, names cut with an
@@ -50,6 +68,13 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
 | The summary box black, its figures one digit wide | a custom view (NSCustomView) lost its archived constraints; the box's colour is a named colour of the app's catalog | cocoa 0104 (`NSCustomView.m`); 0105 (Finch's catalog reader) |
 | Percentages printed as 0.0583911453518234, threads 0 | bindings did not make value transformers named by class; the number formatter printed every style as `%.3f`; libsysmon's row applier stopped at the first attribute's answer | cocoa 0104 (`NSBinder.m`); `libs/Foundation-am.m`; `libs/sysmon.m` |
 | A figure stayed as wide as its first value | a new value did not invalidate a constrained label's intrinsic size | cocoa 0104 (`NSControl.m`) |
+| CoreFoundation halt opening the Energy tab | the responsible pid was left out of the row; AM's `objectForKey:` got nil | `libs/sysmon.m`: the process's own pid |
+| Clicking a header did not sort; clicking a row did not select it | Cocotron's header never asked `-tableView:shouldSelectTableColumn:`, the rows did (AM sorts there and answers NO) | cocoa 0101 (`NSTableHeaderView.m`, `NSTableView.m`, `NSTableColumn.m`) |
+| Typing in the search field did not filter | the search field sent no action while typing | cocoa 0100 (`-[NSSearchField textDidChange:]`) |
+| Command-I raised `-[NSValue initWithCoder:]` | libFoundation's NSValue has no keyed decoding (the inspector's nib carries sizes) | `libs/Foundation-am.m` |
+| An abort at start in some runs: `-[NSArray sortedArrayWithOptions:usingComparator:]` | missing from libFoundation's NSArray; AM's GPU handler calls it on a dispatch queue | `libs/Foundation-am.m` (a stable merge sort) |
+| CoreFoundation halts in `CFArrayCreateCopy` under `-[NSNotificationCenter postNotification:]` at start (5 of about 15 launches) | bindings applied AM's model changes on its sampling queue: the text field binder took its notification observers off and on there while the main thread posted (found with `SFAM_NC_DEBUG=1`) | cocoa 0104 (`NSKVOBinder.m`, `NSCachingBinder.m`, `NSMultipleValueBinder.m`, `NSBinder.m`: a change made off the main thread is applied on it); 8 launches after it without a halt |
+| AM at 41 % CPU at 5 s | a layout pass of the whole window for every changed figure | cocoa 0104 (`NSControl.m`: only when the shown string's length changes, and on the main thread): 27 % |
 
 ## The binary
 | | |
@@ -109,7 +134,7 @@ Process request (type 1, every 0.5 s, then its update interval):
 | 56 | AppSleep | false (there is no App Nap) |
 | 52, 62 | powerScore, averagePowerScore | not known here: left out |
 | 53, 54 | privateMemory, sharedMemory | not computed (a walk of every region of every process): left out |
-| 55 | responsible_pid | not known here: left out |
+| 55 | responsible_pid | the process's own pid (the kernel keeps no responsibility; macOS gives the same for a process nobody launched on another's behalf). Left out, the Energy tab ended in a CoreFoundation halt (`objectForKey:` nil) |
 
 System request (type 2, every 1 s): 4 wired pages, 14 purgeable, 20 compressor, 33 external,
 34 internal, 38 pages in use (active+inactive+speculative+throttled+wired+compressor), 36 total
@@ -136,10 +161,10 @@ series, `am/` = with ours), `cocoa-patches/mkpatches.sh` writes them; test build
 | Patch | What |
 |---|---|
 | 0100 | AppKit: `NSWorkspaceDidWakeNotification`, NSSearchToolbarItem, the compositional layout's description objects (kept as data), views' `identifier`; `+[NSColor colorNamed:]` (an application's asset catalog is not read: a name that says its colour gets that system colour), `systemCyanColor`, `monospacedDigitSystemFontOfSize:weight:`, `-[NSBundle imageForResource:]`, `-[NSSavePanel setAllowedContentTypes:]`, `-[NSPrintOperation runOperationModalForWindow:...]`, `-[NSTouchBar setItemIdentifiers:]` |
-| 0101 | AppKit: view-based NSTableView/NSOutlineView (NSTableCellView, NSTableRowView, `makeViewWithIdentifier:owner:`, the table's archived cell-view nibs, row views laid out before each display, reuse), hidden table columns (`NSHidden`, no space in table or header), the header's sort indicator |
+| 0101 | AppKit: view-based NSTableView/NSOutlineView (NSTableCellView, NSTableRowView, `makeViewWithIdentifier:owner:`, the table's archived cell-view nibs, row views laid out before each display, reuse), hidden table columns (`NSHidden`, no space in table or header), the header's sort indicator; a header click asks the delegate `…shouldSelectTableColumn:` and tells it `…didClickTableColumn:` (row clicks do not ask), the table at least as wide as its clip view with the last column re-fitted |
 | 0102 | CoreGraphics: `CGSEventIsAppUnresponsive`, `CGSRegisterNotifyProc` |
 | 0103 | AppKit: without EGL a layer-backed view is drawn as an ordinary view (no layer context) |
-| 0104 | AppKit: NIBArchive booleans (4 false, 5 true), a cell's three line-break bits, custom views' constraints and identifier, value transformers named by class, constrained labels re-measured on a new value |
+| 0104 | AppKit: NIBArchive booleans (4 false, 5 true), a cell's three line-break bits, custom views' constraints and identifier, value transformers named by class, constrained labels re-measured when the shown string's length changes (on the main thread), bindings apply changes made off the main thread on it, the window menu strip also on full-size-content windows |
 | 0105 | AppKit: an application's named colours from its `Assets.car`, with Finch's catalog reader (`PDCUIStore.m`, `PDCUIRendition.m`, `PDCUIPrivate.h`) |
 
 ## Tools
