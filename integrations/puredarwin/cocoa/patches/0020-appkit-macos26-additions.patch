@@ -116,7 +116,7 @@
 +@end
 --- a/src/Frameworks/AppKit/NSMacOS26Additions.m
 +++ b/src/Frameworks/AppKit/NSMacOS26Additions.m
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,516 @@
 +// NSMacOS26Additions.m - see the header. SPDX-License-Identifier: MIT
 +#import <AppKit/NSMacOS26Additions.h>
 +#import <AppKit/NSAccessibility.h>
@@ -551,6 +551,10 @@
 +// private, sent by Terminal at launch: whether the Help menu's search also searches help books.
 +// There are no help books and no search field here: nothing to switch.
 +- (void)setDefaultHelpBookSearchEnabled:(BOOL)flag { }
++// private: the application's window-server (CoreGraphics Services) context. The window server
++// here is a Wayland compositor: there is no such context, and the calls that would take the
++// number (CGS*, CoreGraphics patch 0025) answer "not implemented".
++- (unsigned int)contextID { return 0; }
 +- (BOOL)searchString:(NSString *)searchString inUserInterfaceItemString:(NSString *)stringToSearch searchRange:(NSRange)searchRange foundRange:(NSRange *)foundRange
 +{
 +    NSRange found = [stringToSearch rangeOfString:searchString options:NSCaseInsensitiveSearch range:searchRange];

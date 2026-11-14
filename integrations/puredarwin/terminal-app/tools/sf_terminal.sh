@@ -153,6 +153,10 @@ install-stage)
 qemu)
   N=${2:?name}; [ -s $IN/core/replace.list ] || { echo "run sf_terminal.sh install-stage first" >&2; exit 2; }
   TT=/usr/share/sf-test
+  # the root starts with the libSystem the target has (SF_QEMU_LIBSYSTEM: a file; default the one
+  # ../../macos-compat last staged for it), not with the default recipe's, which is the new one
+  export SF_COMPAT_LIBSYSTEM=${SF_QEMU_LIBSYSTEM:-runs/sf-compat/stage/replace/libSystem.B.dylib.new}
+  [ -s "$SF_COMPAT_LIBSYSTEM" ] || { echo "no libSystem for the rehearsal's root at $SF_COMPAT_LIBSYSTEM (SF_QEMU_LIBSYSTEM)" >&2; exit 2; }
   SF_COMPAT_STAGE=$IN/core SF_COMPAT_HOST_NEW=1 SF_COMPAT_EXTRA=$T/guest/qemu-terminal-extra.sh \
   SF_COMPAT_MORE_FILES="$IN/core/dyld.new=$TT/compat/dyld.new $IN/core/dyld.sha256=$TT/compat/dyld.sha256" \
     $C/tools/sf_compat_qemu.sh "$N" ${3:-};;
