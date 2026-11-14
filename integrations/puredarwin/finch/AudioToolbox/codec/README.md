@@ -43,7 +43,7 @@ Finch queue/converter family. The candidate also re-exports retained APIs. The
 or a copied SDK. PD source provenance:AudioQueue.c and related AudioToolbox files,
 Copyright2026 PureDarwin,MPL-2.0 OR BSD-2-Clause. No installed image is changed.
 
-M1 final audio-codecs-v6:all9 programs exit0. Original converter,ExtAudioFile and PCM/file probe
+M1 final audio-codecs-v7 (after the retained core-library update):all9 programs exit0. Original converter,ExtAudioFile and PCM/file probe
 match identical Linux-built native M5 programs. WAV and ALAC each decode12000
 frames and seek64 identically to M5;lossless PCM hashes also match Linux ffmpeg.
 AAC/MP3 produce the correct12000 valid frames and seek positions,with small
@@ -61,9 +61,9 @@ installed framework was changed. M5 reference packets exclude the output tool.
 
 Build `../codecs-tests.nix`,generate original fixtures with fixtures.sh NEW_DIR,
 then use ../prepare-codecs.py with explicit Nix outputs,retained-PD image and new
-stage/reference destinations. The final v6 regression includes the full retained
+stage/reference destinations. The final v7 regression includes the full retained
 family re-export and hidden FFmpeg implementation exports (86 direct public
-exports plus the retained provider;all78 previous PD names available). The v4
-receipt is retained separately. Hash-check the reference packet on M5,explicitly
+exports plus the retained provider;all78 previous PD names available). The earlier v4/v6
+receipts are retained separately. Hash-check the reference packet on M5,explicitly
 name its reviewed file/converter tests to the comparison runner,and enforce
 the fresh /tmp,30s/core0,no-DYLD,stdout/stderr-only,cleanup reference procedure.

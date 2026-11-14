@@ -14,7 +14,7 @@ reading from raw converter packets:ALAC file reading succeeds on native M5,
 while its raw-converter case currently fails there with OSStatus560226676.
 That reference failure is preserved;it is not ALAC converter conformance.
 AAC/MP3 file and raw-converter cases and WAV file reading pass on M5.
-Final `avaudio-engine-v2` runs all8 cases on M1 with exit0. The original engine,
+Final `avaudio-engine-v3` (after the retained core-library update) runs all8 cases on M1 with exit0. The original engine,
 WAV and ALAC files MATCH identical Linux-built M5 programs; AAC/MP3 numerical
 differences remain DIFF. The raw ALAC comparison remains FAIL because the native
 reference fails, despite the staged decoder completing it. Final recipe rebuilds
