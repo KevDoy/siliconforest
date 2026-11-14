@@ -320,10 +320,38 @@ int main(void)
     /* encoding */
     {
         uint8_t rep[M1TP_MT_POINTER_REPORT_BYTES];
-        struct m1tp_mt_out o = { 2, -300, 4, -1 };
+        struct m1tp_mt_out o = { .buttons = 2, .dx = -300, .dy = 4, .wheel = -1 };
         m1tp_mt_encode(&o, rep);
         assert(rep[0] == 2 && rep[1] == 2 && rep[2] == 0xd4 && rep[3] == 0xfe && rep[4] == 4 &&
                rep[5] == 0 && rep[6] == 0xff);
+    }
+    /* swipes: three and four fingers 40 mm to the left in 300 ms give BEGIN, UPDATEs
+     * leftwards and one END when the fingers leave, one by one (debounced as scrolling is);
+     * no pointer motion and no wheel meanwhile; two fingers give no swipe */
+    for (unsigned n = 2; n <= 4; n++) {
+        int16_t xy[4][2];
+        unsigned begins = 0, ends = 0, updates = 0, i, pointer = 0;
+        int32_t total_x = 0, total_y = 0;
+        m1tp_mt_init(&st, NULL);
+        for (i = 0; i <= 40; i++) {
+            for (unsigned f = 0; f < n; f++) {
+                xy[f][0] = (int16_t)(2000 + f * 1500 - (int)i * 98);   /* 1 mm per report leftwards */
+                xy[f][1] = 3000;
+            }
+            if (feed(8, 0, n, (const int16_t (*)[2])xy, NULL) && (out.dx || out.dy || out.wheel)) pointer++;
+            if (out.swipe == M1TP_MT_SWIPE_BEGIN) { begins++; assert(out.swipe_fingers == n); }
+            if (out.swipe == M1TP_MT_SWIPE_UPDATE) { updates++; total_x += out.swipe_dx; total_y += out.swipe_dy; }
+            if (out.swipe == M1TP_MT_SWIPE_END) ends++;
+        }
+        for (unsigned left = n; left-- > 0;) {                   /* lifted one per report */
+            feed(8, 0, left, (const int16_t (*)[2])xy, NULL);
+            if (out.swipe == M1TP_MT_SWIPE_END) { ends++; assert(out.swipe_fingers == n); }
+            if (out.swipe == M1TP_MT_SWIPE_BEGIN) begins++;
+        }
+        printf("  swipe %u fingers: begin %u update %u end %u travel %d,%d pointer reports with motion %u\n",
+               n, begins, updates, ends, (int)total_x, (int)total_y, pointer);
+        if (n == 2) { assert(begins == 0 && updates == 0 && ends == 0); continue; }
+        assert(begins == 1 && ends == 1 && updates > 20 && total_x < -200 && total_y == 0 && pointer == 0);
     }
     printf("m1tp_mt host tests: PASS\n");
     return 0;

@@ -24,7 +24,9 @@
  * (full permission notice in NOTICE). libinput works in floating point and on
  * evdev slots; this is integer arithmetic on the controller's own records,
  * and only the parts the 12-byte pointer record can carry: no tapping (off on
- * the reference desktop), no pinch or swipe events, no horizontal scrolling.
+ * the reference desktop), no pinch events, no horizontal scrolling. Three- and
+ * four-finger swipes (libinput's swipe gesture) are given to the driver beside the
+ * pointer report (m1tp_mt_out.swipe), for the desktop's switch between Spaces.
  */
 #include "m1tp_mt.h"
 #include <string.h>
@@ -258,8 +260,19 @@ int32_t m1tp_mt_accel_factor(const struct m1tp_mt_state *s, int64_t speed_um_s)
 
 /* accelerator_filter_touchpad(): the report's travel in contact units (dy
  * already towards the user) -> pointer counts, carrying the fraction. */
+static void accelerate_gain(struct m1tp_mt_state *s, int32_t ux, int32_t uy, uint64_t now,
+                            uint32_t gain_percent, int64_t *rem_x, int64_t *rem_y,
+                            int32_t *dx, int32_t *dy);
 static void accelerate(struct m1tp_mt_state *s, int32_t ux, int32_t uy, uint64_t now,
                        int32_t *dx, int32_t *dy)
+{
+    accelerate_gain(s, ux, uy, now, s->cfg.gain_percent, &s->rem_x, &s->rem_y, dx, dy);
+}
+/* The same with a given gain and remainder: a swipe's travel is libinput's own units
+ * (gain 100), carried apart from the pointer's fraction. */
+static void accelerate_gain(struct m1tp_mt_state *s, int32_t ux, int32_t uy, uint64_t now,
+                            uint32_t gain_percent, int64_t *rem_x, int64_t *rem_y,
+                            int32_t *dx, int32_t *dy)
 {
     int64_t x, y, len, tdelta, velocity, factor;
 
@@ -268,9 +281,10 @@ static void accelerate(struct m1tp_mt_state *s, int32_t ux, int32_t uy, uint64_t
     if (!ux && !uy) return;
     if (s->cfg.flat_units_per_count) {
         int64_t k = (int64_t)s->cfg.flat_units_per_count << 16;
-        s->rem_x += (int64_t)ux << 16; s->rem_y += (int64_t)uy << 16;
-        *dx = (int32_t)(s->rem_x / k); s->rem_x -= (int64_t)*dx * k;
-        *dy = (int32_t)(s->rem_y / k); s->rem_y -= (int64_t)*dy * k;
+        *rem_x += ((int64_t)ux << 16) * gain_percent / s->cfg.gain_percent;
+        *rem_y += ((int64_t)uy << 16) * gain_percent / s->cfg.gain_percent;
+        *dx = (int32_t)(*rem_x / k); *rem_x -= (int64_t)*dx * k;
+        *dy = (int32_t)(*rem_y / k); *rem_y -= (int64_t)*dy * k;
         return;
     }
     /* tp_scale_to_xaxis(): y in the x axis' resolution; 1/256 unit */
@@ -292,10 +306,10 @@ static void accelerate(struct m1tp_mt_state *s, int32_t ux, int32_t uy, uint64_t
     s->accel_last_velocity = velocity;
     s->last_velocity = velocity; s->last_factor = (int32_t)factor;
     /* normalize_for_dpi(): "* DEFAULT_MOUSE_DPI / dpi"; then this desktop's gain */
-    s->rem_x += x * factor / 256 * 1000 / s->dpi * s->cfg.gain_percent / 100;
-    s->rem_y += y * factor / 256 * 1000 / s->dpi * s->cfg.gain_percent / 100;
-    *dx = (int32_t)(s->rem_x / 65536); s->rem_x -= (int64_t)*dx * 65536;
-    *dy = (int32_t)(s->rem_y / 65536); s->rem_y -= (int64_t)*dy * 65536;
+    *rem_x += x * factor / 256 * 1000 / s->dpi * gain_percent / 100;
+    *rem_y += y * factor / 256 * 1000 / s->dpi * gain_percent / 100;
+    *dx = (int32_t)(*rem_x / 65536); *rem_x -= (int64_t)*dx * 65536;
+    *dy = (int32_t)(*rem_y / 65536); *rem_y -= (int64_t)*dy * 65536;
 }
 
 /* ---- thumbs: libinput evdev-mt-touchpad-thumb.c -------------------------- */
@@ -554,7 +568,8 @@ static void gesture_begin(struct m1tp_mt_state *s, unsigned count, uint64_t now)
     unsigned i;
     s->finger_count = (uint8_t)count; s->finger_pending = 0;
     s->gesture_start_us = now;
-    s->gesture = count == 1 ? M1TP_MT_G_POINTER : count == 2 ? M1TP_MT_G_UNKNOWN : M1TP_MT_G_IGNORED;
+    s->gesture = count == 1 ? M1TP_MT_G_POINTER : count == 2 ? M1TP_MT_G_UNKNOWN :
+                 count <= 4 ? M1TP_MT_G_SWIPE : M1TP_MT_G_IGNORED;
     for (i = 0; i < M1TP_MT_SLOTS; i++) { s->slot[i].start_x = s->slot[i].x; s->slot[i].start_y = s->slot[i].y; }
     s->rem_scroll = 0;
 }
@@ -806,7 +821,7 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
     if (nactive != s->finger_count) {
         if (!nactive) {
             s->gesture = M1TP_MT_G_NONE; s->finger_count = 0; s->finger_pending = 0;
-        } else if (s->gesture != M1TP_MT_G_SCROLL) {
+        } else if (s->gesture != M1TP_MT_G_SCROLL && s->gesture != M1TP_MT_G_SWIPE) {
             gesture_begin(s, nactive, now);
         } else if (nactive != s->finger_pending) {
             /* DEFAULT_GESTURE_SWITCH_TIMEOUT: a scroll survives 100 ms of a
@@ -826,6 +841,31 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
         s->gesture = M1TP_MT_G_POINTER; s->finger_count = 1; s->finger_pending = 0;
     }
     if (s->gesture == M1TP_MT_G_UNKNOWN) gesture_detect(s, now);
+
+    /* Three- and four-finger swipes (libinput's swipe gesture, tp_gesture_post_gesture()):
+     * the average travel of the active touches, accelerated as the pointer is, in libinput's
+     * units. A finger lifted or added is debounced as for scrolling (above); the swipe ends
+     * when every finger has left or the debounced count is another. Physical directions:
+     * natural scrolling does not apply. */
+    if (s->swipe_fingers && (s->gesture != M1TP_MT_G_SWIPE || !nactive || s->finger_count != s->swipe_fingers)) {
+        out->swipe = M1TP_MT_SWIPE_END; out->swipe_fingers = s->swipe_fingers;
+        s->swipe_fingers = 0;
+    } else if (s->gesture == M1TP_MT_G_SWIPE && nactive) {
+        if (!s->swipe_fingers) {
+            s->swipe_fingers = s->finger_count; s->swipe_rem_x = s->swipe_rem_y = 0;
+            s->accel_last_us = now;                 /* filter_restart() */
+            out->swipe = M1TP_MT_SWIPE_BEGIN; out->swipe_fingers = s->swipe_fingers;
+        } else {
+            int32_t sx, sy;
+            accelerate_gain(s, sum_x / (int32_t)nactive, sum_y / (int32_t)nactive, now, 100,
+                            &s->swipe_rem_x, &s->swipe_rem_y, &sx, &sy);
+            if (sx || sy) {
+                out->swipe = M1TP_MT_SWIPE_UPDATE; out->swipe_fingers = s->swipe_fingers;
+                out->swipe_dx = (int16_t)(sx > 32767 ? 32767 : sx < -32767 ? -32767 : sx);
+                out->swipe_dy = (int16_t)(sy > 32767 ? 32767 : sy < -32767 ? -32767 : sy);
+            }
+        }
+    }
 
     if (s->gesture == M1TP_MT_G_POINTER && nactive) {
         if (s->header_motion) { dx = f->mouse_dx; dy = f->mouse_dy; }

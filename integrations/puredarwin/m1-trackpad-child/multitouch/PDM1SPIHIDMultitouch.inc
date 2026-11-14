@@ -21,6 +21,117 @@
  * written to for ever. */
 #define PD_M1_MT_MAX_MODE_REQUESTS 8u
 
+#include <sys/errno.h>
+#include <sys/sysctl.h>
+#include <IOKit/IOLocks.h>
+
+/* ---- Three- and four-finger swipes for the desktop (night of 14 November) ----------------
+ * The pointer record that reaches /dev/usb_hid_mouse has no room for a swipe (buttons, motion,
+ * one wheel byte), and IOHIDFamily's queue is left as it is. A swipe the decoder recognises
+ * (m1tp_mt_out.swipe) goes into a small ring here instead, which the compositor reads once a
+ * frame through `sysctl kern.pd_trackpad_swipe` (opaque, read-only: a version, the next
+ * sequence number and the last 32 events). `sysctl -w kern.pd_trackpad_swipe_test=<n>` (root)
+ * sends a constructed swipe through the same decoder on a scratch state, report by report in
+ * real time (8 ms apart): n = 3 or 4 fingers to the left, -3 or -4 to the right; those events
+ * are marked synthetic. The sysctls are registered once and never removed (the kext is part of
+ * the collection and is not unloaded; the handlers touch only these statics). */
+struct pd_tp_swipe_event {
+    uint32_t seq;
+    uint8_t phase;          /* M1TP_MT_SWIPE_BEGIN, _UPDATE, _END */
+    uint8_t fingers;
+    int16_t dx, dy;         /* libinput units, physical directions */
+    uint8_t synthetic, reserved;
+    uint32_t ms;            /* the host clock, milliseconds */
+};
+#define PD_TP_SWIPE_RING 32u
+struct pd_tp_swipe_ring {
+    uint32_t version;       /* 1 */
+    uint32_t next_seq;      /* the sequence number the next event will have (the first is 1) */
+    struct pd_tp_swipe_event ev[PD_TP_SWIPE_RING];
+};
+static struct pd_tp_swipe_ring gPdTpSwipe = { 1, 1, {} };
+static IOLock *gPdTpSwipeLock;
+static struct m1tp_mt_state gPdTpSwipeScratch;
+static struct m1tp_mt_frame gPdTpSwipeFrame;
+static uint8_t gPdTpSwipeReport[M1TP_MT_MAX_REPORT_BYTES];
+static uint32_t gPdTpSwipeLogged;
+
+static void pd_tp_swipe_push(const struct m1tp_mt_out *out, bool synthetic)
+{
+    if (!out->swipe || !gPdTpSwipeLock) return;
+    IOLockLock(gPdTpSwipeLock);
+    struct pd_tp_swipe_event *e=&gPdTpSwipe.ev[gPdTpSwipe.next_seq % PD_TP_SWIPE_RING];
+    e->seq=gPdTpSwipe.next_seq++;
+    e->phase=out->swipe; e->fingers=out->swipe_fingers; e->dx=out->swipe_dx; e->dy=out->swipe_dy;
+    e->synthetic=synthetic?1:0; e->reserved=0;
+    e->ms=(uint32_t)(PDM1KeyboardHW::clockUS()/1000);
+    IOLockUnlock(gPdTpSwipeLock);
+    if (out->swipe==M1TP_MT_SWIPE_BEGIN && gPdTpSwipeLogged<4) {
+        gPdTpSwipeLogged++;
+        IOLog("PDM1SPIHID: MT stage=swipe-begin fingers=%u synthetic=%u (kern.pd_trackpad_swipe)\n",
+              (unsigned)out->swipe_fingers,synthetic?1u:0u);
+    }
+}
+
+static int pd_tp_swipe_read SYSCTL_HANDLER_ARGS
+{
+#pragma unused(oidp, arg1, arg2)
+    struct pd_tp_swipe_ring copy;
+    if (!gPdTpSwipeLock) return ENOENT;
+    IOLockLock(gPdTpSwipeLock);
+    copy=gPdTpSwipe;
+    IOLockUnlock(gPdTpSwipeLock);
+    return SYSCTL_OUT(req,&copy,sizeof(copy));
+}
+
+/* A swipe of 40 mm in 41 reports, 8 ms apart, through m1tp_mt_parse() and m1tp_mt_step() on a
+ * scratch state, then the fingers lifted one per report. */
+static int pd_tp_swipe_test SYSCTL_HANDLER_ARGS
+{
+#pragma unused(oidp, arg1, arg2)
+    int value=0, error=SYSCTL_IN(req,&value,sizeof(value));
+    if (error || !req->newptr) return error ? error : SYSCTL_OUT(req,&value,sizeof(value));
+    int fingers=value<0?-value:value, sign=value<0?1:-1;
+    if (fingers<3 || fingers>4 || !gPdTpSwipeLock) return EINVAL;
+    int16_t xy[4][2];
+    struct m1tp_mt_out out;
+    uint64_t t=PDM1KeyboardHW::clockUS();
+    m1tp_mt_init(&gPdTpSwipeScratch,nullptr);
+    for (int i=0;i<=40+fingers;i++) {
+        int n=i<=40?fingers:fingers-(i-40);
+        int step=i<=40?i:40;
+        for (int f=0;f<fingers;f++) {
+            xy[f][0]=(int16_t)(sign<0?2000:-2000)+(int16_t)(f*1500)+(int16_t)(sign*step*98);
+            xy[f][1]=3000;
+        }
+        size_t size=m1tp_mt_build(gPdTpSwipeReport,sizeof(gPdTpSwipeReport),0,(uint16_t)(t/1000),(unsigned)n,
+                                  (const int16_t (*)[2])xy,nullptr);
+        if (!size || m1tp_mt_parse(gPdTpSwipeReport,size,&gPdTpSwipeFrame)!=M1TP_MT_KIND_TOUCH) return EIO;
+        (void)m1tp_mt_step(&gPdTpSwipeScratch,&gPdTpSwipeFrame,t,&out);
+        pd_tp_swipe_push(&out,true);
+        IOSleep(8);
+        t=PDM1KeyboardHW::clockUS();
+    }
+    IOLog("PDM1SPIHID: MT stage=swipe-test fingers=%d direction=%s next_seq=%u (synthetic reports through the decoder)\n",
+          fingers,sign<0?"left":"right",(unsigned)gPdTpSwipe.next_seq);
+    return 0;
+}
+
+SYSCTL_DECL(_kern);
+SYSCTL_PROC(_kern, OID_AUTO, pd_trackpad_swipe, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0,
+            pd_tp_swipe_read, "S", "three- and four-finger swipes of the trackpad: version, next sequence, the last 32 events");
+SYSCTL_PROC(_kern, OID_AUTO, pd_trackpad_swipe_test, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, 0,
+            pd_tp_swipe_test, "I", "write 3 or 4 (to the left), -3 or -4 (to the right): a constructed swipe through the decoder");
+
+static void pd_tp_swipe_register()
+{
+    if (gPdTpSwipeLock) return;
+    gPdTpSwipeLock=IOLockAlloc();
+    if (!gPdTpSwipeLock) return;
+    sysctl_register_oid(&sysctl__kern_pd_trackpad_swipe);
+    sysctl_register_oid(&sysctl__kern_pd_trackpad_swipe_test);
+}
+
 /* Boot-args (all optional; the trackpad child needs pdm1trackpadchild=1 as before).
  * The defaults reproduce this M1 under Omarchy Linux: libinput 1.32.0 with Hyprland's
  * settings there; where each number comes from is in m1tp_mt.h and m1tp_mt.c.
@@ -71,6 +182,7 @@ void PDM1SPIHID::mtConfigure()
     if (PE_parse_boot_argn("pdm1tpselftest",&value,sizeof(value)) && (value==1 || value==2))
         mtSelftest=value;
     m1tp_mt_init(&mtState,&mtConfig);
+    if (mtEnabled) pd_tp_swipe_register();
     const struct m1tp_mt_config *c=&mtState.cfg;
     IOLog("PDM1SPIHID: MT stage=config enabled=%u reference=libinput-1.32.0 res=%d/%d units_per_mm gain_percent=%u accel_from_mm_s=%u flat_units_per_count=%u scroll_factor_permille=%u scroll_units_per_step=%u natural=%u dwt=%u thumb=%u palm_size=%u touch_size=%u/%u header_motion=%u debug_reports=%u selftest=%d\n",
           mtEnabled?1u:0u,(int)c->res_x,(int)c->res_y,(unsigned)c->gain_percent,(unsigned)c->accel_threshold,
@@ -177,6 +289,7 @@ void PDM1SPIHID::mtRoute(const struct dlsp_message *message)
             IOLog("PDM1SPIHID: MT stage=device-clock report interval taken from the controller's millisecond counter\n");
     }
     if (mtDebug) mtDump(message,emit,&out);
+    pd_tp_swipe_push(&out,false);
     if (emit) (void)mtSubmit(&out);
 }
 

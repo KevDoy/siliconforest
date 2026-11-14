@@ -120,11 +120,23 @@ struct m1tp_mt_out {
     uint8_t buttons;                /* bit 0 left, bit 1 right, bit 2 middle */
     int16_t dx, dy;                 /* dy grows towards the user */
     int8_t wheel;                   /* + is away from the user */
+    /* A three- or four-finger swipe (not part of the pointer report; m1tp_mt_step() fills it
+     * whether or not it returns a pointer report): M1TP_MT_SWIPE_*, the finger count, and for an
+     * update the travel in libinput's units (accelerated like the pointer, normalized to 1000 dpi,
+     * before this desktop's gain: what a Linux compositor receives as the swipe's dx/dy),
+     * physical directions: x grows to the right, y towards the user. */
+    uint8_t swipe, swipe_fingers;
+    int16_t swipe_dx, swipe_dy;
 };
+#define M1TP_MT_SWIPE_NONE 0u
+#define M1TP_MT_SWIPE_BEGIN 1u
+#define M1TP_MT_SWIPE_UPDATE 2u
+#define M1TP_MT_SWIPE_END 3u
 
 /* libinput's gesture states, as far as they are used */
 enum m1tp_mt_gesture { M1TP_MT_G_NONE = 0, M1TP_MT_G_UNKNOWN = 1, M1TP_MT_G_POINTER = 2,
-    M1TP_MT_G_SCROLL = 3, M1TP_MT_G_IGNORED = 4 /* pinch, swipe: nothing to report */ };
+    M1TP_MT_G_SCROLL = 3, M1TP_MT_G_IGNORED = 4 /* pinch, five or more fingers */,
+    M1TP_MT_G_SWIPE = 5 /* three or four fingers */ };
 /* libinput's thumb states (evdev-mt-touchpad.h) */
 enum m1tp_mt_thumb { M1TP_MT_T_FINGER = 0, M1TP_MT_T_JAILED, M1TP_MT_T_PINCH,
     M1TP_MT_T_SUPPRESSED, M1TP_MT_T_REVIVED, M1TP_MT_T_REVIVED_JAILED, M1TP_MT_T_DEAD };
@@ -168,6 +180,8 @@ struct m1tp_mt_state {
     int32_t dpi;
     int64_t rem_x, rem_y;           /* 1/65536 count */
     int64_t rem_scroll;             /* 1/65536 scroll unit */
+    uint8_t swipe_fingers;          /* a swipe is under way with this many fingers (0: none) */
+    int64_t swipe_rem_x, swipe_rem_y; /* 1/65536 libinput unit */
     int64_t scroll_per_unit;        /* scroll units per contact unit, 1/65536 */
     uint32_t events;                /* M1TP_MT_EV_* seen so far */
     /* measurements for the self-test and the debug dump */

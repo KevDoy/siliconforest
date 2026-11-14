@@ -18,6 +18,7 @@ the desktop menu ...").
 | 5 | `wm-darwin-mac-command-q.patch` | Command-Q goes to the focused toplevel when its app id is the bundle identifier of a bundle in `/Applications` (a Mac application quits itself, with its questions, as on macOS); elsewhere it stays the desktop's "quit application" | `wm-darwin-cmdq-build-001` (test), `wm-darwin-cmdq-daily-001` |
 | 6 | `wm-darwin-client-states.patch` | a client's `xdg_toplevel` set/unset_fullscreen, set/unset_maximized and set_minimized go to wm-core (one configure with size and state; requests made before the first buffer are kept until the window maps); `wm_capabilities`; inject lines `hwheel`, `scroll`, `swipe` (DESK, night of 14 November) | `desk-next-001`, `desk-daily-001` |
 | 7 | `wm-darwin-desktop-night.patch` | the desktop of the night of 14 November (DESK, `docs/roadmap/issues/SF-Z-desktop-night.md`): the owner's Linux key table on the standalone desk (Omarchy keymap with Command as Super, plus the Mac profile's free chords) and the Spaces profile; three/four-finger swipes between Spaces that follow the fingers (wm-core's Linux recognizer and spring); screenshots (keys, `--screencapture`, clipboard) and `--desktop-request terminal` over a uid-checked socket; `zwlr_layer_shell_v1`, `zwlr_foreign_toplevel_management_v1`, `zxdg_output_manager_v1` (the Chonkstep dock), `xdg_activation_v1`; `/System/Applications` in the Applications rows; Darwin socket shims in `dock/crates/chonk-dock-proto`; the host test `tests/dock_host.rs` | `desk-next-007`, `desk-daily-007` |
+| 8 | `wm-darwin-trackpad-swipes.patch` | the compositor reads the trackpad driver's swipe ring (`sysctl kern.pd_trackpad_swipe`, `m1-trackpad-child/multitouch/PDM1SPIHIDMultitouch.inc`) once a frame and turns each event into the swipe of patch 7; nothing happens with a kernel without it | `desk-next-008`, `desk-daily-008` |
 
 Builds:
 ```sh
@@ -54,7 +55,7 @@ Not run: the crate's own tests (`cargo test -p wm-darwin`); two test expectation
 hand for the new Applications row.
 
 ### Night of 14 November (DESK)
-Source: `runs/m1-desktop-010/desk-src` (`wm-darwin-cmdq-src` + patches 6 and 7; a local git with one
+Source: `runs/m1-desktop-010/desk-src` (`wm-darwin-cmdq-src` + patches 6 to 8; a local git with one
 commit per patch; the patches applied to a fresh copy of `wm-darwin-cmdq-src` give the same tree).
 Builds as above (`desk-next-NNN` with `DESKTOP_FEATURES=test-inject`, `desk-daily-NNN` without).
 The dock: `../../desktop/tools/build_dock.sh <name> <same source>` (binary `chonk-dock`, installed as
