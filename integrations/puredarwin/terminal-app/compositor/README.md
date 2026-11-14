@@ -16,6 +16,8 @@ the desktop menu ...").
 | 3 | `wm-darwin-popups.patch` | client popups (`xdg_popup`), frame state told to clients, fitted sizes: the Cocoa stream's commits `a447cef..f0955fb` of branch `wm-darwin-cocoa` (local), unchanged. Every AppKit menu, pop-up button and tool tip is such a popup | `wm-darwin-apps-build-001` |
 | 4 | `wm-darwin-applications.patch` | the desktop menu's Applications submenu (one row per bundle in `/Applications` and `/Applications/Utilities`; the path goes to the session's pipe, `open --listen` starts it: the compositor starts no program), and the inject module behind the feature `test-inject` | `wm-darwin-apps-build-001` |
 | 5 | `wm-darwin-mac-command-q.patch` | Command-Q goes to the focused toplevel when its app id is the bundle identifier of a bundle in `/Applications` (a Mac application quits itself, with its questions, as on macOS); elsewhere it stays the desktop's "quit application" | `wm-darwin-cmdq-build-001` (test), `wm-darwin-cmdq-daily-001` |
+| 6 | `wm-darwin-client-states.patch` | a client's `xdg_toplevel` set/unset_fullscreen, set/unset_maximized and set_minimized go to wm-core (one configure with size and state; requests made before the first buffer are kept until the window maps); `wm_capabilities`; inject lines `hwheel`, `scroll`, `swipe` (DESK, night of 14 November) | `desk-next-001`, `desk-daily-001` |
+| 7 | `wm-darwin-desktop-night.patch` | the desktop of the night of 14 November (DESK, `docs/roadmap/issues/SF-Z-desktop-night.md`): the owner's Linux key table on the standalone desk (Omarchy keymap with Command as Super, plus the Mac profile's free chords) and the Spaces profile; three/four-finger swipes between Spaces that follow the fingers (wm-core's Linux recognizer and spring); screenshots (keys, `--screencapture`, clipboard) and `--desktop-request terminal` over a uid-checked socket; `zwlr_layer_shell_v1`, `zwlr_foreign_toplevel_management_v1`, `zxdg_output_manager_v1` (the Chonkstep dock), `xdg_activation_v1`; `/System/Applications` in the Applications rows; Darwin socket shims in `dock/crates/chonk-dock-proto`; the host test `tests/dock_host.rs` | `desk-next-007`, `desk-daily-007` |
 
 Builds:
 ```sh
@@ -50,6 +52,20 @@ in the working tree.
 
 Not run: the crate's own tests (`cargo test -p wm-darwin`); two test expectations were edited by
 hand for the new Applications row.
+
+### Night of 14 November (DESK)
+Source: `runs/m1-desktop-010/desk-src` (`wm-darwin-cmdq-src` + patches 6 and 7; a local git with one
+commit per patch; the patches applied to a fresh copy of `wm-darwin-cmdq-src` give the same tree).
+Builds as above (`desk-next-NNN` with `DESKTOP_FEATURES=test-inject`, `desk-daily-NNN` without).
+The dock: `../../desktop/tools/build_dock.sh <name> <same source>` (binary `chonk-dock`, installed as
+`/usr/bin/chonkstep-dock`; its launcher items are `../../desktop/system/applications/*.desktop` in
+`/usr/share/applications` and `../../desktop/system/dock-pins` as `$XDG_STATE_HOME/chonkstep/dock`).
+Installing and restarting: `../../desktop/tools/desk_m1.sh` (`install`, `put`, `relaunch next|daily`).
+Every build is first host-tested: `cargo test --offline --locked -p wm-darwin --features desktop-shell`
+(the lib tests construct the standalone desktop session; desk-002 ended at start on the M1 because
+nothing had) and, with a host build of the dock, `CHONK_DOCK_BIN=... cargo test ... --test dock_host -- --ignored`.
+`/usr/bin/chonkstep-darwin-desktop.safe` is a build that ran on the M1 (desk-daily-001): the session
+starts it when a compositor ends by itself within 20 s (`m1-storage/system/sf-session`).
 
 ## Terminal (`chonk-terminal-darwin`)
 Base: the source of `terminal-application-build-008`.

@@ -6,6 +6,10 @@
 #                                          /usr/bin/chonkstep-darwin-desktop.next and /usr/bin/chonkstep-darwin-desktop
 #                                          replaced; the files of before are kept as <path>.before-<tag> (hard links)
 #   desk_m1.sh put <local> <remote> [tag]  any other file, the one of before kept as <remote>.before-<tag>
+#   desk_m1.sh dock <chonk-dock>           the dock as /usr/bin/chonkstep-dock (the one of before kept), its launcher
+#                                          items (../system/applications) in /usr/share/applications, its pins
+#                                          (../system/dock-pins) where the session has none yet; it starts with
+#                                          the next compositor start (sf-session)
 #   desk_m1.sh relaunch next|daily         the session starts its compositor again (sf-session of 14 November,
 #                                          night, or later): every window ends. Take runs/m1-coord/gui.lock first.
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
@@ -28,6 +32,12 @@ case "${1:-}" in
   state) state;;
   install) put "$2" $D.next "${4:-desk}"; put "$3" $D "${4:-desk}";;
   put) put "$2" "$3" "${4:-desk}";;
+  dock)
+    put "$2" /usr/bin/chonkstep-dock "${3:-desk}"
+    (cd "$(dirname "$0")/../system" && tar -cf - applications dock-pins) | "${SF[@]}" 'T=/private/tmp/desk-items.$$; mkdir -p $T /usr/share/applications /private/var/db/desktop-state/chonkstep && tar -xf - -C $T &&
+      for f in $T/applications/*.desktop; do cp "$f" /usr/share/applications/ && chmod 644 "/usr/share/applications/$(basename "$f")"; done;
+      [ -e /private/var/db/desktop-state/chonkstep/dock ] || { cp $T/dock-pins /private/var/db/desktop-state/chonkstep/dock && chmod 644 /private/var/db/desktop-state/chonkstep/dock; };
+      rm -rf $T; ls /usr/share/applications; cat /private/var/db/desktop-state/chonkstep/dock';;
   relaunch)
     case "$2" in next) word=relaunch-next;; daily) word=relaunch;; *) echo "next|daily" >&2; exit 2;; esac
     "${SF[@]}" "grep -q relaunch-next /usr/libexec/sf-session || { echo 'the running session has no relaunch: reboot-next'; exit 1; }

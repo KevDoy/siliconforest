@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal.app
+Comment=Apple's Terminal (the bundle in /Applications/Utilities)
+TryExec=/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
+Exec=/usr/bin/open -a Terminal
+Categories=System;TerminalEmulator;
+StartupWMClass=com.apple.Terminal

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=A new window of the desktop's own terminal
+Exec=/usr/bin/chonkstep-darwin-desktop --desktop-request terminal
+Categories=System;TerminalEmulator;
+StartupWMClass=chonk-terminal-darwin

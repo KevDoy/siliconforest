@@ -27,7 +27,8 @@
 #               (../../m1-native-boot/reboot/launcher-self-reboot.diff: no controller reset when the M1's Linux
 #               comes back by itself), guests ../guest/diskroot-halt-prelude.sh and ../guest/darwin-diskroot-halt.in
 #   DR_INSTALL=1  (with DR_HALT) the boot carries ../system and tools/staged.sh's compositor (DR_COMPOSITOR=<file>:
-#               another) in its RAM root and its script installs them on the disk root (through the fenced driver)
+#               another) in its RAM root and its script installs them on the disk root (through the fenced driver);
+#               DR_DOCK=<file>: also the Chonkstep dock with its launcher items (../desktop/system)
 #   DR_USERLAND=1  (with DR_INSTALL=1) the boot also carries ../userland (the SSH server and its job, the Homebrew
 #               account's wrapper, DR_TERMINAL=<file>: the terminal, DR_USERLAND_KEY=<public key file>, default
 #               ~/.ssh/id_rsa.pub: who may log in as root) and userland/sf-userland-install.sh puts them on the disk root
@@ -164,6 +165,13 @@ if [ -n "$HALT" ] && [ "${DR_INSTALL:-0}" = 1 ]; then
   X="$X;$SYS/sbin/sf-halt=/usr/share/sf-system/sf-halt;$SYS/usr/sbin/sf-clock=/usr/share/sf-system/sf-clock;$COMP=/usr/bin/chonkstep-darwin-desktop"
   for f in sf-boot sf-command sf-install.sh darwin-desktop-test.disk sf-session; do X="$X;$HERE/system/$f=/usr/share/sf-system/$f"; done
   X="$X;$NB/guest/org.siliconforest.desktop.plist=/usr/share/sf-system/org.siliconforest.desktop.plist"
+  # the Chonkstep dock (../desktop): DR_DOCK=<chonk-dock built by ../desktop/tools/build_dock.sh>; its launcher
+  # items and pins go with it (system/sf-install.sh puts them on the disk root)
+  if [ -n "${DR_DOCK:-}" ]; then
+    [ -x "$DR_DOCK" ] || { echo "no dock at $DR_DOCK" >&2; exit 2; }
+    X="$X;$DR_DOCK=/usr/share/sf-system/chonkstep-dock;$HERE/../desktop/system/dock-pins=/usr/share/sf-system/dock-pins"
+    for f in "$HERE"/../desktop/system/applications/*.desktop; do X="$X;$f=/usr/share/sf-system/applications/$(basename "$f")"; done
+  fi
   if [ "${DR_USERLAND:-0}" = 1 ]; then
     # daily use (../userland): the SSH server (upstream's OpenSSH; the client and the rest follow over SSH,
     # tools/sf_userland_push.sh), its configuration and launchd job, the Homebrew account's wrapper, the

@@ -161,18 +161,32 @@ dock() {
 # $XDG_RUNTIME_DIR/session-end-request and ends the compositor (SIGTERM). Every window ends with it.
 # Anything else in the file (restart, poweroff, nothing) ends the session as before.
 launch=1
+# The compositor's lines also go to /var/log/desktop-session.log (the one of the boot before is
+# desktop-session.log.old).
+[ -f /var/log/desktop-session.log ] && mv -f /var/log/desktop-session.log /var/log/desktop-session.log.old
 while :; do
-    printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s launch=%s\n' "$seconds" "$(date +%s)" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}" "$launch"
+    started=$(date +%s)
+    printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s launch=%s\n' "$seconds" "$started" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}" "$launch"
     dock
     # The desktop's own exit status, not that of the filter it is piped through.
     {
         "$desktop" --run --socket "$runtime/wayland-0" --records "$records" --session "$session" --terminal /usr/bin/chonk-terminal-darwin --seconds "$seconds" --font-regular /usr/share/darwin-desktop/DejaVuSans.ttf --font-bold /usr/share/darwin-desktop/DejaVuSans-Bold.ttf --input pdhid --startup-terminals 2 2>&1
         echo "$?" > "$runtime/desktop.rc"
-    } | grep -v 'chonkstep-gl: step:'
+    } | grep --line-buffered -v 'chonkstep-gl: step:' | tee -a /var/log/desktop-session.log
     printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
-    case "$(cat "$runtime/session-end-request" 2>/dev/null)" in
+    request=$(cat "$runtime/session-end-request" 2>/dev/null)
+    # A compositor that does not come up (it ended by itself, with an error, within 20 seconds and
+    # nobody asked for an end) is replaced once by the kept good build, instead of ending the
+    # session (which restarts the machine): /usr/bin/chonkstep-darwin-desktop.safe.
+    rc=$(cat "$runtime/desktop.rc" 2>/dev/null || echo 1)
+    if [ -z "$request" ] && [ "$rc" != 0 ] && [ $(( $(date +%s) - started )) -lt 20 ] && [ -x /usr/bin/chonkstep-darwin-desktop.safe ] && [ "$desktop" != /usr/bin/chonkstep-darwin-desktop.safe ]; then
+        printf 'SF_SESSION %s ended at once (rc=%s): the kept build instead\n' "$desktop" "$rc"
+        request=relaunch-safe
+    fi
+    case "$request" in
         relaunch) desktop=/usr/bin/chonkstep-darwin-desktop;;
         relaunch-next) desktop=/usr/bin/chonkstep-darwin-desktop.next; [ -x "$desktop" ] || desktop=/usr/bin/chonkstep-darwin-desktop;;
+        relaunch-safe) desktop=/usr/bin/chonkstep-darwin-desktop.safe;;
         *) break;;
     esac
     launch=$((launch + 1))

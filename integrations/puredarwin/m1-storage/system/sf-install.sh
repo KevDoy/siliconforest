@@ -41,6 +41,22 @@ if [ -d "$S/bench" ]; then
     fi
     echo "SF_INSTALL bench: $(cd "$R/$B" && ls -l 2>&1 | awk 'NR > 1 {print $NF ":" $5}' | tr '\n' ' ')"
 fi
+# The Chonkstep dock (../../desktop, optional: present when the boot carries it, DR_DOCK=<file>): the
+# program, its launcher items in /usr/share/applications and, only where the person has none yet, its
+# pins ($XDG_STATE_HOME/chonkstep/dock of the session: /private/var/db/desktop-state).
+if [ -r "$S/chonkstep-dock" ]; then
+    put chonkstep-dock usr/bin/chonkstep-dock
+    mkdir -p "$R/usr/share/applications" "$R/private/var/db/desktop-state/chonkstep"
+    for f in "$S"/applications/*.desktop; do
+        [ -r "$f" ] || continue
+        cp "$f" "$R/usr/share/applications/$(basename "$f").sf-new" && chmod 644 "$R/usr/share/applications/$(basename "$f").sf-new" \
+            && mv -f "$R/usr/share/applications/$(basename "$f").sf-new" "$R/usr/share/applications/$(basename "$f")"
+    done
+    if [ -r "$S/dock-pins" ] && [ ! -e "$R/private/var/db/desktop-state/chonkstep/dock" ]; then
+        cp "$S/dock-pins" "$R/private/var/db/desktop-state/chonkstep/dock" && chmod 644 "$R/private/var/db/desktop-state/chonkstep/dock"
+    fi
+    echo "SF_INSTALL dock: $(ls -l "$R/usr/bin/chonkstep-dock" | awk '{print $5}') bytes, items: $(cd "$R/usr/share/applications" && ls *.desktop 2>/dev/null | tr '\n' ' ')"
+fi
 for c in reboot halt poweroff shutdown; do
     if [ -e "$R/bin/$c" ] && ! grep -q '/sbin/sf-halt' "$R/bin/$c" 2>/dev/null; then mv -f "$R/bin/$c" "$R/bin/$c.xnu"; fi
     put sf-command "bin/$c"
