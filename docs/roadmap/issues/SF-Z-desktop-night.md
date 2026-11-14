@@ -242,6 +242,7 @@ IOHIDFamily, no new device node, nothing of `pd_nvme_wgate.c/.h`, the fence cons
   the path behind the fingers works.
 
 ## Final state (11:35Z)
+(Later the same day the kernel moved on: `sf/kernel.bin` is `56759b9f…` since 22:43Z, this kernel plus one LinuxKPI fix for the GPU teardown panic; `sf/kernel.bin.old` is `821cb932…`. See SF-R-storage.md and SF-AC-vulkan.md.)
 SiliconForest on the disk with `sf/kernel.bin` `821cb932…` (trackpad swipes), the standard state of the
 night: `/usr/bin/chonkstep-darwin-desktop.next` = desk-next-011 `bb9a2c9b…` (with the inject module,
 running), `/usr/bin/chonkstep-darwin-desktop` = desk-daily-011 `71da0543…` (without it),

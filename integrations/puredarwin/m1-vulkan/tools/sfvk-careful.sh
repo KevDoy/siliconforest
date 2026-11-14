@@ -20,7 +20,8 @@ MAX_RUN=${MAX_RUN:-300}   # the command is killed (SIGKILL) if it still runs aft
 cd "$ROOT"
 # gui.lock is HELD for the whole run (whoever runs a risky test owns the recovery if it drops)
 exec 9>>runs/m1-coord/gui.lock
-[ -n "${SFVK_SELFTEST:-}" ] || { echo "waiting for gui.lock (up to 30 min)"; flock -w 1800 9; } || { echo "gui.lock stayed held: not now"; exit 3; }
+# SFVK_HAVE_GUI_LOCK=1: the caller holds gui.lock for a whole session of runs
+[ -n "${SFVK_SELFTEST:-}${SFVK_HAVE_GUI_LOCK:-}" ] || { echo "waiting for gui.lock (up to 30 min)"; flock -w 1800 9; } || { echo "gui.lock stayed held: not now"; exit 3; }
 [ -n "${SFVK_SELFTEST:-}${SFVK_IGNORE_CORE:-}" ] || flock -n runs/m1-coord/core.lock true || { echo "core.lock is held (core install pipeline): not now"; exit 3; }
 [ -n "${SFVK_SELFTEST:-}" ] || echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) VK risky GPU test over SSH (may take the M1 down; kernel log streamed live): $name: $cmd" >> runs/m1-coord/log.txt
 OUT=runs/sfvk/$name.txt
@@ -34,6 +35,8 @@ if [ "${SFVK_UART:-1}" = 1 ]; then
   $M5 'mkdir -p ~/vk-serial' && scp -q -o HostKeyAlias=10.1.1.93 -o BatchMode=yes "$HERE/m5_uart_capture.py" \
     "chriskearney@${M5_HOST:-10.1.1.55}:vk-serial/" || { echo "M5 not reachable: no capture, not running"; exit 4; }
   BENCH_WHO=VK tools/bench.sh run $M5 "sudo -n $VDM serial" | tail -1
+  # one reader only: an older capture still holding the device would take the bytes
+  $M5 'for p in $(pgrep -f "[m]5_uart_capture.py"); do kill $p; done; true'
   $M5 "cd ~/vk-serial && rm -f $name.txt && nohup python3 m5_uart_capture.py $name.txt $((MAX_RUN + WATCH_AFTER + 120)) >/dev/null 2>&1 &"
   echo "UART capture running on the M5 (~/vk-serial/$name.txt)"
 fi

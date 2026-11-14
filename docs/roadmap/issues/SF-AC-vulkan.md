@@ -98,7 +98,8 @@ What happened (runs/sfvk/vk-tri-00*.txt, runs/m1-coord/log.txt):
 | 3 (~460 s) | `ASAHI_MESA_DEBUG=sync`: an infinite timeline wait inside `vkQueueSubmit`, then as run 2 | the machine stopped answering at ~21:06:30Z (uptime ~500 s) and came back in Linux by itself |
 
 No panic text survived: the serial cable was disconnected then, SiliconForest writes no panic log,
-the PMU count was read only after clean reboots. Lead hypothesis (not proven): the death came
+the PMU count was read only after clean reboots. (The hypothesis below was wrong; the reproduction
+further down found the real cause.) Lead hypothesis at the time: the death came
 about 100 s after run 2, which is the GPU scheduler's job timeout (`drm_sched` timeout 100000 ms
 in `queue/mod.rs`); run 2 exited while its job (which takes about 1.5 ms) could still be in
 flight, so the scheduler's timeout work may have run after the queue's scheduler was finalised, or
@@ -133,9 +134,61 @@ disk install is therefore still unknown. A next attempt needs a RAM root with ro
 without the desktop payload, or the slim stager `m1-boot-speed/tools/stage_ramdisk_slim.py` that
 `tools/gpu_desktop.sh` uses) and `PCIE_EXTRA_FILES` with the seven files.
 
+### The crash reproduced and explained (14 November 22:22-22:27Z, disk system, UART captured)
+
+Session `vk-teardown-*` (runs/sfvk/; announced, gui.lock, `macvdmtool serial` and a capture of
+`/dev/cu.debug-console` on the M5 verified with a marker first, `sync` before each trigger):
+
+- **(a) `_exit` right after 200 submits** (about 75 ms of GPU work left in flight): the machine
+  survived the 120 s watch. Kernel log: `QueueJob 1664..1668: Job canceled on DRM scheduler
+  teardown`, then five `GPU timeout` reports with fault info `reason: Unmapped`, reads of the
+  test's shader code (`0x11fffbc000`, unit UL1C), compute data (`0x2fffeac000`, gCDM) and the VDM
+  control stream (`0x2fffed0400`, dVDM_CSD) in VM slot 2, each followed by `Attempting recovery...`.
+  The process's GEM handles were closed (and their GPU mappings dropped) while the firmware still
+  ran its jobs.
+- **(b) the DRM files closed after 200 submits, process alive**: the kernel panicked 0.2 s after
+  the trigger (`runs/sfvk/vk-teardown-001-uart.txt`): `panic(cpu 5 caller ...): Mutex
+  0xfffffe0011d05618 is unexpectedly not owned by thread ... @lock_mtx.c:148`, panicked task
+  kernel_task. Symbolized against the installed collection (KC slide `0xb0b8000`; PDAgx's UUID
+  `6B3B1C5C...` equal in the panic, the collection and the kext build) and PDAgx's link map:
+  `thread_entry` -> `tq_handle_thread` -> `taskqueue_run_locked+0x10c` -> `pdos_mtx_unlock` on
+  `Giant`. (c) was not reached.
+
+Cause, found by reading with that stack: Haiku's copy of FreeBSD's taskqueue in our LinuxKPI layer
+(`src/Kernel/fbsdkpi/haiku/freebsd_network/fbsd_subr_taskqueue.c`, compiled into every kext built
+with `add_fbsdkpi_driver`: PDAgx and PDDcp in the installed collection) reads `task->ta_flags`
+**after** `task->ta_func` returns, to decide whether to drop Giant. A LinuxKPI work item embeds its
+task, and a Linux work function may free its own work item (the GPU recovery work does); the read
+is then a use after free, and freed memory with `TASK_NEEDSGIANT` set unlocks a Giant nobody
+holds. FreeBSD's own taskqueue never touches the task after the call. Fix: layer patch
+`m1-rust-kext/lkpi/patches-layer/0041` (the flag is read before the call), one change for both
+kexts (PDDcp builds from the same patched layer, `m1-dcp/build-kext.nix`). The 21:06Z crash had the
+same shape (a process exited with work in flight; no text survived then).
+
+**The fix on the M1 (22:41-23:08Z):** `sf/kernel.bin` `56759b9f…` = the installed kit `821cb932…` (rebuilt
+without the patch: byte for byte) plus patch 0041; only PDAgx and PDDcp change in the collection (their
+`taskqueue_run_locked` no longer reloads `ta_flags` after the call). Installed with `sf-bootbin-install.sh`
+(`kernel.bin.old` = `821cb932…`), one-time boot, up at 22:43Z (`kern.kernelcacheuuid` 742E0857 -> D184D33A).
+With the UART captured (`runs/sfvk/vk-teardown-002-uart.txt`, no panic line): variants a, b, c with 200
+frames, then with 3000 frames in flight; a with 3000 drove 10 GPU timeouts and 10 firmware recoveries
+(the event that preceded the 22:24Z panic) and the machine stayed up through b and c after it. Health
+afterwards: the compositor alive (same pid since boot), the GL off-screen test passes by hash
+(`agx-offscreen-test --expect-b 8fee6b41…`, installed GL Mesa), vkcube 300 frames in a window. One
+observation: while the display is asleep (idle, 300 s) the compositor sends no frame callbacks, so vkcube
+(FIFO) waits until the display wakes; that is pacing, not a GPU hang. The new kernel stays installed.
+
+The first event, mappings dropped under jobs the firmware still runs, is not our port's: in
+linux-aurora a GEM handle close calls `File::unbind_gem_object` -> `Vm::drop_mappings`, and Linux's
+`drm_file_free` calls `drm_gem_release` (handle close) **before** the driver's `postclose` (the
+queues). Only G15 and G17 VMs carry `VmLifetime` (`Vm::with_status`/`with_tracked_status`), which
+defers handle-close unmaps while accepted jobs can still use the object; G13 VMs unmap at once, so
+the same GPU faults are expected on Linux for a process killed with work in flight, and the
+firmware recovery handles them. What must be robust is the recovery path, which the fix is about.
+Bringing `VmLifetime` to G13 would avoid the faults; not attempted.
+
 ### Open items
 
-- The teardown/timeout panic above (kernel).
+- `/dev/pdavd` absent on the disk kernel (Codex's finding): the next, separate kernel change.
 - Install the GL Mesa with the clock and `ETIME` fixes (147a62f + 0011 + `pd-etime.h`); not done.
 - A test that would catch a missing implicit-sync fence (a heavy frame per present), and the
   compositor's fence counters; `wp_linux_drm_syncobj_v1` in Chonkstep (explicit sync) would be the
