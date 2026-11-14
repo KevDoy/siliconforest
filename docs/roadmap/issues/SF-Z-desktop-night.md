@@ -486,6 +486,29 @@ for a Mac application without windows (the dock knows toplevels only), stale min
    close to that window only; if it quits, that is AppKit's). The clock column: the time, "SAT 14" and "17%  0.5G" read
    clearly; NET shows the send rate and no receive figure; the Activity Monitor tile reads its whole name.
 
+### The theme and the dock's tiles (coordinator, after the first final install)
+The desk had been left by DESK2 in Relay (wallpaper `relay`) with three launcher tiles (Chonkstep terminal,
+Terminal.app, Activity Monitor). On the M1 `/private/var/db/desktop-state/chonkstep/dock` was rewritten at 20:29Z with
+Activity Monitor only, and `theme`/`wallpaper` at 20:32Z with `nextstep-classic`/`lavender-grid` (a pick of the first
+row of the desk menu's Theme submenu writes exactly these two). Both are before DESK3's first use of the M1 (21:31Z),
+in the owner's own session; the session logs of then were rotated away by the reboots of 20:31Z and 21:06Z.
+- Theme and wallpaper: most likely the owner's own choice; **left as they are** (the coordinator asks him).
+- The pins: one way the dock loses tiles by itself was found and fixed — a click whose pointer drifted a few pixels past
+  the strip's edge before the release (a trackpad click at the edge of the last tile) was taken as a drag off the strip
+  and unpinned the tile (host test `a_click_that_drifts_off_the_strips_edge_does_not_unpin`, **fails on the old dock**:
+  the bottom tile is unpinned by a 6-pixel drift). A tile is now unpinned only when dropped at least half a tile away
+  from the strip, and a drop where it was writes nothing. The three pins of `integrations/puredarwin/desktop/system/
+  dock-pins` were **restored** (the file of 20:29 kept as `dock.before-desk3-restore`).
+- The title bar of the window at the panel's left edge (`d5-final-daily`): light grey with a close box only =
+  NeXTSTEP Classic's inactive title bar (that theme has miniaturize at the left and close at the right, no zoom); its
+  miniaturize button lay under the launcher strip. The owner wants maximise to honour only the right column ("we are ok
+  with it overlapping launchers and minimized tiles"), so the strip still reserves nothing; instead a window placed for
+  the first time is moved clear of the strip (`place_clear_of_launchers`, log `WMLAYER placed window=… clear of the
+  launcher strip`); maximise and dragging may still cover it. Not exercised on the M1: the terminal requested after
+  the relaunch was placed at the lower left, clear of the strip already; the session's startup terminal still lies
+  under the strip, because it maps before the dock starts (`d6-restored-daily`: the three tiles back, NeXTSTEP
+  Classic kept).
+
 ### Host tests (final source, `runs/m1-desktop-010/desk3-tests/`)
 wm-darwin (`--features desktop-shell`): lib 137/137 (with the launch-debounce and app-menu tests); wayland_shm 16/17,
 wayland_scale 3/4, wayland_dmabuf 5/5, wayland_theme 3/3. The two failures are the base's
@@ -499,21 +522,25 @@ window menu. chonk-shell 303/303 (+4 ignored), wm-core's new switcher-hide test,
 110, chonk-instruments 254 (+1). `python3 tools/check.py --sanitize --cross`: rc 0.
 
 ### On the disk and how to go back
-- `/usr/bin/chonkstep-darwin-desktop` = desk3-daily-006 `aa92e5e4…` (no inject; running; `/private/var/db/desktop-inject`
+- `/usr/bin/chonkstep-darwin-desktop` = desk3-daily-008 `43f174ea…` (no inject; running; `/private/var/db/desktop-inject`
   and the runtime inject directory removed), before: `.before-desk3` (desk2-daily-008 `3e89453a…`); `.next` =
-  desk3-next-006 `c69a173a…` (inject), before: `.next.before-desk3` (desk2-next-008); `/usr/bin/chonkstep-dock` =
-  desk3-dock-006 `8378a65e…`, before: `.before-desk3` (desk2-dock-008 `53601217…`); `.safe` unchanged (`b1104b75…`).
+  desk3-next-008 `95202f4d…` (inject), before: `.next.before-desk3` (desk2-next-008); `/usr/bin/chonkstep-dock` =
+  desk3-dock-008 `e196d285…`, before: `.before-desk3` (desk2-dock-008 `53601217…`); `.safe` unchanged (`b1104b75…`).
+  `/private/var/db/desktop-state/chonkstep/dock` restored to the three default pins, before: `dock.before-desk3-restore`
+  (theme and wallpaper untouched).
   Hashes taken right after each copy, before anything ran them (a running binary reads back with its PAC
-  instructions lowered to NOPs: the daily then hashes `1b0eca59…`, not a change on the disk).
-- Revert: `ln -f <path>.before-desk3 <path>.back && mv -f <path>.back <path>` for the three binaries, then
+  instructions lowered to NOPs: the daily then hashes differently, not a change on the disk).
+- Revert: `ln -f <path>.before-desk3 <path>.back && mv -f <path>.back <path>` for the three binaries (and
+  `mv dock.before-desk3-restore dock` in the state directory if wanted), then
   `echo relaunch > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop`.
 - Source: compositor patch 13 `integrations/puredarwin/terminal-app/compositor/wm-darwin-owner-round.patch` (applied
-  to a fresh copy of `desk2-src` it gives the build sources of desk3-next-006, desk3-daily-006 and desk3-dock-006
+  to a fresh copy of `desk2-src` it gives the build sources of desk3-next-008, desk3-daily-008 and desk3-dock-008
   exactly, `diff -r`).
 - Captures (`runs/m1-desktop-010/desk3-tests/shots/`): `d3-a-start` (Terminal.app over Activity Monitor), `d3-b`/`d3-c`/
   `d3-d` (pointer and frame before/during/after a resize), `d3-e-typed`/`d3-f-moved` (hidden while typing, back on
   moving), `d3-g`/`d3-h` (window menus), `d3-i`/`d3-j` (Maximize/Restore from it), `d4-a-start` (the dock column and
-  strip), `d4-c`..`d4-f` (switcher: pointer, H), `d5-final-daily` (the daily build, through the socket), window dumps
+  strip), `d4-c`..`d4-f` (switcher: pointer, H), `d5-final-daily` (the daily build, NeXTSTEP theme and one tile),
+  `d6-restored-daily` (the daily build after the pins' restore, through the socket), window dumps
   `d3a-*`, `d4a.txt`.
 
 ### Protocol for the application's menu (compositor side done, AppKit side asked of COCOA4)

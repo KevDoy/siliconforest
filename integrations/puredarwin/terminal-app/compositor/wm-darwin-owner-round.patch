@@ -980,6 +980,39 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/inp
      }
  }
  
+diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/layers.rs desk3-src/crates/wm-darwin/src/layers.rs
+--- desk2-src/crates/wm-darwin/src/layers.rs	2026-11-14 11:44:15.177150327 -0800
++++ desk3-src/crates/wm-darwin/src/layers.rs	2026-11-14 14:16:00.534710565 -0800
+@@ -35,6 +35,29 @@
+ }
+ 
+ impl Server {
++    /// A window placed for the first time is moved out from under the dock's launcher strip
++    /// (namespace `chonk-dock-launcher`, which reserves no space: maximise and dragging may still
++    /// cover it, as the owner wants), so its title bar's buttons are not born under a tile.
++    pub(crate) fn place_clear_of_launchers(&mut self, window: u64) {
++        let Some(frame) = self.wm.backend().window_frame_rect(window) else { return };
++        let overlaps = |r: &Rect| r.pos.x < frame.pos.x + frame.size.w as i32 && frame.pos.x < r.pos.x + r.size.w as i32
++            && r.pos.y < frame.pos.y + frame.size.h as i32 && frame.pos.y < r.pos.y + r.size.h as i32;
++        let Some(right) = self.layers.iter()
++            .filter(|l| l.namespace == "chonk-dock-launcher" && l.shell.is_some() && l.exclusive.is_none() && !l.hidden)
++            .filter(|l| overlaps(&l.rect))
++            .map(|l| l.rect.pos.x + l.rect.size.w as i32)
++            .max() else { return };
++        let dx = right - frame.pos.x;
++        let screen = self.wm.backend().screen_size();
++        let room = screen.w as i32 - (frame.pos.x + frame.size.w as i32 + dx);
++        if dx <= 0 || room < -(frame.size.w as i32) / 2 {
++            return; // no room beside the strip: left where wm-core placed it
++        }
++        let Some(id) = self.wm.client_for_window(window) else { return };
++        let Some(content) = self.wm.client(id).map(|c| c.geometry) else { return };
++        eprintln!("WMLAYER placed window={window} clear of the launcher strip: x {} -> {}", frame.pos.x, frame.pos.x + dx);
++        self.wm.set_client_content_geometry(id, Rect::new(Point::new(content.pos.x + dx, content.pos.y), content.size));
++    }
+     fn layer_index(&self, surface: &WlSurface) -> Option<usize> {
+         self.layers.iter().position(|l| l.surface.wl_surface() == surface)
+     }
 diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/lib.rs desk3-src/crates/wm-darwin/src/lib.rs
 --- desk2-src/crates/wm-darwin/src/lib.rs	2026-11-14 10:38:00.034390760 -0800
 +++ desk3-src/crates/wm-darwin/src/lib.rs	2026-11-14 13:19:33.933188661 -0800
@@ -1565,7 +1598,7 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/sce
                      height: g.size.h,
 diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/server.rs desk3-src/crates/wm-darwin/src/server.rs
 --- desk2-src/crates/wm-darwin/src/server.rs	2026-11-14 11:30:08.599764779 -0800
-+++ desk3-src/crates/wm-darwin/src/server.rs	2026-11-14 13:19:33.933530874 -0800
++++ desk3-src/crates/wm-darwin/src/server.rs	2026-11-14 14:16:00.536047871 -0800
 @@ -71,7 +71,7 @@
      live_peers().into_iter().find(|p| p.client.lock().ok().and_then(|c| c.clone()) == Some(id.clone()))
  }
@@ -1638,6 +1671,14 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/ser
              self.cursor_callbacks.clear();
          }
          self.remove(surface);
+@@ -1405,6 +1422,7 @@
+                     }
+                     w.content.size = size;
+                     self.wm.dispatch(BackendEvent::MapRequest(id));
++                    self.place_clear_of_launchers(id);
+                     self.output.enter(surface);
+                     self.apply_early_states(id);
+                 } else {
 diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-darwin/src/settings.rs desk3-src/crates/wm-darwin/src/settings.rs
 --- desk2-src/crates/wm-darwin/src/settings.rs	2026-11-14 02:17:53.012835881 -0800
 +++ desk3-src/crates/wm-darwin/src/settings.rs	2026-11-14 13:07:40.256100717 -0800
@@ -1987,7 +2028,7 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/crates/wm-theme/src/rast
      pub(crate) fn modern_system(&self) -> std::cell::RefMut<'_, cosmic_text::FontSystem> {
 diff -ruN '--exclude=.git' '--exclude=target' desk2-src/dock/crates/chonk-dock/src/launchdock.rs desk3-src/dock/crates/chonk-dock/src/launchdock.rs
 --- desk2-src/dock/crates/chonk-dock/src/launchdock.rs	2026-11-14 10:50:02.552298260 -0800
-+++ desk3-src/dock/crates/chonk-dock/src/launchdock.rs	2026-11-14 13:59:10.567806119 -0800
++++ desk3-src/dock/crates/chonk-dock/src/launchdock.rs	2026-11-14 14:12:41.725853733 -0800
 @@ -33,6 +33,9 @@
  
  use crate::apps::{match_window_class, AppEntry};
@@ -2060,7 +2101,7 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/dock/crates/chonk-dock/s
      /// Whether the pin set changed since running lamps were last
      /// reconciled. Kept separate from the shell's client cache because
      /// pinning an application changes no client at all.
-@@ -315,8 +353,17 @@
+@@ -315,10 +353,35 @@
          backend.ungrab_pointer(drag.grab);
  
          if !drag.moved {
@@ -2077,10 +2118,28 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/dock/crates/chonk-dock/s
 +                self.repaint(backend, theme);
 +            }
 +            return Some(action);
++        }
++        // A tile is unpinned only when it is dropped clearly away from the strip (half a tile
++        // or more off it): a click whose pointer drifted a few pixels past the strip's edge (a
++        // trackpad click at the bottom tile's edge) is a cancelled click, not an unpin.
++        let near = |v: i32, lo: i32, hi: i32| v >= lo - self.tile as i32 / 2 && v < hi + self.tile as i32 / 2;
++        let strip_bottom = origin.y + (self.pins.len() as i32) * self.tile as i32;
++        if slot_at(origin, self.tile, self.pins.len(), root).is_none()
++            && near(root.x, origin.x, origin.x + self.tile as i32)
++            && near(root.y, origin.y, strip_bottom)
++        {
++            self.repaint(backend, theme);
++            return None;
          }
          match slot_at(origin, self.tile, self.pins.len(), root) {
++            Some(slot) if slot == drag.index => {
++                // dropped where it was: nothing changes, nothing is written
++                self.repaint(backend, theme);
++            }
              Some(slot) => {
-@@ -465,13 +512,15 @@
+                 move_pin(&mut self.pins, drag.index, slot);
+                 move_pin(&mut self.lit, drag.index, slot);
+@@ -465,13 +528,15 @@
          for (index, pin) in self.pins.iter().enumerate() {
              let lit = self.lit.get(index).copied().unwrap_or(false);
              let icon = crate::apps::entry_icon(pin, self.tile);
@@ -2097,7 +2156,7 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/dock/crates/chonk-dock/s
                  icon.as_deref(),
              );
              if buffer.pixels.len() == slot_bytes {
-@@ -1040,6 +1089,38 @@
+@@ -1040,6 +1105,69 @@
          );
      }
  
@@ -2131,6 +2190,37 @@ diff -ruN '--exclude=.git' '--exclude=target' desk2-src/dock/crates/chonk-dock/s
 +        // Started but never showed a window: after the wait a click launches again.
 +        dock.launching.insert("app.a".into(), std::time::Instant::now() - LAUNCH_WAIT);
 +        assert!(matches!(click(&mut dock, &mut backend, &[]), Some(LaunchDockAction::Launch(_))));
++    }
++
++    /// The owner's strip lost its Terminal tiles (pins file rewritten with Activity Monitor only):
++    /// a press that drifted a little past the strip's edge before its release unpinned the tile.
++    /// Only a drop clearly away from the strip unpins; a drop where the tile was writes nothing.
++    #[test]
++    fn a_click_that_drifts_off_the_strips_edge_does_not_unpin() {
++        use crate::surface::FakeBackend;
++        let theme = wm_theme::default_theme::nextstep_classic();
++        let mut backend = FakeBackend::new();
++        let primary = Rect { pos: Point::new(0, 0), size: Size::new(640, 480) };
++        let mut dock: LaunchDock<FakeBackend> = LaunchDock::new(&mut backend, &theme, primary, 56, &[], wm_theme::FontState::new());
++        dock.state_path = None;
++        dock.pins = vec![entry("org.siliconforest.terminal"), entry("com.apple.Terminal"), entry("com.apple.ActivityMonitor")];
++        dock.lit = vec![false; 3];
++        dock.sync_window(&mut backend, &theme);
++        // press near the bottom of the last tile, drift 6 px down (past the threshold and the strip's end)
++        dock.handle_click(&mut backend, &theme, Point::new(28, 165), true, &[]);
++        dock.handle_motion(&mut backend, &theme, Point::new(28, 171));
++        assert!(dock.handle_release(&mut backend, &theme, Point::new(28, 171)));
++        assert_eq!(ids(&dock.pins), ["org.siliconforest.terminal", "com.apple.Terminal", "com.apple.ActivityMonitor"]);
++        // the same off the right edge
++        dock.handle_click(&mut backend, &theme, Point::new(50, 20), true, &[]);
++        dock.handle_motion(&mut backend, &theme, Point::new(60, 20));
++        assert!(dock.handle_release(&mut backend, &theme, Point::new(60, 20)));
++        assert_eq!(dock.pins.len(), 3);
++        // a deliberate drag well away unpins
++        dock.handle_click(&mut backend, &theme, Point::new(28, 80), true, &[]);
++        dock.handle_motion(&mut backend, &theme, Point::new(200, 80));
++        assert!(dock.handle_release(&mut backend, &theme, Point::new(200, 80)));
++        assert_eq!(ids(&dock.pins), ["org.siliconforest.terminal", "com.apple.ActivityMonitor"]);
 +    }
 +
      #[test]
