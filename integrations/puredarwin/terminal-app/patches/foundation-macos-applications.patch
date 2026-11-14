@@ -570,7 +570,16 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
 --- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
 +++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
-@@ -49,6 +49,21 @@
+@@ -21,6 +21,8 @@
+ #include <string.h>
+ #include <stdio.h>
+ #include <ctype.h>
++#include <pthread.h>
++#include <mach-o/dyld.h>
+ #import <Foundation/NSNull.h>
+ 
+ NSString *const NSUndefinedKeyException = @"NSUndefinedKeyException";
+@@ -49,6 +51,21 @@
      if ([self respondsToSelector:sel_getUid(buffer)]) {
          return sel_getUid(buffer);
      }
@@ -592,7 +601,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      return NULL;
  }
  
-@@ -61,7 +76,17 @@
+@@ -61,7 +78,117 @@
      if (ivar != NULL) {
          return ivar;
      }
@@ -608,10 +617,110 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +        return ivar;
 +    }
 +    return class_getInstanceVariable([self class], buffer + 1);
++}
++
++/* Where -valueForKey: finds a key of a class: its getter, its instance variable, or neither
++ * (-valueForUndefinedKey:). The search formats up to nine method and variable names and asks the
++ * runtime for each; a terminal reads a few keys of the same objects thousands of times a second
++ * while it draws. Apple's key-value coding keeps the same answers. Classes that answer
++ * -respondsToSelector: themselves are searched each time; every answer is forgotten when an image
++ * is loaded (a bundle's categories may add accessors). */
++typedef struct { Class cls; char *name; unsigned hash; SEL getter; Ivar ivar; } PDKVCEntry;
++#define PDKVC_SLOTS 4096
++static PDKVCEntry *kvcTable;
++static unsigned kvcCount;
++static pthread_mutex_t kvcLock = PTHREAD_MUTEX_INITIALIZER;
++
++static unsigned kvcHash(Class cls, const char *name) {
++    unsigned hash = (unsigned)((uintptr_t)cls >> 3) * 2654435761u;
++
++    while (*name)
++        hash = hash * 31 + (unsigned char)*name++;
++    return hash;
++}
++
++static void kvcForgetLocked(void) {
++    if (kvcTable == NULL)
++        return;
++    for (unsigned i = 0; i < PDKVC_SLOTS; i++)
++        free(kvcTable[i].name);
++    memset(kvcTable, 0, sizeof(PDKVCEntry) * PDKVC_SLOTS);
++    kvcCount = 0;
++}
++
++static void kvcImageAdded(const struct mach_header *header, intptr_t slide) {
++    pthread_mutex_lock(&kvcLock);
++    kvcForgetLocked();
++    pthread_mutex_unlock(&kvcLock);
++}
++
++static BOOL kvcCached(Class cls, const char *name, SEL *getter, Ivar *ivar) {
++    BOOL hit = NO;
++    unsigned hash = kvcHash(cls, name);
++
++    pthread_mutex_lock(&kvcLock);
++    if (kvcTable != NULL) {
++        for (unsigned i = 0; i < PDKVC_SLOTS; i++) {
++            PDKVCEntry *entry = &kvcTable[(hash + i) % PDKVC_SLOTS];
++
++            if (entry->cls == Nil)
++                break;
++            if (entry->cls == cls && entry->hash == hash && strcmp(entry->name, name) == 0) {
++                *getter = entry->getter;
++                *ivar = entry->ivar;
++                hit = YES;
++                break;
++            }
++        }
++    }
++    pthread_mutex_unlock(&kvcLock);
++    return hit;
++}
++
++static void kvcRemember(id self, Class cls, const char *name, SEL getter, Ivar ivar) {
++    static IMP plain;
++    static BOOL watching;
++
++    if (plain == NULL)
++        plain = class_getMethodImplementation([NSObject class], @selector(respondsToSelector:));
++    if (cls == Nil || class_getMethodImplementation(cls, @selector(respondsToSelector:)) != plain)
++        return;
++    unsigned hash = kvcHash(cls, name);
++
++    pthread_mutex_lock(&kvcLock);
++    if (!watching) {
++        watching = YES;
++        pthread_mutex_unlock(&kvcLock);
++        // called at once for every image already loaded, then for each new one
++        _dyld_register_func_for_add_image(kvcImageAdded);
++        pthread_mutex_lock(&kvcLock);
++    }
++    if (kvcTable == NULL)
++        kvcTable = calloc(PDKVC_SLOTS, sizeof(PDKVCEntry));
++    if (kvcTable != NULL && kvcCount >= PDKVC_SLOTS * 3 / 4)
++        kvcForgetLocked();
++    for (unsigned i = 0; kvcTable != NULL && i < PDKVC_SLOTS; i++) {
++        PDKVCEntry *entry = &kvcTable[(hash + i) % PDKVC_SLOTS];
++
++        if (entry->cls == cls && entry->hash == hash && strcmp(entry->name, name) == 0)
++            break;
++        if (entry->cls == Nil) {
++            entry->name = strdup(name);
++            if (entry->name == NULL)
++                break;
++            entry->cls = cls;
++            entry->hash = hash;
++            entry->getter = getter;
++            entry->ivar = ivar;
++            kvcCount++;
++            break;
++        }
++    }
++    pthread_mutex_unlock(&kvcLock);
  }
  
  /* Boxes whatever the getter returns, based on its encoded return type. */
-@@ -177,6 +202,58 @@
+@@ -177,6 +304,58 @@
      return YES;
  }
  
@@ -670,7 +779,37 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  @implementation NSObject (NSKeyValueCoding)
  
  + (BOOL)accessInstanceVariablesDirectly {
-@@ -199,6 +276,12 @@
+@@ -184,14 +363,26 @@
+ }
+ 
+ - (id)valueForKey:(NSString *)key {
+-    SEL getter = selectorForGetter(self, key);
++    const char *name = [key UTF8String];
++    Class cls = object_getClass(self);
++    SEL getter = NULL;
++    Ivar found = NULL;
++
++    // the search below formats up to nine names; its answer for a class and a key is kept
++    if (name == NULL || !kvcCached(cls, name, &getter, &found)) {
++        getter = selectorForGetter(self, key);
++        if (getter == NULL && [[self class] accessInstanceVariablesDirectly])
++            found = ivarForKey(self, key);
++        if (name != NULL)
++            kvcRemember(self, cls, name, getter, found);
++    }
+ 
+     if (getter != NULL) {
+         return boxedReturnValue(self, getter);
+     }
+ 
+-    if ([[self class] accessInstanceVariablesDirectly]) {
+-        Ivar ivar = ivarForKey(self, key);
++    if (found != NULL && [[self class] accessInstanceVariablesDirectly]) {
++        Ivar ivar = found;
+ 
+         if (ivar != NULL) {
+             const char *type = ivar_getTypeEncoding(ivar);
+@@ -199,6 +390,12 @@
              if (type != NULL && (type[0] == '@' || type[0] == '#')) {
                  return object_getIvar(self, ivar);
              }
@@ -683,7 +822,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
          }
      }
      return [self valueForUndefinedKey:key];
-@@ -210,14 +293,26 @@
+@@ -210,14 +407,26 @@
      /* No isa-swizzling here, so this is where automatic KVO notification
       * happens: anything routed through KVC notifies its observers. */
      BOOL notifies = [[self class] automaticallyNotifiesObserversForKey:key];
@@ -713,7 +852,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      if ([self respondsToSelector:setter]) {
          if (!setThroughSetter(self, setter, value, key))
              ((void (*)(id, SEL, id))objc_msgSend)(self, setter, value);
-@@ -246,6 +341,19 @@
+@@ -246,6 +455,19 @@
                  }
                  return;
              }
@@ -733,7 +872,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
          }
      }
      if (notifies) {
-@@ -260,7 +368,13 @@
+@@ -260,7 +482,13 @@
      id current = self;
  
      for (NSUInteger i = 0; i < count && current != nil; i++) {
@@ -748,7 +887,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
      }
      return current;
  }
-@@ -320,3 +434,131 @@
+@@ -320,3 +548,131 @@
  }
  
  @end

@@ -5,7 +5,10 @@
 // November also: key-value coding reaches a scalar instance variable and the accessors named
 // -_key and -_setKey:, a subclass of NSAttributedString keeps its own object, and a bundle's
 // resource paths are whole paths (the second build of that patch; the first passes only the
-// observing part, so the installer replaces it).
+// observing part, so the installer replaces it). Since 15 November also: -valueForKey: keeps where
+// it found a key of a class (the third build): 200000 reads of an instance variable take less than
+// a fifth of a second (each formatted up to nine names before), and the values stay right.
+#include <time.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
 #import <objc/runtime.h>
@@ -61,6 +64,31 @@ static int second_build(void)
     return bad;
 }
 
+// the third build's addition; 0 when it holds
+static int third_build(void)
+{
+    SFScalar *o = [[SFScalar alloc] init];
+    SFLeaf *leaf = [[SFLeaf alloc] init];
+    struct timespec a, b;
+    int bad = 0;
+
+    [o setValue:[NSNumber numberWithInt:5] forKey:@"count"];
+    [leaf setName:@"x"];
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    for (int i = 0; i < 100000; i++) {
+        NSAutoreleasePool *pool = [NSAutoreleasePool new];
+        if ([[o valueForKey:@"count"] intValue] != 5 || [leaf valueForKey:@"name"] != [leaf name]) bad |= 1;
+        [pool release];
+    }
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    double ms = (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1e6;
+    if (ms > 200) bad |= 2;
+    @try { [o valueForKey:@"nothing"]; bad |= 4; } @catch (id e) { }
+    @try { [o valueForKey:@"nothing"]; bad |= 4; } @catch (id e) { }
+    printf("sf-kvo-probe: 200000 key-value reads in %.0f ms (wanted under 200)\n", ms);
+    return bad;
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -77,7 +105,7 @@ int main(void)
     int end = root->heard;
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
-    int more = second_build();
+    int more = second_build() | (third_build() << 4);
     BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0;
     printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, ok ? "ok" : "FAIL");
     [pool release];
