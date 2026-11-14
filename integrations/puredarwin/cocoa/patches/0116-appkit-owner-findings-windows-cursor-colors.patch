@@ -1,0 +1,151 @@
+--- a/src/Frameworks/AppKit/NSWindow.m
++++ b/src/Frameworks/AppKit/NSWindow.m
+@@ -305,6 +305,8 @@
+    return self;
+ }
+ 
++static char pdWindowServerWindowGone;   // set once the window server's window of this NSWindow is destroyed
++
+ -initWithContentRect:(NSRect)contentRect styleMask:(unsigned int)styleMask backing:(unsigned)backing defer:(BOOL)defer screen:(NSScreen *)screen {
+     NSRect backgroundFrame;
+     NSRect contentViewFrame;
+@@ -441,6 +443,7 @@
+ }
+ 
+ -(void)dealloc {
++   [self _pdDestroyWindowServerWindow];
+    [_representedURL release];
+    [_colorSpace release];
+     [[NSNotificationCenter defaultCenter] removeObserver:self];
+@@ -2558,15 +2561,26 @@
+ 
+     [self postNotificationName:NSWindowWillCloseNotification];
+ 
++    /* A window kept after -close (releasedWhenClosed NO: Terminal's Preferences, Activity Monitor's CPU
++     * History...) can be ordered front again, as on macOS: it keeps its window-server window, only
++     * ordered out above; that window goes when the object does (-dealloc). Destroying it here left
++     * nothing for a later -makeKeyAndOrderFront: (Terminal's Preferences did not open a second time). */
++    if(_releaseWhenClosed){
++        [self _pdDestroyWindowServerWindow];
++        [self autorelease];
++    }
++}
++
++-(void)_pdDestroyWindowServerWindow {
++    if(objc_getAssociatedObject(self, &pdWindowServerWindowGone) != nil)
++        return;
++    objc_setAssociatedObject(self, &pdWindowServerWindowGone, (id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
+     struct wsRPCWindow data = {
+         { kWSWindowDestroy, sizeof(struct wsRPCWindow) - sizeof(struct wsRPCBase) },
+         _number, _frame.origin.x, _frame.origin.y,
+         _frame.size.width, _frame.size.height, (_styleMask&~NSFullScreenWindowMask), 0, {'\0'}, _level
+     };
+     _windowServerRPC(&data, sizeof(data), NULL, NULL);
+-
+-    if(_releaseWhenClosed)
+-        [self autorelease];
+ }
+ 
+ -(void)center {
+--- a/src/Frameworks/AppKit/NSCursor.m
++++ b/src/Frameworks/AppKit/NSCursor.m
+@@ -7,6 +7,7 @@
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
+ 
+ #import <AppKit/NSCursor.h>
++void _windowServerSetCursorHidden(int hidden); /* WindowServer (rpc.h): 0 shown, 1 hidden, 2 until the pointer moves */
+ #import <AppKit/NSDisplay.h>
+ #import <AppKit/NSImage.h>
+ #import <Foundation/NSNull.h>
+@@ -393,19 +394,26 @@
+    return shared;
+ }
+ 
++/* As macOS counts them: +hide and +unhide balance, and +setHiddenUntilMouseMoves:YES hides the pointer only
++ * until it moves (Terminal calls it at every key typed). The WindowServer library shows such a pointer again on
++ * its next motion (_windowServerSetCursorHidden(2)); before, nothing did, and the pointer stayed invisible over
++ * the application's windows after typing (seen after resizing a Terminal window and coming back to it). */
++static int pdCursorHideCount;
++
+ +(void)hide {
+-   [[NSDisplay currentDisplay] hideCursor];
++   if(pdCursorHideCount++==0)
++    _windowServerSetCursorHidden(1);
+ }
+ 
+ +(void)unhide {
+-   [[NSDisplay currentDisplay] unhideCursor];
++   if(pdCursorHideCount>0 && --pdCursorHideCount==0)
++    _windowServerSetCursorHidden(0);
+ }
+ 
+ +(void)setHiddenUntilMouseMoves:(BOOL)flag {
+-   if(flag)
+-    [self hide];
+-   else
+-    [self unhide];
++   if(pdCursorHideCount>0)
++    return;
++   _windowServerSetCursorHidden(flag ? 2 : 0);
+ }
+ 
+ -initWithImage:(NSImage *)image foregroundColorHint:(NSColor *)foregroundHint backgroundColorHint:(NSColor *)backgroundHint hotSpot:(NSPoint)hotSpot {
+--- a/src/Frameworks/AppKit/NSApplication.m
++++ b/src/Frameworks/AppKit/NSApplication.m
+@@ -1588,11 +1588,12 @@
+ -(void)_checkForTerminate {
+    int  count=[_windows count];
+ 
+-   /* As on macOS an app outlives its last window unless its delegate asks otherwise - where
+-    * there is a menu bar or a Dock to reach it by. On a desktop whose windows carry the menu
+-    * (NSWindowMenuStrip.m) an application without a window can never be reached again: there it
+-    * ends once its last window has been closed (the default PDQuitsWithLastWindow=NO keeps it),
+-    * through -terminate:, so its delegate is still asked. */
++   /* As on macOS an app outlives its last window unless its delegate asks otherwise: the desk
++    * keeps an AppKit application without windows in Command-Tab and the Dock and brings it back
++    * through org.puredarwin.appkit.reopen (-_reopen). PDQuitsWithLastWindow=YES ends it once its
++    * last window has been closed on a desktop whose windows carry the menu (NSWindowMenuStrip.m),
++    * as before the desk knew windowless applications, through -terminate:, so its delegate is
++    * still asked. */
+    BOOL asks=[_delegate respondsToSelector:@selector(applicationShouldTerminateAfterLastWindowClosed:)];
+    BOOL unreachable=[self _pdEndsWithLastWindow];
+ 
+@@ -1628,7 +1629,7 @@
+    if(allowed<0){
+     id value=[[NSUserDefaults standardUserDefaults] objectForKey:@"PDQuitsWithLastWindow"];
+ 
+-    allowed=(value!=nil && ![value boolValue]) ? 0 : 1;
++    allowed=(value!=nil && [value boolValue]) ? 1 : 0;
+    }
+    if(!allowed)
+     return NO;
+--- a/src/Frameworks/AppKit/NSPathCell.m
++++ b/src/Frameworks/AppKit/NSPathCell.m
+@@ -220,7 +220,11 @@
+      [currentPath appendString: @"/"];
+      [currentPath appendString: path];
+      
+-     NSURL    *currentURL = [[[NSURL alloc] initWithScheme: scheme host: host path: currentPath] autorelease];
++     // (not -initWithScheme:host:path:, which this Foundation lacks: its exception left Terminal's
++     // Preferences window unshown)
++     NSURL    *currentURL = isFileURL ? [NSURL fileURLWithPath: currentPath]
++         : [NSURL URLWithString: [NSString stringWithFormat: @"%@://%@%@", scheme, host ? host : @"",
++             [currentPath stringByAddingPercentEscapesUsingEncoding: NSUTF8StringEncoding]]];
+      NSString *title;
+      NSImage  *image;
+ 				
+--- a/src/Frameworks/AppKit/NSModernAppKit.m
++++ b/src/Frameworks/AppKit/NSModernAppKit.m
+@@ -61,6 +61,12 @@
+     return [self colorWithCalibratedRed:red green:green blue:blue alpha:alpha];
+ }
+ 
++// macOS 10.7's generic constructor: components in sRGB (Activity Monitor's CPU Usage and History bars)
+++ (NSColor *)colorWithRed:(CGFloat)red green:(CGFloat)green blue:(CGFloat)blue alpha:(CGFloat)alpha
++{
++    return [self colorWithCalibratedRed:red green:green blue:blue alpha:alpha];
++}
++
+ // display p3 shares sRGB's transfer curve, so only the primaries need converting, in linear light
+ + (NSColor *)colorWithDisplayP3Red:(CGFloat)red green:(CGFloat)green blue:(CGFloat)blue alpha:(CGFloat)alpha
+ {

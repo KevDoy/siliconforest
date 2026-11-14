@@ -7,7 +7,8 @@
 #   am-0106/  = am-0105/ + 0106 (frozen)
 #   am-0107/  = am-0106/ + 0107 (frozen)
 #   am-0109/  = am-0107/ + 0108, 0109 (frozen; COCOA3, evening of 14 November)
-#   am/       = am-0109/ + 0110 on (the current tree)
+#   am-0115/  = am-0109/ + 0110..0115 (frozen; COCOA3)
+#   am/       = am-0115/ + 0116 on (the current tree; COCOA4)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -34,15 +35,21 @@ mk am-0107 am-0109 0108-appkit-menu-item-getters-autoreleased.patch $A/NSMenu.su
 mk am-0107 am-0109 0109-coregraphics-imageio-thumbnail-metadata.patch src/Frameworks/CoreGraphics/CGImageMetadata.h src/Frameworks/CoreGraphics/CGImageMetadata.m
 ( diff -rq am-0107 am-0109 ) | sed 's/^/differs from am-0107: /'
 # 0110, 0111 on: am-0109 -> am (the current tree)
-mk am-0109 am 0110-appkit-collection-view-from-finch.patch $A/NSCollectionView/NSCollectionView.h $A/NSCollectionView/NSCollectionView.m \
+mk am-0109 am-0115 0110-appkit-collection-view-from-finch.patch $A/NSCollectionView/NSCollectionView.h $A/NSCollectionView/NSCollectionView.m \
   $A/NSCollectionView/NSCollectionViewItem.h $A/NSCollectionView/NSCollectionViewItem.m $A/NSCollectionView/NSCollectionViewLayout.h \
   $A/NSCollectionView/NSCollectionViewLayout.m $A/NSActivityMonitorAdditions.m $A/NSViewController.h $A/NSViewController.m
-mk am-0109 am 0111-appkit-catalog-images-symbols-from-finch.patch $A/PDCUIPrivate.h $A/PDCUIRendition.m $A/PDCUICodecs.h \
+mk am-0109 am-0115 0111-appkit-catalog-images-symbols-from-finch.patch $A/PDCUIPrivate.h $A/PDCUIRendition.m $A/PDCUICodecs.h \
   $A/PDCUIDeepmap.m $A/PDCUIImage.m $A/NSImage.m $A/PDSymbolGlyphs.m $A/NSSymbolImages.m $A/NSImageSymbolConfiguration.m
-mk am-0109 am 0112-appkit-solve-time-trace.patch $A/NSLayoutConstraint.m
-mk am-0109 am 0113-appkit-toolbar-buttons-macos26.patch $A/NSButtonCell.m $A/NSToolbar.subproj/NSToolbarView.m \
+mk am-0109 am-0115 0112-appkit-solve-time-trace.patch $A/NSLayoutConstraint.m
+mk am-0109 am-0115 0113-appkit-toolbar-buttons-macos26.patch $A/NSButtonCell.m $A/NSToolbar.subproj/NSToolbarView.m \
   $A/NSToolbar.subproj/NSToolbarItemView.m
-mk am-0109 am 0114-appkit-overlay-scrollers.patch $A/NSScroller.m $A/NSScrollView.m $A/NSScrollView.h $A/NSView.m \
+mk am-0109 am-0115 0114-appkit-overlay-scrollers.patch $A/NSScroller.m $A/NSScrollView.m $A/NSScrollView.h $A/NSView.m \
   $A/NSMacOS26Additions.m $A/NSModernAppKit.m
-mk am-0109 am 0115-appkit-cgevent-autoreleased.patch $A/NSEvent.subproj/NSEvent_Modern.m
-( diff -rq am-0109 am ) | sed 's/^/differs from am-0109: /'
+mk am-0109 am-0115 0115-appkit-cgevent-autoreleased.patch $A/NSEvent.subproj/NSEvent_Modern.m
+( diff -rq am-0109 am-0115 ) | sed "s/^/differs from am-0109: /"
+# 0116 on (COCOA4, night of 14 November): am-0115 -> am
+mk am-0115 am 0116-appkit-owner-findings-windows-cursor-colors.patch $A/NSWindow.m $A/NSCursor.m $A/NSApplication.m $A/NSPathCell.m \
+  $A/NSModernAppKit.m
+mk am-0115 am 0117-windowserver-cursor-shown-when-the-pointer-moves.patch src/Frameworks/WindowServer/rpc_wayland.c
+mk am-0115 am 0118-coregraphics-icc-and-indexed-color-spaces.patch src/Frameworks/CoreGraphics/CGColorSpace.h src/Frameworks/CoreGraphics/CGColorSpace.m
+( diff -rq am-0115 am ) | sed 's/^/differs from am-0115: /'

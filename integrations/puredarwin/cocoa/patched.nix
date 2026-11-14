@@ -239,6 +239,17 @@
 #         with nothing to scroll hidden; in the legacy style the square where two scrollers meet is painted
 #   0115  AppKit: -[NSEvent CGEvent] autoreleases with -autorelease (CoreFoundation's CFAutorelease does not
 #         autorelease a CF-owned object: every CGEvent asked for leaked)
+#   0116  AppKit (COCOA4, the owner's findings): a window kept after -close keeps its window-server window
+#         (destroyed with the object), so Terminal's Preferences opens again after Command-W; NSCursor's +hide/
+#         +unhide counted and +setHiddenUntilMouseMoves: hides only until the pointer moves (the pointer stayed
+#         invisible over Terminal after typing); an application outlives its last window (PDQuitsWithLastWindow
+#         =YES for the old rule); NSPathCell without -[NSURL initWithScheme:host:path:]; +[NSColor
+#         colorWithRed:green:blue:alpha:] (Activity Monitor's CPU windows raised on it)
+#   0117  WindowServer: a pointer hidden until it moves is shown at its next motion or entry, on the input
+#         thread; PD_CURSOR_TRACE=1
+#   0118  CoreGraphics: CGColorSpaceCreateWithICCData/ICCProfile/ICCBased keep the profile (CGColorSpaceCopyICCData),
+#         model and components from its header; CGColorSpaceCreateIndexed and the indexed getters (Codex's
+#         bodies); kCGColorSpaceCoreMedia709
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -312,6 +323,7 @@ let
     ./patches/0113-appkit-toolbar-buttons-macos26.patch
     ./patches/0114-appkit-overlay-scrollers.patch
     ./patches/0115-appkit-cgevent-autoreleased.patch
+    ./patches/0116-appkit-owner-findings-windows-cursor-colors.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -321,6 +333,7 @@ let
     ./patches/0036-windowserver-present-on-release-tab-toplevel.patch
     ./patches/0043-windowserver-sheet-parent.patch
     ./patches/0058-windowserver-activation-configure-timing.patch
+    ./patches/0117-windowserver-cursor-shown-when-the-pointer-moves.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -348,6 +361,7 @@ let
     ./patches/0025-coregraphics-private-additions.patch
     ./patches/0102-coregraphics-activity-monitor-cgs.patch
     ./patches/0109-coregraphics-imageio-thumbnail-metadata.patch
+    ./patches/0118-coregraphics-icc-and-indexed-color-spaces.patch
   ];
   coregraphics = optimised (pd."coregraphics-arm64".override { src = coregraphicsSrc; });
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
