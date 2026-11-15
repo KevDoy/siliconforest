@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 13:57Z)
+## Current target and observed state (owner change; updated 14:34Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,20 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** installed non-AVE CIO21, kernel source `a7cf6b22e`,
+**Observed in Darwin:** installed non-AVE CIO22, kernel source `455ea303f`,
+capsule `8f3800a8bf4c…`, qualified14:31:04Z; UART reaped before lock release
+14:31:06Z. Standard desktop/injection, Wi-Fi, RTKit/NHI/PHY and actual
+catalogue/UID/snapshot checks pass. The new five-control comparison rules out
+a root sleep or TBT3-disable mismatch: those controls agree with active Linux.
+The primary port's TBT3-mode/bonded/configured flags are clear only in Darwin;
+these are observations, not bits to force. Both lanes remain unplugged7,
+remote0. Actual TS3 approval returns ENODEV19/count1 and independent PCI
+inventory exit2/functions0, no native host. Firmware logs again show cable411,
+Phase1 then Phase2, no Phase3. All57 modules are non-AVE; no pdave boot argument
+or endpoint mapper is present. The installed image includes the separate
+PCIe-C physical-power access guard, which has not executed without a peer.
+
+**Previously qualified CIO21 lifecycle:** kernel source `a7cf6b22e`,
 CLI `0d36fe096`, capsule `e0519170e573…`, qualified13:46:19Z; owned UART
 reaped13:46:21Z before lock release. The normal desktop/Wi-Fi/NHI/RTKit/PHY and
 snapshot ABI remain healthy. At13:45:17Z an actual administrator peerless
@@ -1955,7 +1968,7 @@ IOPCIFamily interrupt indexes marked PCIMessaged. It must be supplied an actual
 AIC-backed MSI route; the Wi-Fi bridge's custom MSI function alone is not that
 integration. No fabricated interrupt index or successful MSI stub is supplied.
 
-### Focused USB4 control observation: source/SDK, target pending
+### Focused USB4 control observation: CIO22 qualified
 
 The existing root/physical-port snapshot now also reads exactly ROUTER_CS5/6/26
 (sleep, TBT3 capability and router-operation status) and the actual primary
@@ -1970,12 +1983,42 @@ thread or timer, only three additional packets per explicit/startup snapshot.
 Ordinary/enum native SDKs and all six required repository checks pass. The first
 SDK attempt failed because the native setProperty data overload takes a mutable
 pointer; the local offsets array was corrected, the failed receipt retained,
-and the second build passes. These controls are not yet observed on Darwin.
+and the second build passes. CIO22 now observes these controls on Darwin.
 Linux's root sleep/TBT3-disable flags are clear; its primary port reports TBT3,
 bonded/configured, no reset or initialization-disable request and no training
 in progress. Differences will be interpreted against source, not forced blindly.
-The prospective image includes the separate PCIe-C host power guard and excludes
-the endpoint mapper. CIO21 remains the installed non-AVE rollback baseline.
+The installed image includes the separate PCIe-C host power guard and excludes
+the endpoint mapper. CIO21 remains the qualified non-AVE rollback baseline.
+
+CIO22/source455ea303f/capsule8f3800a8bf4c installed14:29:43Z and qualified
+14:31:04Z; its UART reader was reaped before lock release14:31:06Z. Standard
+`.next` desktop/injection, Wi-Fi, NHI/RTKit/owned PHY, catalogue and UID checks
+pass. Snapshot count is1 at startup, unchanged by UID65534 denial, then2 after
+the explicit root query. Firmware start count1/retrain count0 are unchanged.
+Both initial and explicit snapshots agree:
+
+| Public control | Active Linux | Darwin | Meaning supported by the pinned source |
+| --- | --- | --- | --- |
+| ROUTER_CS5 | `0x0` | `0x0` | Sleep/TBT3-disable and tunneling flags agree. |
+| ROUTER_CS6 | `0x01000000` | `0x01000000` | Router-ready set; sleep/TBT3-not-supported flags clear in both. |
+| ROUTER_CS26 | `0x11` | `0x10` | Last operation differs (allocation versus query); neither operation-valid/unsupported flag set. Not a stable configuration mismatch. |
+| Primary PORT_CS18 | `0x3710` | `0x410` | TBT3 mode and bonding clear only in Darwin; bits12/13 also differ. Training-in-progress is clear in both. |
+| Primary PORT_CS19 | `0xe` | `0x6` | Configured bit3 clear only in Darwin. No reset or initialization-disable request in either. |
+
+PORT_CS18 CPS means CLx support, not cable power. PC can reflect successful
+peer discovery; it is not evidence to force configuration on an unplugged
+lane. No status bit was written. The secondary lane correctly reports no USB4
+capability (unsupported optional controls), while its base PHY read succeeds.
+Native firmware logs show the real cable parameter411, Phase1 then Phase2,
+without Phase3. Both lanes remain state7/remote0. TS3 approval returns native
+ENODEV19 (CLI exit1), and independent PCI inventory returns2 with zero
+functions/no native host. No dock PCI, Ethernet, USB or DP success is implied.
+This narrows the next investigation to the low-speed lane-init boundary;
+matching root controls do not explain that failure.
+
+This Linux visit again sees the dock and Keychron3434:0610. Its interface0
+is HID boot-keyboard class/subclass/protocol03/01/01; two other HID interfaces
+are03/00/00. This is Linux evidence only. No owner change is needed.
 
 ### Native I210 MSI transport: separate SDK variant, not installed
 
@@ -2013,3 +2056,35 @@ revocation or ambiguous ownership retains the real objects until reboot;
 nonblocking revocation is explicitly not an IRQ/work/endpoint drain. No MSI
 interrupt, I210 DMA, Ethernet link/DHCP or cable teardown has been observed on
 Darwin. Those remain hardware milestones after dock router/link discovery.
+
+### Dock USB storage write barrier: separate SDK, not installed
+
+The existing PCI xHCI driver is RavynXHCIPort, with an IOUSBFamily bus and
+mass-storage child. Its generic PCI path still uses physical DMA addresses;
+the direct DWC3 lifetime/DART variant does not supply the dock's shared
+PCIe-C SID0 domain. The enumeration profile therefore still excludes the
+generic PCI personality. The I210-only mapper/MSI preparation above does not
+admit any USB controller. No dock keyboard or stick is observed on Darwin.
+
+`build-dock-usb-readonly.nix` prepares a separate SDK variant over the existing
+USB lifetime patch. Its storage patch reports write protection, completes block
+writes with NotWritable before preparing memory or submitting a transfer, and
+also rejects writes at the lower SCSI READ/WRITE helper. Exact application to
+the pinned PureDarwin source passes with zero fuzz; the first handwritten hunk
+failed in a temporary copy and was replaced with a generated exact diff.
+The separate native SDK now builds; it is not installed. It does not claim
+mapper, MSI, bus-master admission, a read-only mount, or endpoint teardown.
+One source-staging attempt was interrupted after a shell failed to stop at a
+refused lock-wait cancellation; it did not complete an SDK. That coordination
+error is recorded in log.txt. The successful build ran after CIO22 ended and
+its UART was reaped. No target action or AVE work came from this USB variant.
+
+### Load-average interpretation follow-up
+
+Pinned XNU `osfmk/kern/sched_average.c:compute_averages` samples the runnable
+bucket minus the maintenance thread, then passes that sample to BSD's
+five-second `compute_averunnable` update. A thread merely sleeping in the
+NVMe timed wait does not itself count as runnable. Thus the old NVMe stack
+sample alone proves neither the elevated load nor spinning. The measured
+quiet CPU/NHI and desktop-thread accounting above remain the evidence; the
+reported AppKit slowdown and elevated load have no confirmed common cause.
