@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-{ gpuBacking ? false }:
+{ gpuBacking ? false, nv12Backing ? false }:
+assert !nv12Backing || gpuBacking;
 let
  a=import ../cocoa/arm64.nix;
  drm=(import ../m1-vulkan/common.nix).p.libdrm-dri-arm64;
@@ -12,6 +13,9 @@ let
   ${a.pkgs.patch}/bin/patch -p1 < ${./iosurface-patches/0001-private-standalone-broker.patch}
   ${a.pkgs.lib.optionalString gpuBacking ''
    ${a.pkgs.patch}/bin/patch -p1 < ${./iosurface-patches/0002-opt-in-dmabuf-fileport-storage.patch}
+   ${a.pkgs.lib.optionalString nv12Backing ''
+    ${a.pkgs.patch}/bin/patch -p1 < ${./iosurface-patches/0003-nv12-gpu-planes-and-local-use-count.patch}
+   ''}
   ''}
  '';
  raw=a.iosurface.override {src=patched;};
