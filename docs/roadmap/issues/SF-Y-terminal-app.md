@@ -413,8 +413,8 @@ on the M1: `networking-probe --native https://example.com` HTTP 200, 577 bytes (
 the library reports its install path, so the CA is found at `/usr/share/certs` once installed); missing CA -1202, 0
 bytes. Cost: libFoundation 2.5 -> 9.7 MB, load-time fixups 12.4k -> 39.5k; a tiny Foundation program 40.3/41.4 ms ->
 42.2/42.2 ms a run (40 runs each, the new one with `DYLD_LIBRARY_PATH`). Not rehearsed or installed (QEMU rehearsal and
-the guarded installer still to do). The install stage (`build-macos-apps-root.nix`) now carries it
-(`SF_FOUNDATION=plain` for the one without) and `build-compat.nix` takes QuartzCore's library from `patched.nix`, so a
+the guarded installer still to do). The install stage (`build-macos-apps-root.nix`) carries it with
+`SF_FOUNDATION=networking` (the default stays the Foundation without it until it is installed) and `build-compat.nix` takes QuartzCore's library from `patched.nix`, so a
 later `sf_terminal.sh install direct` does not put the unpatched QuartzCore back.
 
 ## Performance: optimised core libraries (15 November, night; PERF)

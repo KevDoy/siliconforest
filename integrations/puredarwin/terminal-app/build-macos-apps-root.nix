@@ -6,8 +6,8 @@
 #   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix (optimised; SF_LIBSYSTEM=debug: -O0)
 #   usr/lib/libobjc.A.dylib                      ./build-libobjc.nix (PD_POOL_TRACE read once; SF_LIBOBJC=old:
 #                                                not in the tree, the root keeps PureDarwin's)
-#   usr/lib/libFoundation.dylib                  ./build-foundation-networking.nix (./build-foundation.nix + networking;
-#                                                SF_FOUNDATION=plain: without), its CA bundle in usr/share/certs
+#   usr/lib/libFoundation.dylib                  ./build-foundation.nix (SF_FOUNDATION=networking: ./build-foundation-
+#                                                networking.nix, its CA bundle in usr/share/certs)
 #   usr/lib/libCoreFoundation.dylib              ./build-corefoundation.nix (-O2; CFAutorelease autoreleases)
 #   usr/lib/swift/*.dylib                        ./build-swift-runtime.nix
 #   usr/lib/libWindowServer.dylib, AppKit.framework (binary and resources), CoreText.framework,
@@ -43,9 +43,9 @@ let
   libsystem = import ./build-libsystem.nix;
   optimised = builtins.getEnv "SF_LIBSYSTEM" != "debug";
   libobjc = if builtins.getEnv "SF_LIBOBJC" == "old" then null else import ./build-libobjc.nix;
-  # (TERM7) libFoundation with Foundation's networking (NSURLSession ...; ./build-foundation-networking.nix);
-  # SF_FOUNDATION=plain: the one without it
-  foundation = if builtins.getEnv "SF_FOUNDATION" == "plain" then import ./build-foundation.nix else import ./build-foundation-networking.nix;
+  # (TERM7) SF_FOUNDATION=networking: libFoundation with Foundation's networking (NSURLSession ...;
+  # ./build-foundation-networking.nix), the default once it is rehearsed and installed; until then the one without
+  foundation = if builtins.getEnv "SF_FOUNDATION" == "networking" then import ./build-foundation-networking.nix else import ./build-foundation.nix;
   corefoundation = import ./build-corefoundation.nix { };
   swift = import ./build-swift-runtime.nix;
   compat = import ./build-compat.nix;
