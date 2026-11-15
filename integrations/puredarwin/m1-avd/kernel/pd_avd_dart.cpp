@@ -80,6 +80,7 @@ dmaMemory(size_t bytes, bool contiguous)
 int
 PDAvdDart::reprogram()
 {
+    if (poisoned) return ENXIO;
 	uint64_t l1pa = l1MD->getPhysicalSegment(0, NULL, kIOMemoryMapperNone);
 
 	/* apple_dart_hw_reset() for this stream, then attach: TTBR, translate, flush */
@@ -146,16 +147,25 @@ PDAvdDart::attach(const char *path, uint32_t stream)
 IOBufferMemoryDescriptor *
 PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 {
-    if (!bytes || bytes > PD_AVD_DART_SPAN) return NULL;
+    if (poisoned || !bytes || bytes > PD_AVD_DART_SPAN) return NULL;
     IOBufferMemoryDescriptor *md=dmaMemory((bytes+PAGE_16K-1)&~(PAGE_16K-1),false);
     if (!md) return NULL;
-    if (mapMemory(md,bytes,iovaOut)) {md->complete();md->release();return NULL;}
+    if (mapMemory(md,bytes,iovaOut)) {
+        if (poisoned) {
+            /* Keep the prepared reference: stale translations may still name
+             * these pages. This unrecoverable reservation lasts until reboot. */
+            quarantinedBytes+=(bytes+PAGE_16K-1)&~(PAGE_16K-1);
+            quarantinedDescriptors++;
+        } else {md->complete();md->release();}
+        return NULL;
+    }
     return md;
 }
 
 bool PDAvdDart::aliasesMapped(const uint64_t *sortedPages,size_t count)
 {
     bool found=false;
+    if (poisoned) return true;
     IOLockLock(lock);
     for (unsigned t=0;t<PD_AVD_DART_L2S&&!found;t++) if (l2[t])
         for (unsigned p=0;p<PTES;p++) {
@@ -170,6 +180,7 @@ bool PDAvdDart::aliasesMapped(const uint64_t *sortedPages,size_t count)
 int
 PDAvdDart::mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iovaOut)
 {
+    if (poisoned) return ENXIO;
     if (!md || !iovaOut || !bytes || bytes > PD_AVD_DART_SPAN) return EINVAL;
     uint32_t need = (uint32_t)((bytes + PAGE_16K - 1) >> PAGE_SHIFT_16K);
     if (md->getLength() < ((IOByteCount)need << PAGE_SHIFT_16K)) return EINVAL;
@@ -227,9 +238,17 @@ PDAvdDart::mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iovaOut)
 				bitmap[(start + j) / 8] &= ~(1u << ((start + j) % 8));
 			}
 			__asm__ volatile("dsb sy" ::: "memory");
-			invalidate(regs, 1u << sid);
+            int flushError=invalidate(regs,1u<<sid);
+            if (flushError) {
+                poisoned=true;
+                /* Do not reuse any part of the selected IOVA range after a
+                 * failed rollback flush. The caller must retain backing. */
+                for(uint32_t j=0;j<need;j++) bitmap[(start+j)/8]|=1u<<((start+j)%8);
+                mappedBytes+=(uint64_t)need<<PAGE_SHIFT_16K;
+                *iovaOut=PD_AVD_DART_BASE+((uint64_t)start<<PAGE_SHIFT_16K);
+            }
 			IOLockUnlock(lock);
-			return ENOMEM;
+			return flushError?flushError:ENOMEM;
 		}
 		l2[t][(iova & (L2_SPAN - 1)) >> PAGE_SHIFT_16K] =
 		    (pa & APPLE_DART1_PADDR_MASK) | APPLE_DART1_PTE_PROT_SP_DIS | APPLE_DART_PTE_VALID;
@@ -248,29 +267,33 @@ PDAvdDart::mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iovaOut)
 	return 0;
 }
 
-void
-PDAvdDart::free(IOMemoryDescriptor *md, uint64_t iova, size_t bytes)
+int
+PDAvdDart::unmapMemory(uint64_t iova,size_t bytes)
 {
-	uint32_t need = (uint32_t)((bytes + PAGE_16K - 1) >> PAGE_SHIFT_16K);
-	uint32_t start = (uint32_t)((iova - PD_AVD_DART_BASE) >> PAGE_SHIFT_16K);
-
-	if (md == NULL)
-		return;
-	IOLockLock(lock);
-	for (uint32_t i = 0; i < need; i++) {
-		uint64_t v = iova + ((uint64_t)i << PAGE_SHIFT_16K);
-		uint32_t t = (uint32_t)((v - PD_AVD_DART_BASE) / L2_SPAN);
-
-		if (l2[t] != NULL)
-			l2[t][(v & (L2_SPAN - 1)) >> PAGE_SHIFT_16K] = 0;
-		bitmap[(start + i) / 8] &= ~(1u << ((start + i) % 8));
-	}
-	__asm__ volatile("dsb sy" ::: "memory");
-	invalidate(regs, 1u << sid);
-	mappedBytes -= (uint64_t)need << PAGE_SHIFT_16K;
-	IOLockUnlock(lock);
-	md->complete();
-	md->release();
+    if (poisoned) return ENXIO;
+    if (!bytes || bytes>PD_AVD_DART_SPAN || (iova&(PAGE_16K-1)) ||
+        iova<PD_AVD_DART_BASE || iova>=PD_AVD_DART_BASE+PD_AVD_DART_SPAN) return EINVAL;
+    uint32_t need=(uint32_t)((bytes+PAGE_16K-1)>>PAGE_SHIFT_16K);
+    uint32_t start=(uint32_t)((iova-PD_AVD_DART_BASE)>>PAGE_SHIFT_16K);
+    if(need>pages-start)return EINVAL;
+    IOLockLock(lock);
+    for(uint32_t i=0;i<need;i++) if(!(bitmap[(start+i)/8]&(1u<<((start+i)%8)))) {
+        IOLockUnlock(lock);return EINVAL;
+    }
+    for(uint32_t i=0;i<need;i++) {
+        uint64_t v=iova+((uint64_t)i<<PAGE_SHIFT_16K);
+        uint32_t t=(uint32_t)((v-PD_AVD_DART_BASE)/L2_SPAN);
+        if(l2[t])l2[t][(v&(L2_SPAN-1))>>PAGE_SHIFT_16K]=0;
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+    int error=invalidate(regs,1u<<sid);
+    if(error)poisoned=true;
+    else {
+        for(uint32_t i=0;i<need;i++)bitmap[(start+i)/8]&=~(1u<<((start+i)%8));
+        mappedBytes-=(uint64_t)need<<PAGE_SHIFT_16K;
+    }
+    IOLockUnlock(lock);
+    return error;
 }
 
 uint32_t

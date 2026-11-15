@@ -30,9 +30,12 @@ struct PDAvdDart {
 	uint32_t                  faults;
 	uint64_t                  mappedBytes, peakBytes;
 	bool                      attached;
+    bool poisoned;
+    uint64_t quarantinedBytes;
+    uint32_t quarantinedDescriptors;
 
 	PDAvdDart() : l1MD(NULL), l1(NULL), bitmap(NULL), pages(0), hint(0), lock(NULL), sid(0), faults(0), mappedBytes(0),
-	    peakBytes(0), attached(false)
+	    peakBytes(0), attached(false), poisoned(false), quarantinedBytes(0), quarantinedDescriptors(0)
 	{
 		for (unsigned i = 0; i < PD_AVD_DART_L2S; i++) {
 			l2MD[i] = NULL;
@@ -50,10 +53,12 @@ struct PDAvdDart {
 	 */
 	IOBufferMemoryDescriptor *alloc(size_t bytes, uint64_t *iova);
     /* Already-prepared memory, ownership stays with caller on failure. Success
-     * maps unused IOVA; free() then completes/releases the supplied descriptor. */
+     * maps unused IOVA; unmapMemory() must succeed before the caller releases its descriptor. */
     int mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iova);
     bool aliasesMapped(const uint64_t *sortedPages, size_t count);
-    void free(IOMemoryDescriptor *md, uint64_t iova, size_t bytes);
+    /* Only removes translations. Caller releases backing AFTER success.
+     * Invalidation failure poisons all further DMA until reboot. */
+    int unmapMemory(uint64_t iova, size_t bytes);
 	/* Logs and clears a pending fault; returns the raw error register (0: none). */
 	uint32_t check(const char *why);
 };

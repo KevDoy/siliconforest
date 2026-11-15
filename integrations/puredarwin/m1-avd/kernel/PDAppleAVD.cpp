@@ -36,6 +36,7 @@
 #include <IOKit/IOService.h>
 #include <kern/clock.h>
 #include <kern/task.h>
+#include <kern/task_ref.h>
 #include <kern/thread.h>
 #include <libkern/OSAtomic.h>
 #include <miscfs/devfs/devfs.h>
@@ -57,6 +58,7 @@
 
 extern "C" {
 vnode_t vfs_rootvnode(void);
+task_t proc_task(proc_t); /* retained XNU BSD/KPI signature; no SDK header copy */
 }
 
 #define LOG(fmt, ...) IOLog("PDAppleAVD: " fmt "\n", ##__VA_ARGS__)
@@ -84,6 +86,7 @@ struct Context {
 	struct pd_avd_session *session;
 	struct pdavd_format    format;
 	pid_t                  owner;
+    task_t ownerTask;
 	uint32_t               buffers;
 	IOMemoryMap           *maps[PDAVD_MAX_BUFFERS];
     bool submitted, imported;
@@ -95,8 +98,11 @@ struct DmaCookie {
     bool prepared;
 	uint64_t                  iova;
 	size_t                    bytes;
+    DmaCookie *quarantineNext;
+    bool quarantined;
 };
 
+static DmaCookie *gQuarantined; /* prepared pins/maps deliberately retained until reboot */
 static PDAppleAVD  *gService;
 static IOLock      *gLock;          /* every ioctl, open and close */
 static IOLock      *gWait;          /* the completion wait */
@@ -233,6 +239,7 @@ pd_avd_os_dma_alloc(size_t bytes, uint64_t *iova, void **cookie)
 
 	if (c == NULL)
 		return NULL;
+    bzero(c,sizeof(*c));
 	c->bytes = bytes;
     c->kernelMap=NULL;c->prepared=true;
     IOBufferMemoryDescriptor *memory=gDart.alloc(bytes, &c->iova);
@@ -246,19 +253,26 @@ pd_avd_os_dma_alloc(size_t bytes, uint64_t *iova, void **cookie)
 	return memory->getBytesNoCopy();
 }
 
+static void quarantine_dma(DmaCookie *c)
+{
+    if(c->quarantined)return;
+    c->quarantined=true;c->quarantineNext=gQuarantined;gQuarantined=c;
+    gDart.quarantinedDescriptors++;
+    gDart.quarantinedBytes+=(c->bytes+16383)&~(size_t)16383;
+}
 extern "C" void
 pd_avd_os_dma_free(void *cookie)
 {
-	DmaCookie *c = (DmaCookie *)cookie;
-
-	if (c == NULL)
-		return;
-    if (c->kernelMap) {c->kernelMap->unmap();c->kernelMap->release();}
-    if (c->md) {
-        if (c->iova) gDart.free(c->md,c->iova,c->bytes);
-        else {if(c->prepared)c->md->complete();c->md->release();}
+    DmaCookie *c=(DmaCookie*)cookie;if(!c)return;
+    if(gDart.poisoned || (c->md&&c->iova&&gDart.unmapMemory(c->iova,c->bytes))) {
+        /* Never complete/unmap/release pinned backing unless invalidation is
+         * established. No further AVD jobs are admitted after poison. */
+        gDart.poisoned=true;
+        quarantine_dma(c);return;
     }
-	IOFree(c, sizeof(DmaCookie));
+    if(c->kernelMap){c->kernelMap->unmap();c->kernelMap->release();}
+    if(c->md){if(c->prepared)c->md->complete();c->md->release();}
+    IOFree(c,sizeof(DmaCookie));
 }
 
 extern "C" void
@@ -465,6 +479,7 @@ context_destroy(Context *c)
 		}
 	}
 	pd_avd_session_destroy(c->session);
+    if(c->ownerTask)task_deallocate(c->ownerTask);
 	bzero(c, sizeof(*c));
 }
 
@@ -489,11 +504,10 @@ reap_contexts(void)
 		if (c->session == NULL)
 			continue;
 		p = proc_find(c->owner);
-		if (p != NULL) {
-			proc_rele(p);
-			continue;
-		}
-		LOG("context %u: its process %d is gone; released", i, c->owner);
+        bool sameTask=p && proc_task(p)==c->ownerTask;
+        if(p)proc_rele(p);
+        if(sameTask)continue;
+		LOG("context %u: its original task for pid %d is gone; released", i, c->owner);
 		/* the task's mappings went with the task */
 		for (unsigned b = 0; b < PDAVD_MAX_BUFFERS; b++)
 			OSSafeReleaseNULL(c->maps[b]);
@@ -557,6 +571,7 @@ do_create(struct pdavd_create *req)
 		return -ret;
 	}
 	c->owner = proc_selfpid();
+    c->ownerTask=current_task();task_reference(c->ownerTask);
 	c->buffers = req->buffers;
 	req->ctx = slot;
 	req->format = c->format;
@@ -582,7 +597,7 @@ do_map(struct pdavd_map *req)
 	void *vaddr, *cookie;
 	size_t size;
 
-	if (c == NULL || req->index >= c->buffers || c->owner != proc_selfpid())
+	if (c == NULL || req->index >= c->buffers || (c->owner != proc_selfpid() || c->ownerTask != current_task()))
 		return EINVAL;
 	if (pd_avd_session_buffer(c->session, req->index, &vaddr, &size, &cookie) != 0)
 		return EINVAL;
@@ -610,7 +625,7 @@ static int do_import(struct pdavd_import *req)
     uint64_t *physical=NULL;
     size_t pageCount=0,needed=0,at=0;
     int error=EINVAL;
-    if (!c || c->owner!=proc_selfpid()) return EINVAL;
+    if (!c || (c->owner!=proc_selfpid() || c->ownerTask!=current_task())) return EINVAL;
     if (c->submitted || c->imported) return EBUSY;
     for(unsigned i=0;i<c->buffers;i++) if(c->maps[i]) return EBUSY;
     error=pdavd_import_validate(req,c->buffers,c->format.sizeimage);
@@ -671,7 +686,7 @@ do_decode(struct pdavd_decode *req)
 	void *coded;
 	int err, ret;
 
-	if (c == NULL || c->owner != proc_selfpid() || req->nctrls > PDAVD_MAX_CTRLS || req->size == 0 || req->data == 0)
+	if (c == NULL || (c->owner != proc_selfpid() || c->ownerTask != current_task()) || req->nctrls > PDAVD_MAX_CTRLS || req->size == 0 || req->data == 0)
 		return EINVAL;
 	for (uint32_t i = 0; i < req->nctrls; i++) {
 		uint8_t *ctrl = NULL;
@@ -731,7 +746,7 @@ pd_avd_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag, __
 	int err = ENOTTY;
 
 	IOLockLock(gLock);
-	if (!gUp) {
+	if (!gUp || (gDart.poisoned && cmd!=PDAVD_IOC_INFO && cmd!=PDAVD_IOC_DESTROY)) {
 		IOLockUnlock(gLock);
 		return ENXIO;
 	}
@@ -761,7 +776,7 @@ pd_avd_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag, __
 		break;
 	case PDAVD_IOC_DESTROY: {
 		Context *c = context_of(((struct pdavd_destroy *)data)->ctx);
-		if (c == NULL || c->owner != proc_selfpid()) {
+		if (c == NULL || (c->owner != proc_selfpid() || c->ownerTask != current_task())) {
 			err = EINVAL;
 		} else {
 			context_destroy(c);
@@ -809,10 +824,10 @@ pd_sysctl_text(__unused struct sysctl_oid *oidp, __unused void *arg1, int arg2, 
 		snprintf(text, sizeof(text),
 		    "jobs %llu done %llu errors %llu timeouts %llu resets %u stale %llu irqs %u vp_done %llu unhandled %llu "
 		    "last_status 0x%x last_us %llu max_us %llu mean_us %llu contexts %u opens %u dart_faults %u dart_kib %llu "
-		    "dart_peak_kib %llu",
+		    "dart_peak_kib %llu dart_poisoned %u quarantined_desc %u quarantine_kib %llu",
 		    s.jobs, s.done, s.errors, s.timeouts, gResets, s.stale, gIrqs, s.vp_done, s.unhandled, s.last_status,
 		    s.last_decode_us, s.max_decode_us, s.done ? s.total_decode_us / s.done : 0, contexts_in_use(), gOpens,
-		    gDart.faults, gDart.mappedBytes / 1024, gDart.peakBytes / 1024);
+		    gDart.faults, gDart.mappedBytes / 1024, gDart.peakBytes / 1024, (unsigned)gDart.poisoned, gDart.quarantinedDescriptors, gDart.quarantinedBytes/1024);
 	}
 	return SYSCTL_OUT(req, text, strlen(text) + 1);
 }
