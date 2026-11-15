@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/omacom/linux-aurora",
+  "revision": "6a08a08e57558083f552733a5276d71b1a4d8ff6",
+  "kind": "design references; adapted native bridge/cable parser, no runtime captures",
+  "sha256": {
+    "drivers/thunderbolt/apple.c": "ce86dc0f4c139ac2d052c1f890bdbd15a34af82b4840f0c95cd5ce752bf2dafb",
+    "drivers/thunderbolt/nhi.c": "ac2c7e95366d30fde202bf5d39d7e528d3d321b3270eddb5ee1920f621c66879",
+    "drivers/thunderbolt/nhi_regs.h": "9cea99e2a9d6881bdec51e9bf8d8eb554bf8bdb2c14d6e2b5c4d4057606745db",
+    "drivers/usb/typec/tipd/core.c": "3b1b0a981f2a5653792a7dd8d57b35fa6c1db636bbf11f18c3c3641e4a9294d5",
+    "drivers/usb/typec/tipd/tps6598x.h": "30c7283b082fe68c9e35988b7c2c4fb9d70802d0eeec3b28c67a3a5d5c610ded",
+    "include/linux/usb/typec_tbt.h": "374afc462504ec55535e7ebd3cafa32c6e46036f70d31af6821202ec41f9a5be"
+  }
+}

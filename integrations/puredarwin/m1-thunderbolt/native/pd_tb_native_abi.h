@@ -27,7 +27,16 @@ struct pd_tb_native_ops {
  int (*runtime)(void *,void *device,enum pd_tb_pm_op,int argument);
  /* Fill Linux new_utsname layout from actual OS state. Reject truncation. */
  int (*os_info)(void *,void *out,size_t size);
+ /* Final Linux device release, after devres and before its release callback
+  * can free the device. Also called during teardown of a faulted adapter. */
+ void (*forget)(void *,void *device);
 };
+#ifdef __cplusplus
+extern "C" {
+#endif
 int pd_tb_native_install(const struct pd_tb_native_ops *);
 bool pd_tb_native_ready(void);
+#ifdef __cplusplus
+}
+#endif
 #endif

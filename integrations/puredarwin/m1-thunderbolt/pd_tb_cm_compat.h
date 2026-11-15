@@ -9,6 +9,8 @@
 #include "pd_tb_wire.h"
 #include "pd_tb_device_api.h"
 #include "pd_tb_cm_helpers.h"
+#include "pd_tb_dma_api.h"
+#include "pd_tb_nhi.h"
 #define crc32c pd_tb_crc32c
 #define cpu_to_be32_array pd_tb_to_be32_array
 #define be32_to_cpu_array pd_tb_from_be32_array

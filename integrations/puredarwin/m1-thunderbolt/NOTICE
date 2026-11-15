@@ -100,3 +100,11 @@ The RTKit device-memory copy helper pd_rtkit_iomem.h derives from the pinned
 Linux lib/iomem_copy.c, GPL-2.0-only:
   Copyright 2024 Kalray, Inc. All Rights Reserved.
 The combined native ACIO bundle selects GPL-2.0, including this helper.
+
+
+native/pd_tb_nhi.c and its private ring teardown adaptations derive from
+apple.c/nhi.c at the same pin (native/provenance.json): Copyright (c) Sven
+Peter, The Asahi Linux Contributors; Copyright (c) 2014 Andreas Noever;
+Copyright (C) 2018 Intel Corporation. GPL-2.0 is selected for this bridge.
+The Type-C cable inputs correspond to TIPD's Intel status parser and Linux
+TBT alternate-mode definitions at that pin; no captured cable bytes ship.

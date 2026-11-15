@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <stdint.h>
 struct node { struct device dev;unsigned index; };
-static bool destroyed[16];static unsigned published,unpublished,events,pm_calls;
+static bool destroyed[16];static unsigned published,unpublished,events,pm_calls,forgotten;
 static bool fail_publish,fail_event,bad_os;static int pm_result;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static const struct bus_type bus={.name="test"};
@@ -15,6 +15,7 @@ static void drop_lock(void *ctx) { (void)ctx;assert(!pthread_mutex_unlock(&lock)
 static int publish(void *ctx,void *dev,void *parent,const char *name,const char *type,void **token)
 { (void)ctx;(void)parent;(void)type;assert(name && *name);if(fail_publish)return -EIO;*token=dev;++published;return 0; }
 static void unpublish(void *ctx,void *token) { (void)ctx;assert(token);++unpublished; }
+static void forget(void *ctx,void *dev) { (void)ctx;assert(dev && !((struct device *)dev)->pd_registered);++forgotten; }
 static int event(void *ctx,void *token,int action,const char *const *env,size_t count)
 { (void)ctx;assert(token);assert(action>=0 && action<=2);assert(count==1 && !strcmp(env[0],"TYPE=router"));++events;return fail_event?-EIO:0; }
 static int runtime(void *ctx,void *dev,enum pd_tb_pm_op op,int arg)
@@ -62,7 +63,7 @@ static int match(struct device *dev,const void *ctx) { return dev==ctx; }
 int main(int argc,char **argv)
 {
  (void)argv;assert(bus_register(&bus)==-EPROBE_DEFER);
- struct pd_tb_native_ops ops={NULL,take_lock,drop_lock,publish,unpublish,event,runtime,os_info};
+ struct pd_tb_native_ops ops={NULL,take_lock,drop_lock,publish,unpublish,event,runtime,os_info,forget};
  struct pd_tb_native_ops missing=ops;missing.runtime=NULL;assert(pd_tb_native_install(&missing)==-EINVAL);
  bad_os=true;assert(pd_tb_native_install(&ops)==-EOVERFLOW);assert(!pd_tb_native_ready());bad_os=false;
  assert(!pd_tb_native_install(&ops));assert(pd_tb_native_install(&ops)==-EALREADY);
@@ -101,6 +102,7 @@ int main(int argc,char **argv)
   * production iterator keeps child and parent alive through callback return. */
  assert(device_for_each_child(parent,parent,unregister_child)==7);
  assert(destroyed[0] && destroyed[1]);assert(published==unpublished);
+ assert(forgotten==(argc>1?4u:3u)); // Includes the failed USB4 component and never-published child.
  bus_unregister(&bus);
  printf("native device adapter: publication rollback, bounded events, parent final lifetime, traversal removal and %s power dispatch PASS\n",argc>1?"faulted":"live");return 0;
 }

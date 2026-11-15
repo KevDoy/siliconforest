@@ -5,7 +5,7 @@ external display or Thunderbolt operation has been established on SiliconForest.
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 06:41Z)
+## Current target and observed state (owner change; updated 07:11Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -20,7 +20,7 @@ preflight; CIO02 reached M3 SYSLOG reception, then panicked in an unaligned
 I/O-memory copy. RTKit-ready completion has not been observed. **Not observed:** NHI
 up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
 enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
-The 28 CM/library/native/devres objects, PHY/calibration, DART, crossbar and
+The 30 CM/library/native/devres/NHI objects, PHY/calibration, DART, crossbar and
 external-display work below are source/host/SDK evidence, not those hardware
 acceptance results. DESK5's second-output userland half is built; K1–K13
 remain the kernel contract, including per-CRTC flip IDs and external overlay.
@@ -870,3 +870,45 @@ by WindowServer patch 0124 discarding frames and Activity Monitor recreating
 is separate from the unchanged NVMe worker measured in the kernel A/B; it is
 not a claim that our CPU-only probes established the AppKit timing cause or
 that a USB kernel change fixed those application timings.
+
+
+### Dock-first source progress and install transport (07:11Z)
+
+CIO03 and CIO03B did not reach installation: the former's Linux upload was
+refused; the latter's clean Linux transition did not answer. CIO03B captured
+m1n1 through the next-stage handoff, without a captured panic. The external
+reset recovery reached Linux and the normal installer confirmed unchanged
+USB04; SiliconForest desktop returned at 07:04:24 and the owned reader was
+reaped before lock release. This does not test the SRAM-copy fix. CIO03C is
+retrying the same frozen capsule with one bounded external-reset fallback;
+new source changes below are excluded from that capsule. Transport cause
+remains unestablished; no Linux SSH/firewall/boot configuration was changed.
+
+The private CM coherent/pool DMA adapter now requires real native allocation
+and checked DART retirement callbacks. It accepts only ACIO1 SID1's qualified
+IOVA window, rejects unsupported masks before allocation, zeroes payloads,
+and retains failed/malformed mappings. Fault injection and eight concurrent
+allocation threads pass under ASan/UBSan. Native PDCIODMABuffer has explicit
+retire(), leaving its descriptor/backing owned when invalidation fails. The
+DMA inventory is not a controller/IRQ/worker drain proof.
+
+The Type-C source reads packed Intel VID status 0x59 for TBT, publishing its
+raw device/enter VDO with status/data in one prefix-compatible immutable
+snapshot. Missing cable fields refuse a TBT claim. Cable speed/active/link
+training/generation/legacy changes revoke the shared lease. The current TS3
+status implies 0x411 before the as-yet-unobserved legacy-adapter bit, rather
+than guessing the cable value from USB flags. 128 protocol combinations,
+invalid-state and v1/v2 parsing checks plus native Type-C/USB SDK builds pass.
+This observer still runs at 1 Hz; no new periodic timer is added.
+
+The native NHI bridge now SDK-compiles with the actual Linux ring engine and
+software manager (30 full-target objects). It uses Apple's ring/PDF layout,
+AIC callbacks, W1C status and throttle registers, and explicit native DMA.
+It avoids generic Intel reset/interrupt setup, requires 12 pristine rings,
+valid host DROM and Apple's VSE capability, unlocks ports and programs the
+supplied cable value. PCIe/DP activation explicitly refuses until the actual
+host backends exist. Private ring teardown checks VALID/IRQ readback before
+clearing addresses, joins IRQ and worker before retirement, and quarantines
+all mappings on failure. Domain removal owns its release; no second put is
+issued. Native IORegistry/PM provider and combined kext linkage remain work
+in progress; these compiled bridge objects are not an installed NHI or dock.

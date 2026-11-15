@@ -48,6 +48,7 @@ class PDCIODMABuffer : public IOBufferMemoryDescriptor {
 public:
     static PDCIODMABuffer *allocate(PDCIODart *dart, size_t size, size_t alignment = PD_DART_PAGE);
     uint64_t dmaAddress() const { return dva; }
+    int retire(); // leaves the descriptor/backing retained on failure
     void free() override;
 };
 #endif

@@ -19,6 +19,7 @@
 #define PD_TPS_REG_VID 0x00
 #define PD_TPS_REG_MODE 0x03
 #define PD_TPS_REG_STATUS 0x1a
+#define PD_TPS_REG_INTEL_VID_STATUS 0x59
 #define PD_TPS_REG_DATA_STATUS 0x5f
 #define PD_TPS_STATUS_PLUG_PRESENT (1u << 0)
 #define PD_TPS_STATUS_UPSIDE_DOWN (1u << 4)
@@ -62,6 +63,51 @@ enum pd_cd321x_usb_role {
 struct pd_cd321x_snapshot {
     uint32_t status, data_status, sample, error;
 };
+/* Prefix-compatible v2: publish all cable inputs in the SAME OSData. The
+ * Intel register is packed: mode[0], attention[1:4], enter[5:6], device[7:8].
+ * protocol_vdo contains the raw device mode (low16) and enter VDO (high16).
+ * No unique identity, firmware bytes or independently sampled property here. */
+#define PD_CD321X_TBT_VALID 1u
+struct pd_cd321x_cable_snapshot {
+    struct pd_cd321x_snapshot port;
+    uint32_t protocol_vdo, valid_flags;
+};
+static inline uint32_t pd_cd321x_tbt_vdo(const uint8_t intel[9])
+{
+    return (uint32_t)intel[7] | (uint32_t)intel[8] << 8 |
+           (uint32_t)intel[5] << 16 | (uint32_t)intel[6] << 24;
+}
+static inline int pd_cd321x_snapshot_decode(const void *bytes, size_t len,
+                                           struct pd_cd321x_cable_snapshot *dst)
+{
+    if (!bytes || !dst || (len != sizeof(struct pd_cd321x_snapshot) && len != sizeof(*dst)))
+        return EINVAL;
+    struct pd_cd321x_cable_snapshot state = {{0,0,0,0},0,0};
+    memcpy(&state, bytes, len);
+    *dst = state;
+    return 0;
+}
+/* apple.c's CABLE_INFO value for TBT, from the same TIPD inputs. Linux's
+ * TBT_CABLE_10_AND_20GBPS value is 3, and TBT_ADAPTER is device-mode bit0.
+ * This is a protocol value; it does not assert PHY/NHI readiness. */
+static inline int pd_cd321x_tbt_cable_info(const struct pd_cd321x_cable_snapshot *s,
+                                          uint32_t *info)
+{
+    if (!s || !info || s->port.error || !s->port.sample ||
+        !(s->port.status & PD_TPS_STATUS_PLUG_PRESENT) ||
+        !(s->port.data_status & PD_TPS_DATA_TBT) ||
+        !(s->valid_flags & PD_CD321X_TBT_VALID)) return ENODEV;
+    uint32_t d=s->port.data_status, v=1u | (1u<<10);
+    if (s->port.status & PD_TPS_STATUS_UPSIDE_DOWN) v|=1u<<1;
+    if (d & (1u<<22)) {
+        v|=1u<<2;
+        if (!(d & (1u<<20))) v|=1u<<3;
+    }
+    if (s->protocol_vdo & 1u) v|=1u<<9;
+    if (((d>>25)&7u)==3u) v|=1u<<4;
+    *info=v;
+    return 0;
+}
 
 /* CD321x uses DATA_STATUS for the DWC3 role, distinct from its PD data role
  * in STATUS. See cd321x_update_work(): a TB-only cable does not start DWC3. */

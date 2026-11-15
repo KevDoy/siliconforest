@@ -114,8 +114,8 @@ class PDAppleUSB : public IOService {
     int begin(bool flip,bool ss);
     bool end();
     void sample();
-    bool readCable(pd_cd321x_snapshot &);
-    int observeCable(const pd_cd321x_snapshot &);
+    bool readCable(pd_cd321x_cable_snapshot &);
+    int observeCable(const pd_cd321x_cable_snapshot &);
     int beginAlt(pd_usbc_phy_mode,bool);
     int stopAlt();
     int phyRequest(pd_usbc_phy_request *);
@@ -365,31 +365,32 @@ bool PDAppleUSB::end()
     return true;
 }
 
-bool PDAppleUSB::readCable(pd_cd321x_snapshot &state)
+bool PDAppleUSB::readCable(pd_cd321x_cable_snapshot &state)
 {
     if (!getProvider() || getProvider()->isInactive()) return false;
     OSObject *object=getProvider()->copyProperty("port-state");
     OSData *data=OSDynamicCast(OSData,object);
-    bool valid=data && data->getLength()==sizeof(state);
-    if (valid) bcopy(data->getBytesNoCopy(),&state,sizeof(state));
+    bool valid=data && !pd_cd321x_snapshot_decode(data->getBytesNoCopy(),data->getLength(),&state);
     OSSafeReleaseNULL(object);
-    return valid && !state.error && state.sample;
+    return valid && !state.port.error && state.port.sample;
 }
-int PDAppleUSB::observeCable(const pd_cd321x_snapshot &state)
+int PDAppleUSB::observeCable(const pd_cd321x_cable_snapshot &state)
 {
     uint32_t smask=PD_TPS_STATUS_PLUG_PRESENT|PD_TPS_STATUS_UPSIDE_DOWN|PD_TPS_STATUS_DATAROLE;
-    uint32_t dmask=PD_TPS_DATA_USB2|PD_TPS_DATA_USB3|PD_TPS_DATA_USB_DEVICE|PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4;
-    uint64_t key=((uint64_t)(state.status&smask)<<32)|(state.data_status&dmask);
-    uint32_t eligible=0,d=state.data_status;
-    if (state.status&PD_TPS_STATUS_PLUG_PRESENT) {
+    uint32_t dmask=PD_TPS_DATA_USB2|PD_TPS_DATA_USB3|PD_TPS_DATA_USB_DEVICE|PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4|
+        (7u<<25)|(3u<<28)|(1u<<18)|(1u<<20)|(1u<<22);
+    uint64_t key=((uint64_t)(state.port.status&smask)<<32)|(state.port.data_status&dmask);
+    if ((state.valid_flags&PD_CD321X_TBT_VALID) && (state.protocol_vdo&1u)) key|=UINT64_C(1)<<63;
+    uint32_t eligible=0,d=state.port.data_status;
+    if (state.port.status&PD_TPS_STATUS_PLUG_PRESENT) {
         if (d&PD_CD321X_DATA_USB4) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_USB4);
-        else if (d&PD_TPS_DATA_TBT) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT);
+        else if ((d&PD_TPS_DATA_TBT) && (state.valid_flags&PD_CD321X_TBT_VALID)) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT);
         // A composite USB3+DP cable needs a joint USB/DP session. Do not
         // silently steal its USB lanes for a four-lane DP-only claim.
         else if ((d&PD_TPS_DATA_DP) && !(d&PD_TPS_DATA_USB3)) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_DP);
     }
     uint64_t before=lease.epoch;
-    int ret=pd_usbc_phy_observe(&lease,key,eligible,!!(state.status&PD_TPS_STATUS_UPSIDE_DOWN));
+    int ret=pd_usbc_phy_observe(&lease,key,eligible,!!(state.port.status&PD_TPS_STATUS_UPSIDE_DOWN));
     setProperty("phy-cable-epoch",lease.epoch,64);
     setProperty("phy-eligible-modes",lease.eligible,32);
     if (ret) quarantined=true;
@@ -401,19 +402,19 @@ void PDAppleUSB::sample()
 {
     if (!__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE)) return;
     setProperty("snapshot-check-count",++snapshotChecks,32);
-    pd_cd321x_snapshot state={};
-    if (stopping || !readCable(state) || state.sample==lastSample) return;
-    lastSample=state.sample;
+    pd_cd321x_cable_snapshot state={};
+    if (stopping || !readCable(state) || state.port.sample==lastSample) return;
+    lastSample=state.port.sample;
     if (observeCable(state)) return;
     if (lease.owner) {
         setProperty("alternate-mode-deferred",true);
         setProperty("phy-lease-revoked",lease.phase==PD_USBC_PHY_REVOKED);
         return; // Never drain/reset another client's PHY from this sampler.
     }
-    bool host=pd_cd321x_usb_role(state.status,state.data_status)==PD_CD321X_USB_HOST;
-    bool alt=state.data_status&(PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4);
-    bool flip=state.status&PD_TPS_STATUS_UPSIDE_DOWN;
-    bool ss=state.data_status&PD_TPS_DATA_USB3;
+    bool host=pd_cd321x_usb_role(state.port.status,state.port.data_status)==PD_CD321X_USB_HOST;
+    bool alt=state.port.data_status&(PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4);
+    bool flip=state.port.status&PD_TPS_STATUS_UPSIDE_DOWN;
+    bool ss=state.port.data_status&PD_TPS_DATA_USB3;
     if (active && (!host || alt || flip!=reversed || ss!=superSpeed)) {
         if (!end()) { setProperty("removal-blocked",true); return; }
     }
@@ -615,7 +616,7 @@ void PDAppleUSB::notifyRevoke(thread_call_param_t owner,thread_call_param_t)
 }
 int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
 {
-    pd_cd321x_snapshot state={};bool fresh=readCable(state);
+    pd_cd321x_cable_snapshot state={};bool fresh=readCable(state);
     int ret=fresh?observeCable(state):ENODEV;
     if (req->command==PD_USBC_PHY_RELEASE ||
         ((req->command==PD_USBC_PHY_DP_RATE || req->command==PD_USBC_PHY_TUNNEL_RATE) && !req->rate)) ret=0;

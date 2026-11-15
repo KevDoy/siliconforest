@@ -28,7 +28,7 @@ class PDAppleTypeC : public IOService {
     IOWorkLoop *loop;
     IOTimerEventSource *timer;
     uint8_t address;
-    uint32_t lastStatus, lastData, samples, failures;
+    uint32_t lastStatus, lastData, lastVdo, lastFlags, samples, failures;
     bool valid;
     int blockRead(uint8_t reg, void *dst, unsigned len);
     void sample();
@@ -78,10 +78,15 @@ int PDAppleTypeC::blockRead(uint8_t reg, void *dst, unsigned len)
 
 void PDAppleTypeC::sample()
 {
-    uint8_t status[4], data[4];
+    uint8_t status[4], data[4], intel[9];
     int ret = blockRead(PD_TPS_REG_STATUS, status, sizeof(status));
     if (!ret)
         ret = blockRead(PD_TPS_REG_DATA_STATUS, data, sizeof(data));
+    uint32_t vdo=0, flags=0;
+    if (!ret && (pd_cd321x_le32(data) & PD_TPS_DATA_TBT)) {
+        ret = blockRead(PD_TPS_REG_INTEL_VID_STATUS, intel, sizeof(intel));
+        if (!ret) { vdo=pd_cd321x_tbt_vdo(intel); flags=PD_CD321X_TBT_VALID; }
+    }
     samples++;
     setProperty("sample-count", samples, 32);
     setProperty("last-error", (uint32_t)ret, 32);
@@ -91,7 +96,7 @@ void PDAppleTypeC::sample()
         setProperty("error-count", failures, 32);
         if (failures == 1 || failures % 60 == 0)
             LOG("port 1 status read failed errno=%d (failed samples=%u)", ret, failures);
-        struct pd_cd321x_snapshot snapshot = {lastStatus, lastData, samples, (uint32_t)ret};
+        struct pd_cd321x_cable_snapshot snapshot = {{lastStatus, lastData, samples, (uint32_t)ret},lastVdo,lastFlags};
         setProperty("port-state", &snapshot, sizeof(snapshot));
         messageClients(kIOMessageServicePropertyChange);
         // Failed samples never become disconnects or usable role changes.
@@ -120,8 +125,10 @@ void PDAppleTypeC::sample()
             !!(d & PD_CD321X_DATA_HPD));
     lastStatus = s;
     lastData = d;
+    lastVdo = vdo;
+    lastFlags = flags;
     valid = true;
-    struct pd_cd321x_snapshot snapshot = {s, d, samples, 0};
+    struct pd_cd321x_cable_snapshot snapshot = {{s, d, samples, 0},vdo,flags};
     setProperty("port-state", &snapshot, sizeof(snapshot));
     messageClients(kIOMessageServicePropertyChange);
 }

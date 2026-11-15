@@ -18,7 +18,7 @@ static void release(void *ctx,void *p) { (void)ctx;put_device(p); }
 bool pd_tb_native_ready(void) { return __atomic_load_n(&ready,__ATOMIC_ACQUIRE) && !__atomic_load_n(&fault,__ATOMIC_ACQUIRE); }
 int pd_tb_native_install(const struct pd_tb_native_ops *ops)
 {
- if(!ops || !ops->lock || !ops->unlock || !ops->publish || !ops->unpublish || !ops->event || !ops->runtime || !ops->os_info)return -EINVAL;
+ if(!ops || !ops->lock || !ops->unlock || !ops->publish || !ops->unpublish || !ops->event || !ops->runtime || !ops->os_info || !ops->forget)return -EINVAL;
  if(ready)return -EALREADY;
  struct new_utsname snapshot={0};
  int err=ops->os_info(ops->ctx,&snapshot,sizeof(snapshot));if(err)return err;
@@ -62,6 +62,7 @@ static void final_release(struct kobject *kobj)
  struct device *dev=kobj_to_dev(kobj);
  struct device *parent=dev->pd_parent_held?dev->parent:NULL;
  lkpi_devres_release_free_list(dev);
+ if(__atomic_load_n(&ready,__ATOMIC_ACQUIRE))native.forget(native.ctx,dev);
  if(dev->type && dev->type->release)dev->type->release(dev);
  else if(dev->release)dev->release(dev);
  /* The child may already have been freed. No access to dev from here. */

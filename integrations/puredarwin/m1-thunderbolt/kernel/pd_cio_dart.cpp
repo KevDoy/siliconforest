@@ -230,9 +230,16 @@ PDCIODMABuffer *PDCIODMABuffer::allocate(PDCIODart *mapper, size_t bytes, size_t
     return mem;
 }
 
+int PDCIODMABuffer::retire()
+{
+    if (!dart) return 0;
+    int ret=dart->unmap(dva,span);
+    if (!ret) { dart=NULL;dva=0;span=0; }
+    return ret;
+}
 void PDCIODMABuffer::free()
 {
-    if (dart && dart->unmap(dva, span)) {
+    if (retire()) {
         LOG("DMA buffer unmap failed; backing quarantined");
         return;
     }

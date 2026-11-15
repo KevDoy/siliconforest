@@ -2,7 +2,8 @@
 
 `build-objects.nix` compiles the NHI/ACIO/DP-IN backend with the ARM64 SDK.
 It is **objects only**, not a loaded driver, NHI, connection manager or
-working tunnel. No ACIO registers have been accessed by this port on M1.
+working tunnel. CIO02 reached native M3 SYSLOG reception and panicked in an SRAM I/O copy;
+the diagnosed correction is built, with target retry pending. NHI has not run.
 The owner-attached TS3 Plus remains a Thunderbolt-only Type-C cable flag in
 Darwin; its USB/PCIe/Ethernet/display are not enumerated there.
 
@@ -205,3 +206,19 @@ engine. It is event-driven, caches handles across cable cycles and requires
 mode 2 interrupt rearming; resolution itself does not register/unmask a line.
 Failed PHY acquisition can still own a token after failed cleanup, so the
 native client now retains that returned token and drain identity on error.
+
+
+`native/pd_tb_dma.c` replaces physical-address coherent/pool DMA only for CM
+objects. Its native callbacks must allocate through ACIO1 SID1 and explicitly
+retire mappings before releasing backing. Unsupported masks, IOVA/pointer
+bounds, partial backend failures and failed retirement are checked; faults
+retain backing until reboot. Admission/counters alone prove no hardware drain.
+
+`native/pd_tb_nhi.c` binds the Linux ring engine to Apple's layout/interrupt
+operations and directly starts the software manager, avoiding generic Intel
+reset/interrupt setup. It requires actual native IRQ, power and DMA callbacks
+and native device/publication/PM installation first. PCIe/DP tunnel activation
+is explicitly unsupported until host providers are bound. The private staged
+ring engine verifies VALID/IRQ readback before address clearing and joins
+IRQ/work before DMA retirement. The 30-object SDK target compiles this bridge;
+it neither installs those callbacks nor establishes NHI or dock function.
