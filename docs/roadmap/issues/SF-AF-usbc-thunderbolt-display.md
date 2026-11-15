@@ -2585,3 +2585,63 @@ boot.bin/configuration, zero overlaps and five actual PCI personalities.
 Prelink metadata was reduced160790 to137330 bytes solely by removing XML
 structural whitespace: parsed values and every other file byte are identical.
 Earlier rejected capacity/tool attempts remain failures.
+
+
+### 2026-11-15 18:03Z: BAR correction built; runner preparation failed
+
+Source `9b0936512` compiles in native network and enumeration SDKs and passes
+all host sanitizers and six repository checks. Its58-module collection has
+zero overlaps, no AVE/pdave, unchanged605-byte configuration and boot.bin;
+only the old CIO code UUID changes. Capsule
+`88fa3687762365c0af29552cdee4fe7f02da8ee70e0ec5dbeafab299854b6276`
+has **not** reached hardware: CIO31 rebooted to Linux, then the runner failed
+on a missing local auxiliary capture file BEFORE installation. Original
+failure is preserved. Normal recovery restored the exact qualified CIO29
+at18:03:17Z and reaped the reader before release18:03:18Z. The retry uses
+the unchanged capsule; all21 local upload inputs are now read and hashed
+before any target action. This preparation failure is not a BAR-fix test.
+
+An independent read-only placement probe on CIO29 found defaultQoS work on
+E cores0–2/cluster0 taking121.17ms warm, versus83.68ms on P cores4–6/cluster1
+after interactiveQoS returned success. Cold runs after1s sleeps were152–175ms
+E and113–156ms P. CPU time nearly equals wall time, so this is not primarily
+descheduling. This establishes scheduling/clock effects in this probe, not
+the cause or a fix for the reported AppKit regression. The earlier baseline
+A/B and steady kernel/IRQ measurements remain unchanged.
+
+
+### 2026-11-15: CIO32 exposed real unassigned BARs and aperture starvation
+
+The unchanged BAR-descriptor capsule reached hardware as CIO32: boot without
+panic, real TS3 authorization,12-function PCI inventory, MSI setup and actual
+I210 mapper binding passed. The six live I210 BAR words were exactly
+`[0,0,1,0,0,0]`; resource publication refused ENXIO6 and the mapper command
+reported that actual error. No endpoint driver retry, BME, interface, link,
+DHCP or USB input was admitted. Normal recovery restored qualified non-AVE
+CIO29 at18:10:36Z; reader reaped before release18:10:38Z. The candidate
+therefore disproved the assumption that native enumeration assigned BARs.
+
+Native trace shows TB prefetchable windows taking PCI00100000..7fffffff
+while ordinary memory windows stay zero. Our host advertised all three
+apciec1 windows as ordinary memory; pinned Linux DT explicitly marks the
+40000000..7fffffff and580000000..5ffffffff windows prefetchable. Native
+`bridgeGetRange(PrefetchMemory)` falls back to the ordinary list when no
+prefetch list exists, letting TB maximize its prefetch window over the whole
+merged low aperture and starving the non-prefetchable I210 BARs. The source
+correction uses `addBridgePrefetchableMemoryRange` for those exact two ranges,
+keeping00100000..3fffffff for ordinary memory. No guessed BAR address or
+global allocator flag is introduced.
+
+The host regression compiles the actual frozen SDK's IOPCIRange implementation
+with sanitizers: it reproduces the old full-aperture prefetch allocation and
+failed ordinary-memory allocation, then derives this host's declarations and
+verifies separate prefetch placement plus nested bridge memory and I210
+BAR0/MSI-X allocations. This is actual allocator host execution, not PCI
+configuration or hardware qualification of the correction.
+
+Separate, uninstalled source preparation now SDK-compiles: a dock xHCI
+IODMACommand buffer helper (object only, no controller binding/shared-domain
+registration yet) and native raw-HID select/FIONREAD readiness. The latter
+would let DESK replace250Hz idle HID polling after real select tests and a
+consumer change; it establishes no idle-regression fix. Neither enters the
+next dock collection.

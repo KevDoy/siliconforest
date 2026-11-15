@@ -214,9 +214,11 @@ void PDCIOPCIHost::writeConfig(IOPCIAddressSpace space,UInt8 offset,unsigned wid
 }
 bool PDCIOPCIHost::configure(IOService *provider)
 {
+    // Preserve Linux apciec1 range types. With only a MEM list, native TB
+    // prefetch maximization falls back to it and starves ordinary BARs.
     if(!addBridgeMemoryRange(0x00100000ULL,0x3ff00000ULL,true) ||
-       !addBridgeMemoryRange(0x40000000ULL,0x40000000ULL,true) ||
-       !addBridgeMemoryRange(0x580000000ULL,0x80000000ULL,true))return false;
+       !addBridgePrefetchableMemoryRange(0x40000000ULL,0x40000000ULL) ||
+       !addBridgePrefetchableMemoryRange(0x580000000ULL,0x80000000ULL))return false;
     return IOPCIBridge::configure(provider);
 }
 IODeviceMemory *PDCIOPCIHost::ioDeviceMemory(){return NULL;}

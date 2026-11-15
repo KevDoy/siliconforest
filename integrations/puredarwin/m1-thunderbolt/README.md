@@ -1,18 +1,32 @@
 # Apple Thunderbolt / USB4 port (SF-AF milestone 3, in progress)
 
-`build-objects.nix` compiles the NHI/ACIO/DP-IN backend with the ARM64 SDK.
-It is **objects only**, not a loaded driver, NHI, connection manager or
-working tunnel. CIO02 panicked in an SRAM I/O copy. Corrected CIO03D is observed on M1
-with RTKit ready, M3 state 0x01000000 and twelve inactive NHI rings. The
-CIO05 reached native CM creation, DART setup and control-ring allocation, but
-domain startup failed with DART fault `0x8f0f0001` (SID15/no-TTBR) and errno12.
-The native fault latch quarantined the path; CIO03 was restored. NHI readiness
-and successful control DMA were unobserved in CIO05. CIO07 now passes native
-CM startup, NHI control DMA/IRQ and host-router publication after the full-bank
-DART reset (`e6c674413`). TX0/RX0 flags `c0000000`, IRQ mask `1001`, error0,
-quarantineNo. Dock-router discovery, PCIe/USB/Ethernet/display remain absent.
-The owner-attached TS3 Plus remains a Thunderbolt-only Type-C cable flag in
-Darwin; its USB/PCIe/Ethernet/display are not enumerated there.
+The real M1 now authorizes the owner's CalDigit TS3 Plus and enumerates its
+12 PCI functions through the PCIe tunnel (qualified CIO27 and CIO29): seven
+bridges, four xHCI controllers and Intel I210 `8086:1533`. CIO29 additionally
+observes restored MSI config/base/address `0x51/0/0xfffff000`, 32 masked native
+AIC parents from818 and an actual I210 IOMapper bound to its owned SID0 DART.
+These are enumeration/translation checkpoints; no endpoint packet, keyboard
+input or external display is qualified yet.
+
+The explicit `build-pci-ethernet-kext.nix` profile admits only a checked I210
+network driver. CIO30 booted without panic and reached that driver, but refused
+BAR0 before bus mastering: dynamic dock nubs lack `assigned-addresses`, and
+pinned IOPCIFamily constructed no device memory. The subsequent source
+publishes descriptors from live I210 BARs and native enumeration sizes using
+the exact apciec1 windows. It refuses unassigned/out-of-range values and writes
+no BAR/configuration registers. CIO32 then observed all memory BARs unassigned and refused ENXIO before
+driver retry/BME; qualified CIO29 was restored. The next source corrects
+this host's two prefetchable apertures (previously all advertised as MEM),
+preventing native TB prefetch maximization from consuming ordinary memory.
+The actual frozen allocator reproduces that starvation and permits nested
+I210 allocations with the corrected declarations; hardware retry is pending.
+
+Default/enumeration profiles do not admit endpoint bus mastering. Network
+admission additionally requires a live native mapper, actual armed MSI route,
+complete blocked inventory and the I210's real bridge ancestry. Partial or
+ambiguous DMA startup remains retained until reboot; dock hot-remove is not
+qualified. See SF-AF for actual trials, failures and the dock-first order.
+AVE is paused and excluded from these collections.
 
 `upstream/apple-dpin-*` preserves the pinned Linux lifecycle/token/request
 code and its tests byte for byte (hashes in provenance.json). Its tokens
