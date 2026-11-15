@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <spawn.h>
 #include <signal.h>
@@ -37,7 +38,8 @@ static int capture(NSString *directory,NSString *phase,NSString *marker){
 }
 #define LOAD(ret,name,args) ret (*name) args=dlsym(gl,#name);if(!name){fprintf(stderr,"missing %s\n",#name);return 2;}
 int main(int argc,char **argv){@autoreleasepool{
- setvbuf(stdout,NULL,_IOLBF,0);if(argc!=3)return 2;
+ setvbuf(stdout,NULL,_IOLBF,0);if(argc!=3&&argc!=4)return 2;
+ int adopt=argc==4&&!strcmp(argv[3],"--adopt");if(argc==4&&!adopt)return 2;
  int require=atoi(argv[2]);NSString *directory=[NSString stringWithUTF8String:argv[1]];
  [NSApplication sharedApplication];
  void *gl=dlopen("/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",RTLD_NOW|RTLD_GLOBAL);
@@ -73,14 +75,31 @@ int main(int argc,char **argv){@autoreleasepool{
  CALayer *root=[CALayer layer],*left=[CALayer layer],*right=[CALayer layer];root.frame=CGRectMake(0,0,96,64);left.frame=CGRectMake(0,0,48,64);left.contents=(id)surface;right.frame=CGRectMake(48,0,48,64);
  CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGFloat blue[]={0,0,.5,.5};CGColorRef color=CGColorCreate(space,blue);right.backgroundColor=color;CGColorRelease(color);CGColorSpaceRelease(space);
  [root addSublayer:left];[root addSublayer:right];[[window contentView] setLayer:root];[window makeKeyAndOrderFront:nil];[window display];pump(.7);
+ if(adopt)for(int i=0;i<3;i++){[window display];pump(.05);}
  int failed=capture(directory,@"green",marker);CGLSetCurrentContext(writer);glBindFramebuffer(0x8d40,fbo);glClearColor(1,1,0,1);glClear(0x4000);
  glEnable(0x0c11);glScissor(0,0,32,16);glClearColor(0,0,1,1);glClear(0x4000);glDisable(0x0c11);
  glFinish();failed+=glGetError()!=0;CGLSetCurrentContext(NULL);
  [CATransaction begin];[CATransaction commit];pump(.7);failed+=capture(directory,@"yellow",marker);
+ // Keep the same context and contents while replacing both export surfaces.
+ [window setContentSize:NSMakeSize(128,80)];root.frame=CGRectMake(0,0,128,80);
+ left.frame=CGRectMake(0,0,64,80);right.frame=CGRectMake(64,0,64,80);
+ [window display];pump(.7);failed+=capture(directory,@"resized",marker);
+ if(adopt){
+  [window close];[window release];pump(.2);
+  window=[[NSWindow alloc] initWithContentRect:NSMakeRect(60,60,128,80) styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO];
+  [window setReleasedWhenClosed:NO];[window setBackgroundColor:[NSColor redColor]];[window setTitle:marker];
+  [[window contentView] setLayer:root];[window makeKeyAndOrderFront:nil];[window display];pump(.7);
+  failed+=capture(directory,@"adopted",marker);
+ }
  uint64_t transfers[4]={0},present[4]={0};if(stats)stats(transfers);
+ void (*exportStats)(uint64_t[3])=dlsym(gl,"CGLSFFXExportCacheStats");uint64_t exported[3]={0};if(exportStats)exportStats(exported);
+ printf("FXEXPORTCACHE enabled=%d hits=%llu misses=%llu evictions=%llu\n",getenv("SFFX_GPU_EXPORT_CACHE")!=NULL,(unsigned long long)exported[0],(unsigned long long)exported[1],(unsigned long long)exported[2]);
+ if(require&&getenv("SFFX_GPU_EXPORT_CACHE")&&(!exportStats||exported[0]==0))failed++;
  int (*wsstats)(int,uint64_t[4])=dlsym(RTLD_DEFAULT,"_windowServerSFFXGPUStats");int observed=wsstats?wsstats((int)[window windowNumber],present):0;
  int transport=!require||(observed&&present[0]>0&&present[1]>0&&present[2]>0&&present[3]==0&&stats&&transfers[0]==0&&transfers[1]==0);
  printf("FXGPUPRESENT require=%d window=%d observed=%d frames=%llu base_upload_bytes=%llu layer_gpu_bytes=%llu failures=%llu CGL_cpu_upload=%llu CGL_cpu_readback=%llu CGL_gpu_blit=%llu CGL_direct_commits=%llu captures_failed=%d transport_pass=%d\n",require,(int)[window windowNumber],observed,(unsigned long long)present[0],(unsigned long long)present[1],(unsigned long long)present[2],(unsigned long long)present[3],(unsigned long long)transfers[0],(unsigned long long)transfers[1],(unsigned long long)transfers[2],(unsigned long long)transfers[3],failed,transport);
- [window close];[window release];pump(.2);CGLSetCurrentContext(writer);glDeleteFramebuffers(1,&fbo);glDeleteTextures(1,&texture);CGLSetCurrentContext(NULL);CGLDestroyContext(writer);CGLDestroyPixelFormat(format);CFRelease(surface);
+ [window close];[window release];pump(.2);
+ CGLSetCurrentContext(writer);glDeleteFramebuffers(1,&fbo);glDeleteTextures(1,&texture);failed+=glGetError()!=0;
+ CGLSetCurrentContext(NULL);CGLDestroyContext(writer);CGLDestroyPixelFormat(format);CFRelease(surface);
  return failed||!transport?1:0;
 }}

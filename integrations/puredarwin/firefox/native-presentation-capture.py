@@ -4,7 +4,7 @@ import json,os,re,shutil,subprocess,sys,time
 from pathlib import Path
 root=Path(__file__).resolve().parent
 phase,marker=sys.argv[1:]
-assert phase in ['green','yellow'] and re.fullmatch(r'SF-FX GPU native \d+',marker)
+assert phase in ['green','yellow','resized','adopted'] and re.fullmatch(r'SF-FX GPU native \d+',marker)
 inject=Path('/private/var/run/gpu-desktop/inject');name='sffx-gpu-'+marker.split()[-1]+'-'+phase
 def request(lines):
  if (inject/'request').exists() or (inject/'request.part').exists():raise RuntimeError('Other inject request pending')
