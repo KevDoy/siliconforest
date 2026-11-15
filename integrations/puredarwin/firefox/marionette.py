@@ -51,8 +51,13 @@ class Marionette:
         return result['value'] if isinstance(result, dict) and set(result) == {'value'} else result
 
     def start(self, page_load_strategy='normal'):
-        return self.command('WebDriver:NewSession', {
-            'capabilities': {'alwaysMatch': {'pageLoadStrategy': page_load_strategy}}})
+        # Marionette takes capabilities directly. The HTTP WebDriver envelope
+        # is handled by geckodriver, not by this local wire protocol.
+        result = self.command('WebDriver:NewSession', {
+            'pageLoadStrategy': page_load_strategy})
+        if result['capabilities']['pageLoadStrategy'] != page_load_strategy:
+            raise RuntimeError('Firefox did not accept the requested page-load strategy')
+        return result
 
     def support(self):
         self.command('Marionette:SetContext', {'value': 'chrome'})

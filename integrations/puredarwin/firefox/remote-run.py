@@ -101,6 +101,8 @@ def main():
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
+    ap.add_argument('--gpu-startup-fault', choices=['stop', 'kill'],
+                    help='diagnostic only: signal the first GPU helper of this isolated launch')
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
@@ -270,6 +272,7 @@ def main():
     wall_start = time.time()
     result['launcher_wall_start_ms'] = wall_start * 1000
     early_captured = False
+    gpu_fault_injected = False
     gpu_sampled = False
     with (args.run / 'firefox.log').open('w') as log:
         launch = ([args.catcher] if args.catcher else []) + cmd
@@ -294,6 +297,29 @@ def main():
                                     ps=subprocess.run(['ps', '-p', ','.join(map(str, sorted(owned))),
                                                        '-o', 'pid,ppid,time,rss,stat,command'],
                                                       capture_output=True, text=True).stdout))
+                if args.gpu_startup_fault and not gpu_fault_injected:
+                    # Admission requires both ancestry and the unchanged start
+                    # time, not a global process-name match. The owner cannot
+                    # be selected even when another Firefox is running.
+                    for pid in sorted(owned):
+                        if pid == p.pid:
+                            continue
+                        current = process_identities()
+                        if pid not in current or current[pid][1] != owned[pid]:
+                            continue
+                        command = subprocess.run(['ps', '-p', str(pid), '-o', 'command='],
+                            capture_output=True, text=True, check=True).stdout
+                        if 'gpu-helper.app/Contents/MacOS/Firefox GPU Helper' not in command:
+                            continue
+                        owner_guard.check()
+                        sig = signal.SIGSTOP if args.gpu_startup_fault == 'stop' else signal.SIGKILL
+                        os.kill(pid, sig)
+                        result['gpu_startup_fault'] = dict(pid=pid, start=owned[pid],
+                            signal=sig.name, elapsed=time.monotonic() - start,
+                            wall_ms=time.time() * 1000,
+                            timing_qualified=False, software_fallback_qualified=False)
+                        gpu_fault_injected = True
+                        break
                 if args.capture_after is not None and not early_captured and time.monotonic() - start >= args.capture_after:
                     early_captured = True
                     capture = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture',
@@ -308,15 +334,21 @@ def main():
                         if pid not in current_ids or current_ids[pid][1] != owned[pid]:
                             continue
                         command = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True).stdout
-                        browser_command = str((args.bundle.parent / 'original/Firefox.app/Contents/MacOS/firefox')
-                                              if args.executable == 'firefox-sf' else args.bundle / 'Contents/MacOS/firefox')
+                        if args.bundle == Path('/Applications/Firefox.app') and args.executable == 'firefox-sf':
+                            browser_command = str(args.bundle / 'Contents/Resources/Mozilla.app/Contents/MacOS/firefox')
+                        else:
+                            browser_command = str((args.bundle.parent / 'original/Firefox.app/Contents/MacOS/firefox')
+                                                  if args.executable == 'firefox-sf' else args.bundle / 'Contents/MacOS/firefox')
                         is_parent = args.sample_parent and command.strip().startswith(browser_command)
                         if pid != p.pid and (is_parent or 'gpu-helper.app/Contents/MacOS/Firefox GPU Helper' in command):
                             sample = subprocess.run([args.sample_path, str(pid), '2', '20', '-file',
                                                      str(args.run / ('gpu-sample-%d.txt' % pid))],
                                                     capture_output=True, text=True, timeout=12)
                             result['gpu_sample'] = dict(pid=pid, status=sample.returncode, stderr=sample.stderr)
-                if not support_attempted and time.monotonic() - start > 8:
+                # Give the independent native sampler its turn before a
+                # synchronous Marionette command can wait on a stalled parent.
+                admission_after = 21 if args.gpu_startup_fault else 8
+                if not support_attempted and time.monotonic() - start > admission_after:
                     try:
                         from marionette import Marionette
                         client = Marionette(timeout=1)
@@ -606,7 +638,7 @@ def main():
                             except Exception as error:
                                 result['page_diagnostics_error'] = str(error)
                             client.close()
-                time.sleep(1)
+                time.sleep(.05 if args.gpu_startup_fault and not gpu_fault_injected else 1)
             result['exit_before_cleanup'] = p.poll()
             result['elapsed_before_cleanup'] = time.monotonic() - start
             result['samples'] = samples
@@ -644,7 +676,10 @@ def main():
             except subprocess.TimeoutExpired:
                 result['cleanup_timeout'] = True
             if args.executable == 'firefox-sf':
-                logs = [path for path in (args.bundle.parent / 'logs').glob('firefox-*-%d.log' % p.pid)
+                log_directory = (home / 'Library/Logs/SiliconForest/Firefox'
+                                 if args.bundle == Path('/Applications/Firefox.app')
+                                 else args.bundle.parent / 'logs')
+                logs = [path for path in log_directory.glob('firefox-*-%d.log' % p.pid)
                         if path.stat().st_mtime >= wall_start - 1]
                 if len(logs) == 1:
                     shutil.copy2(logs[0], args.run / 'launcher-runtime.log')

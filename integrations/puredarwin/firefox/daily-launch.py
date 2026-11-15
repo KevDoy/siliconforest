@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import socket
 import sys
 import time
 
@@ -17,7 +18,7 @@ def selected_profile(args):
     return None
 
 
-def plan(root, args):
+def plan(root, args, manifest=None):
     args = list(args)
     # Preserve the caller's interpretation before changing to the bundle's
     # directory. A relative profile must never end up in the original bundle.
@@ -26,7 +27,8 @@ def plan(root, args):
             args[index + 1] = str(Path(args[index + 1]).expanduser().resolve())
         elif arg.startswith('--profile='):
             args[index] = '--profile=' + str(Path(arg.partition('=')[2]).expanduser().resolve())
-    manifest = json.loads((root / 'release.json').read_text())
+    if manifest is None:
+        manifest = json.loads((root / 'release.json').read_text())
     diagnostic = manifest.get('diagnostics', {})
     if diagnostic:
         allowed = {'PD_WS_TRACE','PD_WS_TIMING','PD_CA_TRACE','PD_SANDBOX_TRACE','MOZ_REMOTE_ALLOW_SYSTEM_ACCESS'}
@@ -49,6 +51,23 @@ def plan(root, args):
     frames = [root / (name + '/Frameworks') for name in
               ['surface', 'avfoundation', 'appkit', 'quartz', 'onyx', 'gl']]
     frames.append(root / 'compat/System/Library/Frameworks')
+    onyx = manifest.get('onyx_override')
+    if onyx is not None:
+        requested = Path(onyx)
+        if (not manifest.get('system_layout') or '..' in requested.parts or
+                not requested.is_relative_to(root / 'overrides') or requested.name != 'Frameworks'):
+            raise ValueError('Onyx override must be a versioned provider inside this app runtime')
+        frames[4] = requested
+    ui = manifest.get('ui_override')
+    if ui is not None:
+        ui = Path(ui)
+        if (not manifest.get('system_layout') or '..' in ui.parts or
+                not ui.is_relative_to(root / 'overrides') or ui == root / 'overrides'):
+            raise ValueError('UI override must be a versioned provider inside this app runtime')
+        frames[2] = ui / 'appkit/Frameworks'
+    coretext_source = manifest.get('coretext_source', 'private')
+    if coretext_source not in ['private', 'system']:
+        raise ValueError('Unknown CoreText selection')
     if manifest.get('private_fonts', False):
         font_framework = root / 'coretext/Frameworks'
         override = manifest.get('coretext_override')
@@ -58,18 +77,29 @@ def plan(root, args):
                     not requested.is_relative_to(root / 'overrides') or requested.name != 'Frameworks'):
                 raise ValueError('CoreText override must be a versioned provider inside this app runtime')
             font_framework = requested
-        frames.insert(0, font_framework)
+        if coretext_source == 'private':
+            frames.insert(0, font_framework)
         env['FONTCONFIG_FILE'] = str(root / 'fonts/fonts.conf')
     libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
         root / 'quartz/Frameworks/QuartzCore.framework/Versions/A', root / 'gl/lib', root / 'compat/usr/lib']
     if manifest.get('gpu_presentation', False):
-        libraries.insert(0, root / 'windowserver/usr/lib')
+        libraries.insert(0, (ui or root) / 'windowserver/usr/lib')
     env.update(DYLD_FRAMEWORK_PATH=':'.join(map(str, frames)),
         DYLD_LIBRARY_PATH=':'.join(map(str, libraries)) + ':/usr/local/lib/mesa-asahi',
         DYLD_INSERT_LIBRARIES=str(root / 'sandbox/libsffx-sandbox.dylib') + ':' + str(root / 'io/libsffx-io-policy.dylib'),
-        XDG_RUNTIME_DIR=env.get('XDG_RUNTIME_DIR', '/private/var/run/gpu-desktop'),
-        WAYLAND_DISPLAY=env.get('WAYLAND_DISPLAY', 'wayland-0'), SFFX_IO_POLICY='default',
+        XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',
+        WAYLAND_DISPLAY='wayland-0', SFFX_IO_POLICY='default',
         SFFX_IOSURFACE_SERVICE='org.puredarwin.iosurfaced.sffx.' + str(os.getpid()))
+    observer = env.get('SFFX_DIAGNOSTIC_OBSERVER')
+    if observer:
+        requested = Path(observer)
+        explicit_profile = selected_profile(args)
+        private = Path('/private/var/db/sffx')
+        if (not requested.is_absolute() or '..' in requested.parts or
+                not requested.is_relative_to(private) or requested.suffix != '.dylib' or
+                explicit_profile is None or not explicit_profile.is_relative_to(private)):
+            raise ValueError('Diagnostic audio observer requires an explicit isolated Firefox profile')
+        env['DYLD_INSERT_LIBRARIES'] += ':' + str(requested)
     for name in list(env):
         if name.startswith('MOZ_DISABLE_') and name.endswith('_SANDBOX'):
             raise RuntimeError('Refusing inherited disabled sandbox: ' + name)
@@ -104,6 +134,15 @@ def main():
         return
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Runtime requires SiliconForest')
+    # A stale inherited SSH environment or an absent desktop must not produce
+    # a long connection retry followed by an unreachable, headless parent.
+    display = Path(env['XDG_RUNTIME_DIR']) / env['WAYLAND_DISPLAY']
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.settimeout(1)
+            probe.connect(str(display))
+    except OSError as error:
+        raise RuntimeError('Firefox desktop is unavailable: ' + str(display)) from error
     manifest = json.loads((root / 'release.json').read_text())
     profile = selected_profile(arguments) or default_profile(root, manifest)
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)
