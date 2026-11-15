@@ -8,8 +8,13 @@ ICC/indexed-color provider, preserving the bootstrap recipe for old receipts.
 The whole umbrella has explicit mappings for all eight vecLib component IDs.
 `vimage-tests.nix` builds Finch's original image comparison program using our
 headers; it completes on the M5 with the same Linux-built bytes prepared for
-the M1. The M1 run and image-output comparison are still pending. No whole
-Accelerate installation or general numerical equivalence is claimed.
+the M1. The corrected private stage emits 1,159 output lines: 1,158 match native;
+Display P3 coarse conversion is 80 versus 82 (DIFF). The initial missing nested
+framework-path loading failure remains recorded. Whole Accelerate is now installed
+and passes Root/VT/HAL/desktop/app-open/compatibility regressions. The final recipe
+rebuild reproduces all 40 installed files byte-for-byte. See
+[installed-media evidence](../media/INSTALLED.md); general numerical equivalence
+is not established.
 
 Our C declarations come from preprocessed Finch definitions through
 `tools/c_functions.py`; typed headers and Sparse overload glue are ours.
