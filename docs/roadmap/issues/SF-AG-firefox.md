@@ -353,6 +353,39 @@ argument. The first run omitted its desktop runtime environment and failed;
 that failure is preserved. The corrected test changes no owner default or
 pinned application. This routing result does not establish Firefox integration.
 
+## Close-tab lifetime and native menu geometry (private candidates)
+
+A synthetic Command-W in `native-ui-003` and `004` crashed the browser parent
+with SIGSEGV in `CALayer._setNeedsRender`: a retained layer still held a weak
+pointer to a freed `CALayerContext`. Patch0207 recursively detaches the former
+root on replacement, invalidation and deallocation, while preserving a tree
+already adopted by another context. The native ownership probe fails both old
+controls and passes both candidate controls, including layer mutation after the
+context is released (`lifetime-menu-probes-v2-results.json`). Firefox005 survives
+Command-W with this candidate; its UI harness still fails while restoring a
+saved tab handle, so the complete native-shortcut sequence remains unqualified.
+Optional transaction filtering0205 is off in the lifetime candidate. These are
+private builds, not an assertion that the installed AppKit regressed.
+
+Patch0206 makes NSWindow class frame/content conversions count the native menu
+strip, including full-size-content windows. Internal decoration layout uses a
+separate border-interior conversion to avoid counting it twice. All eight
+native controls pass in `menu-probe-v3-results.json`: menus on/off, normal/full
+size, panel and borderless. The old class conversion fails the two menu-enabled
+normal/full-size controls. First candidate0206v1 double-counted content height
+and remains a failed result. An intermediate v2 staging error loaded the system
+AppKit instead of the candidate; its provider path is recorded and it supplies
+no candidate evidence. Firefox visual qualification is separate.
+
+The corrected AVFoundation base preserves the current Finch capture-absence
+family. Its native v3 probe observes AVCaptureDevice, honestly reports no capture
+devices, reads two tracks/10seconds and renders all1024 expected NV12 pixels.
+Actual Firefox `video-canonical-002` also plays all three original AV clips to
+completion with installed AudioToolbox:300/0frames each, matching earlier
+hardware pixel hashes and real AVD work. The earlier asset-only AVFoundation
+candidate omitted AVCaptureDevice, prevented XUL loading, and invalidated the
+first installer assembly; that assembly remains rejected.
+
 ## Milestones still requiring real-M1 evidence
 
 | Milestone | Missing evidence |
@@ -360,7 +393,7 @@ pinned application. This routing result does not establish Firefox integration.
 | 0 baseline | qualified private-prefix pass014: all3 visible with defaultGPU and WebGL |
 | 1 rendering | WebGL software pixel comparison; wall/presentation60fps scrolling/animation and CPU reduction; zero-copy native layers at150% (hardware WR+WebGL+checker observed) |
 | 2 media | hardware3codec visible pass above; CPU/pixel SW A/B, audible output and A/V clock, native pacing/zero-copy and non-DRM streaming remain |
-| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JIT, Speedometer/MotionMark/JetStream; 30-minute crash-free browsing |
+| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JetStream (Speedometer/MotionMark and actual Baseline/Ion observed above); 30-minute crash-free browsing |
 | 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
 
 Initial Speedometer/MotionMark scores are recorded above. No30-minute crash-free

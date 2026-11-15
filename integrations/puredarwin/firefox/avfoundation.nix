@@ -4,7 +4,7 @@
 let
  a=import ../cocoa/arm64.nix;
  e=import ../finch/environment.nix;
- base=import ../finch/AVFoundation/build.nix;
+ base=import ../finch/media/bottle/avfoundation.nix;
  retained=base.overrideAttrs(old:{
   name="sffx-retained-current-avfoundation-arm64";
   buildPhase=builtins.replaceStrings

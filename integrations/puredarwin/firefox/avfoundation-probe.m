@@ -8,6 +8,7 @@
 #include <math.h>
 @interface NSObject (FXAVProbe)
 +(NSArray *)speechVoices;
++(NSArray *)devices;
 -(BOOL)isSpeaking;
 +(id)URLAssetWithURL:(NSURL *)url options:(NSDictionary *)options;
 -(NSArray *)tracks;
@@ -28,6 +29,9 @@ int main(int argc,char **argv){@autoreleasepool{
  Class voice=NSClassFromString(@"AVSpeechSynthesisVoice"),speech=NSClassFromString(@"AVSpeechSynthesizer");
  id synth=[[[speech alloc] init] autorelease];
  int noVoices=voice&&speech&&[[voice speechVoices] count]==0&&![synth isSpeaking];
+ Class capture=NSClassFromString(@"AVCaptureDevice");
+ int noDevices=capture&&[[capture devices] count]==0;
+ printf("FXAV capture_class=%d no_devices=%d\n",capture!=Nil,noDevices);
  Class assetClass=NSClassFromString(@"AVURLAsset");
  id asset=[assetClass URLAssetWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]] options:nil];
  CMTime duration=[asset duration];NSUInteger tracks=[[asset tracks] count];
@@ -63,5 +67,5 @@ int main(int argc,char **argv){@autoreleasepool{
  const char *renderer=(const char *)glGetString(0x1f01);
  printf("FXAV layer_status=%ld NV12_red_pixels=%u/1024 renderer=%s\n",(long)[layer status],red,renderer?renderer:"null");
  CGContextRelease(output);CGColorSpaceRelease(space);CGImageRelease(image);[context release];CFRelease(sample);CFRelease(format);CFRelease(pixel);
- return noVoices&&realAsset&&red==1024&&renderer&&strstr(renderer,"Apple M1")?0:1;
+ return noDevices&&noVoices&&realAsset&&red==1024&&renderer&&strstr(renderer,"Apple M1")?0:1;
 }}
