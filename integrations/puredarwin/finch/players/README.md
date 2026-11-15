@@ -94,3 +94,17 @@ statistics remain pending: the attempted rc alias does not exist on macOS;
 upstream only defines it on Windows. Fresh v5 uses the actual oldrc module and
 reads only its stats command through our private stage socket. No screen input,
 playback-changing control or canonical provider change is involved.
+
+V5's actual oldrc module supplies5 statistics responses. Maximum vendor counters:
+video decoded121, audio decoded189, frames displayed26 and buffers played94,
+with zero reported lost frames/buffers. Our fixture contains60 video samples and
+95 AAC packets (independently confirmed by Linux ffprobe). The reported decoder
+counters therefore are not qualified unique-source-frame counts; accounting
+remains unresolved. Open-a HAL observation reaches101376 consumed frames,
+and the direct sf-catch run exits0 with103936. These establish real headless
+vendor decoder/output activity, not60 confirmed presented frames or a window.
+AudioToolbox is now canonically installed/CLI-qualified; fresh v6 checks the
+same VLC path without the AudioToolbox framework prefix. That canonical run now
+passes: no framework override, same vendor counters,104448 HAL-consumed frames
+in both open-a and direct runs, direct exit0/no exception and no survivors.
+No GUI/capture or unique-source-frame claim; qualified.json records the limits.

@@ -6,7 +6,7 @@ Linux/Nix FFmpeg, and queues through a distinct retained-PD image. Its M1 WAV/AA
 CLI completes HAL buffers. The description below applies to the earlier PCM-only
 build.nix. The complete install.nix family is installed with retained PD output;
 the earlier PCM-only build must stay staged. Browser AAC and real AUHAL device-ID
-updates are a prefix candidate, pending final regression/installation.
+updates were installed09:33:26Z after prefix and full Root regressions.
 
 Compile full AudioFile.c, AudioFormat.c, AudioFormatTables.c, AudioConverter.c,
 ExtendedAudioFile.c from Finch2d9b1bb in Linux/Nix using our declarations. No queue,

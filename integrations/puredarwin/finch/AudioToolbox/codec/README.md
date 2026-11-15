@@ -84,17 +84,27 @@ The candidate also stages the PD private provider from ../units, retaining all78
 reviewed exports (80total) with validated per-unit actual output selection.
 Only AudioToolbox.output-pd changes in this retained family; generated CoreAudio
 is not staged. The complete Finch main keeps135/135 effective prior exports.
-No candidate is installed yet. prepare-codecs.py keeps exact reviewed exports
+The complete candidate is now installed after the checks below. prepare-codecs.py keeps exact reviewed exports
 by default; --allow-retained-superset explicitly records added symbols for this
 reviewed source port.
 
 M1 audio-browser-stage-v1 passes11of12 tests, including original converter/file
 programs, four decoders, WAV/AAC HAL completions, raw-ASC/ESDS PCM equality and
 real-device AUHAL. The one failure is a harness error: SystemSound was invoked
-without its required WAV filename (exit2); a corrected fresh probe is queued.
+without its required WAV filename (exit2); the corrected fresh probe passes completion1/dispose0.
 Final-source M1 probe passes: raw ASC and ESDS each13312 float frames with
 identical PCM hash; AUHAL again consumes12288 frames with clean lifecycle. The same Linux-built new browser
 probe fails on native M5 because native AudioConverter rejects its raw5-byte ASC
 cookie with560226676. This is retained as a reference difference/failure, not
 claimed native-matched behavior or general AAC-cookie conformance. Existing
 native-matched lossless file/PCM tests are separate evidence.
+
+Installation09:32:16–09:33:26Z:20 cold file hashes before activation; first
+.pre-finch originals plus immediate-prior snapshots retained. Main cold SHA256
+4bb3b6976d27f0fe2c4130e0a2cc8ced256c63d7f45bb5cb7c1aca96150799d7.
+Root selection,600 H264/HEVC hardware pictures with unchanged PTS/hashes,
+WAV/AAC HAL completion, System Sound, three AVPlayerNode output lifetimes,
+offline/file APIs, new browser-cookie/AUHAL probes, desktop/dock/coreaudiod,
+Terminal/Activity Monitor open-a and compatibility18/18 all pass. Receipts:
+runs/sffinch/install-AudioToolbox-v2/{manifest,receipt,regressions,qualified}.json.
+Only the owned AudioToolbox family changed; CoreAudio/coreaudiod stayed in place.

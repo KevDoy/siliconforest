@@ -199,3 +199,14 @@ in the owned AudioToolbox candidate; file/codec/queue, final rawASC/ESDS PCM,
 real-device HAL and corrected SystemSound prefix tests pass. The reviewed update
 is queued behind the kernel owner, with cold hashes/original+prior snapshots and
 full regressions required. No CoreAudio or Foundation replacement is involved.
+
+AudioToolbox update installed09:33:26Z:20 cold file hashes, .pre-finch plus prior
+version snapshots;135 prior effective exports retained.600 hardware decode
+PTS/hashes, WAV/AAC HAL, System Sound, AVPlayerNode3lifetimes, browser cookie/AUHAL,
+app-open/desktop and compatibility18/18 pass. No CoreAudio/coreaudiod replaced.
+VLCv5 vendor counters121video/189audio exceed the fixture's60samples/95packets;
+this is an accounting discrepancy, not a claim of121 unique decoded pictures.
+HAL101376/direct103936 and traced exit0 provide real headless output evidence.
+The fresh canonical-audio v6 run also passes with no framework override,
+104448 HAL-consumed frames and traced direct exit0. TERM6 GUI window/capture
+remains pending, along with unique-source-frame accounting.
