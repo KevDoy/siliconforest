@@ -2674,3 +2674,30 @@ BME admission and Ethernet child, then send the same normal registration
 request and require a real non-Wi-Fi BSD name. It chooses no fixed unit and
 sets no interface-up/address/route/resolver/DHCP state. The next trial can
 reuse the exact non-AVE CIO33 capsule, without another collection build.
+
+
+### 2026-11-15: native I210 en1 naming observed; command inventory corrected
+
+CIO34 used the byte-identical CIO33 capsule. Real authorization, PCI
+inventory, BARs, mapper/MSI/BME and driver attachment repeated. The new
+helper passed actual UID65534 denial, then registered the actual I210 as
+`en1`. The harness immediately failed rc127 in its following inspection
+command: `ifconfig` is absent. Interface-up and DHCP were NOT RUN. This is
+a runner preparation failure, not a demonstrated link or packet failure.
+Normal recovery restored qualified non-AVE CIO29 at18:36:27Z and reaped the
+reader18:36:29Z. No AVE code/argument was installed or probed.
+
+A read-only target inventory confirms PATH already includes sbin directories
+and ifconfig/netstat/route are absent from the standard locations. The new
+`pd-dock-netstatus` uses native getifaddrs, media/MTU ioctls, NET_RT_IFLIST2
+64-bit counters and NET_RT_DUMP2 IPv4 route records. It follows XNU's
+ROUNDUP32 sockaddr layout, handles compressed masks, bounds messages and
+never prints link-layer addresses. Native SDK compilation and the actual M1
+Wi-Fi control pass (real address/counters/media and15IPv4 routes). All six
+repository checks pass. This read-only tool sets no network configuration.
+
+The next runner removes the absent commands and requires the real status
+binary hash and live Wi-Fi query BEFORE any reboot/cycle, under normal locks.
+A failed preflight exits without installing or starting a recovery reboot.
+The actual I210 DHCP attempt still awaits this corrected run, using the same
+non-AVE CIO33 kernel rather than another collection build.
