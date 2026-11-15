@@ -766,10 +766,22 @@ int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
         uint32_t pipeOffsets[]={0xc,0x10,0x14,0x1c,0x20};
         uint32_t pipeValues[sizeof(pipeOffsets)/sizeof(pipeOffsets[0])];
         for(unsigned i=0;i<sizeof(pipeOffsets)/sizeof(pipeOffsets[0]);++i)pipeValues[i]=pipe.r32(pipeOffsets[i]);
+        // These are ordinary T8103 control registers already read by the
+        // shared power sequence, not status/clear-on-read registers. Capture
+        // them only under the same live exclusive lease as the core/PIPE
+        // snapshot; no AUX enable or USB2 role change is performed here.
+        uint32_t auxOffsets[]={0,0x4000},auxValues[2];
+        for(unsigned i=0;i<2;++i)auxValues[i]=lpdptx.r32(auxOffsets[i]);
+        uint32_t usb2Offsets[]={0,4,8,0x1c},usb2Values[4];
+        for(unsigned i=0;i<4;++i)usb2Values[i]=usb2.r32(usb2Offsets[i]);
         bool ok=setProperty("phy-snapshot-offsets",offsets,sizeof(offsets)) &&
             setProperty("phy-snapshot-values",values,sizeof(values)) &&
             setProperty("pipe-snapshot-offsets",pipeOffsets,sizeof(pipeOffsets)) &&
-            setProperty("pipe-snapshot-values",pipeValues,sizeof(pipeValues));
+            setProperty("pipe-snapshot-values",pipeValues,sizeof(pipeValues)) &&
+            setProperty("aux-snapshot-offsets",auxOffsets,sizeof(auxOffsets)) &&
+            setProperty("aux-snapshot-values",auxValues,sizeof(auxValues)) &&
+            setProperty("usb2-snapshot-offsets",usb2Offsets,sizeof(usb2Offsets)) &&
+            setProperty("usb2-snapshot-values",usb2Values,sizeof(usb2Values));
         ret=ok?snapshotCalibration():ENOMEM;
         setProperty("phy-calibration-error",(uint32_t)ret,32);
         break;

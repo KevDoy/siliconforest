@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 12:51Z)
+## Current target and observed state (owner change; updated 13:09Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,24 +15,19 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO18, source `1613d830d`, capsule
-`211cae69e8a0…`,
-boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
-startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
-read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
-ring state. The actual host-router service `0-0` and `usb4_port1` publish
-beneath the native domain. Full-bank DART reset removed the early SID15 fault;
-Linux and Darwin now have SID1 translating and unused streams disabled.
-The one-shot link query reports both physical lanes UNPLUGGED (state7),
-no remote router, count1/error0. The owned UART reader was reaped before
-lock release at12:35:09Z. An explicit late snapshot also reports state7/remote0;
-UID65534 was denied without incrementing the query count, while root completed
-one request and advanced it1->2; the post-idle query advanced it to3. CD321x power7 was changed to S0 with the bounded
-SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
-or `pdave` argument. CIO18 changes and verifies the exact Linux CD3217
-mask (bits1/9/10), acknowledges one real EVENT1 word with zero errors and
-clears EVENT1. Both lanes remain7/remote0: S0, mask setup and acknowledgement
-are working but have not established the Thunderbolt link.
+**Observed in Darwin:** non-AVE CIO19, source `0f7052ab3`, capsule
+`fb0925264c91…`, qualified13:04:43Z; owned UART reaped13:04:44Z before
+lock release. The normal desktop, Wi-Fi, RTKit/NHI control DMA/IRQs, host router,
+PHY ownership and privileged snapshot ABI remain healthy. Both physical lanes
+still report UNPLUGGED (state7), no remote router. CD3217 S0, exact Linux
+MASK1 bits1/9/10 and EVENT1 acknowledgement/readback all work, with no dock link.
+The actual IOCatalogue contains exactly the four allowed PCI personalities
+(three bridges and the exact existing Wi-Fi match), profile valid/error0.
+UID65534 authorization is denied without changing its counter; root advances
+it0->1 and receives native ENODEV19. No PCI host is published and the independent
+inventory reports zero functions, zero xHCI and zero I210 (exit2). The image has
+57 code modules, no AVE kext and no pdave boot argument. The PCIe enumeration
+path is installed but unexercised because the physical peer is absent.
 
 **CIO16 failed qualification:** the same non-AVE diagnostic image reached
 healthy NHI/RTKit/Type-C/PHY startup, but the standard desktop and inject
@@ -1800,3 +1795,35 @@ real child/IRQ/work/TLB teardown. The new CLI's successful return would mean
 approval/host startup only; the independent PCI inventory must still observe
 all four xHCI controllers and I210 before stage(a) passes. Its UID65534 denial
 mode and real-catalogue result await the next suitable native boot.
+
+### CIO19 qualification and phase2/3 boundary (13:09Z)
+
+The explicit enumeration image qualified with the actual catalogue and
+administrator checks described above. No approval, PCIe MMIO, endpoint DMA,
+Ethernet, dock USB or display success is claimed. Source/SDK evidence in the
+preceding section was prepared before this boot; only its runtime negative
+path and driver-exclusion profile are now qualified.
+
+The full Linux dmesg was streamed to the host during the ordinary installation
+visit, without firmware/image extraction. Linux and Darwin report the same
+ACIO firmware version and cable-info0x411. On the actual physical port1 Linux
+reaches lane-init Phase2 at5.062551s, Phase3 at5.097641s and Connected at5.100003s.
+Darwin reaches Phase2 and does not capture Phase3/Connected. This narrows the
+observed divergence to the low-speed lane-init boundary; its cause is not yet
+proved. Linux probe unconditionally disables DP AUX before its first mode,
+just as the native stop sequence does. Linux also powers USB2 in TBT mode.
+Neither is evidence for removing those operations. Unknown PHY bits remain
+unchanged pending source or measured evidence.
+
+The same guarded quiet60s measured kernel2.331255% of one CPU, aggregate
+98.09594% idle and18 NHI interrupts including diagnostic request boundaries.
+The actual compositor HID reader used0.408775%, cleanup2.320012%, main0.903145%
+of one CPU; total3.634607%. Interrupt wakeups434.2/s, platform-idle364.2833/s,
+timer bins117.7/210.65/s. Warm50M integer83.676–83.686ms,100k syscalls14.508ms.
+The cold first round173.772ms is recorded separately. The reported AppKit
+slowdown remains unresolved; these observations do not establish an idle fix.
+
+Source follow-up adds six bounded, read-only AUX/USB2 control words to the
+existing lease-checked PHY snapshot (two AUX and four USB2 registers). No
+new timer or mode write. The native USB SDK and all six repository checks
+pass; this diagnostic source has not yet run on the target.
