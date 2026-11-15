@@ -539,3 +539,14 @@ Frozen XNU mapped-command synchronization does not itself flush CPU caches.
 This variant native-builds and its actual allocator fixtures pass; the pending
 trace collection excludes it. CPU mapping policy is a source hypothesis until
 a real device trial establishes descriptor and packet behavior.
+
+
+The prepared PCI USB DMA helper now requests normal-NC owned buffers. PCI
+MSI event waits and non-isochronous completion work have one-second recovery
+backstops; default interrupt reads use one second while explicit completion
+deadlines are honored. Actual event completions wake immediately. The direct
+prepared host and isochronous branches retain their original timing. HID
+teardown still joins the reader before aborting its persistent TD, which can
+now include a one-second PCI read. Actual allocator and sleep-method fixtures
+pass with the native SDK; this bundle remains uninstalled and has no hardware
+input or idle-power qualification.

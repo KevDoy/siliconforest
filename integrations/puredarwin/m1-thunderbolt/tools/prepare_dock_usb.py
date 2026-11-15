@@ -19,6 +19,9 @@ def replace(text, old, new, count=1):
 
 p = root / 'RavynXHCIPort.h'
 s = p.read_text()
+s = replace(s, '    void logBOTState(const char *why);', '''    void logBOTState(const char *why);
+    // Real MSI wakes readers immediately; idle PCI reads need no 20ms poll.
+    UInt32 interruptReadTimeoutMs() const { return fPCI ? 1000 : 20; }''')
 s = replace(s, '    PDUSBDart *fAppleDart;', '''    PDUSBDart *fAppleDart;
     IOService *fDockHost;
     const OSSymbol *fDockAccessKey;
@@ -189,6 +192,20 @@ s = replace(s, 'UInt32 dw2 = *(volatile UInt32 *)(fCapRegs + off + 8);', 'UInt32
 # Client pages never bypass the owned mapper bounces in this profile.
 start=s.index('bool RavynXHCIPort::mapClientSegs(');body=s.index('{',start)
 s=s[:body+1]+'\n    if (fPCI) return false;\n'+s[body+1:]
+# The direct prepared host keeps its existing timing. The admitted PCI host
+# requires MSI and waits on its real event generation, with a slow recovery
+# backstop. Explicit transfer deadlines remain upper bounds on every sleep.
+s = replace(s, 'clock_interval_to_deadline(kEventWaitBackstopMs, kMillisecondScale, &backstop);',
+            'clock_interval_to_deadline(fPCI ? 1000 : kEventWaitBackstopMs, kMillisecondScale, &backstop);')
+s = replace(s, 'clock_interval_to_deadline(self->fInterruptsEnabled && !self->fIsochOpen ? 20 : 2, kMillisecondScale, &deadline);',
+            'clock_interval_to_deadline(self->fInterruptsEnabled && !self->fIsochOpen ? (self->fPCI ? 1000 : 20) : 2, kMillisecondScale, &deadline);')
+p.write_text(s)
+
+p=root/'RavynXHCIUSBBus.cpp';s=p.read_text()
+s=replace(s, 'fPort->interruptTransfer(slotId, endpoint->number, buffer, len, 20);',
+          'fPort->interruptTransfer(slotId, endpoint->number, buffer, len, fPort->interruptReadTimeoutMs());')
+s=replace(s, 'fPort->interruptTransfer(address, endpoint->number, buffer, (UInt32)reqCount, 20, &done);',
+          'fPort->interruptTransfer(address, endpoint->number, buffer, (UInt32)reqCount, completionTimeout ? completionTimeout : fPort->interruptReadTimeoutMs(), &done);')
 p.write_text(s)
 
 p=root/'Info.plist';data=plistlib.loads(p.read_bytes());prototype=next(v for v in data['IOKitPersonalities'].values() if v.get('IOProviderClass')=='IOPCIDevice').copy()

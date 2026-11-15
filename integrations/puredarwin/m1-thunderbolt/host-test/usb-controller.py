@@ -22,7 +22,7 @@ for name in names:
     defines.append(match[0])
 functions=[]
 for name in ['dockFail','dockAccess','dockRead32','dockWrite32','retireDockBuffers','quiesce',
-             'claimBIOSOwnership','parseExtendedCapabilities']:
+             'claimBIOSOwnership','parseExtendedCapabilities','sleepForEvent']:
     m=re.search(r'(?:bool|UInt32|void) RavynXHCIPort::'+name+r'\([^{};]*\)(?: const)?\s*\{',s);assert m,name
     end,depth=m.end(),1
     while depth:depth+=(s[end]=='{')-(s[end]=='}');end+=1
@@ -34,6 +34,10 @@ fixture=r'''
 #include <vector>
 #include "pd_usb_lifetime.h"
 using UInt8=uint8_t;using UInt32=uint32_t;using UInt64=uint64_t;
+static constexpr unsigned kEventWaitBackstopMs=2,kMillisecondScale=1,THREAD_UNINT=0;
+static unsigned waitMilliseconds,sleeps;static uint64_t sleptUntil;
+static void clock_interval_to_deadline(unsigned ms,unsigned,uint64_t *out){waitMilliseconds=ms;*out=ms;}
+static void IOLockSleepDeadline(void *,void *,uint64_t until,unsigned){++sleeps;sleptUntil=until;}
 static constexpr int kIOReturnSuccess=0;static bool powered,autoReset;static unsigned retired,writes;
 struct Object {virtual ~Object()=default;template<class...T>void setProperty(T...){} };
 struct Service:Object {int callPlatformFunction(const void *,bool,void *,void *,void *,void *){return powered?0:1;}};
@@ -52,7 +56,7 @@ struct RavynXHCIPort:Object {
  const void *fDockAccessKey=this;OSArray array,*fDockBuffers=&array;
  void *fDockBufferLock=this,*fRemovalLock=this,*fEventWaitLock=nullptr;
  mutable UInt32 fDockMMIOFailed=0;bool fDockRetiring=false,fQuiesced=false,fDmaLive=true;
- bool fHotplugRunning=true,fBulkStop=false;Interrupt *fInterruptSource=nullptr;
+ bool fHotplugRunning=true,fBulkStop=false,fInterruptsEnabled=true;Interrupt *fInterruptSource=nullptr;
  unsigned fWorkers=0,fEventGeneration=0;int fEventWaitChannel=0,fHotplugWaitChannel=0;
  pd_usb_lifetime fLifetime{};UInt32 regs[256]{};volatile UInt8 *fCapRegs=(volatile UInt8 *)regs,*fOpRegs=fCapRegs;UInt64 fBARLength=sizeof(regs);
  UInt8 fPortMajorRev[64]{},fPairedPort[64]{};
@@ -60,6 +64,7 @@ struct RavynXHCIPort:Object {
  UInt32 opRead32(UInt32 n){return dockRead32(fOpRegs,n);}void opWrite32(UInt32 n,UInt32 v){++writes;dockWrite32(fOpRegs,n,v);}
  UInt32 capRead32(UInt32 n){return dockRead32(fCapRegs,n);}
  bool retireDockBuffers();void quiesce(const char *);
+ void sleepForEvent(UInt32,uint64_t);
  void claimBIOSOwnership();void parseExtendedCapabilities();
  RavynXHCIPort(){powered=autoReset=true;retired=writes=0;registers=regs;regs[1]=1;}
 };
@@ -76,6 +81,7 @@ int main(){
  {RavynXHCIPort c;c.regs[XHCI_HCCPARAMS1/4]=(0x40/4)<<16;c.regs[0x40/4]=(2u<<24)|(4u<<8)|2;c.regs[0x48/4]=(2u<<8)|1;c.regs[0x50/4]=(3u<<24)|2;c.regs[0x58/4]=(2u<<8)|3;c.parseExtendedCapabilities();assert(!c.fDockMMIOFailed && c.fPortMajorRev[0]==2 && c.fPortMajorRev[2]==3 && c.fPairedPort[0]==2 && c.fPairedPort[1]==3);}
  {RavynXHCIPort c;c.regs[XHCI_HCCPARAMS1/4]=(0x40/4)<<16;c.regs[0x40/4]=1;c.regs[0x44/4]=55;c.claimBIOSOwnership();assert(!c.fDockMMIOFailed && (c.regs[0x40/4]&XHCI_LEGACY_OS_OWNED) && !c.regs[0x44/4]);}
  {RavynXHCIPort c;c.regs[XHCI_HCCPARAMS1/4]=(0x40/4)<<16;c.regs[0x40/4]=1;c.regs[0x44/4]=55;powered=false;c.claimBIOSOwnership();assert(c.fDockMMIOFailed && c.regs[0x40/4]==1 && c.regs[0x44/4]==55);}
+ {RavynXHCIPort c;c.fEventWaitLock=&c;sleeps=0;c.sleepForEvent(0,5000);assert(sleeps==1 && waitMilliseconds==1000 && sleptUntil==1000);c.sleepForEvent(0,7);assert(sleptUntil==7);c.fEventGeneration=1;unsigned old=sleeps;c.sleepForEvent(0,5000);assert(sleeps==old);c.fPCI=nullptr;c.sleepForEvent(1,5000);assert(waitMilliseconds==2 && sleptUntil==2);}
  puts("actual transformed USB methods: latched physical/bounds refusal, no false all-ones halt, worker/operation/reset failures retain mappings, failed completion retains ledger PASS (host fixtures only)");
 }
 '''.replace('FUNCTIONS','\n'.join(functions)).replace('DEFINES','\n'.join(defines))

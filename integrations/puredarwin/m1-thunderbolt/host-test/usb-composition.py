@@ -59,7 +59,8 @@ with tempfile.TemporaryDirectory() as directory:
         assert pci['IOPCIPrimaryMatch'] == '0x11001b73' and pci['IOPCITunnelCompatible'] is True
         assert all(p.read_bytes() == before[p.relative_to(dest)]
                    for p in dest.rglob('*') if p.is_file() and
-                   p.name not in ('Info.plist', 'RavynXHCIPort.cpp', 'RavynXHCIPort.h'))
+                   p.name not in ('Info.plist', 'RavynXHCIPort.cpp', 'RavynXHCIPort.h',
+                                  'RavynXHCIUSBBus.cpp'))
         cpp = (dest / 'RavynXHCIPort.cpp').read_text()
         assert 'if (!fPCI || fPCI->configRead32(0)' not in cpp
         assert 'if (!fPCI) return true;' in cpp

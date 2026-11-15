@@ -2947,3 +2947,33 @@ actual allocator fixtures for flags, whole-page zeroing, identity and failure
 cleanup pass; all six repository checks pass. No collection, boot, page-table
 readout or Ethernet fix is claimed. The initial source-shape refusal is retained
 in private receipts. This candidate is excluded from the pending trace boot.
+
+
+### PCI USB normal-NC buffers and event waits, native SDK only
+
+The prepared FL1100 bundle now requests normal noncacheable CPU mappings for
+all actual owned ring/payload buffers through PDPCIUSBDMABuffer. Native
+IOMapper/IODMACommand translation, full-page ownership, zero padding and
+ambiguous failure retention remain intact. The actual allocation method is
+exercised with explicit host IOKit fixtures: native mapper selection, mapping
+flags, nonidentity IOVA and failed preparation retention pass ASan/UBSan.
+This is requested mapping policy, not hardware cache or USB DMA evidence.
+
+The admitted PCI branch also uses the real MSI event-generation wait with a
+one-second recovery backstop instead of two-millisecond fallback wakeups;
+its non-isochronous completion worker uses the same slow backstop. Default
+PCI interrupt reads wait up to one second, return immediately on actual
+completion, and honor a caller's explicit completion timeout. The existing
+HID stop path still joins its reader before aborting the persistent TD, so
+that join can include the longer default read. Direct prepared-host timing
+and active isochronous service timing retain their existing branches.
+Actual sleep-function fixtures verify the slow PCI wait, caller deadline
+clamping, changed-generation refusal to sleep and original non-PCI wait.
+
+The combined native SDK builds, broker/ATC/PMGR/common source bytes still
+match the installed combined USB bundle, and actual allocator/controller/
+composition fixtures plus all six repository checks pass. This supersedes
+the earlier cached/two-millisecond detached USB candidates. No USB collection
+or boot has occurred. These uninstalled changes cannot explain the currently
+reported idle-load regression; that cause remains unresolved. CIO38TRACE
+remains unchanged and waits behind TERM8's guarded core pipeline.

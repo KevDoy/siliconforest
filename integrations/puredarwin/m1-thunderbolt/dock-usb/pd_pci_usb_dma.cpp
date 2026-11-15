@@ -20,7 +20,10 @@ PDPCIUSBDMABuffer *PDPCIUSBDMABuffer::allocate(IOService *device,UInt64 bytes,UI
  if(!memory){property->release();return NULL;}
  memory->command=NULL;memory->endpoint=NULL;memory->iova=0;memory->retiring=memory->unsafe=0;memory->prepared=false;
  UInt64 span=(bytes+page-1)&~(page-1);
- if(!memory->initWithPhysicalMask(kernel_task,kIODirectionInOut|kIOMemoryPhysicallyContiguous,
+ // PCIe-C is distinct from the coherent internal PCIe fabric. Whole owned
+ // buffers use normal-NC DRAM: rings and payloads must not rely on a mapped
+ // command's copy synchronization to clean/invalidate the CPU cache.
+ if(!memory->initWithPhysicalMask(kernel_task,kIODirectionInOut|kIOMemoryPhysicallyContiguous|kIOMapWriteCombineCache,
                                  span,alignment,mask)){
   property->release();memory->release();return NULL;
  }
@@ -42,6 +45,7 @@ PDPCIUSBDMABuffer *PDPCIUSBDMABuffer::allocate(IOService *device,UInt64 bytes,UI
   device->setProperty("PDCIOUSBMappingQuarantined",true);
   return NULL;
  }
+ device->setProperty("PDCIOUSBDMACPUCachePolicy","requested-normal-noncacheable");
  memory->iova=segment.fIOVMAddr;return memory;
 }
 IOReturn PDPCIUSBDMABuffer::retire()
