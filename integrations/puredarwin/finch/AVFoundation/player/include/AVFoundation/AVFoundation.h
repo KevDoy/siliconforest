@@ -2288,3 +2288,12 @@ extern NSString *const my_UIApplicationWillResignActiveNotification;
 - (id<AVPlayerItemMetadataCollectorPushDelegate>)delegate;
 - (dispatch_queue_t)delegateQueue;
 @end
+
+/* Our test diagnostics, not an Apple API or a hardware/presentation promise. */
+@interface AVPlayer (SiliconForestPlaybackDiagnostics)
+- (NSDictionary *)sfPlaybackStatistics;
+- (NSArray *)sfPlaybackFrameDigests;
+@end
+@interface AVPlayerLayer (SiliconForestPlaybackDiagnostics)
+- (NSUInteger)sfDisplayedFrameIndex;
+@end

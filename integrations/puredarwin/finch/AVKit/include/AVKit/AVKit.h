@@ -157,3 +157,10 @@ typedef struct {int16_t subframes,divisor;uint32_t counter,type,flags;int16_t ho
 @property uint32_t tc_flags;
 @property SFAVKitSMPTETime timecodeStruct;
 @end
+
+/* Source-owned stage diagnostics; CPU drawing is not panel presentation. */
+@interface AVPlayerView (SiliconForestPlaybackDiagnostics)
+- (AVPlayerLayer *)sfPlayerLayer;
+- (NSUInteger)sfVideoDrawCount;
+- (NSUInteger)sfTransportDrawCount;
+@end
