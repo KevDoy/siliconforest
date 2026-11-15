@@ -1008,3 +1008,21 @@ earlier survey must not be used to map these windows. The pinned
 `t8103-pciec-tunables.dtsi` supplies the additional OE-fabric configuration;
 no captured calibration values are being added to source. Native endpoint
 bridge/DMA and PCI xHCI/I210 binding are still unimplemented.
+
+
+The pre-retry startup audit also catches the missing NHI tunable application:
+pinned apple_nhi_probe applies apple,tunable-nhi before rings. The native
+firmware stage loaded/validated those eight fabric/management groups but
+intentionally did not apply them. The CM entry now requires HOP_COUNT 12,
+IRQ enable zero and every ring VALID clear, then applies PD_CIO_NHI before
+DART/rings/manager startup. This remains a source correction pending target
+qualification, with no new timer and no effect on the firmware-only build.
+
+
+Native failure closure is also wired through to actual DMA admission: a
+faulted device/PM adapter now makes the native owner unavailable, rejects
+new Linux ring enqueues before descriptor writes, and masks/quarantines a
+ring that interrupts after the latch. Metadata teardown remains available;
+a failed controller drain retains backing and the PHY lease. This closes a
+source gap between the previously tested metadata fault latch and the new
+native ring engine; it is pending hardware qualification with that engine.

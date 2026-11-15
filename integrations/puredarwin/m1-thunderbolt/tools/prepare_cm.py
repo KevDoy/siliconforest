@@ -12,7 +12,12 @@ q=p/'usb4_port.c';s=q.read_text();needle='device_unregister(&usb4->dev);\n\t}';a
 q.write_text(s.replace(needle,'device_unregister(&usb4->dev);\n\t\treturn ERR_PTR(ret);\n\t}'))
 # Native Apple stop must observe VALID/IRQ disabled before clearing addresses.
 # A failed check quarantines DMA backing; leave running set for final teardown.
-q=p/'nhi.c';s=q.read_text();needle='\tring_iowrite32options(ring, 0, 0);\n\tring_iowrite64desc(ring, 0, 0);';assert s.count(needle)==1
+q=p/'nhi.c';s=q.read_text()
+# Close actual frame submission when native PM/publication has faulted. The
+# IRQ path masks its hardware bit and quarantines DMA on that same latch.
+needle='\tspin_lock_irqsave(&ring->lock, flags);\n\tif (ring->running) {';assert s.count(needle)==1
+s=s.replace(needle,'\tspin_lock_irqsave(&ring->lock, flags);\n\tif (!pd_tb_native_ready()) {\n\t\tret = -ENODEV;\n\t} else if (ring->running) {')
+needle='\tring_iowrite32options(ring, 0, 0);\n\tring_iowrite64desc(ring, 0, 0);';assert s.count(needle)==1
 s=s.replace(needle,'\tring_iowrite32options(ring, 0, 0);\n\tif (pd_tb_nhi_check_stopped(ring)) goto err;\n\tring_iowrite64desc(ring, 0, 0);')
 # Native release_ring_irq masks and joins the AIC source. Then join the ring
 # worker before retiring descriptor mappings, rather than afterwards.

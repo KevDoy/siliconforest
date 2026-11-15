@@ -346,6 +346,16 @@ int PDAppleCIO::startCM()
  setProperty("cm-ausb-cio-power",reset.r32(0x468),32);
  if(!cm)cm=pd_cio_cm_create(this,this,cmPowered);
  if(!cm)return EIO;
+ // Linux apple_nhi_probe applies NHI fabric/interrupt-management tunables
+ // before the control rings can run. The firmware-only stage intentionally
+ // did not touch them. Require the real, exclusive controller to be pristine
+ // before any NHI write; the native ring owner repeats this check on entry.
+ if((nhi.r32(0)&0x3ff)!=12 || nhi.r32(0xd0010))return EBUSY;
+ for(unsigned i=0;i<12;++i){
+  if((nhi.r32(0x10010+i*0x4000)|(nhi.r32(0x80010+i*0x4000)))&(1u<<31))return EBUSY;
+ }
+ ret=pd_cio_tunables_apply(&tunables,&tuning,PD_CIO_NHI);
+ setProperty("nhi-start-fabric-applied",ret==0);if(ret)return ret;
  ret=pd_cio_cm_start(cm,(void *)nhi.va,(void *)pdf.va,cable);
  setProperty("nhi-cable-info",cable,32);setProperty("nhi-ready",ret==0);
  setProperty("nhi-interrupt-enable",nhi.r32(0xd0010),32);

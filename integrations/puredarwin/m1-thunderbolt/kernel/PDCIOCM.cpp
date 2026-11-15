@@ -43,7 +43,7 @@ struct PDCIOCM {
   if(create)for(auto &s:slots)if(!s.device){s={};s.device=dev;pd_tb_pm_init(&s.pm);return &s;}
   return NULL;
  }
- bool live(){return !__atomic_load_n(&failed,__ATOMIC_ACQUIRE) && powered(powerCtx);}
+ bool live(){return pd_tb_native_ready() && !__atomic_load_n(&failed,__ATOMIC_ACQUIRE) && powered(powerCtx);}
  void fault(){__atomic_store_n(&failed,1,__ATOMIC_RELEASE);pd_tb_dma_quarantine();pd_tb_native_fault(-EIO);}
  static void lock(void *p){IOLockLock(((PDCIOCM *)p)->registryLock);}
  static void unlock(void *p){IOLockUnlock(((PDCIOCM *)p)->registryLock);}

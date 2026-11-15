@@ -50,6 +50,9 @@ static int interrupt(void *arg)
  struct tb_ring *r=arg;struct pd_tb_nhi *s=owner(r->nhi);
  spin_lock(&r->nhi->lock);spin_lock(&r->lock);
  writel(BIT(index_of(r)),s->config.nhi_base+IRQ_STATUS);
+ if(!pd_tb_native_ready()){
+  active(r,false);fail(s);
+ }
  if(r->running && !__atomic_load_n(&s->failed,__ATOMIC_ACQUIRE)){
   if(r->start_poll){mask(r,true);r->start_poll(r->poll_data);}
   else schedule_work(&r->work);
