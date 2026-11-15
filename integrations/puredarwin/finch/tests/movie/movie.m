@@ -3,7 +3,7 @@
  * decode -> retained AudioQueue/HAL, audio sample clock -> ordered layer submits.
  * --decode-only never opens an output device or window (native reference mode).
  * --headless measures delivery timing without claiming screen presentation.
- * --window is for the GUI owner; layer submission is not a scanout acknowledgement.
+ * --window draws our frame layer through CPU CoreGraphics; drawing is not scanout.
  */
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
@@ -31,6 +31,42 @@ typedef struct {
 static double now_seconds(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec/1e9;}
 static void require(BOOL ok,const char *message){if(!ok){fprintf(stderr,"MOVIE_FAIL %s\n",message);exit(1);}}
 static void check(OSStatus status,const char *message){if(status){fprintf(stderr,"MOVIE_FAIL %s status=%d\n",message,(int)status);exit(1);}}
+/* Own frame-layer presenter. Hosted CALayer rendering needs CGL/libEGL on PD;
+ * a CPU view instead draws this layer's CGImage into the real window context. */
+@interface SFMovieView : NSView {
+    CALayer *_sfFrameLayer;
+    size_t _sfFrameIndex,_sfDrawnFrames,_sfLastDrawn;
+    double _sfPTS;
+    char _sfMD5[33];
+    BOOL _sfHasFrame;
+}
+- (id)initWithFrame:(NSRect)frame frameLayer:(CALayer *)layer;
+- (void)setMovieFrame:(const MovieFrame *)frame index:(size_t)index;
+- (size_t)drawnFrameCount;
+@end
+@implementation SFMovieView
+- (id)initWithFrame:(NSRect)frame frameLayer:(CALayer *)layer {
+    if((self=[super initWithFrame:frame])){_sfFrameLayer=[layer retain];_sfLastDrawn=SIZE_MAX;}
+    return self;
+}
+- (void)dealloc {[_sfFrameLayer release];[super dealloc];}
+- (void)setMovieFrame:(const MovieFrame *)frame index:(size_t)index {
+    _sfFrameIndex=index;_sfPTS=CMTimeGetSeconds(frame->pts);memcpy(_sfMD5,frame->hash,33);_sfHasFrame=YES;[self setNeedsDisplay:YES];
+}
+- (size_t)drawnFrameCount {return _sfDrawnFrames;}
+- (void)drawRect:(NSRect)dirty {
+    (void)dirty;
+    CGContextRef context=[[NSGraphicsContext currentContext] graphicsPort];
+    require(context!=NULL,"window graphics context");
+    if(!_sfHasFrame){[[NSColor blackColor] set];NSRectFill([self bounds]);return;}
+    CGImageRef image=(CGImageRef)[_sfFrameLayer contents];require(image!=NULL,"frame-layer contents");
+    CGContextDrawImage(context,NSRectToCGRect([self bounds]),image);
+    if(_sfLastDrawn!=_sfFrameIndex){
+        require(_sfFrameIndex==_sfDrawnFrames,"CPU draw order");_sfLastDrawn=_sfFrameIndex;_sfDrawnFrames++;
+        printf("MOVIE_VIEW_DRAW frame=%zu pts=%.6f md5=%s\n",_sfFrameIndex,_sfPTS,_sfMD5);
+    }
+}
+@end
 static void digest(const UInt8 *bytes,size_t size,char out[33]){
     UInt8 hash[16];av_md5_sum(hash,bytes,size);for(int n=0;n<16;n++)sprintf(out+2*n,"%02x",hash[n]);out[32]=0;
 }
@@ -137,9 +173,9 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
     require(fabs(videoDuration-audioDuration)<0.05,"source stream duration agreement");
     if(decodeOnly){for(size_t n=0;n<pictures.count;n++)printf("MOVIE_DECODE frame=%zu pts=%.6f md5=%s\n",n,CMTimeGetSeconds(pictures.frames[n].pts),pictures.frames[n].hash);}
     else {
-        NSWindow *host=nil;NSView *view=nil;CALayer *layer=nil;struct SwsContext *scale=NULL;
-        if(window){[NSApplication sharedApplication];host=[[NSWindow alloc] initWithContentRect:NSMakeRect(120,120,640,384) styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
-            [host setTitle:@"Finch Movie Test"];view=[[NSView alloc] initWithFrame:NSMakeRect(0,0,640,384)];layer=[CALayer layer];[view setLayer:layer];[host setContentView:view];[host makeKeyAndOrderFront:nil];[NSApp finishLaunching];}
+        NSWindow *host=nil;SFMovieView *view=nil;CALayer *layer=nil;struct SwsContext *scale=NULL;
+        if(window){[NSApplication sharedApplication];host=[[NSWindow alloc] initWithContentRect:NSMakeRect(120,120,320,192) styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
+            [host setTitle:@"Finch Movie Test"];layer=[CALayer layer];view=[[SFMovieView alloc] initWithFrame:NSMakeRect(0,0,320,192) frameLayer:layer];[host setContentView:view];[host makeKeyAndOrderFront:nil];[NSApp finishLaunching];[host displayIfNeeded];[host flushWindow];}
         AudioQueueRef queue=NULL;check(AudioQueueNewOutput(&pcm,returned,&audio,NULL,NULL,0,&queue),"queue output");check(AudioQueueSetParameter(queue,kAudioQueueParam_Volume,0.1f),"queue local volume");
         for(int n=0;n<3;n++){AudioQueueBufferRef buffer=NULL;check(AudioQueueAllocateBuffer(queue,1024*pcm.mBytesPerFrame,&buffer),"queue buffer");feed(&audio,queue,buffer);}
         double start=now_seconds(),maximumLateness=0,totalLateness=0,lastClock=0;size_t delivered=0;check(AudioQueueStart(queue,NULL),"queue start");
@@ -147,7 +183,7 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
             AudioTimeStamp time={0};check(AudioQueueGetCurrentTime(queue,NULL,&time,NULL),"queue sample clock");double clock=time.mSampleTime/pcm.mSampleRate;if(clock<0)clock=0;lastClock=clock;
             while(delivered<pictures.count && CMTimeGetSeconds(pictures.frames[delivered].pts)<=clock){
                 MovieFrame *frame=&pictures.frames[delivered];double pts=CMTimeGetSeconds(frame->pts),late=clock-pts;if(late>maximumLateness)maximumLateness=late;totalLateness+=late;
-                if(window)layer_submit(layer,frame,&scale);
+                if(window){layer_submit(layer,frame,&scale);[view setMovieFrame:frame index:delivered];[host displayIfNeeded];[host flushWindow];require([view drawnFrameCount]==delivered+1,"CPU view draw callback");}
                 printf("%s frame=%zu pts=%.6f audio=%.6f late_ms=%.3f md5=%s\n",window?"MOVIE_LAYER_SUBMIT":"MOVIE_HEADLESS_DELIVER",delivered,pts,clock,late*1000,frame->hash);delivered++;
             }
             pthread_mutex_lock(&audio.lock);BOOL complete=audio.completed==audio.bytes;OSStatus error=audio.error;pthread_mutex_unlock(&audio.lock);require(!error,"audio enqueue callback");
@@ -156,7 +192,7 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
             else usleep(2000);
         }}
         double elapsed=now_seconds()-start;check(AudioQueueStop(queue,true),"queue stop");check(AudioQueueDispose(queue,true),"queue dispose");
-        printf("MOVIE_SYNC mode=%s frames=%zu/%zu audio_queued=%zu audio_completed=%zu callbacks=%u rate=%.0f wall=%.6f audio_clock=%.6f clock_wall_drift_ms=%.3f max_delivery_late_ms=%.3f mean_delivery_late_ms=%.3f hardware=%d\n",window?"layer":"headless",delivered,pictures.count,audio.next/pcm.mBytesPerFrame,audio.completed/pcm.mBytesPerFrame,(unsigned)audio.callbacks,pcm.mSampleRate,elapsed,lastClock,(elapsed-lastClock)*1000,maximumLateness*1000,totalLateness*1000/pictures.count,hardware);
+        printf("MOVIE_SYNC mode=%s frames=%zu/%zu audio_queued=%zu audio_completed=%zu callbacks=%u rate=%.0f wall=%.6f audio_clock=%.6f clock_wall_drift_ms=%.3f max_delivery_late_ms=%.3f mean_delivery_late_ms=%.3f hardware=%d view_draws=%zu\n",window?"cpu-layer":"headless",delivered,pictures.count,audio.next/pcm.mBytesPerFrame,audio.completed/pcm.mBytesPerFrame,(unsigned)audio.callbacks,pcm.mSampleRate,elapsed,lastClock,(elapsed-lastClock)*1000,maximumLateness*1000,totalLateness*1000/pictures.count,hardware,window?[view drawnFrameCount]:0);
         require(delivered==pictures.count && audio.completed==audio.bytes && !audio.error,"all streams consumed");require(fabs(elapsed-audioDuration)<1.0 && maximumLateness<0.1,"clock pacing/drift bound");
         sws_freeContext(scale);if(window){[host orderOut:nil];[host release];[view release];}
     }
