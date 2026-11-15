@@ -23,3 +23,15 @@ cases. These are register models; no ATC writes have yet run on the M1.
 This is USB2 only. SuperSpeed lane calibration and PIPE routing, DP AUX/link
 rates/drive levels and Thunderbolt/USB4 mode remain to be ported. A direct
 USB3 device may use its USB2 fallback; this does not establish SuperSpeed.
+
+`src/pd_atc_dp.c` and `upstream/atc-t8103-dp.inc` now port DP AUX,
+RBR/HBR/HBR2/HBR3 PLL/lane programming and the distinct T8103 DP-over-TB
+pixel-clock sequence. `tools/extract_dp.py` keeps the upstream register
+bodies with T8103 specialization and callback/serialization adapters. A
+failed tunnel-clock shutdown retains ownership and blocks retuning until
+shutdown succeeds; this strengthens upstream's discarded APB error.
+The native caller must already own a powered, calibrated DP or TBT/USB4
+mode and the PHY lock; these programs do not establish that ownership.
+Host tests cover physical PMA masks, all rates, no-op repeated rates,
+shared-PLL refusal and command/PLL/shutdown failures. `build-objects.nix`
+SDK-builds the programs. No DP path is attached or hardware-tested yet.

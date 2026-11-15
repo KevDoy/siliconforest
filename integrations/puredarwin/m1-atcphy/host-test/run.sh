@@ -7,3 +7,6 @@ trap 'rm -rf "$tmp"' EXIT
 ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/../include" -c "$here/../src/pd_atc_usb2.c" -o "$tmp/atc.o"
 ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../include" "$here/atc.cpp" "$tmp/atc.o" -o "$tmp/atc"
 "$tmp/atc"
+${CC:-cc} -std=gnu11 -O1 -g -fsanitize=address,undefined -I "$here/../include" -I "$here/../upstream" -c "$here/../src/pd_atc_dp.c" -o "$tmp/dp.o"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../include" "$here/dp.cpp" "$tmp/dp.o" -o "$tmp/dp"
+"$tmp/dp"
