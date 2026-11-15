@@ -40,11 +40,14 @@ static uint32_t fnv(const uint8_t *p, size_t n)
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);   // every line out at once: where a run stops is visible
     @autoreleasepool {
+        printf("SFMETAL step device\n");
         id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
         if (dev == nil) { printf("SFMETAL FAIL no device\n"); return 1; }
         printf("SFMETAL device %s\n", [[dev name] UTF8String]);
 
+        printf("SFMETAL step library\n");
         NSError *err = nil;
         NSString *src = [NSString stringWithUTF8String:kSource];
         id<MTLLibrary> lib = [dev newLibraryWithSource:src options:nil error:&err];
@@ -53,6 +56,7 @@ int main(void)
         id<MTLFunction> ff = [lib newFunctionWithName:@"sf_fragment"];
         if (vf == nil || ff == nil) { printf("SFMETAL FAIL functions %p %p\n", (void *)vf, (void *)ff); return 1; }
 
+        printf("SFMETAL step pipeline\n");
         MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor alloc] init];
         [pd setVertexFunction:vf];
         [pd setFragmentFunction:ff];
@@ -82,6 +86,7 @@ int main(void)
         [ca setStoreAction:MTLStoreActionStore];
         [ca setClearColor:MTLClearColorMake(0.0, 0.0, 0.0, 1.0)];
 
+        printf("SFMETAL step encode\n");
         id<MTLCommandQueue> q = [dev newCommandQueue];
         id<MTLCommandBuffer> cb = [q commandBuffer];
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
@@ -95,7 +100,9 @@ int main(void)
        destinationBytesPerRow:W * 4 destinationBytesPerImage:W * H * 4];
         [blit endEncoding];
         [cb commit];
+        printf("SFMETAL step wait\n");
         [cb waitUntilCompleted];
+        printf("SFMETAL step done\n");
 
         // the CPU reference: a pixel is inside when its centre is on the inner side of all three edges
         static uint8_t ref[W * H * 4];

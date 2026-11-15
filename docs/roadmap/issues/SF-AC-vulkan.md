@@ -200,7 +200,7 @@ first: the kit rebuilt from the tree gave the installed `56759b9f…` byte for b
 | Kit | Change | `sf/kernel.bin` | `.old` | Checked on the M1 |
 |---|---|---|---|---|
 | k1 | `pdavd=1` on the command line (configuration record only; `kern.kernelcacheuuid` unchanged) | `35044741…` | `56759b9f…` | `/dev/pdavd` present; `m1-avd/tools/avd_disk_test.sh run`: H.264 High, HEVC Main, VP9 1080p, 300 pictures each, **900 of 900 identical** to the workstation's software decode (framemd5), 0 errors, timeouts or DART faults; 2.3-2.8 ms per picture |
-| k2 | k1 + `if_attach_nx=46` + IO80211Family counting packets out (collection: IO80211Family, PDBwfm) | `7ad3b4a9…` | `35044741…` | 50 MiB pushed into the M1 over SSH: `ipackets` 334 -> 36856, `ibytes` +52.4 MB, `opackets` 197 -> 4196 (k1, same test: all three stay 0) |
+| k2 | k1 + `if_attach_nx=46` + IO80211Family counting packets out (collection: IO80211Family, PDBwfm) | `7ad3b4a9…` | `35044741…` | 50 MiB pushed into the M1 over SSH: `ipackets` 334 -> 36856, `ibytes` +52.4 MB, `opackets` 197 -> 4196 (k1, same test: all three stay 0). Screen (capture during a 100 MiB push, 01:56Z): Activity Monitor's Network tab "Data received/sec 15.3 MB", totals counting; the dock's EN0 tile "13 M" down, "19 K" up. Activity Monitor's per-process Sent/Rcvd columns stay 0 (another source, not covered) |
 
 - **AVD**: PDAppleAVD was already a member of the collection (`rebase/build-kc.nix`), inert without the
   boot-arg. The decoder firmware `avd-fw-v2-t0.bin` (aurora-silicon/avd-fw, MIT, 49152 bytes, from the
@@ -343,8 +343,21 @@ was not tested. Those two tests are what to write first.
 - MAILBOX works (about 134 fps); IMMEDIATE is not offered by Mesa's Wayland WSI here.
 - Conformance: no CTS run (see above).
 - Zink on Honeykrisp does not start (EGL falls back to swrast); patch 0201 is experimental.
-- Mappings dropped under in-flight jobs on G13 (GPU faults + recovery when a client dies with work
-  queued): bring linux-aurora's `VmLifetime` to G13 VMs, or keep it as Linux does.
+- **Kernel, second issue: mappings dropped under in-flight jobs** on G13 (GPU faults + firmware recovery
+  when a client dies or closes its DRM file with work queued; reproduced 14 November, see "The crash
+  reproduced"): in linux-aurora a GEM handle close unmaps at once on G13 (`File::unbind_gem_object` ->
+  `Vm::drop_mappings`, and `drm_file_free` releases handles before the driver's `postclose` stops the
+  queues); only G15/G17 VMs carry `VmLifetime`, which defers the unmap while accepted jobs may still use
+  the object. The fix is to give G13 VMs the same deferral (or to stop and drain a file's queues before
+  its handles are released). Not attempted; after taskqueue fix 0041 the faults are recovered, not fatal.
+- **Kernel, third issue (15 November): a process that used Indium cannot exit.** Indium's device polling
+  thread waits on a timeline semaphore with an infinite timeout (`vkWaitSemaphores(..., UINT64_MAX)`, a
+  DRM syncobj timeline wait); at `exit`/`_exit` the process stays in state `?NE` for good (seen twice;
+  the GPU stays usable for others). Linux's wait would return `-ERESTARTSYS` when the task is killed;
+  our LinuxKPI's interruptible wait is evidently not ended by XNU's thread termination. To check in
+  `m1-rust-kext/lkpi` (signal_pending / schedule_timeout against thread_abort) in the next kernel round.
+- **Kernel, fourth issue: the dEQP-VK dma-buf hang** (`fd_properties` after `export_multiple_times`):
+  uninterruptible, and new device opens blocked until a reboot (see "Conformance"). Not analysed.
 - vkcube waits while the display sleeps (no frame callbacks); a compositor policy question for DESK3.
 - `memory_limit = 0` from our kernel's GET_PARAMS (newer kernels report it); Honeykrisp falls back
   to the machine's memory for its heap (7.02 GiB).
