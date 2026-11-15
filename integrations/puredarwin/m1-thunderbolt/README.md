@@ -298,3 +298,17 @@ explicit administrator requests remain the only callers; no timer rearm,
 write or authorization is added. The actual inline observer has sanitizer
 host coverage for input rejection, both I/O failures and all64 state/LD/LCK
 combinations; that is source evidence until the candidate boots.
+
+
+`PDCIOPCIController` SDK-builds the native ordered-MMIO/power adapter for
+`pd_pciec_port`. It checks real DT resources and absence of host/DART
+children, retains the lease owner, checks the actual ATC1_PCIE PMGR state
+before each access, and maps only root/controller windows with nonposted
+ordering. It does not read any PCIe-C DART parameters. Its43 public T8103
+tuning records derive from the pinned Linux DTS; all42 root records match
+the active Linux capture (port record separately from t8103.dtsi).
+The native adapter is unwired. Actual cold-init, tunnel activation, link,
+DART/MSI and child enumeration are unqualified. Link startup must run outside
+the CM domain lock; failures block later access and pin ownership until
+reboot. Revoke is not a DMA/child drain implementation. No boot is scheduled
+solely to run this adapter before a dock router exists.

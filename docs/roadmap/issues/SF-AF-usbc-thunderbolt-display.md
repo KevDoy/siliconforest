@@ -1416,3 +1416,21 @@ reader passes ASan/UBSan input and both read-failure cases and64 field
 combinations. SDK and all six local checks pass; this diagnostic is not yet
 installed. It uses the existing startup/administrator query, with no recurring
 timer or writes. CIO13 remains the observed non-AVE installed kernel above.
+
+### PCIe-C native cold-init/link adapter: SDK and host evidence only
+
+`PDCIOPCIController` maps the actual apciec1 root/controller windows and
+uses nonposted accesses with dsb/isb ordering, actual ATC1_PCIE PMGR reads
+and retained power/PHY-owner callbacks. It requires host/DART registry
+children absent at initialization; it never touches PCIe-C DART parameters.
+It adapts the existing bounded cold-init/link helper and43 published T8103
+tuning records. All42 root records match the active Linux capture; the
+remaining port record is the pinned t8103.dtsi constant. SDK and sanitizer
+host tests pass (every tuning I/O failure, critical masks and idempotence).
+
+This adapter remains unwired. No native cold-init/link or PCI enumeration
+is claimed. Real CM tunnel callbacks/deferred activation, endpoint DART/MSI,
+posted endpoint BARs and child drain are outstanding. Any attempted programming
+pins its owner/mappings until reboot; revocation only blocks access and is
+not hotplug teardown. CIO14's separately frozen diagnostic is the queued
+hardware candidate; this controller is not in that collection.

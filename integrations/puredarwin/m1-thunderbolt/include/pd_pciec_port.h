@@ -31,6 +31,10 @@ int pd_pciec_cold_init(const struct pd_pciec_io *);
 /* Called only after the real connection manager activated its PCIe tunnel;
  * native bridge/DART/MSI setup must precede endpoint-driver admission. */
 int pd_pciec_link_start(const struct pd_pciec_io *);
+/* Published T8103 Linux SoC constants, not runtime/private calibration.
+ * Caller validates real windows/power and serializes. No ADT bytes accepted.
+ * This function supplies the tune callback; it never calls io->tune. */
+int pd_pciec_t8103_tune(const struct pd_pciec_io *,enum pd_pciec_window);
 #ifdef __cplusplus
 }
 #endif

@@ -139,3 +139,12 @@ state/LD and ADP_CS_4 LCK layouts, GPL-2.0:
   Copyright (c) 2014 Andreas Noever <andreas.noever@gmail.com>
   Copyright (C) 2018, Intel Corporation
 Its host test exercises the same inline observer linked by the native bridge.
+
+kernel/PDCIOPCIController.cpp and pd_cio_pcie_controller.h adapt the same
+GPL-2.0 pcie-apple.c sequence and retain its Alyssa Rosenzweig/Google/
+Corellium/Mark Kettenis notices. src/pd_pciec_tunables.c reproduces published
+T8103 register constants from arch/arm64/boot/dts/apple/t8103-pciec-tunables.dtsi
+and t8103.dtsi at the pinned Linux revision. The including t8103.dtsi carries
+GPL-2.0+ OR MIT, Copyright The Asahi Linux Contributors; this data source and
+its digest are recorded in native/provenance.json. No captured calibration,
+firmware or owner identifiers are included.

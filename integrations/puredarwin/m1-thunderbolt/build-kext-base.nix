@@ -13,7 +13,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     mkdir -p "$dest"
     cp ${./kernel}/* "$dest/"
     cp ${./include}/* "$dest/"
-    cp ${./src}/pd_apple_nhi.c ${./src}/pd_cio_tunables.c ${./src}/pd_pciec_config.c "$dest/"
+    cp ${./src}/pd_apple_nhi.c ${./src}/pd_cio_tunables.c ${./src}/pd_pciec_config.c ${./src}/pd_pciec_port.c ${./src}/pd_pciec_tunables.c "$dest/"
     cp ${../m1-usb-dwc3/kernel/pd_usbc_phy_lease.h} "$dest/pd_usbc_phy_lease.h"
     cp ${../m1-usb-dwc3/kernel/pd_usb_iova.h} "$dest/pd_usb_iova.h"
     cp ${../m1-dcp-dart/include/pd_dart_table.h} "$dest/pd_dart_table.h"
