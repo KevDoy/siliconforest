@@ -6,6 +6,12 @@ import plistlib
 import sys
 
 root = Path(sys.argv[1]) / 'src/Kernel/Extensions/RavynXHCIPort'
+composition=plistlib.loads((root/'Info.plist').read_bytes())
+preserved={name:value for name,value in composition['IOKitPersonalities'].items()
+           if value.get('IOClass')=='PDAppleUSB' or value.get('IONameMatch')=='pd,apple-dwc3-host'}
+assert sum(v.get('IOClass')=='PDAppleUSB' and v.get('IOProviderClass')=='PDAppleTypeC' for v in preserved.values())==1, 'shared PHY broker missing'
+assert sum(v.get('IONameMatch')=='pd,apple-dwc3-host' for v in preserved.values())==1, 'prepared direct host missing'
+assert (root/'PDAppleUSB.cpp').is_file() and 'PDAppleUSB.cpp' in (root/'CMakeLists.txt').read_text(), 'broker code missing'
 def replace(text, old, new, count=1):
     if text.count(old) != count:
         raise SystemExit(f'dock USB source shape changed ({text.count(old)} != {count}): {old[:80]}')
@@ -115,7 +121,8 @@ bool RavynXHCIPort::retireDockBuffers()
 }
 
 ''' + anchor)
-s = replace(s, '    if (!super::start(provider)) return false;', '''    if (!fPCI || fPCI->configRead32(0)!=0x11001b73 ||
+s = replace(s, '    if (!super::start(provider)) return false;', '''    if (fPCI) {
+    if (fPCI->configRead32(0)!=0x11001b73 ||
         (fPCI->configRead32(8)>>8)!=0x0c0330 || (fPCI->configRead16(4)&4)) return false;
     fDockMMIOFailed=0;fDockRetiring=false;
     fDockAccessKey=OSSymbol::withCString("PDCIOPCIEndpointAccess");
@@ -128,7 +135,9 @@ s = replace(s, '    if (!super::start(provider)) return false;', '''    if (!fPC
     }
     fDockHost->retain();retain(); // IRQ/partial DMA startup remains pinned until reboot.
     fDockBuffers=OSArray::withCapacity(64);fDockBufferLock=IOLockAlloc();
-    if (!fDockBuffers || !fDockBufferLock || !super::start(provider)) return false;''')
+    if (!fDockBuffers || !fDockBufferLock) return false;
+    }
+    if (!super::start(provider)) return false;''')
 s = replace(s, '        fPCI->setBusMasterEnable(true);', '        // Native host admits DMA only after registered and armed MSI below.')
 s = replace(s, '''        fBARMap = mapUsableBAR(fPCI, kIOPCIConfigBaseAddress0);
         if (!fBARMap) mapBARFromAssignedAddresses(fPCI, &fBARDesc, &fBARMap);
@@ -136,7 +145,8 @@ s = replace(s, '''        fBARMap = mapUsableBAR(fPCI, kIOPCIConfigBaseAddress0)
         if (!resource || resource->getLength()<0x1000 || !dockAccess()) return false;
         fBARMap=fPCI->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0,kIOMapPostedWrite);
         // Native resources only: no BAR sizing, guessed address or fallback.''')
-s = replace(s, '    // CONFIG.MaxSlotsEn', '''    if (!fInterruptsEnabled || !(irqType & kIOInterruptTypePCIMessaged)) return false;
+s = replace(s, '    // CONFIG.MaxSlotsEn', '''    if (fPCI) {
+    if (!fInterruptsEnabled || !(irqType & kIOInterruptTypePCIMessaged)) return false;
     IOReturn admitted=kIOReturnNotReady;
     for (unsigned attempt=0;attempt<100;++attempt) {
         admitted=fDockHost->callPlatformFunction("PDCIOPCIEnableDockUSBDMA",false,fPCI,NULL,NULL,NULL);
@@ -144,6 +154,7 @@ s = replace(s, '    // CONFIG.MaxSlotsEn', '''    if (!fInterruptsEnabled || !(i
         IOSleep(10);
     }
     if (admitted!=kIOReturnSuccess || !dockAccess() || !(fPCI->configRead16(4)&4)) return false;
+    }
 
     // CONFIG.MaxSlotsEn''')
 s = replace(s, '        if (wait == 2000) { IOLockUnlock(fRemovalLock); return; }',
@@ -185,4 +196,4 @@ for key in list(prototype):
     if key.startswith('IOPCI'):prototype.pop(key)
 prototype['IOProviderClass']='IOPCIDevice';prototype['IOPCIPrimaryMatch']='0x11001b73';prototype['IOPCITunnelCompatible']=True
 # Mapper/access checks still select one actual device; matching alone admits nothing.
-data['IOKitPersonalities']={'T8103 dock FL1100':prototype};p.write_bytes(plistlib.dumps(data))
+data['IOKitPersonalities']={**preserved,'T8103 dock FL1100':prototype};p.write_bytes(plistlib.dumps(data))

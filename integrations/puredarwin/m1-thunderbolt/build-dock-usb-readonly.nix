@@ -5,7 +5,7 @@
 let
  source=import ../rebase/pd.nix;
  inherit (source) pkgs;
- base=import ../m1-usb-dwc3/build-xhci.nix;
+ base=import ../m1-usb-dwc3/build-host.nix;
 in base.overrideAttrs (old: {
  pname="puredarwin-dock-xhci-readonly";
  src=pkgs.runCommand "puredarwin-dock-xhci-readonly-tree" {nativeBuildInputs=[pkgs.patch];} ''

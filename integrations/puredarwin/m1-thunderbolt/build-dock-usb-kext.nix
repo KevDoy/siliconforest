@@ -15,5 +15,7 @@ in base.overrideAttrs (old: {
   mkdir -p "$out/System/Library/Extensions"
   cp -R build-nix/src/Kernel/Extensions/RavynXHCIPort/RavynXHCIPort.kext "$out/System/Library/Extensions/"
   cp ${../m1-usb-dwc3/NOTICE} "$out/System/Library/Extensions/RavynXHCIPort.kext/Contents/NOTICE"
+  chmod u+w "$out/System/Library/Extensions/RavynXHCIPort.kext/Contents/NOTICE"
+  cat ${../m1-atcphy/NOTICE} >> "$out/System/Library/Extensions/RavynXHCIPort.kext/Contents/NOTICE"
  '';
 })
