@@ -241,14 +241,14 @@ int PDAppleUSB::priorACIOOff()
 {
     // A stopped DWC3 is not proof of stopped ACIO. Check before even
     // enabling PHY clocks: an inherited controller must not wake on them.
-    uint32_t acioState=0,cpuState=0;
+    uint32_t acioState=0;
     int ret=pd_usbc_pmgr_node_off("/arm-io/acio1",&acioState);
-    int cpuRet=pd_usbc_pmgr_node_off("/arm-io/acio-cpu1",&cpuState);
     setProperty("prior-acio-power-state",acioState,32);
-    setProperty("prior-acio-cpu-power-state",cpuState,32);
     setProperty("prior-acio-off-error",(uint32_t)ret,32);
-    setProperty("prior-acio-cpu-off-error",(uint32_t)cpuRet,32);
-    return ret?ret:cpuRet;
+    // T8103 M3 is inside ATC1_CIO. Its clock-gate entry is a virtual
+    // reconfigure command, not another physical power domain.
+    setProperty("prior-acio-power-covers-m3",!ret);
+    return ret;
 }
 
 int PDAppleUSB::stopPHY()
@@ -517,6 +517,7 @@ void PDAppleUSB::free()
 
 int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
 {
+    setProperty("phy-start-stage","map-and-calibration");
     altTouched=false;auxTouched=false;
     if (quarantined || !map()) return ENODEV;
     pd_atc_mode target=mode==PD_USBC_PHY_DP?PD_ATC_MODE_DP:
@@ -528,13 +529,20 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
     int ret=pd_atc_mode_plan(target,flip,&program);
     if (!ret) ret=cal.validate(cal.ctx,&program);
     if (ret) return ret; // All retained calibration is checked before power/writes.
+    setProperty("phy-start-stage","acio-off-check");
     ret=priorACIOOff();
     if (ret) return ret;
+    setProperty("phy-start-stage","power-enable");
     ret=pd_pmgr_enable_node(atcPath,-1,0,true);
     if (!ret) ret=pd_pmgr_enable_node(usbPath,-1,0,true);
     if (ret) return ret;
+    setProperty("initial-pipe-clock",pipe.r32(0x1c),32);
+    setProperty("initial-pipe-mux",pipe.r32(0xc),32);
+    setProperty("phy-start-stage","stopped-dwc3-check");
     if (pipe.r32(0x1c)&1) {
         uint32_t cap=dwc.r32(0);unsigned op=cap&0xff;
+        setProperty("initial-dwc3-cap",cap,32);
+        setProperty("initial-dwc3-control",dwc.r32(0xc704),32);
         if ((dwc.r32(0xc704)&(1u<<31)) || cap==UINT32_MAX || op<0x20 || op>0x100 ||
             (dwc.r32(op)&1) || !(dwc.r32(op+4)&1)) return EBUSY;
     }
@@ -551,14 +559,16 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
     altTouched=true;
     directDP={};directDP.io=&atcIO;directDP.lane_mask=program.dp_lanes;directDP.rate=-1;
     tunnel={};tunnel.io=&atcIO;
+    setProperty("phy-start-stage","park-prior-phy");
     ret=stopPHY();
-    if (!ret) ret=pd_atc_mode_start(&atcIO,target,flip,&cal);
+    if (!ret) {setProperty("phy-start-stage","configure-mode");ret=pd_atc_mode_start(&atcIO,target,flip,&cal);}
     if (!ret && target==PD_ATC_MODE_USB4) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB4_BACKEND);
     if (!ret && target==PD_ATC_MODE_DP) {
         auxTouched=true; // Also unwind a partially failed AUX enable.
         ret=pd_atc_dp_aux_start(&directDP);
     }
     if (!ret) tunnel.configured=target==PD_ATC_MODE_TBT || target==PD_ATC_MODE_USB4;
+    if (!ret) setProperty("phy-start-stage","configured");
     // DWC3 stays reset and unpublished in all three exclusive alt modes.
     return ret;
 }

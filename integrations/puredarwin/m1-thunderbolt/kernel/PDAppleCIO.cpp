@@ -88,6 +88,7 @@ void PDAppleCIO::write(void *ctx,pd_cio_window w,uint32_t off,uint32_t v){((PDAp
 int PDAppleCIO::mapResources()
 {
  if(rtkit)return 0; // Immutable validated resources/context retained for this boot.
+ setProperty("resource-stage","acio-reg-layout");
  OSSafeReleaseNULL(cpuEntry);OSSafeReleaseNULL(tunableData);
  PDMmio rc1,rc2;
  if(!nhi.mapNode("/arm-io/acio1",0) || nhi.phys!=0x501f00000ULL || nhi.len<0x100000 ||
@@ -100,8 +101,13 @@ int PDAppleCIO::mapResources()
  }
  rc1.unmap();rc2.unmap();rc.unmap();
  if(!rc.mapPhys(0x501ac0000ULL,0xc000))return ENOMEM;
+ setProperty("resource-stage","m3-compatible");
  cpuEntry=IORegistryEntry::fromPath("/arm-io/acio-cpu1",gIODTPlane);
- if(!cpuEntry || !IODTMatchNubWithKeys(cpuEntry,"iop,m3wrap-v2-acio"))return ENODEV;
+ auto compatible=OSString::withCString("iop,m3wrap-v2-acio");
+ bool cpuMatch=cpuEntry && compatible && IODTCompareNubName(cpuEntry,compatible,NULL);
+ OSSafeReleaseNULL(compatible);
+ if(!cpuMatch)return ENODEV;
+ setProperty("resource-stage","sram-segment");
  auto nub=IORegistryEntry::fromPath("/arm-io/acio-cpu1/iop-acio1-nub",gIODTPlane);
  auto segments=nub?OSDynamicCast(OSData,nub->getProperty("segment-ranges")):NULL;
  auto names=nub?OSDynamicCast(OSData,nub->getProperty("segment-names")):NULL;
@@ -117,7 +123,9 @@ int PDAppleCIO::mapResources()
  }
  OSSafeReleaseNULL(nub);
  if(!valid)return EINVAL;
+ setProperty("resource-stage","pmgr-reset-window");
  if(!reset.mapNode("/arm-io/pmgr",0) || reset.phys!=0x23b700000ULL || reset.len<0x88004)return ENODEV;
+ setProperty("resource-stage","tunables");
  tunableData=OSDictionary::withCapacity(11);
  if(!tunableData)return ENOMEM;
  tuning={this,getprop,read,write};
@@ -125,10 +133,12 @@ int PDAppleCIO::mapResources()
  if(ret)return ret;
  // Never introduce the RTKit compatibility layer's 2 ms polling mode.
  if(pd_rtkit_platform_bootarg("pdrtkit_irq",2)!=2)return EOPNOTSUPP;
+ setProperty("resource-stage","mailbox-platform");
  ret=pd_rtkit_platform_init(this);
  if(ret)return ret<0?-ret:ret;
  pd_rtkit_platform_set_log_prefix("PDAppleCIO: rtkit: ");
  rtkit=pd_cio_rtkit_create(cpuEntry,(void *)sram.va,sram.phys,sram.len);
+ if(rtkit)setProperty("resource-stage","complete");
  return rtkit?0:ENOMEM;
 }
 int PDAppleCIO::preparePCIe()
@@ -157,10 +167,14 @@ int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
 {
  int ret=mapResources();if(ret)return ret;
  q.command=PD_USBC_PHY_ACQUIRE;q.mode=(q.eligible&PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT))?PD_USBC_PHY_TBT:PD_USBC_PHY_USB4;
- ret=phy(q);if(ret)return ret;
+ ret=phy(q);
+ // A failed PHY setup can still retain this client's lease when cleanup
+ // failed. Keep that token and drain identity even on an error response.
  leaseToken=q.token;
+ if(!ret && !leaseToken)ret=EPROTO;
  __atomic_store_n(&drainToken,leaseToken,__ATOMIC_RELEASE);
  __atomic_store_n(&drained,0,__ATOMIC_RELEASE);
+ if(ret)return ret;
  ret=preparePCIe();if(ret)return ret;
  power=true; // Also unwind a partially failed enable.
  ret=pd_pmgr_enable_node("/arm-io/acio1",-1,0,true);if(ret)return ret;

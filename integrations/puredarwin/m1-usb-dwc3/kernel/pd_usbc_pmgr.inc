@@ -1,15 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 /* Private extension appended to this bundle's copy of pd_soc.cpp. The PMGR
  * layout follows m1n1 (MIT), Copyright The Asahi Linux Contributors.
- * No writes. Unknown/malformed/virtual gates cannot establish quiescence.
+ * No writes. Read the physical power-gates, not clock-gates: ACIO clock-gates
+ * also lists a virtual CIO1_RECONFIG reset command with no state register.
+ * Unknown/malformed/virtual power gates cannot establish quiescence.
  * The port owner serializes claims; no ACIO owner may power up before claim.
  */
 int pd_usbc_pmgr_node_off(const char *path, uint32_t *observed)
 {
     if (!path || !observed) return EINVAL;
+    if (strcmp(path,"/arm-io/acio1")) return ENODEV;
     *observed=0;
-    unsigned count=pd_adt_cells(path,"clock-gates");
-    if (!count || count>16) return ENOENT;
+    unsigned count=pd_adt_cells(path,"power-gates");
+    if (count!=3) return ENOENT;
     pmgr_lock_init();
     if (!gPmgr.lock) return ENOMEM;
     IOLockLock(gPmgr.lock);
@@ -17,7 +20,7 @@ int pd_usbc_pmgr_node_off(const char *path, uint32_t *observed)
     bool busy=false;
     for (unsigned i=0;!ret && i<count;++i) {
         uint32_t cell=0;
-        if (!pd_adt_u32(path,"clock-gates",i,&cell) || (cell&~PMGR_DEVICE_ID)) {
+        if (!pd_adt_u32(path,"power-gates",i,&cell) || (cell&~PMGR_DEVICE_ID)) {
             ret=EINVAL;break; // This provider is T8103, die zero only.
         }
         const uint8_t *dev=dev_find((uint16_t)cell);
@@ -31,7 +34,8 @@ int pd_usbc_pmgr_node_off(const char *path, uint32_t *observed)
         if (!md || offset>md->getLength() || md->getLength()-offset<4) { ret=EINVAL;break; }
         uint64_t base=md->getPhysicalSegment(0,NULL,kIOMemoryMapperNone);
         PDMmio reg;
-        if (!base || base>UINT64_MAX-offset || !reg.mapPhys(base+offset,4)) { ret=ENXIO;break; }
+        if (!base || base>UINT64_MAX-offset || base+offset!=0x23b700458ULL+8*i) { ret=ENXIO;break; }
+        if (!reg.mapPhys(base+offset,4)) { ret=ENXIO;break; }
         uint32_t value=reg.r32(0);
         reg.unmap();
         *observed|=value;

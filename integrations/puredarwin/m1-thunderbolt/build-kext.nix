@@ -21,6 +21,11 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     chmod u+w "$dest/pd_soc.cpp"
     cat ${./kernel/pd_cio_pmgr.inc} >> "$dest/pd_soc.cpp"
     cp -R ${../m1-gpu-rtkit/src} "$dest/rtkit"
+    chmod -R u+w "$dest/rtkit"
+    # This controller owns 24 NHI lines + DART + its two mailbox lines.
+    # Keep all other RTKit consumers' private engines unchanged.
+    substituteInPlace "$dest/rtkit/PDRtkitPlatform.cpp" --replace-fail '#define MAX_IRQS  16' '#define MAX_IRQS  64'
+    cat ${./kernel/pd_cio_irq.inc} >> "$dest/rtkit/PDRtkitPlatform.cpp"
     printf '\nadd_subdirectory(PDAppleCIO)\n' >> "$out/src/Kernel/Extensions/CMakeLists.txt"
   '';
   buildPhase=''

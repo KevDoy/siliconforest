@@ -25,12 +25,13 @@ int pd_cio_power_off()
     pmgr_lock_init();if(!gPmgr.lock)return ENOMEM;
     IOLockLock(gPmgr.lock);
     int ret=pmgr_load();PDMmio maps[16];
-    unsigned count=pd_adt_cells("/arm-io/acio1","clock-gates");
-    if(!count || count>16)ret=EINVAL;
+    unsigned count=pd_adt_cells("/arm-io/acio1","power-gates");
+    if(count!=3)ret=EINVAL;
     for(unsigned i=0;!ret && i<count;++i){
         uint32_t cell=0;
-        if(!pd_adt_u32("/arm-io/acio1","clock-gates",i,&cell)){ret=EINVAL;break;}
+        if(!pd_adt_u32("/arm-io/acio1","power-gates",i,&cell)){ret=EINVAL;break;}
         ret=pd_cio_gate_map(cell,maps[i]);
+        if(!ret && maps[i].phys!=0x23b700458ULL+8*i)ret=ENODEV;
     }
     for(unsigned i=count;!ret && i>0;--i){
         auto &reg=maps[i-1];
@@ -50,18 +51,24 @@ int pd_cio_power_off()
     for(unsigned i=0;i<16;++i)maps[i].unmap();
     IOLockUnlock(gPmgr.lock);return ret;
 }
-/* The caller has exclusive ownership and has verified the PCIe-C host/DART
- * are unbound; reset only its first (ATC1_PCIE) gate, never the Wi-Fi bridge. */
+/* The caller owns PCIe-C and verified its host/DART unbound. Reset its
+ * physical ATC1_PCIE domain; the clock-gate list contains virtual AON/PCIe
+ * votes, not the reset target. Never reset the AON parent or Wi-Fi bridge. */
 int pd_cio_pcie_reset()
 {
     pmgr_lock_init();if(!gPmgr.lock)return ENOMEM;
     IOLockLock(gPmgr.lock);
     int ret=pmgr_load();uint32_t cell=0;PDMmio reg;
-    if(!ret && !pd_adt_u32("/arm-io/apciec1","clock-gates",0,&cell))ret=ENOENT;
+    if(!ret){
+        const uint8_t *dev=dev_find_named("ATC1_PCIE");
+        if(!dev || (dev[DEV_FLAGS]&PMGR_FLAG_VIRTUAL))ret=ENOENT;
+        else cell=dev_id(dev);
+    }
     if(!ret)ret=pd_cio_gate_map(cell,reg);
+    if(!ret && reg.phys!=0x23b700450ULL)ret=ENODEV;
     if(!ret){
         uint32_t before=reg.r32(0);
-        if(((before&PMGR_PS_ACTUAL)>>4)!=PMGR_PS_ACTIVE)ret=EBUSY;
+        if(before==UINT32_MAX || ((before&PMGR_PS_ACTUAL)>>4)!=PMGR_PS_ACTIVE)ret=EBUSY;
         else{
             uint32_t clear=PMGR_WAS_CLKGATED|PMGR_WAS_PWRGATED|(1u<<11);
             reg.mask32(0,clear,PMGR_DEV_DISABLE);

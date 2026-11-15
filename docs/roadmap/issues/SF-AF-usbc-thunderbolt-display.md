@@ -5,7 +5,7 @@ external display or Thunderbolt operation has been established on SiliconForest.
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change, 2026-11-15 05:37Z)
+## Current target and observed state (owner change; updated 06:24Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,8 @@ its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
 **Observed in Darwin:** port-1 Type-C APP/status reads and TBT-only cable
-flags; USB04 boots with internal desktop/Wi-Fi intact. **Not observed:** NHI
+flags; CIO01 boots with internal desktop/Wi-Fi intact, but ACIO startup
+failed ENODEV before PHY acquisition. No RTKit start has been observed. **Not observed:** NHI
 up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
 enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
 The 28 CM/library/native/devres objects, PHY/calibration, DART, crossbar and
@@ -787,3 +788,48 @@ in this stage. Its root must be reprogrammed after ACIO power cycles; suspend
 refuses outstanding mappings or a failed invalidation. NHI interrupts and
 connection-manager attachment are the following implementation step, followed
 by PCIe-C enumeration and the owner's prepared dock keyboard/LAN connection.
+
+
+### CIO01 target observation (06:11Z): preflight failure, no RTKit start
+
+CIO01 was installed normally and booted with internal desktop/Wi-Fi and the
+standard .next/inject state restored. UART reader was stopped/reaped before
+gui.lock release. Capsule SHA-256:
+`c28cdae9f5fa019e77b09d03167f24c3a99ffedd616bc327f5fa8450a433e87d`.
+PDAppleCIO matched, but returned ENODEV (19) before acquiring PHY; phy-owned
+and quarantined are No, RTKit-ready/NHI-ready are No. This startup FAILED;
+no M3/host-router/dock PCI progress is claimed. No panic was observed.
+
+The CPU-compatible preflight used IODTMatchNubWithKeys, which calls the bare
+node's name comparison rather than directly comparing its compatible data.
+The CPU node is named acio-cpu1. Source now uses IODTCompareNubName and exposes
+the current resource stage; this correction is not yet target-tested. Initial
+ACIO gate state was not reached by that failed startup and remains unobserved.
+
+Installed producer/consumer evidence: Type-C samples 61, snapshot checks 62;
+consumer is event-driven, has one initial check, then follows the 1 Hz producer.
+TBT-only state, zero Type-C errors, no active direct host or PHY lease persist.
+The separate native NHI/DART interrupt resolver (24 actual ring IRQs + DART)
+SDK-builds using the existing masked-AIC engine; not installed or registered.
+
+
+### Preflight correction from actual ADT metadata (06:24Z; not installed)
+
+Read-only IOKit XML verifies the M3 compatible bytes (19 including NUL),
+__TEXT;__DATA names (14), SRAM metadata (64), and actual PMGR table. ACIO1's
+power-gates are physical ATC1_CIO / CIO_PCIE / CIO_USB; the clock-gates list
+also contains virtual CIO1_RECONFIG-V, with no parents or state register.
+The prior source's rejection of all virtual clock gates would therefore
+refuse every claim even after the name check was fixed. No such gate read
+was reached in CIO01. The corrected off check uses all three physical power
+gates at the qualified T8103 addresses; ATC1_CIO covers M3. It never treats a
+virtual reset vote as an off reading. Reverse shutdown follows the same
+physical list and checks every mapping before any write. PCIe-C reset targets
+physical ATC1_PCIE, not either virtual clock vote or the shared AON parent.
+
+Host tests execute those corrected native extensions, require power-gates
+rather than clock-gates, and reject unknown/active/all-ones state. The native
+client also keeps a lease token returned on a failed PHY setup, so cleanup
+cannot lose an owner when the PHY provider retained a partial session.
+CIO02 is the next announced dock startup boot. NHI DMA remains disabled in
+this firmware-stage test; no direct USB/adapter boot is planned.

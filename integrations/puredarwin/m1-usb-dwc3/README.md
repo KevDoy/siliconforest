@@ -101,13 +101,15 @@ Failed drains retain the owner; failed PHY shutdown quarantines the provider.
 The command gate serializes timer and client transitions. Tokens alone prove
 no hardware fact. Composite USB3+DP remains unsupported by this exclusive API.
 
-Initial handoff checks the real stopped DWC3 view and the ACIO1/M3 PMGR gates
-before enabling PHY clocks. The read-only private PMGR extension distinguishes
+Initial handoff checks the real stopped DWC3 view and ACIO1's three physical
+power gates before enabling PHY clocks. T8103 M3 is covered by ATC1_CIO;
+its clock-gate entry is a virtual reconfiguration command without a power
+state register. The check uses power-gates, not that virtual clock vote. The read-only private PMGR extension distinguishes
 unknown state from off, checks all ADT gate/address bounds, and rejects active,
 clock-gated and automatic-wakeup domains. It is appended only to this bundle's
-copy of pd_soc.cpp, leaving the sound owner's helper untouched. The two state
-properties aggregate raw gate bits; their separate error properties must both
-be zero to establish off. A preexisting live ACIO must be stopped by its actual
+copy of pd_soc.cpp, leaving the sound owner's helper untouched. The state property aggregates raw physical gate bits; its error property must
+be zero to establish off. Physical addresses are checked against the qualified
+T8103 domain table before reading. No fabricated M3 power register is used. A preexisting live ACIO must be stopped by its actual
 owner, not bypassed using this API. This off check also protects direct-host
 initialization. A poisoned prior USB DART prevents alternate-mode startup.
 

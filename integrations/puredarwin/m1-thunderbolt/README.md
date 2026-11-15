@@ -145,7 +145,7 @@ reject out-of-contract suspension-query values. No native shared connector
 aggregate, controller power, ACIO, DMA or tunnel binding is installed yet.
 
 
-## Native ACIO1 firmware stage (not yet installed)
+## Native ACIO1 firmware stage
 
 `build-kext.nix` now builds PDAppleCIO, matching the port-1 shared PHY provider
 when `pdcio=1`. It requests an exclusive TBT/USB4 lease, verifies that the
@@ -181,3 +181,27 @@ retained. Native power tests execute the actual extension with malformed
 ADT/mapping injection, all-gate preflight, reverse shutdown and parent
 retention after a timeout. All CM/PHY/DMA host suites and repository checks
 pass. First target execution is still required; these are build/host facts.
+
+
+CIO01 target execution matched the service but FAILED preflight with ENODEV
+before a PHY claim; RTKit/NHI remained unready. The standard desktop/Wi-Fi
+returned, and the capture reader was reaped. The CPU compatible check now
+uses IODTCompareNubName for its bare device-tree node; stage diagnostics
+identify future failures. This correction is awaiting the next target boot.
+
+Read-only IOKit ADT inspection also confirmed physical power gates ATC1_CIO,
+ATC1_CIO_PCIE and ATC1_CIO_USB. CIO1_RECONFIG-V in clock-gates is a virtual
+reset command with no state/parent; it cannot establish a power state.
+The PHY off check and reverse shutdown now use the three physical power-gates
+and validate their known T8103 register addresses. PCIe-C's clock votes are
+virtual too; reset targets physical ATC1_PCIE, with the known address and
+active-state checks. Unknown/all-ones state refuses reset. No shared AON gate
+or Wi-Fi domain is reset. The actual-extension host fixture distinguishes
+power-gates from clock-gates and covers those refusals.
+
+The next source stage adds an IRQ resolver for ACIO1's actual 24 ring sources
+plus DART fault line, using a private 64-handle copy of the existing masked-AIC
+engine. It is event-driven, caches handles across cable cycles and requires
+mode 2 interrupt rearming; resolution itself does not register/unmask a line.
+Failed PHY acquisition can still own a token after failed cleanup, so the
+native client now retains that returned token and drain identity on error.
