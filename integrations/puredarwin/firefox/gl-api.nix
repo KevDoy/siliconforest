@@ -16,8 +16,23 @@ in pkgs.stdenv.mkDerivation {
   nativeBuildInputs = [ c.pythonEnv ];
   dontConfigure = true;
   buildPhase = ''
+    # Mesa's Linux libGL ABI list omits entries that native Mac clients resolve
+    # directly from OpenGL.framework, including core timer queries. Generate
+    # their real signatures/slots from the SAME Mesa XML and live dispatch.
+    cp src/glx/libgl-symbols.txt sffx-gl-symbols.txt
+    cat >> sffx-gl-symbols.txt <<'EOF'
+    glEGLImageTargetTexture2DOES
+    glEGLImageTargetRenderbufferStorageOES
+    glBindBufferOffsetEXT
+    glQueryCounter
+    glGetQueryObjecti64v
+    glGetQueryObjectui64v
+    glGetInternalformativ
+    glPolygonOffsetClamp
+    glClipControl
+    EOF
     python3 src/mesa/glapi/mapi_abi.py --printer glapi \
-      --gl_symbols src/glx/libgl-symbols.txt \
+      --gl_symbols sffx-gl-symbols.txt \
       src/mesa/glapi/glapi/gen/gl_and_es_API.xml > entries.h
     cat > entries.c <<'EOF'
     #include <GL/gl.h>
