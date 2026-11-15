@@ -50,7 +50,8 @@ def pending_hold(text):
                 active.pop((owner, 'gpu'), None)
                 active.pop((owner, 'gpu-session'), None)
             elif any(phrase in lower_body for phrase in
-                     ['m1 reboot', 'siliconforest rebooting', 'clean reboot to linux', 'reboot now']):
+                     ['m1 reboot', 'siliconforest rebooting', 'clean reboot to linux', 'reboot now',
+                      'will reboot the m1']):
                 active[(owner, 'reboot')] = (line, [], owner)
             if lower_body.startswith('risky gpu test ') and ' finished:' in lower_body:
                 active.pop((owner, 'gpu'), None)

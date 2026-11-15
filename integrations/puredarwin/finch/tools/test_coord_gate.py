@@ -93,5 +93,11 @@ class HoldTests(unittest.TestCase):
         text = 'T CODEX-TB tc01 clean reboot to Linux\nU CODEX-TB INSTALL END tc01: M1 back in SiliconForest; evidence saved\n'
         self.assertIsNone(gate.pending_hold(text))
 
+    def test_kernel_hang_reboot_warning_survives_cts_release(self):
+        text = 'T GFX2 WARNING: a kernel client hung; I will REBOOT the M1 after CTS\n'
+        text += 'U GFX2 risky GPU test third finished: timeout\nV GFX2 gui.lock released: CTS done\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text+'W GFX2 M1 back in SiliconForest; recovered\n'))
+
 if __name__ == '__main__':
     unittest.main()
