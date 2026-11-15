@@ -18,24 +18,40 @@ H264 VideoToolbox or AudioToolbox output backend. It is therefore staged only;
 it does not replace the installed AVFoundation or our separate working movie
 pipeline. PiP explicitly reports unsupported.
 
-QuickTime's reviewed import inventory: AVPlayerView class and metaclass are
-provided (2/18 AVKit imports). Remaining class imports are AVAssetIdentifier,
+QuickTime's reviewed inventory now has 6/18 AVKit imports provided: AVPlayerView
+class/metaclass, AVAssetIdentifier, AVTimecode and the two slow-motion range
+conversion functions. The actual export audit is
+`runs/sffinch/quicktime-avkit-mediatoolbox-stage-audit-v2.json`.
+
+The range functions use CoreMedia rational arithmetic and propagate invalid
+inputs. Expanded M5 vectors matched M1 exactly, including zero, invalid,
+negative-start and rounding cases. `PRIVATE-ABI.md` records the local call-site
+layouts; `math-reference.{c,nix}` supplies our independently built observations.
+
+`values.m` adds immutable asset-identity snapshots and timecode metadata.
+Existing file identifiers compare device/inode identity, including symlinks;
+missing paths have URL identity. CoreFoundation cannot create file-reference
+URLs here, so assetURL is a working canonical path URL. It cannot follow later
+renames like native file-reference URLs. This limitation is handed to the core
+owner rather than hidden. AVTimecode independently stores frame number,
+duration, flags and SMPTE fields, matching the native setters; it does not
+invent frame-number-to-SMPTE conversion. The constructor accepts four colon-
+or semicolon-separated nonnegative components within signed16-bit bounds.
+Own large-layout/native-reference tests do not establish every private method.
+
+The remaining 12 imports are the two media-selection-menu functions,
 AVAudioLevelIndicatorView, AVCaptureView (+ metaclass), AVPlayerController,
 AVPlayerControllerTimeResolver, AVPlayerControlsViewController (+ metaclass),
-AVTimecode, AVTouchBarCaptureInputSourceItem,
-AVTouchBarRecordingControlsProvider and AVVolumeControlSlider. Functions missing:
-AVAddAudibleMediaSelectionOptionsToMenu, AVAddLegibleMediaSelectionOptionsToMenu,
-AVAssetSlowMotionTimeRangeFromNormalizedSlowMotionTimeRange and
-AVNormalizedSlowMotionTimeRangeFromAssetSlowMotionTimeRange. Private ABI and
-semantics remain unestablished; name-only exports are not supplied.
+AVTouchBarCaptureInputSourceItem, AVTouchBarRecordingControlsProvider and
+AVVolumeControlSlider. Native runtime method signatures alone do not supply
+these classes' behavior. No name-only placeholder is supplied.
 
-None of the seven private MediaToolbox imports is implemented: FigAssetCreateWithURL,
-FigGetRotationAngleAndFlipsFromCGAffineTransform,
-MTCopyLocalizedNameForMediaSubType, MTCopyLocalizedNameForMediaType,
-MTCopyLocalizedStringForVideoDynamicRange, MTCopyStringForColorInfo,
-MTRegisterProfessionalVideoWorkflowFormatReaders. A real implementation needs
-verified signatures/ownership and the corresponding asset/format behavior.
+MediaToolbox now provides five of its seven reviewed imports, documented in
+`../MediaToolbox/README.md`. Both frameworks remain staged. In particular,
+Finch AVPlayer here still needs a real H264/AAC output backend before this
+AVPlayerView can claim QuickTime playback. The separately qualified movie CLI
+and installed asset/capture AVFoundation family do not change that limitation.
 
-Evidence: `runs/sffinch/avkit-stage-v1/`,
-`avkit-network-native-v1-reference.json`,
-`quicktime-avkit-mediatoolbox-stage-audit-v1.json`.
+Evidence: `runs/sffinch/avkit-stage-v1/`, `media-math-stage-v1/comparison.json`,
+`avkit-value-stage-v1/candidate.json`, and the same-byte value comparison in
+`avkit-value-stage-v2/` / `m5-avkit-values-v5-results.json`.

@@ -129,3 +129,31 @@ typedef NSUInteger AVVideoFrameAnalysisType;
 - (void)setRequiresLinearPlayback:(BOOL)value;
 - (void)invalidatePlaybackState;
 @end
+
+/* Own source-observed range/duration ABI; no decoder or player side effects. */
+CMTimeRange AVAssetSlowMotionTimeRangeFromNormalizedSlowMotionTimeRange(CMTimeRange range,CMTime duration);
+CMTimeRange AVNormalizedSlowMotionTimeRangeFromAssetSlowMotionTimeRange(CMTimeRange range,CMTime duration);
+
+/* Snapshot metadata identifiers. On PD assetURL is a usable path URL; persistent
+ * file-reference URL creation/resolution is not available in Foundation. */
+@interface AVAssetIdentifier : NSObject<NSCopying>
++ (instancetype)identifierForURL:(NSURL *)url;
++ (instancetype)identifierForAsset:(id)asset;
++ (instancetype)invalidIdentifier;
+- (instancetype)initWithURL:(NSURL *)url;
+- (instancetype)initWithAsset:(id)asset;
+- (NSURL *)assetURL;
+- (BOOL)isValid;
+- (BOOL)matchesAsset:(id)asset;
+@end
+typedef struct {int16_t subframes,divisor;uint32_t counter,type,flags;int16_t hours,minutes,seconds,frames;} SFAVKitSMPTETime;
+/* Native stores these independent values; changing frameNumber does not derive
+ * SMPTE components or frameDuration. The string initializer populates components. */
+@interface AVTimecode : NSObject
+- (instancetype)initWithTimecodeString:(NSString *)string;
+- (BOOL)stringIsValidNumericValue:(NSString *)string;
+@property CMTime frameDuration;
+@property int64_t frameNumber;
+@property uint32_t tc_flags;
+@property SFAVKitSMPTETime timecodeStruct;
+@end
