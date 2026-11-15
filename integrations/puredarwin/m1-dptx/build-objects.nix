@@ -9,9 +9,9 @@ in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
     chmod -R u+w "$out"
     dest="$out/src/Kernel/Extensions/PDDcpExtPlan"
     mkdir -p "$dest"
-    cp ${./include}/* ${./src}/*.c "$dest/"
+    cp ${./include}/* ${./src}/*.c ${./upstream}/*.inc "$dest/"
     cat > "$dest/CMakeLists.txt" <<'CMAKE'
-add_library(PDDcpExtPlan OBJECT pd_dcpext_plan.c)
+add_library(PDDcpExtPlan OBJECT pd_dcpext_plan.c pd_dpxbar.c)
 target_include_directories(PDDcpExtPlan PRIVATE "''${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(PDDcpExtPlan PRIVATE xnu_kernel_private_headers)
 target_compile_options(PDDcpExtPlan PRIVATE -Os -Wall)

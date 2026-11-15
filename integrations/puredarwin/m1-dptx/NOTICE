@@ -27,3 +27,12 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The crossbar program (upstream/dpxbar-t8103.inc, src/pd_dpxbar.c and its
+public header) ports drivers/mux/apple-display-crossbar.c at the same
+Linux pin, retaining its GPL-2.0-only OR MIT choice; MIT selected here.
+Copyright (C) Asahi Linux Contributors
+Author: Sven Peter <sven@svenpeter.dev>
+The MIT permission/warranty notice above also applies to these portions.
+The extraction tool records the full source SHA256 and keeps the T8103
+register bodies with callback/external-lock plumbing and policy selection.

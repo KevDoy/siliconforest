@@ -38,3 +38,20 @@ That does not make the missing PHY/topology/DMA plumbing optional.
 `host-test/run.sh` uses synthetic ADT resources and ASan/UBSan: valid layout,
 223 absent/truncated property cases, overflow and unsupported ABI/chip
 refusals. No live firmware/address fixture is checked in.
+
+`pd_dpxbar.c` and `upstream/dpxbar-t8103.inc` now port the T8103 crossbar
+program for the direct DP PHY and both Thunderbolt DP-IN outputs. The
+extractor preserves the upstream register bodies, selects T8103's two
+inputs/cycle-slip policy, and adapts MMIO/delay/external serialization.
+It includes source selection, duplicate-input refusal, DP-IN preselection,
+link clock stop/start and disconnect while preserving unrelated fields.
+The native caller must validate/power port1's 0x50304c000 resource, drain
+old users and hold the shared ATC/crossbar lock and mux lease. Init does
+not prove idle hardware. Gate status is diagnostic only, as upstream;
+programming success is not HPD/training or clock readiness evidence.
+
+Host ASan/UBSan tests pass 192 PHY/DP-IN select/link/disconnect cycles plus
+duplicate-source/preselection/shared-field/gate ordering and stuck-status
+cases. SDK objects build. No crossbar program is attached or executed on
+the M1; generic PHY/mux/Type-C registration and the native port owner are
+still required before external DCP can use it.

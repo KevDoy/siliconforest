@@ -501,3 +501,21 @@ host integration test passes all three bindings emitted by the actual
 internal display builder. The corrected SDK attempt also exposed a missing
 LinuxKPI u64-array reader; the final adapter uses its real u32-array reader
 and combines the pairs. The failed build receipt remains a failure.
+
+### T8103 DP/DP-IN crossbar source, 2026-11-15 04:09Z
+
+`m1-dptx` now ports the upstream T8103 crossbar register bodies for the
+physical DP PHY and both Thunderbolt DP-IN outputs. The reproducible
+extractor retains source provenance/notices and T8103's two-input and
+cycle-slip policy. The program includes duplicate-input refusal before
+writes, DP-IN preselection, link clock stop/start and disconnect with
+unrelated fields preserved. The caller still owns native power, mux lease,
+shared ATC/crossbar serialization and prior-user drain; init proves no
+hardware idle fact. Gate status remains diagnostic, matching upstream.
+
+ASan/UBSan passes 192 PHY/DP-IN select/link/disconnect cycles and conflict,
+preselection, shared-field, gate-order and stuck-status cases. SDK objects:
+`/nix/store/iz2ln1z80d4krl854krjrlfzshavyafn-puredarwin-dcpext-plan-objects-0.1`.
+Six repository checks pass. No crossbar writes, HPD, link training, NHI
+traffic or scanout have run from this source on M1. USB04 stays installed;
+external topology/provider and router-device integration continue.
