@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 11:54Z)
+## Current target and observed state (owner change; updated 12:05Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,8 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO15, source `723377da3`, capsule `424b033d72b8…`,
+**Observed in Darwin:** non-AVE CIO16B, the identical CIO16 image, source
+`2614eb5d7`, capsule `9b9baa004c1b…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -24,9 +25,9 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at11:04:52Z. An explicit late snapshot also reports state7/remote0;
+lock release at12:03:55Z. An explicit late snapshot also reports state7/remote0;
 UID65534 was denied without incrementing the query count, while root completed
-one request and advanced it1->2. CD321x power7 was changed to S0 with the bounded
+one request and advanced it1->2; the post-idle query advanced it to3. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
 or `pdave` argument.
 
@@ -37,6 +38,9 @@ the owned UART reader was reaped at11:45:56Z before lock release. No new
 compositor-start record or first SF_SESSION marker was captured. The cause
 is unresolved. A same-image CIO16B repeat is announced for12:00Z or later,
 with process/launchd state capture and bounded additional session waiting.
+That repeat qualified at12:03:54Z (UART reaped12:03:55Z): the normal desktop
+was already present at75s and all snapshot/privilege/ABI checks passed. The
+earlier startup failure has not reproduced and its cause remains unknown.
 
 **Not observed in Darwin:** the dock router, authorization, any dock PCI
 function, Ethernet link/DHCP, dock USB enumeration/HID/read-only storage,
@@ -1605,3 +1609,35 @@ link improvement is claimed. This variant is excluded from frozen CIO16B.
 Linux's mask/setup-reset recovery remains outstanding; acknowledging events
 alone does not establish that lifecycle or prove the source of the training
 failure.
+
+### CIO16B qualifies the identical image; actual idle/IRQ result
+
+The same capsule repeated successfully at12:03:54Z, after its first boot request
+at12:01:35Z. The75s process/launchd snapshot shows sf-session and the standard
+.next compositor alive, with the inject directory present. All native control,
+PHY, ACIO observation and UID65534/root denial/acceptance checks pass. The
+post-idle query completes with count3/error0. Owned UART was stopped/reaped
+at12:03:55Z before gui.lock release. The installed manifest has57modules and
+no AVE; an actual registry/boot-argument check also finds no bound AVE service
+or pdave argument. The failed first attempt stays recorded and unexplained.
+
+During a quiet60s sample, visible nonidle kernel thread work totals2.201445%
+of one CPU, aggregate host idle is98.1876%, the dominant unnamed thread uses
+1.55995%, and PDM1SPIHID0.33516%. The24 NHI handler counters advance only9TX0
+and9RX0, including diagnostic control traffic across the measured boundary;
+other22 remain unchanged. No NHI interrupt storm is observed. The parser
+excludes the exact frozen XNU TH_FLAGS_IDLE=0x2, rather than counting idle
+threads as work. Warm50M integer-mix runs take83.676–83.678ms and100k system
+calls14.496ms, matching earlier fixed-work baselines. The cold first round
+was104.548ms and is not substituted for a warm comparison. The prior k2/USB04
+A/B remains2.42%/1.94% one CPU with the same NVMe timed sleep. These results
+still do not identify the reported AppKit slowdown or qualify an idle fix.
+
+CIO17/source83786dc6e/capsulefcf8f72d697e… is built and announced for12:08Z
+or later under the usual locks. Only Type-C changes from qualified CIO16B;
+other56module UUIDs,605boot arguments and boot.bin remain fixed,57modules/noAVE,
+zero overlap. It tests exact observed EVENT1/CLEAR1 acknowledgement on the
+existing1Hz sampler, with no interrupt-mask/enable or role/mode write. Actual
+acknowledgement count, error/uncertainty, unchanged mask, standard desktop and
+NHI health must qualify before accepting it. CIO16B is the rollback. No event
+clearing or link improvement from CIO17 has yet been observed.
