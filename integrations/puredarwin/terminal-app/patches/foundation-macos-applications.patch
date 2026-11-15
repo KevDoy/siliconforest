@@ -87,7 +87,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
 --- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-11 22:36:07.494506290 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-14 20:18:00.989029311 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-15 10:09:44.850349142 -0800
 @@ -6,6 +6,8 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -97,7 +97,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  #import <Foundation/NSKeyedUnarchiver.h>
  #import <Foundation/NSArray.h>
  #import <Foundation/NSData.h>
-@@ -67,6 +69,208 @@
+@@ -67,6 +69,218 @@
  // substitutions shared by every unarchiver, an instance's own map is consulted first
  static NSMutableDictionary *globalClasses;
  
@@ -114,6 +114,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
 +#import <Foundation/NSValue.h>
 +
 +@interface NSObject (NSKeyedUnarchiverAwake)
+++ (id)allocWithKeyedUnarchiver:(NSKeyedUnarchiver *)coder;
 +- (id)awakeAfterUsingCoder:(NSCoder *)coder;
 +- (void)unarchiver:(NSKeyedUnarchiver *)unarchiver willReplaceObject:(id)object withObject:(id)replacement;
 +- (id)unarchiver:(NSKeyedUnarchiver *)unarchiver didDecodeObject:(id)object;
@@ -261,11 +262,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
 +        [NSException raise:@"NSInvalidUnarchiveOperationException"
 +                    format:@"*** -[NSKeyedUnarchiver decodeObjectForKey:]: cannot decode object of class (%@)", name];
 +    // known before -initWithCoder: runs, so that an object decoded inside it that refers back finds it
-+    id allocated = [cls alloc];
-+    CFDictionarySetValue(table, slot, allocated);
++    // (CODEX, merged by TERM8) a class that allocates for the unarchiver (AppKit's NSClassSwapper: the real
++    // class a nib names, VLC's MainMenu.nib) sees its record; the object allocated is what an outlet cycle finds
++    id allocated = nil;
 +    [u->_containers addObject:record];
-+    result = [allocated initWithCoder:u];
-+    [u->_containers removeLastObject];
++    @try {
++        allocated = [cls respondsToSelector:@selector(allocWithKeyedUnarchiver:)]
++            ? [cls allocWithKeyedUnarchiver:u] : [cls alloc];
++        if (allocated != nil) {
++            CFDictionarySetValue(table, slot, allocated);
++            result = [allocated initWithCoder:u];
++        }
++    } @finally {
++        [u->_containers removeLastObject];
++    }
 +    if(result != nil && [result respondsToSelector:@selector(awakeAfterUsingCoder:)]) {
 +        id awake = [result awakeAfterUsingCoder:u];
 +        result = awake;
@@ -306,7 +316,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  @implementation NSKeyedUnarchiver
  
  + (void)setClass:(Class)cls forClassName:(NSString *)name {
-@@ -110,11 +314,30 @@
+@@ -110,11 +324,30 @@
  
  + (id)unarchiveObjectWithData:(NSData *)data {
      NSKeyedUnarchiver *unarchiver = [[self alloc] initForReadingFromData:data error:NULL];
@@ -338,7 +348,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  + (id)unarchivedObjectOfClass:(Class)cls fromData:(NSData *)data error:(NSError **)error {
      id result = [self unarchiveObjectWithData:data];
      return [result isKindOfClass:cls] ? result : nil;
-@@ -135,12 +358,23 @@
+@@ -135,12 +368,23 @@
              [self release];
              return nil;
          }
@@ -362,7 +372,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
      [_data release];
      [_containers release];
      [_root release];
-@@ -156,6 +390,8 @@
+@@ -156,6 +400,8 @@
  }
  
  - (id)decodeObjectForKey:(NSString *)key {
@@ -371,7 +381,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
      return unarchiveValue(self, [[_containers lastObject] objectForKey:key]);
  }
  
-@@ -188,6 +424,8 @@
+@@ -188,6 +434,8 @@
  - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length {
      id value = [[_containers lastObject] objectForKey:key];
  
@@ -380,7 +390,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
      if (![value isKindOfClass:[NSData class]]) {
          if (length != NULL)
              *length = 0;
-@@ -198,6 +436,33 @@
+@@ -198,6 +446,33 @@
      return [value bytes];
  }
  
@@ -414,9 +424,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  - (void)finishDecoding {
  }
  
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.h b/src/Frameworks/Foundation/Collections.subproj/NSArray.h
+--- a/src/Frameworks/Foundation/Collections.subproj/NSArray.h	2026-11-11 22:36:07.494506290 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.h	2026-11-15 10:47:44.441610623 -0800
+@@ -39,6 +39,7 @@
+ - (id)valueForKey:(NSString *)key;
+ - (instancetype)initWithObjects:(id)firstObject, ...;
+ - (instancetype)initWithArray:(NSArray<ObjectType> *)array;
++- (instancetype)initWithArray:(NSArray<ObjectType> *)array copyItems:(BOOL)flag;
+ 
+ + (instancetype)array;
+ + (instancetype)arrayWithObject:(ObjectType)object;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-11 22:36:07.495091044 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-14 20:18:00.989770384 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-15 10:47:28.505768044 -0800
 @@ -17,6 +17,8 @@
  #import <Foundation/FoundationErrors.h>
  #import <Foundation/NSData.h>
@@ -451,7 +472,29 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  /* See the note in NSDictionary.m: bridged onto CF, so +new/-init must produce a
   * real CF object rather than NSObject's plain allocation. */
  + (instancetype)new {
-@@ -472,6 +492,8 @@
+@@ -165,6 +185,21 @@
+                              (CFIndex)count, &ns_array_callbacks);
+ }
+ 
++// (TERM8) VLC's interface asks this at launch; each element is sent -copyWithZone: when flag is YES, as on macOS
++- (instancetype)initWithArray:(NSArray *)array copyItems:(BOOL)flag {
++    if (!flag)
++        return [self initWithArray:array];
++    CFMutableArrayRef values = CFArrayCreateMutable(kCFAllocatorDefault, 0, &ns_array_callbacks);
++    for (id item in array) {
++        id copy = [item copyWithZone:NULL];
++        CFArrayAppendValue(values, copy);
++        [copy release];
++    }
++    CFArrayRef result = CFArrayCreateCopy(kCFAllocatorDefault, values);
++    CFRelease(values);
++    return (id)result;
++}
++
+ + (instancetype)array {
+     return (id)__NSAutoreleaseCF(CFArrayCreate(kCFAllocatorDefault, NULL, 0,
+                              &ns_array_callbacks));
+@@ -472,6 +507,8 @@
   * from each element, which is what callers use to pluck a field out. */
  - (id)valueForKey:(NSString *)key {
      CFIndex count = CFArrayGetCount((CFArrayRef)self);
@@ -460,7 +503,26 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
      CFMutableArrayRef values = CFArrayCreateMutable(kCFAllocatorDefault, count,
                                                       &ns_array_callbacks);
  
-@@ -1104,3 +1126,26 @@
+@@ -1042,6 +1079,18 @@
+                                         (CFArrayRef)array);
+ }
+ 
++- (instancetype)initWithArray:(NSArray *)array copyItems:(BOOL)flag {
++    if (!flag)
++        return [self initWithArray:array];
++    CFMutableArrayRef values = CFArrayCreateMutable(kCFAllocatorDefault, 0, &ns_array_callbacks);
++    for (id item in array) {
++        id copy = [item copyWithZone:NULL];
++        CFArrayAppendValue(values, copy);
++        [copy release];
++    }
++    return (id)values;
++}
++
+ // Inheriting these from NSArray returned an immutable CFArray, so the first
+ // -addObject: appended to an immutable object and left a NULL slot behind.
+ - (instancetype)initWithObjects:(id)firstObject, ... {
+@@ -1104,3 +1153,26 @@
  }
  
  @end
@@ -489,7 +551,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.h b/src/Frameworks/Foundation/Collections.subproj/NSData.h
 --- a/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-11 22:36:07.495091044 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-14 20:18:00.990522892 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-15 10:10:28.014968517 -0800
 @@ -37,8 +37,15 @@
      NSDataWritingWithoutOverwriting = 1 << 1
  };
@@ -506,9 +568,18 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  + (instancetype)data;
  + (instancetype)dataWithBytes:(const void *)bytes length:(NSUInteger)length;
  + (instancetype)dataWithBytesNoCopy:(void *)bytes length:(NSUInteger)length;
+@@ -89,6 +96,8 @@
+ - (NSString *)base64EncodedStringWithOptions:(NSDataBase64EncodingOptions)options;
+ - (NSData *)base64EncodedDataWithOptions:(NSDataBase64EncodingOptions)options;
+ - (nullable instancetype)initWithBase64EncodedString:(NSString *)string options:(NSDataBase64DecodingOptions)options;
++- (nullable instancetype)initWithBase64Encoding:(NSString *)string;
++- (NSString *)base64Encoding;
+ - (nullable instancetype)initWithBase64EncodedData:(NSData *)data options:(NSDataBase64DecodingOptions)options;
+ 
+ @end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.m b/src/Frameworks/Foundation/Collections.subproj/NSData.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-11 22:36:07.495091044 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-14 20:18:00.990954739 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-15 10:10:28.014137135 -0800
 @@ -110,6 +110,39 @@
  
  @implementation NSData
@@ -549,6 +620,22 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  + (instancetype)data
  {
  	return __NSDataAutorelease(CFDataCreate(kCFAllocatorDefault, NULL, 0));
+@@ -538,6 +571,15 @@
+     return [self initWithData:decoded];
+ }
+ 
++// (TERM8) the macOS 10.6-10.8 names (Sparkle): the same base64 with no line breaks, unknown characters ignored
++- (instancetype)initWithBase64Encoding:(NSString *)string {
++    return [self initWithBase64EncodedString:string options:NSDataBase64DecodingIgnoreUnknownCharacters];
++}
++
++- (NSString *)base64Encoding {
++    return [self base64EncodedStringWithOptions:0];
++}
++
+ - (instancetype)initWithBase64EncodedData:(NSData *)data options:(NSDataBase64DecodingOptions)options {
+     NSData *decoded = base64Decode([data bytes], [data length], options);
+ 
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-11 22:36:07.495091044 -0800
 +++ b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-14 20:18:00.991662499 -0800
@@ -2005,7 +2092,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h
 --- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-11 22:36:07.495593123 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-14 20:18:00.997540055 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-15 10:10:28.014629980 -0800
 @@ -37,10 +37,31 @@
  
  #define NSUndefinedDateComponent NSIntegerMax
@@ -2038,20 +2125,27 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  - (NSInteger)era;
  - (NSInteger)year;
  - (NSInteger)month;
-@@ -64,6 +85,9 @@
+@@ -64,6 +85,10 @@
  @interface NSCalendar : NSObject <NSCopying>
  
  + (NSCalendar *)currentCalendar;
 ++ (NSCalendar *)autoupdatingCurrentCalendar;
 ++ (NSCalendar *)calendarWithIdentifier:(NSCalendarIdentifier)calendarIdentifierConstant;
 +- (NSCalendarIdentifier)calendarIdentifier;
++- (NSUInteger)ordinalityOfUnit:(NSCalendarUnit)smaller inUnit:(NSCalendarUnit)larger forDate:(NSDate *)date;
  
  - (instancetype)initWithCalendarIdentifier:(NSString *)identifier;
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m
 --- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-11 22:36:07.496584236 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-14 20:18:00.997708812 -0800
-@@ -15,6 +15,21 @@
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-15 10:09:51.739457294 -0800
+@@ -11,10 +11,27 @@
+ #import <Foundation/NSString.h>
+ #include <time.h>
+ #include <string.h>
++#include <math.h>
++#include <CoreFoundation/CFCalendar.h>
+ 
  /* Gregorian only, via the C library's civil-time conversion. Non-Gregorian
   * identifiers are accepted and behave as Gregorian. */
  
@@ -2073,7 +2167,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  @implementation NSDateComponents
  
  - (instancetype)init {
-@@ -45,9 +60,24 @@
+@@ -45,9 +62,24 @@
  - (void)setSecond:(NSInteger)value { _second = value; }
  - (void)setWeekday:(NSInteger)value { _weekday = value; }
  
@@ -2098,7 +2192,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
      copy->_era = _era;
      copy->_year = _year;
      copy->_month = _month;
-@@ -72,8 +102,32 @@
+@@ -72,8 +104,32 @@
      return shared;
  }
  
@@ -2132,6 +2226,28 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  }
  
  - (NSDateComponents *)components:(NSCalendarUnit)units fromDate:(NSDate *)date {
+@@ -117,6 +173,21 @@
+     return [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)seconds];
+ }
+ 
++// (TERM8, CODEX's bridge) through CoreFoundation's ICU calendar of this identifier, in the default time zone
++- (NSUInteger)ordinalityOfUnit:(NSCalendarUnit)smaller inUnit:(NSCalendarUnit)larger forDate:(NSDate *)date {
++    if (![date isKindOfClass:[NSDate class]])
++        return NSNotFound;
++    CFAbsoluteTime at = [date timeIntervalSinceReferenceDate];
++    if (!isfinite(at))
++        return NSNotFound;
++    CFCalendarRef calendar = CFCalendarCreateWithIdentifier(NULL, (CFStringRef)[self calendarIdentifier]);
++    if (calendar == NULL)
++        return NSNotFound;
++    CFIndex result = CFCalendarGetOrdinalityOfUnit(calendar, (CFCalendarUnit)smaller, (CFCalendarUnit)larger, at);
++    CFRelease(calendar);
++    return result == kCFNotFound ? NSNotFound : (NSUInteger)result;
++}
++
+ - (id)copyWithZone:(NSZone *)zone {
+     return [self retain];
+ }
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h
 --- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-11 22:36:07.496584236 -0800
 +++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-14 20:18:00.998435115 -0800
@@ -2308,9 +2424,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
  }
  
  @end
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.h b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.h
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.h	2026-11-11 22:36:07.497008684 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.h	2026-11-15 10:10:43.906822752 -0800
+@@ -141,6 +141,7 @@
+                 error:(NSError **)error;
+ - (NSArray *)directoryContentsAtPath:(NSString *)path;
+ 
++- (NSString *)displayNameAtPath:(NSString *)path;
+ @end
+ 
+ #endif /* NSFileManager_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
 --- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-11 22:36:07.497008684 -0800
-+++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-14 20:18:00.999390088 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-15 10:10:28.013758166 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -2319,7 +2446,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
  #import <Foundation/NSFileManager.h>
  #import <Foundation/NSArray.h>
  #import <Foundation/NSData.h>
-@@ -885,3 +886,24 @@
+@@ -885,3 +886,33 @@
  }
  
  @end
@@ -2327,6 +2454,15 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
 +@implementation NSFileManager (NSMacOSSDKAdditions)
 +// The enumerator of -enumeratorAtPath: gives relative paths; this one gives file URLs under the
 +// directory. Options: 1 skip descendants of subdirectories, 4 skip hidden files.
++// (TERM8) the name to show for a path: its last component, an application bundle without ".app" (there is no
++// localized Finder name or extension hiding preference here)
++- (NSString *)displayNameAtPath:(NSString *)path {
++    NSString *name = [path lastPathComponent];
++    if ([[name pathExtension] isEqualToString:@"app"])
++        name = [name stringByDeletingPathExtension];
++    return name;
++}
++
 +- (NSEnumerator *)enumeratorAtURL:(NSURL *)url includingPropertiesForKeys:(NSArray *)keys options:(NSUInteger)options
 +                     errorHandler:(BOOL (^)(NSURL *url, NSError *error))handler {
 +    NSString *base = [url path];
@@ -3994,8 +4130,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  - (void)addObserver:(NSObject *)observer
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h
 --- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-11 22:36:07.498471502 -0800
-+++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-14 20:18:01.003816132 -0800
-@@ -25,6 +25,7 @@
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-15 10:10:43.906693612 -0800
+@@ -22,9 +22,19 @@
+ FOUNDATION_EXPORT NSLocaleKey const NSLocaleDecimalSeparator;
+ FOUNDATION_EXPORT NSLocaleKey const NSLocaleGroupingSeparator;
+ 
++// (TERM8) macOS's values (CFLocaleLanguageDirection's)
++typedef NS_ENUM(NSUInteger, NSLocaleLanguageDirection) {
++    NSLocaleLanguageDirectionUnknown = 0,
++    NSLocaleLanguageDirectionLeftToRight = 1,
++    NSLocaleLanguageDirectionRightToLeft = 2,
++    NSLocaleLanguageDirectionTopToBottom = 3,
++    NSLocaleLanguageDirectionBottomToTop = 4,
++};
++
  @interface NSLocale : NSObject <NSCopying>
  
  + (NSLocale *)currentLocale;
@@ -4003,9 +4151,18 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.sub
  + (NSLocale *)systemLocale;
  + (NSArray *)preferredLanguages;
  
+@@ -32,6 +42,8 @@
+ 
+ - (NSString *)localeIdentifier;
+ - (id)objectForKey:(NSLocaleKey)key;
+++ (NSLocaleLanguageDirection)characterDirectionForLanguage:(NSString *)isoLangCode;
+++ (NSLocaleLanguageDirection)lineDirectionForLanguage:(NSString *)isoLangCode;
+ 
+ @end
+ 
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m
 --- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-11 22:36:07.498697549 -0800
-+++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-14 20:18:01.004046439 -0800
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-15 10:10:28.013584002 -0800
 @@ -25,6 +25,11 @@
      return (NSLocale *)CFAutorelease(CFLocaleCopyCurrent());
  }
@@ -4018,6 +4175,24 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.sub
  + (NSLocale *)systemLocale {
      return (NSLocale *)CFLocaleGetSystem();
  }
+@@ -62,6 +67,17 @@
+     return (NSUInteger)CFGetRetainCount((CFTypeRef)self);
+ }
+ 
++// (TERM8, CODEX's bridge) a language's writing directions, from CoreFoundation's ICU data
+++ (NSLocaleLanguageDirection)characterDirectionForLanguage:(NSString *)isoLangCode {
++    return [isoLangCode isKindOfClass:[NSString class]]
++        ? (NSLocaleLanguageDirection)CFLocaleGetLanguageCharacterDirection((CFStringRef)isoLangCode) : NSLocaleLanguageDirectionUnknown;
++}
++
+++ (NSLocaleLanguageDirection)lineDirectionForLanguage:(NSString *)isoLangCode {
++    return [isoLangCode isKindOfClass:[NSString class]]
++        ? (NSLocaleLanguageDirection)CFLocaleGetLanguageLineDirection((CFStringRef)isoLangCode) : NSLocaleLanguageDirectionUnknown;
++}
++
+ @end
+ 
+ #if DEPLOYMENT_RUNTIME_OBJC
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h
 --- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	1969-12-31 16:00:00.000000000 -0800
 +++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	2026-11-14 20:18:01.004286310 -0800
@@ -5451,6 +5626,84 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  }
  
  /* CFStringGetCStringPtr can refuse, so go through a bounded copy. */
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSProxy.m b/src/Frameworks/Foundation/Runtime.subproj/NSProxy.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSProxy.m	2026-11-11 22:36:07.500593062 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSProxy.m	2026-11-15 10:24:39.533676910 -0800
+@@ -121,6 +121,17 @@
+     return (NSUInteger)_objc_rootRetainCount(self);
+ }
+ 
++// (TERM8) a zeroing weak reference to a proxy, as to an NSObject (objc4's own two methods): NSNotificationCenter
++// keeps its observers so, and libobjc asks a class with its own retain/release these two; a proxy that forwards
++// everything else raised on them (VLC's PXSourceListDelegateDataSourceProxy observing its outline view)
++- (BOOL)allowsWeakReference {
++    return !_objc_rootIsDeallocating(self);
++}
++
++- (BOOL)retainWeakReference {
++    return _objc_rootTryRetain(self);
++}
++
+ - (NSZone *)zone {
+     return NULL;
+ }
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSThread.h b/src/Frameworks/Foundation/Runtime.subproj/NSThread.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSThread.h	2026-11-11 22:36:07.500593062 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSThread.h	2026-11-15 10:32:39.821574605 -0800
+@@ -11,6 +11,7 @@
+ 
+ #import <Foundation/NSObject.h>
+ #import <Foundation/NSObjCRuntime.h>
++#import <Foundation/NSDate.h>
+ 
+ @class NSArray, NSMutableDictionary, NSString;
+ 
+@@ -33,6 +34,8 @@
+ + (NSThread *)mainThread;
+ + (BOOL)isMainThread;
+ + (BOOL)isMultiThreaded;
+++ (void)sleepUntilDate:(NSDate *)date;
+++ (void)sleepForTimeInterval:(NSTimeInterval)interval;
+ + (NSArray *)callStackReturnAddresses;
+ + (NSArray *)callStackSymbols;
+ + (void)detachNewThreadSelector:(SEL)selector
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSThread.m b/src/Frameworks/Foundation/Runtime.subproj/NSThread.m
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSThread.m	2026-11-11 22:36:07.500593062 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSThread.m	2026-11-15 10:31:13.967478564 -0800
+@@ -14,9 +14,11 @@
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSString.h>
+ #import <Foundation/NSObjCRuntime.h>
++#import <Foundation/NSDate.h>
+ 
+ #include <CoreFoundation/CFRunLoop.h>
+ #include <dispatch/dispatch.h>
++#include <time.h>
+ #include <objc/message.h>
+ #include <pthread.h>
+ #include <stdlib.h>
+@@ -216,6 +218,21 @@
+     pthread_detach(thread);
+ }
+ 
++// (TERM8) VLC's interface sleeps its threads with these
+++ (void)sleepUntilDate:(NSDate *)date {
++    NSTimeInterval left;
++    while ((left = [date timeIntervalSinceNow]) > 0) {
++        struct timespec ts = { (time_t)left, (long)((left - (time_t)left) * 1e9) };
++        if (nanosleep(&ts, NULL) == 0)
++            break;
++    }
++}
++
+++ (void)sleepForTimeInterval:(NSTimeInterval)interval {
++    if (interval > 0)
++        [self sleepUntilDate:[NSDate dateWithTimeIntervalSinceNow:interval]];
++}
++
+ + (BOOL)isMultiThreaded {
+     return multiThreaded;
+ }
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h
 --- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-11 22:36:07.501593049 -0800
 +++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-14 20:18:01.008999098 -0800
@@ -5489,10 +5742,50 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  - (NSDictionary *)userInfo { return [[_userInfo copy] autorelease]; }
  
  - (void)setUserInfo:(NSDictionary *)userInfo {
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.h b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.h
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.h	2026-11-11 22:36:07.501593049 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.h	2026-11-15 10:10:28.014743383 -0800
+@@ -27,6 +27,8 @@
+ 
+ + (NSUserDefaults *)standardUserDefaults;
+ - (instancetype)initWithSuiteName:(NSString *)suiteName;
++- (void)addSuiteNamed:(NSString *)suiteName;
++- (void)removeSuiteNamed:(NSString *)suiteName;
+ + (void)resetStandardUserDefaults;
+ 
+ - (id)objectForKey:(NSString *)key;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
 --- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-11 22:36:07.501593049 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-14 20:18:01.009519259 -0800
-@@ -289,3 +289,17 @@
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-15 10:31:20.619786827 -0800
+@@ -11,6 +11,7 @@
+ #import <Foundation/NSArray.h>
+ #import <Foundation/NSDictionary.h>
+ #import <Foundation/NSNumber.h>
++#import <Foundation/NSException.h>
+ #include <CoreFoundation/CFPreferences.h>
+ #include <CoreFoundation/CFNumber.h>
+ #include <CoreFoundation/CFPropertyList.h>
+@@ -70,6 +71,19 @@
+     return self;
+ }
+ 
++// (TERM8, CODEX's bridge) a suite's values join this application's search list, after its own
++- (void)addSuiteNamed:(NSString *)suiteName {
++    if (![suiteName isKindOfClass:[NSString class]] || [suiteName length] == 0)
++        [NSException raise:NSInvalidArgumentException format:@"-[NSUserDefaults addSuiteNamed:]: a suite needs a name"];
++    CFPreferencesAddSuitePreferencesToApp(_applicationID, (CFStringRef)suiteName);
++}
++
++- (void)removeSuiteNamed:(NSString *)suiteName {
++    if (![suiteName isKindOfClass:[NSString class]] || [suiteName length] == 0)
++        [NSException raise:NSInvalidArgumentException format:@"-[NSUserDefaults removeSuiteNamed:]: a suite needs a name"];
++    CFPreferencesRemoveSuitePreferencesFromApp(_applicationID, (CFStringRef)suiteName);
++}
++
+ - (id)objectForKey:(NSString *)key {
+     CFPropertyListRef value = CFPreferencesCopyAppValue((CFStringRef)key,
+                                                         _applicationID);
+@@ -289,3 +303,17 @@
  }
  
  @end
@@ -5883,7 +6176,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.h b/src/Frameworks/Foundation/URL.subproj/NSURL.h
 --- a/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-11 22:36:07.503435864 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-14 20:18:01.012884722 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-15 10:10:28.014859658 -0800
 @@ -20,6 +20,7 @@
  + (instancetype)fileURLWithPath:(NSString *)path;
  
@@ -5892,9 +6185,17 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  - (nullable NSString *)absoluteString;
  - (nullable NSString *)path;
  - (BOOL)isFileURL;
+@@ -35,6 +36,7 @@
+ - (nullable NSURL *)URLByDeletingPathExtension;
+ - (nullable NSURL *)standardizedURL;
+ - (const char *)fileSystemRepresentation;
++- (BOOL)getFileSystemRepresentation:(char *)buffer maxLength:(NSUInteger)maxLength;
+ 
+ 
+ - (NSNumber *)port;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
 --- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-11 22:36:07.503435864 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 20:18:01.013050498 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-15 10:09:44.851535608 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -5938,7 +6239,20 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  }
  
  - (nullable instancetype)initWithString:(NSString *)string {
-@@ -191,6 +215,8 @@
+@@ -147,6 +171,12 @@
+     return path ? [[(id)path autorelease] fileSystemRepresentation] : NULL;
+ }
+ 
++// (TERM8) the path into the caller's buffer (Sparkle, VLC)
++- (BOOL)getFileSystemRepresentation:(char *)buffer maxLength:(NSUInteger)maxLength {
++    return buffer != NULL && maxLength > 0 &&
++           CFURLGetFileSystemRepresentation((CFURLRef)self, true, (UInt8 *)buffer, (CFIndex)maxLength);
++}
++
+ - (nullable NSString *)scheme {
+     return [(NSString *)CFURLCopyScheme((CFURLRef)self) autorelease];
+ }
+@@ -191,6 +221,8 @@
      return (id)CFURLCreateWithString(kCFAllocatorDefault, (CFStringRef)string, (CFURLRef)base);
  }
  
@@ -5947,7 +6261,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  - (instancetype)initFileURLWithPath:(NSString *)path {
      return (id)CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)path, kCFURLPOSIXPathStyle, [path hasSuffix:@"/"]);
  }
-@@ -274,3 +300,73 @@
+@@ -274,3 +306,73 @@
      _CFRuntimeBridgeClasses(CFURLGetTypeID(), "NSURL");
  }
  #endif

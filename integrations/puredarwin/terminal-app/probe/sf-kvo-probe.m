@@ -311,6 +311,45 @@ static int tenth_build(void)
     @catch (id e) { return 16; }
 }
 
+// the eleventh build (TERM8, what VLC 3's interface needed): NSProxy allows zeroing weak references (an observer that
+// is a proxy), -[NSArray initWithArray:copyItems:], +[NSThread sleepForTimeInterval:], NSUserDefaults suites,
+// -[NSCalendar ordinalityOfUnit:inUnit:forDate:], +[NSLocale characterDirectionForLanguage:], NSFileManager's display name
+@interface SFProbeProxy : NSProxy
+@end
+@implementation SFProbeProxy
+- (instancetype)init { return self; }
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)s { return [NSObject instanceMethodSignatureForSelector:@selector(self)]; }
+- (void)forwardInvocation:(NSInvocation *)i { [i setReturnValue:&self]; }
+@end
+
+static int eleventh_checks(void)
+{
+    int bad = 0;
+    id proxy = [[SFProbeProxy alloc] init];
+    id weakSlot = nil;
+
+    objc_storeWeak(&weakSlot, proxy);
+    if (objc_loadWeak(&weakSlot) != proxy) bad |= 1;
+    objc_storeWeak(&weakSlot, nil);
+    [proxy release];
+    NSMutableString *m = [NSMutableString stringWithString:@"x"];
+    NSArray *copied = [[[NSArray alloc] initWithArray:[NSArray arrayWithObject:m] copyItems:YES] autorelease];
+    if ([copied count] != 1 || [copied objectAtIndex:0] == m || ![[copied objectAtIndex:0] isEqual:@"x"]) bad |= 2;
+    if (![NSThread respondsToSelector:@selector(sleepForTimeInterval:)]) bad |= 4;
+    else [NSThread sleepForTimeInterval:0.001];
+    if (![[NSUserDefaults standardUserDefaults] respondsToSelector:@selector(addSuiteNamed:)]) bad |= 8;
+    if (![[NSCalendar currentCalendar] respondsToSelector:@selector(ordinalityOfUnit:inUnit:forDate:)]) bad |= 16;
+    if (![NSLocale respondsToSelector:@selector(characterDirectionForLanguage:)]) bad |= 32;
+    if (![[[NSFileManager defaultManager] displayNameAtPath:@"/Applications/X.app"] isEqual:@"X"]) bad |= 64;
+    return bad;
+}
+
+static int eleventh_build(void)
+{
+    @try { return eleventh_checks(); }
+    @catch (id e) { return 128; }
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -328,9 +367,9 @@ int main(void)
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
     int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16) | (seventh_build() << 25);
-    int eighth = eighth_build(), ninth = ninth_build(), tenth = tenth_build();
-    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0 && ninth == 0 && tenth == 0;
-    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0), readability handler %d (wanted 0), networking classes %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ninth, tenth, ok ? "ok" : "FAIL");
+    int eighth = eighth_build(), ninth = ninth_build(), tenth = tenth_build(), eleventh = eleventh_build();
+    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0 && ninth == 0 && tenth == 0 && eleventh == 0;
+    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0), readability handler %d (wanted 0), networking classes %d (wanted 0), VLC additions %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ninth, tenth, eleventh, ok ? "ok" : "FAIL");
     [pool release];
     return ok ? 0 : 1;
 }
