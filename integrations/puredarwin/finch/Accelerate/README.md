@@ -30,6 +30,11 @@ biquad, vForce, 32/64-bit and legacy/new BLAS ABIs and LAPACK LU/inverse.
 Sparse direct/iterative solver assertions pass on both systems. The 62-line
 Sparse comparison differs on FGMRES with a diagonal preconditioner: native
 Accelerate reports a parameter error, while Finch converges. Keep this DIFF.
+The [15 November audit](../DIFFERENCES-2026-11-15.md) isolates this to the native
+enum overload: the same factory-created diagonal preconditioner succeeds through
+its opaque overload. The port's genuinely missing matrix+opaque overload is now
+implemented over the real solver and checked with the same Linux-built program
+on M1 and M5. No rejection is added just to imitate the native error.
 Printed comparisons do not establish general numerical accuracy equivalence.
 
 LinearAlgebra's numeric/lifetime results match; its 247-line comparison differs

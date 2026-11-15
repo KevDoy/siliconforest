@@ -57,3 +57,16 @@ CVPixelBuffer/IOSurface interop,detectors/ML,RAW providers,wide-gamut/profile
 conversion,all filters and application integration. Some upstream surfaces are
 placeholders;exported names do not establish their behavior. CPU evidence above
 is limited to the actual programs and synthetic pixels.
+
+The [15 November difference audit](../DIFFERENCES-2026-11-15.md) preserves those
+original receipts and classifies their causes. A narrow real gray conversion
+and a private Onyx PNG premultiplication correction make all 86 rendered rows
+match. The remaining extent rows exposed an overflowing CoreGraphics constant
+and incorrect geometry predicates/precision; `geometry-provider.nix` and
+`geometry-build.nix` stage that dependency correction and rebuild CI with its
+corrected inline declarations. These private dependency recipes do not edit or
+install the canonical graphics providers. `diff-probes.nix` builds the independent
+extent/geometry observation program for identical-binary M1/M5 checks.
+Final private stage `coreimage-diffs-stage-v6` matches all three native programs,
+including the original comparison and the new extent/rotation controls. The
+earlier failure receipts above remain unchanged.

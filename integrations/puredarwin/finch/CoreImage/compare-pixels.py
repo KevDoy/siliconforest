@@ -36,10 +36,10 @@ def main():
     result = dict(sha256=candidate['sha256'], pixel_rows=len(c),
         matching_pixels=len(c)-len(differences), pixel_differences=differences,
         extent_differences=extent_differences,
-        note='Supplementary analysis; the unmodified stdout comparison remains DIFF. '
+        note='Supplementary analysis; does not determine or change the raw harness verdict. '
              'Upstream coarse pixel quantization is retained, not a new tolerance.')
     a.output.write_text(json.dumps(result, indent=2)+'\n')
-    print(f"Pixels: {result['matching_pixels']}/{len(c)} rows match; raw verdict remains DIFF")
+    print(f"Pixels: {result['matching_pixels']}/{len(c)} rows match; see raw harness verdict")
 
 
 if __name__ == '__main__':

@@ -95,6 +95,7 @@ for S,T,AT,ST,OLD in [('Float','float','SparseAttributes_t','SparseMatrixStructu
         dmX='sf_sparse_dense(x1)' if typ==V else 'x1';dmY='sf_sparse_dense(y1)' if typ==V else 'y1'
         opbody=f'{A} matrix=a; matrix.structure.attributes.transpose ^= trans!=CblasNoTrans; {tchange} _SparseSpMV_{S}(1,matrix,{dmX},acc,{dmY});'
         operation=f'^ (bool acc,enum CBLAS_TRANSPOSE trans,{typ} x1,{typ} y1){{ {opbody} }}'
+        emit('SparseIterativeStatus_t','SparseSolve',f'SparseIterativeMethod method,{A} a,{typ} b,{typ} x,{P} preconditioner',f'return SparseSolve(method,{operation},b,x,preconditioner);')
         emit('SparseIterativeStatus_t','SparseSolve',f'SparseIterativeMethod method,{A} a,{typ} b,{typ} x,SparsePreconditioner_t type',f'{P} p=_SparseCreatePreconditioner_{S}(type,&a); SparseIterativeStatus_t result=SparseSolve(method,{operation},b,x,p); _SparseReleaseOpaquePreconditioner_{S}(&p); return result;')
         emit('SparseIterativeStatus_t','SparseSolve',f'SparseIterativeMethod method,{A} a,{typ} b,{typ} x','return SparseSolve(method,a,b,x,SparsePreconditionerNone);')
     block=f'void (^operation)(bool,enum CBLAS_TRANSPOSE,{D},{D})'

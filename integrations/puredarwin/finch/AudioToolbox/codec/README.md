@@ -108,3 +108,12 @@ offline/file APIs, new browser-cookie/AUHAL probes, desktop/dock/coreaudiod,
 Terminal/Activity Monitor open-a and compatibility18/18 all pass. Receipts:
 runs/sffinch/install-AudioToolbox-v2/{manifest,receipt,regressions,qualified}.json.
 Only the owned AudioToolbox family changed; CoreAudio/coreaudiod stayed in place.
+
+The [15 November difference audit](../../DIFFERENCES-2026-11-15.md) measures every
+S16 sample from identical Linux-built M1/M5 probes. WAV and ALAC are exact;
+MP3 differs by at most one LSB. AAC's default PNS case differs by at most 5/12
+LSB, while disabling encoder PNS reduces that to one LSB in just one left-channel
+sample and two right-channel samples out of 12000 frames.
+Frames, seeks and zero-lag alignment match. These retained differences are
+consistent with permitted decoder/PNS/rounding variation for these fixtures;
+this is not a normative ISO conformance qualification. The raw DIFF stays visible.
