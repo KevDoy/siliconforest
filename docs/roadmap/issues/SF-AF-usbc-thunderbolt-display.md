@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 08:50Z)
+## Current target and observed state (owner change; updated 09:20Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,14 +15,17 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** CIO07, source `e6c674413`, capsule `e4f9e6d95055…`,
+**Observed in Darwin:** non-AVE CIO08, source `f7e2d645a`, capsule `c63179b7b9f2…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
 ring state. The actual host-router service `0-0` and `usb4_port1` publish
 beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
-The owned UART reader was reaped before lock release at 08:48:05Z.
+The one-shot link query reports both physical lanes UNPLUGGED (state7),
+no remote router, count1/error0. The owned UART reader was reaped before
+lock release at09:08:36Z. AVE is paused; this collection has no AVE module
+or `pdave` argument.
 
 **Not observed in Darwin:** the dock router, authorization, any dock PCI
 function, Ethernet link/DHCP, dock USB enumeration/HID/read-only storage,
