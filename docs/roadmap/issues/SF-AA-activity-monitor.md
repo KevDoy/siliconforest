@@ -114,6 +114,61 @@ Synthetic input; details and the Terminal side are in SF-Y, "TERM6 round".
   rx 504 KB. Kernel message layouts match (`SFNS_TRACE=1` in `libs/NetworkStatistics.c`: TCP descriptions 384 =
   40 + 344, updates 496 = 152 + 344). Why Activity Monitor's columns stay 0 is not found yet.
 
+### Column resize, scrolling, window resize (owner's findings 1 and 2; cocoa 0130)
+Measured on my own Activity Monitor with synthetic input (`runs/sf-term6/colres2.sh`: the divider right of "% CPU"
+dragged 200 px right in 1 s at 60 Hz and back, then 400 px in 0.25 s at 120 Hz and back, the button held), the
+installed AppKit against the test prefix. Times are the WindowServer's `PD_WS_TIMING` lines; the new AppKit also
+says which pointer position each drag step followed (`column-drag x= skipped= changed=`), so "motion -> frame" is
+the time from the window server receiving that motion to the commit that shows it. The application's log goes
+through a pipe now (`RUNFIFO=1` in `m1-run.sh`): a write to a file on this disk takes ~5 ms, and the timing lines
+themselves had slowed what they measured.
+
+| | before (installed) | after (0130) |
+|---|---|---|
+| commits while dragging | every 452-460 ms (median) | every 20-24 ms |
+| one drag step, position taken -> its commit | (every event: `-tile`, a reload of every row) | 18.3-19.1 ms median |
+| motion -> frame | >= 154-257 ms median (lower bound) | 29.0-33.8 ms median (1.7-2.0 frames), p95 51-66 ms |
+| divider behind the pointer at a commit | | 4.5 pt median |
+| Activity Monitor CPU over the drags (`ps` time, 7.8 s) | 92-93 % | 23-24 % |
+| window resize step (`sf-winresize.dylib`: the window 8 pt wider/narrower x60) | 335 ms median | 69 ms median |
+| wheel step -> commit (same build, copy and layout cache off vs on) | 49 ms median | 31 ms median |
+
+The last four runs (`crfo1/2`, `crfn1/2`) were on AppKit 4cf85b64 (the nix build of
+0130, byte-equal to the gated test build `dev34`). Robustness pass on that build before the install: two seeds, 140 s
+each, Activity Monitor 492 random actions and Terminal 444, `MallocScribble=1`, under `sf-catch`: no crash report, no
+exception. Terminal's figures, installed then 0130 (`term-fig.py`, two rounds each): launch to the first commit
+319-430 ms then 300-373 ms; echo 2-8 ms (52 ms once, the first key) then 4-9 ms; `seq 1 300000` 1.019/1.044 s then
+0.982/1.032 s.
+
+What it was, from `sf-prof` profiles of the drag (`shots/cr1`, `crp25`..`crp32`):
+- each drag event ran `-tile`, which reloads every row (`noteNumberOfRowsChanged`); events were taken one by one,
+  so the column fell further behind with each;
+- each cell view that moved or changed size had its whole row's constraints solved again, twice (2.4 s of a 4 s
+  drag in `_pdSolveConstraints`); the row view also autoresized every cell before the table placed them;
+- every frame change posted `NSViewGlobalFrameDidChangeNotification` (nothing observes it but views with surfaces);
+- every cell right of the column was drawn again at each step, each string laid out again by the text system, and
+  each header cell's gradient was a shading evaluated per pixel.
+
+What 0130 does: only the newest drag position is followed; a light re-tile (frame widths, no reload); widths saved
+and `NSTableViewColumnDidResizeNotification` sent once, at the release; the solves a layout pass asks for are
+taken together and each changed tree solved once (cell views are layout boundaries; a boundary moved without
+changing size skips its solve); row views do not autoresize their cells; the pixels right of the column are
+copied along in the window (as macOS moves layers) and only the column is drawn (not while anything else is waiting
+to be drawn, not under a shown overlay scroller); strings drawn in a rectangle are laid out once and kept (a
+one-line string that fits is kept by its own width, so a column of changing width finds it laid out); vertical
+gradients are filled a row of device pixels at a time; `NSClipView` copies on scroll (macOS's `copiesOnScroll`).
+`PD_TABLE_NO_COPY=1`, `PD_CLIP_NO_COPY=1`, `PD_TYPESET_NO_CACHE=1` switch the copies and the cache off to compare.
+
+Column reordering by dragging a header was not implemented at all: a press on a header that moves along it now drags
+the column (it changes places with each column whose middle the pointer passes, as `tableView:shouldReorderColumn:
+toColumn:` allows; `didDragTableColumn:` after), and the click's sort is taken at the release when nothing moved.
+Observed (`shots/co29-*`): "% CPU" moved after "CPU Time" with its values and its sort chevron.
+
+Still wrong: the target was the divider at most one frame behind the pointer; it is about two frames behind (median
+32-34 ms). What is left of a step: the resized column's cells and the header drawn, the layout pass over the visible
+rows, the commit. A window resize still draws the whole window at each step (its backing store is made again at the
+new size).
+
 ## Installed on the M1's disk, seventh round (14 November, night; COCOA4)
 - Core files by the guarded installer after QEMU `c4c`/`c4c-2` (failed=0, QDDESK_PASS both; `c4a` and `c4b` before them
   failed on staging and on their own probes, see SF-Y): `/usr/lib/libCoreFoundation.dylib` 82638edd (the first

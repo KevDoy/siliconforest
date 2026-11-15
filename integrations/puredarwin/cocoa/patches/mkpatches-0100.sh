@@ -15,7 +15,8 @@
 #   am-0127/  = am-0126/ + 0127 (frozen; TERM6)
 #   am-0128/  = am-0127/ + 0128 (frozen; TERM6)
 #   am-0129/  = am-0128/ + 0129 (frozen; TERM6)
-#   am/       = am-0129/ + 0130 on (the current tree; TERM6)
+#   am-0130/  = am-0129/ + 0130 (frozen; TERM6; 0130 diffs from am-0128: am-0129 changed NSView.m too)
+#   am/       = am-0130/ + 0131 on (the current tree; TERM6)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -89,3 +90,8 @@ mk am-0127 am-0128 0128-appkit-table-header-sort-indicator-slot.patch $A/NSTable
 # 0129 (TERM6): am-0128 -> am-0129
 mk am-0128 am-0129 0129-windowserver-frames-kept-by-default.patch src/Frameworks/WindowServer/rpc_wayland.c
 ( diff -rq am-0128 am-0129 ) | sed 's/^/differs from am-0128: /'
+# 0130 (TERM6): am-0128 -> am-0130 for AppKit (am-0129's NSView.m trace with it)
+mk am-0128 am-0130 0130-appkit-column-drag-scroll-copy-split-panes.patch $A/NSView.m $A/NSLayoutConstraint.m $A/NSTableView.m \
+  $A/NSTableViewViewBased.m $A/NSTableHeaderView.m $A/NSSplitView.m $A/NSStringDrawer.h $A/NSStringDrawer.m $A/NSWindow.m \
+  $A/NSClipView.m $A/NSScroller.m $A/NSGradient.m
+( diff -rq am-0129 am-0130 ) | sed 's/^/differs from am-0129: /'
