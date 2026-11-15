@@ -14,6 +14,7 @@ def main():
     ap.add_argument('--system-compat',type=Path,help='Reviewed own legacy errno-table facade output')
     ap.add_argument('--bundle-id',help='Private stage identity, to avoid reusing another staged instance')
     ap.add_argument('--entry-program',type=Path,help='VLC original main rebuilt on Linux with upstream root option')
+    ap.add_argument('--hardware',action='store_true',help='Include actual VideoToolbox/CVPX modules for the hardware path')
     ap.add_argument('--minimal-headless',action='store_true',help='Explicit CLI-only module selection; no GUI/playback claim')
     a=ap.parse_args()
     known={r['name']:r for r in json.loads(Path(__file__).with_name('downloads.json').read_text())}
@@ -27,6 +28,7 @@ def main():
         selected={'dummy','avcodec','mp4','filesystem','packetizer_h264','packetizer_mpeg4audio',
                   'auhal','audio_format','float_mixer','samplerate','swscale','logger','console_logger',
                   'oldrc','vdummy','hotkeys','equalizer','scaletempo','subtitle','stream_out_transcode'}
+        if a.hardware:selected.update({'videotoolbox','cvpx'})
         plugins=a.stage/'Applications/VLC.app/Contents/MacOS/plugins'
         disabled=a.stage/'disabled-plugins';disabled.mkdir()
         wanted={'lib'+name+'_plugin.dylib' for name in selected}

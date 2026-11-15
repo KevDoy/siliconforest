@@ -7,6 +7,8 @@ from pathlib import Path
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--framework-prefix',action='store_true',help='Use only reviewed Frameworks/lib inside this stage')
+    ap.add_argument('--hardware',action='store_true',help='Prefer actual VideoToolbox with its require-hardware option')
     ap.add_argument('--capture',action='store_true')
     ap.add_argument('--as-user',help='Existing unprivileged account; no account or global privilege changes')
     ap.add_argument('--audio-prefix',action='store_true',help='Use the reviewed AudioToolbox-only prefix inside this stage')
@@ -18,6 +20,10 @@ def main():
         raise ValueError('Run only from the reviewed M1 staging directory')
     env={k:v for k,v in os.environ.items() if not k.startswith('DYLD_')}
     env.update(XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',WAYLAND_DISPLAY='wayland-0',SF_METAL_ENABLE_REAL_DEVICE='0')
+    if a.framework_prefix:
+        if not (work/'Frameworks').is_dir():raise ValueError('Missing own Frameworks prefix')
+        env['DYLD_FRAMEWORK_PATH']=str(work/'Frameworks')
+        if (work/'lib').is_dir():env['DYLD_LIBRARY_PATH']=str(work/'lib')
     if a.audio_prefix:
         prefix=work/'audio-prefix/System/Library/Frameworks'
         if not (prefix/'AudioToolbox.framework/AudioToolbox').is_file():
@@ -39,9 +45,15 @@ def main():
     argv=['open' ,'-a',str(work/'Applications/VLC.app'),'--args','--ignore-config','--no-plugins-cache',
           '--no-media-library','--no-metadata-network-access','--play-and-exit',
           '-vv',str(work/'fixtures/movie.mov')]
+    if not a.headless:argv[4:4]=['--intf','macosx']
     if a.headless:argv[4:4]=['--intf','dummy','--extraintf','oldrc','--rc-unix',str(state/'rc.sock'),'--rc-fake-tty','--vout','dummy','--aout','auhal','--codec','avcodec']
+    if a.hardware:
+        if a.headless:argv[argv.index('avcodec')]='videotoolbox,avcodec'
+        else:argv[4:4]=['--codec','videotoolbox,avcodec']
+        argv[4:4]=['--videotoolbox-hw-decoder-only']
     env['SF_VLC_LOG']=str(state/'vlc.log')
-    if a.headless:env.update(SF_VLC_HEADLESS_TIMEOUT='1',SF_VLC_HAL_LOG='1')
+    env['SF_VLC_HAL_LOG']='1'
+    if a.headless:env['SF_VLC_HEADLESS_TIMEOUT']='1'
     with (work/'open.stdout').open('w') as out,(work/'open.stderr').open('w') as err:
         r=subprocess.run(argv,env=env,stdout=out,stderr=err,timeout=15,preexec_fn=drop)
     rc_stats=[]
@@ -88,7 +100,7 @@ def main():
     report={'open_argv':argv,'open_returncode':r.returncode,'vlc_process_lines':own,'capture':capture,'entry_identity':entry_identity,
             'logs':{name:(work/name).read_text(errors='replace') if (work/name).exists() else None
                     for name in ['open.stdout','open.stderr','state/vlc.log']}, 'launch_user':a.as_user or 'current', 'audio_prefix':str(prefix) if a.audio_prefix else None, 'vendor_rc_stats':rc_stats,
-            'mode':'headless dummy video/real auhal' if a.headless else 'GUI attempt',
+            'framework_prefix':a.framework_prefix, 'hardware_requested':a.hardware, 'mode':'headless dummy video/real auhal' if a.headless else 'GUI attempt',
             'note':'Process presence/open success is not playback. No input injection or session restart. No other process was signalled.'}
     (work/'launch.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))

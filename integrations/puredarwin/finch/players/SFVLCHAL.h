@@ -16,6 +16,7 @@ static void *sf_hal_observe(void *unused) {
    AudioTimeStamp stamp={0};
    if(!clock(device,&stamp)&&stamp.mSampleTime>=0&&stamp.mSampleTime<1e12) {
     uint64_t value=(uint64_t)stamp.mSampleTime;if(value>maximum)maximum=value;samples++;
+    if(samples%50==0)fprintf(stderr,"SF_VLC_HAL_SAMPLE samples=%u consumed-frames=%llu device=%u\n",samples,(unsigned long long)value,(unsigned)device);
    }
    usleep(20000);
   }
@@ -25,7 +26,7 @@ static void *sf_hal_observe(void *unused) {
 }
 static void sf_hal_begin(void) {
  const char *value=getenv("SF_VLC_HAL_LOG");
- if(value&&value[0]=='1'&&!value[1])sf_hal_started=pthread_create(&sf_hal_thread,NULL,sf_hal_observe,NULL)==0;
+ if(value&&value[0]=='1'&&!value[1]&&!sf_hal_started){__atomic_store_n(&sf_hal_stop,0,__ATOMIC_RELEASE);sf_hal_started=pthread_create(&sf_hal_thread,NULL,sf_hal_observe,NULL)==0;}
 }
 static void sf_hal_end(void) {
  if(sf_hal_started){__atomic_store_n(&sf_hal_stop,1,__ATOMIC_RELEASE);pthread_join(sf_hal_thread,NULL);sf_hal_started=0;}

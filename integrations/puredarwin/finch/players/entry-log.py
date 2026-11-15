@@ -14,8 +14,10 @@ new=old+'''
         setvbuf(stderr, NULL, _IONBF, 0);
         fprintf(stderr, "SF_VLC_ENTRY pid=%d argc=%d\\n", getpid(), i_argc);
     }
+    int sf_module = sf_vlc_module_probe();
+    if (sf_module >= 0) return sf_module;
 '''
-assert s.count(old)==1;s=s.replace(old,new).replace('#include <stdlib.h>','#include <stdlib.h>\n#include <stdio.h>\n#include "SFVLCHAL.h"',1);anchors={
+assert s.count(old)==1;s=s.replace(old,new).replace('#include <stdlib.h>','#include <stdlib.h>\n#include <stdio.h>\n#include "SFVLCHAL.h"\n#include "SFVLCModule.h"',1);anchors={
  '    /* Handle parameters */':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE signals-ready\\n");\n',
  '    /* Initialize libvlc */':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE before-libvlc-new argc=%d\\n", argc);\n',
  '    if (vlc == NULL)':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE libvlc-new result=%p\\n", (void *)vlc);\n    if (sf_log && !vlc) { const char *sf_error=libvlc_errmsg(); fprintf(stderr, "SF_VLC_ERROR %s\\n", sf_error ? sf_error : "no public error supplied"); }\n',
