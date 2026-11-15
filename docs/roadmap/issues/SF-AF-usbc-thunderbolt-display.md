@@ -958,3 +958,23 @@ The collection fits its original address range and passes the overlap check;
 boot.bin is unchanged. Generic compatibility UUID constants are privately
 namespaced to avoid a duplicate symbol. The firmware-only build interface
 is retained. Native CM is an explicit pdcio_cm=1 opt-in and has not run on M1.
+
+
+### CIO04CM loader rejection; no NHI execution (07:47Z)
+
+The first combined-driver capsule was installed, but native stage 2 rejected
+its 619-byte command line before XNU: revision 2 permits fewer than 608 bytes.
+This is a capsule-preflight mistake, not an NHI/DART result or kernel panic.
+The owned cycle was interrupted promptly for guarded CIO03 recovery. Removing
+only redundant pdrtkit_irq=2 (already the required native default) gives 605
+bytes. The corrected capsule has exactly the same compressed collection and
+boot.bin; the wrapper now checks the native limit before taking a test slot.
+No NHI or dock operation is established by either capsule build.
+
+During that normal Linux visit, the owner-authorized SSH lock-out change was
+completed and eight rapid key-authenticated sessions passed. UFW remains on,
+with both port-22 LIMIT rules replaced by ALLOW. PerSourcePenalties is off;
+key-only authentication was explicitly enforced after discovering passwords
+had been allowed. Exact before/after values, backup files and revert steps
+are in SF-R's reaching-Linux note and the coordination log. No extra reboot
+was used for this change; prior 9-second/60-second SSH workarounds are relaxed.

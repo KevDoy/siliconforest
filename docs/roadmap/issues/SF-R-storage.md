@@ -336,6 +336,67 @@ What the owner asked for after the first start from the picker: SSH (server and 
 | dr46 | bench session 330 s; **`/usr/lib/libSystem.B.dylib` replaced over SSH** by the build with `xpc-copy-description-never-aborts.patch` (`tools/sf_userland_push.sh libsystem`: checked by SHA-256 there, proven to load through `DYLD_LIBRARY_PATH`, the old file kept as `libSystem.B.dylib.old`, then renamed); the Claude Code check; `claude.sf` removed | `DR_PLAIN PASSED`, `e2fsck -fn` rc 0 (`63737/4014080 files, 771042/16035840 blocks`). **The unmodified `claude`: `doctor` rc 0, `-p` "Not logged in", first screen and login-method screen on tmux.** `SF-X-claude-code.md` |
 | dr47 | a fresh boot from the disk with that libSystem (session 230 s), the same check | `DR_PLAIN PASSED`, `e2fsck -fn` rc 0 (`63739/4014080 files, 771077/16035840 blocks`); claude as in dr46; no `libxpc misuse` and no `EXC_CORPSE_NOTIFY` line on the console |
 
+### Reaching the M1's Linux: SSH lock-outs removed (15 November 2026, 07:45Z)
+
+Owner-authorized CODEX-TB change, during the normal CIO04CM Linux install
+visit; no extra reboot. This supersedes dr43's 9-second polling workaround
+and the later 60-second quiet-period advice for Linux SSH. Eight rapid fresh
+key-authenticated sessions from the workstation all succeeded after the change.
+Normal bounded boot/network waits still apply. Firewall remains active; port
+22 and every non-SSH UFW rule remain unchanged.
+
+Observed OpenSSH 10.6p1. UFW had the following rules (original indices 5/8):
+
+```text
+22/tcp       LIMIT IN  Anywhere       # ssh
+22/tcp (v6)  LIMIT IN  Anywhere (v6)  # ssh
+```
+
+Deleted IPv6 rule 8, then IPv4 rule 5, and added `ufw allow 22/tcp comment
+'ssh'`. Both now say `ALLOW IN`, with the same sources/comment. The original
+iptables/ip6tables implementation used `recent --seconds 30 --hitcount 6`
+and jumped to UFW's REJECT chain. No SSH references to recent/hashlimit or
+limit chains remain; generic UFW logging-limit chains were retained. No
+separate hashlimit rule was present. sshguard/fail2ban units were absent.
+
+Created `/etc/ssh/sshd_config.d/00-siliconforest-no-lockout.conf`:
+
+```text
+PerSourcePenalties no
+PerSourceMaxStartups none
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+```
+
+`PerSourcePenalties` before was exactly:
+
+```text
+crash:90.000000 authfail:5.000000 noauth:1.000000 invaliduser:5.000000 grace-exceeded:10.000000 refuseconnection:10.000000 max:600.000000 min:15.000000 max-sources4:65536 max-sources6:65536 overflow:permissive overflow6:permissive
+```
+
+The initial audit unexpectedly found `PasswordAuthentication yes`; it was
+changed to `no` to meet the owner's explicit key-only requirement. Public-key
+authentication remains enabled and keyboard-interactive authentication remains
+disabled. `Port 22`, `MaxStartups 10:30:100`, `MaxAuthTries 6`, and
+`PerSourceMaxStartups none` are unchanged. The first two startup/authentication
+caps bound concurrent unauthenticated connections/tries within one connection;
+they are not a timed source-IP ban. The two effective changes were checked
+against the full before/after `sshd -T` output, `sshd -t` passed, sshd was
+reloaded, and the service remained active. No authentication bypass was used.
+
+Revert evidence on Linux: `/root/sf-ssh-lockout-20261115T074536Z/` contains `report.json`, original
+`user.rules`, `user6.rules`, `ufw`, `sshd_config`, `sshd_config.d/`, and complete
+before/after UFW, sshd, iptables, ip6tables and nftables outputs. Workstation
+receipts are private `runs/m1-usbc/cio04cm-linux.txt`,
+`linux-ssh-change-report.json` and `cio04cm-ssh-fresh-1..8.txt`.
+To restore the old rate limits, delete the `ALLOW 22/tcp` rule and run
+`ufw limit 22/tcp comment 'ssh'` (both families), remove the new drop-in,
+validate with `/usr/bin/sshd -t`, and reload sshd. Removing the entire drop-in
+also restores the old password-enabled baseline; retain its last three lines
+when re-enabling penalties if key-only authentication should remain in force.
+Other SSH configuration files and `/usr/share/omarchy` were not changed.
+
 **The e2fsck finding of dr41, and its fix.** `Inode N seems to contain garbage` for 24 inodes, all valid files and directories (their checksums recomputed from Linux: correct). They shared five inode-table blocks with inodes freed in dr41, when `sf-boot` removed what dr40 had left in `/private/tmp` and `/private/var/run` (several hundred files). The driver's delete paths wrote the freed inode after `ext4_inode_free_extents` had zeroed `i_block`, with `EXT4_EXTENTS_FL` still on: no extent header, which e2fsck's inode scan calls insane, and when more than half of a block's 16 inodes are so, every inode of the block is reported as garbage; `e2fsck -fy` would have cleared the valid ones (**never run `-fy` on this partition without reading what it says first**). Superblock state clean, journal start 0 throughout; both kernels read everything. No boot before had deleted more than a handful of files.
 - Fix (`ext4-downgrade.patch`; the text of before is `ext4-downgrade.before-dr41.patch`, for the reproduction only): the three places that write a freed inode give it a valid empty extent root (`ext4_inode_init_extent_header`: magic, no entries, room for four, depth 0), which is what Linux's `ext4_ext_remove_space` leaves in a freed inode; the flag stays.
 - QEMU (`tools/dr_qemu_massdelete.sh <name> tree|old [reuse <image>]`, `guest/qemu-massdelete.sh`, a scratch filesystem with p3's features): old driver rc 4 with 29 such lines (run md1); fixed driver, the same script, rc 0 (md2); fixed driver on the filesystem the old one left, new files and a second deletion: 250 old freed inodes become 190, none new (md3).
