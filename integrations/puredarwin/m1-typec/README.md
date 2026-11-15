@@ -17,7 +17,7 @@ with a one-byte S0 payload only when the controller is not already in S0.
 It refuses a busy foreign command, bounds completion by one second and an
 iteration cap, sleeps between reads, handles rejection/timeout, and requires
 an actual S0 readback before publishing a service or cable snapshot. It makes
-no periodic command retry. No role swap, mux write, interrupt-mask change,
+no periodic command retry. No role swap, mux write,
 firmware update or transaction to port0 is added. The command transport uses
 the existing serialized I2C engine and Linux's length-prefixed framing.
 CIO10 hardware qualification observes initial state7, SSPS completion in two
@@ -28,10 +28,19 @@ The next source/SDK variant reads EVENT1 and acknowledges exactly that64-bit
 word through CLEAR1 before each status sample, following Linux's interrupt
 handler order. Zero events cause no write. Failed reads never acknowledge;
 failed writes are reported as uncertain and make the sample unavailable.
-It uses the existing1Hz timer and workloop; it enables no GPIO/AIC interrupt
-and leaves MASK1 untouched. Counters distinguish reads, successful acks and
+It uses the existing1Hz timer and workloop; it enables no GPIO/AIC interrupt.
+The acknowledgement operation leaves MASK1 untouched. Counters distinguish reads, successful acks and
 errors. This does not implement Linux's reset/setup-mask recovery, and it
 has not yet been installed or observed clearing events on the M1.
+
+A later startup variant sets Linux's CD3217 MASK1 (plug/power/data events,
+bits1/9/10) after APP/S0 validation and before service publication. An already
+correct mask needs only a read. Otherwise one exact eight-byte write requires
+a checked full readback; any failed or ambiguous setup prevents PHY admission.
+It retains slow polled event delivery without enabling GPIO/AIC interrupts.
+This is startup setup only: controller-reset recovery and consumer revalidation
+are still outstanding. It is not included in the frozen acknowledgement-only
+CIO17 image, and has no M1 mask-write evidence yet.
 
 Build: `nix-build build-kext.nix --no-out-link`. The experimental collection
 is `build-kc.nix`; it retains the disk/reboot base and adds one kext. Pack

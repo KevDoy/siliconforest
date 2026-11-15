@@ -21,6 +21,10 @@ pd_cd321x_events.h follows cd321x_interrupt's exact EVENT1/CLEAR1 64-bit
 acknowledgement ordering from the same pinned source. It does not change an
 interrupt mask or enable GPIO/AIC interrupts. Native sampling remains 1 Hz.
 
+pd_cd321x_mask.h follows tipd_init and tipd_cd321x_data's startup MASK1:
+plug/power-status/data-status events (bits1/9/10), with checked readback.
+It is CD3217/T8103-specific and does not enable a GPIO/AIC interrupt.
+
 pd_cd321x_control.h uses the read-only event1/mask1/S0/status/data register
 layout from the same pinned Linux tipd/core.c, retaining Intel/Heikki Krogerus
 and Asahi notices, GPL-2.0. It acknowledges no interrupts and changes no mask.

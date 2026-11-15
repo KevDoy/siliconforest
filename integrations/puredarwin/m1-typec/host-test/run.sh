@@ -17,3 +17,6 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   -I"$HERE/../kernel" "$HERE/test_events.c" -o "$TEMP/test-events"
 "$TEMP/test-events"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
+  -I"$HERE/../kernel" "$HERE/test_mask.c" -o "$TEMP/test-mask"
+"$TEMP/test-mask"

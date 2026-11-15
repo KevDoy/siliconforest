@@ -8,14 +8,15 @@
  *
  * Port 1 only: perform the Linux S0/SSPS initialization when necessary,
  * then acknowledge observed events and sample state on the existing 1 Hz
- * workloop. No interrupt mask/enable, role swap, firmware update, mux write
- * or port-0 transaction is sent.
+ * workloop. Install Linux's CD3217 interrupt mask at startup; no GPIO/AIC
+ * enable, role swap, firmware update, mux write or port-0 transaction is sent.
  */
 #include "pd_i2c.h"
 #include "pd_cd321x.h"
 #include "pd_cd321x_power.h"
 #include "pd_cd321x_control.h"
 #include "pd_cd321x_events.h"
+#include "pd_cd321x_mask.h"
 #include <mach/mach_time.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -220,7 +221,7 @@ bool PDAppleTypeC::start(IOService *provider)
     setProperty("port-index", 1, 32);
     setProperty("port-label", "USB-C Left-front");
     setProperty("observer-only", false);
-    setProperty("setup-policy","port1-S0-only");
+    setProperty("setup-policy","port1-S0-Linux-mask-polled");
     setProperty("event-policy","polled-1Hz-exact-EVENT1-CLEAR1-mask-unchanged");
     setProperty("hpm-path", hpmPath);
     setProperty("error-count", (uint32_t)0, 32);
@@ -248,6 +249,15 @@ bool PDAppleTypeC::start(IOService *provider)
     LOG("port1 S0 before=%u after=%u SSPS=%u polls=%u error=%d; port0 reserved",
         power.before,power.after,power.command_issued,power.polls,ret);
     if(ret)return false; // No state publication, PHY or ACIO start after failed setup.
+    pd_cd321x_mask_result mask={};ret=pd_cd321x_ensure_mask(this,powerRead,powerWrite,&mask);
+    setProperty("interrupt-mask-error",(uint32_t)ret,32);
+    setProperty("interrupt-mask-write-attempted",mask.write_attempted);
+    setProperty("interrupt-mask-before-valid",mask.before_valid);
+    setProperty("interrupt-mask-after-valid",mask.after_valid);
+    if(mask.before_valid)setProperty("interrupt-mask-before",mask.before,sizeof(mask.before));
+    if(mask.after_valid)setProperty("interrupt-mask-after",mask.after,sizeof(mask.after));
+    setProperty("interrupt-delivery","existing-1Hz-poll-no-GPIO-enable");
+    if(ret){LOG("port1 Linux mask setup failed errno=%d; no PHY admission",ret);return false;}
     loop = IOWorkLoop::workLoop();
     timer = IOTimerEventSource::timerEventSource(this, tick);
     gate=IOCommandGate::commandGate(this);

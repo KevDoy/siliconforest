@@ -1659,3 +1659,23 @@ read/write failure and readback corruption pass actual-helper sanitizers.
 The native CM SDK and all six checks pass. This source backend is excluded
 from frozen CIO17; no mapping register is changed on the M1. It supplies no
 DART table, MSI, endpoint driver/BME admission or hot-remove drain proof.
+
+### CD3217 startup-mask preparation, excluded from frozen CIO17
+
+A later Type-C source variant implements the remaining tipd_init startup
+MASK1 step after APP/S0 checks and before service/cable publication. It uses
+exact Linux tipd_cd321x_data bits1/9/10 (plug/power-status/data-status), not
+STATUS_UPDATE bit8 or the newer SN201202x DP-SID bit. It reads first and skips
+the write when already correct; a changed mask requires one full64-bit write
+and exact checked readback. Read failure, ambiguous write or mismatch prevents
+PHY admission. Delivery still uses the existing1Hz polled EVENT1/CLEAR1 path;
+no GPIO/AIC interrupt is enabled. Startup and acknowledgement have separate
+properties, so the previous mask is preserved as evidence.
+
+The actual inline helper passes already-correct/no-write, upper-byte clearing,
+each I/O failure and readback-corruption sanitizer tests; the native Type-C
+SDK and six required checks pass. This is not installed, is excluded from
+frozen acknowledgement-only CIO17 and has no M1 mask-write/link evidence.
+This startup step does not implement live controller-reset recovery or the
+consumer teardown/revalidation that such a reset needs. Those remain required
+before claiming the complete Type-C/hotplug lifecycle.
