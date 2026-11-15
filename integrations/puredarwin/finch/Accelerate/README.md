@@ -2,9 +2,14 @@ Eight whole numeric source groups build: vDSP, vMisc, BLAS, LAPACK, Quadrature,
 LinearAlgebra, SparseBLAS and Sparse. They remain staged; no Accelerate framework
 was installed. Build them with `nix-build --no-out-link build.nix --arg groups
 '[ "vDSP" "vMisc" "BLAS" "LAPACK" "Quadrature" "LinearAlgebra" "SparseBLAS" "Sparse" ]'`.
-The default whole-framework build additionally compiles all 18 vImage C files,
-but linking needs four CoreGraphics color-space exports requested from COCOA3.
-The authored whole-framework umbrella/layout has not run past that link failure.
+The default whole-framework recipe additionally compiles all 18 vImage C files.
+`installed-graphics.nix` now builds that complete tree against Cocoa's real
+ICC/indexed-color provider, preserving the bootstrap recipe for old receipts.
+The whole umbrella has explicit mappings for all eight vecLib component IDs.
+`vimage-tests.nix` builds Finch's original image comparison program using our
+headers; it completes on the M5 with the same Linux-built bytes prepared for
+the M1. The M1 run and image-output comparison are still pending. No whole
+Accelerate installation or general numerical equivalence is claimed.
 
 Our C declarations come from preprocessed Finch definitions through
 `tools/c_functions.py`; typed headers and Sparse overload glue are ours.
@@ -36,3 +41,10 @@ compile it without builtin folding. vDSP rounded int16 conversion saturates.
 `reference.nix` builds the runtime ABI/workspace probes. Reference execution
 uses fresh /tmp directories, SHA256 verification and 30-second timeouts, with
 no Mac builds, installs, DYLD overrides or Apple files copied back.
+
+Our CoreVideo numeric fallback now guards each macro name independently, so
+it coexists with the media declarations. The five additional public dither/
+multidimensional-table values are authored numeric declarations checked against
+Finch's mode implementation and the maintainer's
+[Go bindings](https://pkg.go.dev/github.com/deploymenttheory/go-bindings-macosplatform/bindings/internal/raw/frameworks/accelerate).
+No SDK headers were imported.

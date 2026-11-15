@@ -70,13 +70,15 @@ in pkgs.stdenv.mkDerivation {
       printf '/* Re-export-only umbrella. */\n' > umbrella.c
       ${cc} $CF -c umbrella.c -o umbrella.o
       REEXPORT=""
+      REEXPORT_MAP=""
       for group in vDSP vMisc BLAS LAPACK Quadrature LinearAlgebra SparseBLAS Sparse; do
         REEXPORT="$REEXPORT -Wl,-reexport_library,$PWD/libs/lib$group.dylib"
+        REEXPORT_MAP="$REEXPORT_MAP -Wl,-dylib_file,/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/lib$group.dylib:$PWD/libs/lib$group.dylib"
       done
-      ${cc} -dynamiclib umbrella.o $LF -L$PWD/libs -L${p.foundation-arm64}/usr/lib -L${p.coreFoundation-arm64}/usr/lib -L${p.libobjc-arm64}/usr/lib $REEXPORT -lSystem \
+      ${cc} -dynamiclib umbrella.o $LF -L$PWD/libs -L${p.foundation-arm64}/usr/lib -L${p.coreFoundation-arm64}/usr/lib -L${p.libobjc-arm64}/usr/lib $REEXPORT $REEXPORT_MAP -lSystem \
         -install_name /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/vecLib -current_version 1126.100.7 -compatibility_version 1 -o libs/vecLib
       ${cc} -dynamiclib umbrella.o $LF -L$PWD/libs -L${p.foundation-arm64}/usr/lib -L${p.coreFoundation-arm64}/usr/lib -L${p.libobjc-arm64}/usr/lib \
-        -Wl,-reexport_library,$PWD/libs/vecLib -Wl,-reexport_library,$PWD/libs/libvImage.dylib -lSystem \
+        -Wl,-reexport_library,$PWD/libs/vecLib -Wl,-reexport_library,$PWD/libs/libvImage.dylib $REEXPORT_MAP -lSystem \
         -install_name /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate -current_version 4 -compatibility_version 1 -o libs/Accelerate
     ''}
   '';
