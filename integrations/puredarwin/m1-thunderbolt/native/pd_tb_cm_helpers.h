@@ -6,6 +6,18 @@
 #include <linux/string.h>
 #include <linux/workqueue.h>
 #include <linux/unaligned.h>
+#include <linux/idr.h>
+#include "pd_tb_ida_range.h"
+/* Repair only this private CM's inclusive range ABI. Never pass end==start
+ * to the native exclusive-end backend (fixed PCI HopID8 is a real caller). */
+static inline int pd_tb_ida_alloc_range(struct ida *ida,unsigned int minimum,
+                                      unsigned int maximum,gfp_t flags)
+{
+ uint32_t end=0;int ret=pd_tb_ida_exclusive_end(minimum,maximum,&end);
+ return ret?ret:ida_simple_get(ida,minimum,end,flags);
+}
+#define ida_alloc_range(ida,minimum,maximum,flags) pd_tb_ida_alloc_range(ida,minimum,maximum,flags)
+#define ida_alloc_max(ida,maximum,flags) pd_tb_ida_alloc_range(ida,0,maximum,flags)
 /* Typed copies preserve the native host byte order without unaligned loads. */
 #ifndef get_unaligned
 #define get_unaligned(p) ({ __typeof__(*(p)) v;memcpy((void *)&v,(p),sizeof(v));v; })
