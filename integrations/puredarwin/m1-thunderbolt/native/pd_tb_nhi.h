@@ -23,6 +23,16 @@ int pd_tb_nhi_device_create(void *dt_entry,const void *raw_drom,size_t length,vo
 int pd_tb_nhi_bus_init(void);
 int pd_tb_nhi_create(const struct pd_tb_nhi_config *,void **);
 int pd_tb_nhi_start(void *,uint32_t cable_info);
+/* Bounded read-only diagnostic, never an authorization or link-state cache.
+ * Public model IDs only; no UID, DROM bytes or DMA/physical addresses. */
+struct pd_tb_nhi_port_status {
+ uint32_t port,state,error,remote,remote_vendor,remote_device;
+};
+struct pd_tb_nhi_status {
+ uint32_t root_vendor,root_device,max_port,port_count;
+ struct pd_tb_nhi_port_status ports[16];
+};
+int pd_tb_nhi_snapshot(void *,struct pd_tb_nhi_status *);
 /* Failure retains context, DMA and controller ownership. No timeout-free
  * retirement is implied: Linux domain teardown joins its actual workers. */
 int pd_tb_nhi_stop(void *);

@@ -1152,3 +1152,20 @@ pending. This does not reproduce the reported AppKit slowdown and does not
 claim its cause resolved. Current tool/userland hashes remain with the
 private profile, not an assertion that every userland file matched the older
 A/B. No added busy loop is evident in this NHI-up measurement.
+
+### Next NHI link observation, source/SDK only
+
+The native CM now has a bounded PHY-capability query through the real NHI
+control channel. One separate one-shot timer, one second after successful
+CM startup, samples physical port state and cached peer model IDs under the
+domain lock and publishes them in `physical-port-state`. It exposes no UID,
+DROM bytes or DMA addresses, performs no authorization or port configuration,
+and never rearms itself. `link-query-count` records actual invocations; stop
+cancels the timer before releasing resources. This distinguishes training/link
+state from later router discovery without adding an idle polling loop.
+
+Native SDK and both capacity checks pass, with zero collection overlaps. The
+optional-AVE collection changes only CIO's UUID; the other 57 modules remain
+identical to the frozen CIO07+AVE candidate. All six repository checks pass.
+This diagnostic code is not installed; the active CIO07AVE cycle adds only
+the requested lazy INFO module and preserves the qualified CIO07 NHI binary.

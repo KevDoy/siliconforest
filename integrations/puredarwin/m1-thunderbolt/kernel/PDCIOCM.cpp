@@ -213,3 +213,25 @@ int pd_cio_cm_stop(PDCIOCM *s)
  if(s->dmaLive){int ret=s->dart.suspend();if(ret)return ret;s->dmaLive=false;}
  return __atomic_load_n(&s->failed,__ATOMIC_ACQUIRE)?EIO:0;
 }
+int pd_cio_cm_snapshot(PDCIOCM *s)
+{
+ if(!s || !s->nhi || !s->live())return ENODEV;
+ pd_tb_nhi_status status={};int ret=pd_tb_nhi_snapshot(s->nhi,&status);
+ s->owner->setProperty("link-query-error",(uint64_t)(ret<0?-ret:ret),32);
+ s->owner->setProperty("host-router-vendor",(uint64_t)status.root_vendor,32);
+ s->owner->setProperty("host-router-device",(uint64_t)status.root_device,32);
+ s->owner->setProperty("host-router-max-port",(uint64_t)status.max_port,32);
+ auto ports=OSArray::withCapacity(status.port_count);
+ if(!ports)return ENOMEM;
+ bool ok=true;
+ for(unsigned i=0;i<status.port_count && ok;++i){
+  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(6);
+  if(!item){ok=false;break;}
+  const char *keys[]={"port","state","error","remote","remote-vendor","remote-device"};
+  const uint32_t values[]={p.port,p.state,p.error,p.remote,p.remote_vendor,p.remote_device};
+  for(unsigned n=0;n<6 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
+  if(ok)ok=ports->setObject(item);item->release();
+ }
+ if(ok)ok=s->owner->setProperty("physical-port-state",ports);
+ ports->release();return !ok?ENOMEM:ret<0?-ret:ret;
+}

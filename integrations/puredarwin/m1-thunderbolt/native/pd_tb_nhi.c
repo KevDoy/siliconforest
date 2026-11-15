@@ -155,6 +155,28 @@ int pd_tb_nhi_start(void *ctx,uint32_t cable)
  ret=tb_sw_write(root,&cable,TB_CFG_SWITCH,cap+1,1);
  done:mutex_unlock(&s->domain->lock);return ret;
 }
+int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
+{
+ struct pd_tb_nhi *s=ctx;
+ if(!s || !out || !s->domain || !s->started || !present(&s->nhi))return -ENODEV;
+ memset(out,0,sizeof(*out));
+ mutex_lock(&s->domain->lock);
+ struct tb_switch *root=s->domain->root_switch;int ret=0;
+ if(!root || !root->ports){ret=-ENODEV;goto done;}
+ out->root_vendor=root->config.vendor_id;out->root_device=root->config.device_id;
+ out->max_port=root->config.max_port_number;
+ struct tb_port *port;
+ tb_switch_for_each_port(root,port)if(tb_port_is_null(port)){
+  if(out->port_count==ARRAY_SIZE(out->ports)){ret=-EOVERFLOW;break;}
+  struct pd_tb_nhi_port_status *p=&out->ports[out->port_count++];p->port=port->port;
+  int state=tb_port_state(port); // actual two-DWORD PHY capability read over NHI
+  if(state<0){p->error=-state;if(!ret)ret=state;}else p->state=state;
+  if(port->remote){
+   p->remote=1;p->remote_vendor=port->remote->sw->vendor;p->remote_device=port->remote->sw->device;
+  }
+ }
+ done:mutex_unlock(&s->domain->lock);return ret;
+}
 int pd_tb_nhi_stop(void *ctx)
 {
  struct pd_tb_nhi *s=ctx;if(!s)return -EINVAL;

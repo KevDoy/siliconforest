@@ -43,6 +43,9 @@ class PDAppleCIO: public IOService {
 #ifdef PD_CIO_CM
  PDCIOCM *cm;
  uint32_t cmLive;
+ IOTimerEventSource *diagnosticTimer;
+ uint32_t diagnosticCount;
+ static void diagnosticTick(OSObject *,IOTimerEventSource *);
  static bool cmPowered(void *);
  int startCM();
 #endif
@@ -220,6 +223,7 @@ int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
 int PDAppleCIO::stopFirmware()
 {
 #ifdef PD_CIO_CM
+ if(diagnosticTimer)diagnosticTimer->cancelTimeout();
  if(cm){int ret=pd_cio_cm_stop(cm);if(ret)return ret;}
  if(power && firmwareReady){
   setProperty("nhi-interrupt-enable",nhi.r32(0xd0010),32);
@@ -274,6 +278,10 @@ bool PDAppleCIO::start(IOService *p)
  pdos_xnu_init();if(pd_cio_layer_up())return false;
  loop=IOWorkLoop::workLoop();gate=IOCommandGate::commandGate(this);timer=IOTimerEventSource::timerEventSource(this,tick);
  if(!loop || !gate || !timer || loop->addEventSource(gate)!=kIOReturnSuccess || loop->addEventSource(timer)!=kIOReturnSuccess)return false;
+#ifdef PD_CIO_CM
+ diagnosticTimer=IOTimerEventSource::timerEventSource(this,diagnosticTick);
+ if(!diagnosticTimer || loop->addEventSource(diagnosticTimer)!=kIOReturnSuccess)return false;
+#endif
  setProperty("port-index",1,32);setProperty("rtkit-ready",false);setProperty("nhi-ready",false);
  __atomic_store_n(&accepting,1,__ATOMIC_RELEASE);__atomic_store_n(&drained,1,__ATOMIC_RELEASE);
  registerService();timer->setTimeoutMS(1);return true;
@@ -310,6 +318,9 @@ void PDAppleCIO::stop(IOService *p)
 {
  __atomic_store_n(&accepting,0,__ATOMIC_RELEASE);
  if(timer){timer->cancelTimeout();timer->disable();if(loop)loop->removeEventSource(timer);}
+#ifdef PD_CIO_CM
+ if(diagnosticTimer){diagnosticTimer->cancelTimeout();diagnosticTimer->disable();if(loop)loop->removeEventSource(diagnosticTimer);}
+#endif
  if(gate)gate->runAction(stopAction);else stopAction(this,NULL,NULL,NULL,NULL);
  IOService::stop(p);
 }
@@ -317,12 +328,25 @@ void PDAppleCIO::free()
 {
  if(leaseToken || power || rtkitTouched || quarantined){LOG("retaining failed-drain resources");return;}
  if(loop && gate)loop->removeEventSource(gate);
+#ifdef PD_CIO_CM
+ if(loop && diagnosticTimer && diagnosticTimer->getWorkLoop()==loop)loop->removeEventSource(diagnosticTimer);
+ OSSafeReleaseNULL(diagnosticTimer);
+#endif
  OSSafeReleaseNULL(timer);OSSafeReleaseNULL(gate);OSSafeReleaseNULL(loop);
  OSSafeReleaseNULL(tunableData);OSSafeReleaseNULL(cpuEntry);
  rc.unmap();nhi.unmap();pdf.unmap();adapter.unmap();sram.unmap();reset.unmap();IOService::free();
 }
 
 #ifdef PD_CIO_CM
+void PDAppleCIO::diagnosticTick(OSObject *owner,IOTimerEventSource *)
+{
+ auto s=OSDynamicCast(PDAppleCIO,owner);
+ if(!s || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return;
+ ++s->diagnosticCount;s->setProperty("link-query-count",(uint64_t)s->diagnosticCount,32);
+ int ret=pd_cio_cm_snapshot(s->cm);
+ s->setProperty("link-query-error",(uint64_t)ret,32);
+ // Deliberately no rearm: one delayed query per successful CM start.
+}
 bool PDAppleCIO::cmPowered(void *ctx)
 {
  auto s=(PDAppleCIO *)ctx;
@@ -361,6 +385,7 @@ int PDAppleCIO::startCM()
  setProperty("nhi-interrupt-enable",nhi.r32(0xd0010),32);
  setProperty("nhi-control-tx-options",nhi.r32(0x10010),32);
  setProperty("nhi-control-rx-options",nhi.r32(0x80010),32);
+ if(!ret && diagnosticTimer)diagnosticTimer->setTimeoutMS(1000);
  return ret;
 }
 #endif
