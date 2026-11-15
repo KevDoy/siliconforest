@@ -556,3 +556,169 @@ time; the answer in `runs/m1-coord/answers-from-DESK3.md` asks for this socket i
 
 ### Taken from Finch (DESK3)
 Nothing.
+
+## Stability and multi-output (DESK4, 15 November)
+
+**Truthfulness.** All input below was synthetic: keyboard records through the real HID queue from the
+Touch Bar driver's test entry (`kern.pd_touchbar.inject`, F1 presses; the brightness was put back), a
+competing reader on `/dev/usb_hid_kbd`, and pointer motion from the compositor's inject module (which
+since this round enters the same input-thread queue the device records enter). Nobody touched the M1.
+The owner's hands are the only proof of the real keyboard/trackpad path: see the checklist at the end.
+
+### 1. The 00:53Z drop: real input ended the desktop
+Evidence: GFX2's UART capture (`runs/sfvk/gfx2-present-race-001-uart.txt`; the session logs of that boot
+were rotated away by the later reboots). The compositor had run 2059 s; from 00:52:37Z the owner opened
+menus and closed windows at the M1; at 00:53:10Z the frame loop ended with `PDHID sequence
+discontinuity: queue overflow or competing reader; input state is lost`, the session ended and
+`SF_HALT` restarted the machine into Linux.
+- **Cause, compositor.** `hid.rs` treated every irregularity of the kernel's HID queues as fatal: a gap in
+  the sequence numbers (the kernel keeps 64 records per queue and overwrites the oldest when the reader
+  is late, `PDHIDEventQueue.cpp`; a second reader takes records too), a key usage without a key code
+  (LANG1/2, International, Help, ... would have ended the desktop as well), a malformed or short record,
+  any read error. The queues were read once per frame, in the frame loop. What made the reader late at
+  00:53 is not established (no frame-time record of that second survives).
+- **Fix (patch 14, `wm-darwin-input-robust.patch`).** Nothing the queues give can end the desktop: a gap
+  releases the keys held (their releases may be among the lost records) and goes on; the pointer's next
+  record carries all its buttons; bad records are dropped; a node that keeps failing (3 errors in a row,
+  or EOF) is closed and reopened with back-off 50 ms .. 5 s (the keyboard's console grab follows the
+  open file); each kind is said once (`WMHID ... (said once; counted from now on)`) and counted, with a
+  count line at most once a minute. The queues are read on a thread of their own (`pdhid-reader`: every
+  1 ms while input arrives, 4 ms after 250 ms quiet, 8 ms after 2 s), whatever the frames do; arriving
+  input ends the wait between frames (a pipe in the frame loop's poll). An event the desktop cannot use
+  is logged (`WMINPUT ... (not fatal)`), never the end of the session; the shell's motion/click queues
+  drop their oldest entry instead of failing; a failing key binding is logged.
+- **Host tests** (`hid.rs`): `real_input_faults_never_end_the_session` (gap with keys held, LANG1, a
+  malformed and a short record, a 200-record pointer gap) **fails on the old source with the M1's own
+  message** (`runs/m1-desktop-010/desk4-tests/basecheck-hid-old-source.txt`);
+  `the_reader_thread_keeps_up_while_the_desktop_is_stuck_in_a_frame` (a 64-record ring fed at 1 kHz:
+  read once per 300 ms frame it loses records, on the thread none of 600);
+  `a_failing_node_is_reopened_with_back_off_and_the_wake_pipe_rings` (EIO x3, two failed reopens,
+  50/100/200 ms).
+- **Observed on the M1** (desk4-next-002, synthetic through the real queue,
+  `runs/m1-desktop-010/desk4-tests/m1/`): 40 F1 presses (80 records) while the frame loop was stalled 2 s
+  (inject `stall 2000`): all 80 read, 0 gaps, 80 key events delivered. 100 presses with a competing
+  reader taking records off `/dev/usb_hid_kbd`: the reader took 5, the compositor logged `WMHID keyboard
+  queue: 1 records lost ... held keys released, input goes on`, counted gaps=5 lost_records=5, and stayed
+  up. **Not reproduced:** a real overflow of the 64-record ring. `kill -STOP` does not stop a process on
+  SiliconForest (`ps` shows `S`, the compositor kept reading 200 records): a kernel finding, not chased.
+
+### 2. A compositor exit restarted the machine
+**Cause.** `sf-session` replaced a compositor by `.safe` only when it ended with an error *within 20 s of
+its start*; this one had run 34 minutes, so the session ended, and the end of the session is a restart.
+**Fix** (`m1-storage/system/sf-session`, function `decide_after_end`, host test
+`desktop/tests/test_sf_session.sh`, 21 cases): only an explicit request (`restart`, `reboot`, `poweroff`,
+`shutdown` in `session-end-request`; the desktop menu writes the first and third) ends the session. A
+compositor that ends by itself (any exit code, a signal, an unknown request word) is started again: the
+same build once, then the installed daily build, then `.safe`, from the third end in a row with a pause
+growing 5 s per end (at most 60 s); a build that ran 10 minutes starts the count afresh. The new compositor
+shows a notice (`CHONKSTEP_DARWIN_START_NOTICE`: "The desktop restarted after an error; its windows were
+closed"), the session logs `SF_SESSION unexpected end N of <build> (rc, seconds, request): starting
+<build>`, and the last 400 lines of the session log are kept in `/var/log/desktop-exits/` (the newest
+20); `desktop-session.log` keeps three generations (`.old`, `.old2`, `.old3`). Bench boots
+(`sfsession_seconds` or `sfbench`) keep the old rule. **The cost:** every window of the session ends
+with the compositor (they are its Wayland clients); Terminal.app, Activity Monitor, a test's windows go
+too. **Observed on the M1** (after one reboot to start the new session): `.next` ended with an error
+(inject `fail`) -> `.next` again with the notice (capture `desk4-tests/shots/desk4-notice.png`) -> again ->
+the daily build -> SIGTERM without a request -> `.safe` after 5 s -> `relaunch-next` -> `.next` with
+inject; no reboot; three files in `/var/log/desktop-exits/`.
+
+### 3. Input independent of rendering; pointer latency (and late latching, asked by the coordinator)
+With patch 14 the device queues no longer depend on the frame loop (above). The pointer still reaches the
+screen only with a frame, and a frame only with a page flip. Measured with inject `stream` (absolute
+motions, one every 8 ms, 1200 per 10-second phase, from a thread into the input thread's queue, i.e. the path device records take
+after they are read; the kernel queue -> reader step, at most 1 ms while input arrives, is not in it) to
+the flip-complete event of the first frame showing the cursor there (scan-out after the flip not
+included):
+
+| phase (10 s, ~600 frames each; desk4-next-007, `latch off`/`on` in one run) | oldest motion per frame p50 / p90 / p99 / max (ms) | newest motion per frame p50 / p90 / p99 / max (ms) | frames that missed the blank they aimed at |
+|---|---|---|---|
+| idle, latching off (as before) | 29.3 / 32.7 / 33.3 / 33.5 | 20.5 / 23.6 / 25.4 / 29.9 | 0 of 579 |
+| idle, latching on | **18.9** / 22.2 / 25.5 / 39.5 | **10.2** / 13.9 / 16.6 / 30.8 | 1 of 575 |
+| vkcube --present_mode 1 (mailbox), off | 29.4 / 32.8 / 33.3 / 33.4 | 20.7 / 23.5 / 25.0 / 26.1 | 0 of 608 |
+| vkcube mailbox, on | **20.0** / 23.7 / 28.6 / 37.3 | **11.3** / 15.6 / 19.3 / 28.7 | 2 of 605 |
+| the desk's terminal flooding (`seq 1 9999999`), off | 29.0 / 32.3 / 33.3 / 33.3 | 20.3 / 23.7 / 24.9 / 26.5 | 0 of 598 |
+| terminal flooding, on | **21.5** / 26.8 / 29.8 / 35.5 | **13.2** / 18.2 / 21.0 / 22.8 | 2 of 603 |
+
+Without late latching (every build before desk4-005) a frame is rendered right after the flip before it,
+so a motion waits for that flip and then a whole refresh: about two frames (29 ms) to the oldest motion
+a frame shows, 20 ms to the newest, the same idle and under GPU load (the input thread made no
+difference here: the pointer never waited for the queue, it waited for the frame clock). **Late latching**
+(patch 16, `FramePacer`): a frame is started as late as the next blank allows (the longest of the last 60
+render times, each with how late the busy loop started it, plus a margin of 3.5 ms that grows by 1.5 ms
+when a frame shows a refresh after the blank it aimed at and shrinks back slowly): about one frame
+(19-21 ms) to the oldest motion and 10-13 ms to the newest. **The cost:** 1-2 frames in 600 (0.2-0.3 %)
+miss their blank and show one refresh later (the frame before stays up 33 ms): a small stutter
+regression against 0 without latching (desk4-005 with a 2.5 ms margin and no lateness term missed about
+1 %, and with the terminal flooding it skipped a quarter of the blanks; desk4-006/007 fixed both).
+`CHONKSTEP_DARWIN_LATCH=0` in the session turns it off. Before/after runs: `desk4-tests/m1/install-00{5,6,7}.txt`.
+Next step for "no visible lag" (not done): the cursor on the panel's overlay plane (`--outputs` lists
+one, `possible_crtcs=0x1`): a pointer-only frame would then be a plane move with no render, so its
+budget could be ~2 ms instead of ~7 ms; the DCP's handling of a second plane (alpha, positions at the
+edges) is unexplored.
+
+Tearing is not possible on this path (whole-buffer atomic page flips). The vkcube zero-copy check
+(`WMDMABUF check ... differing_pixels=0`) was read from the same runs: commits 30 and 150, 250,000 pixels compared, `differing_pixels=0`, `result=client-pixels-are-on-the-frame`, with latching on (desk4-005/006/007).
+
+### 4. External display (groundwork; the kernel's half is CODEX-TB's)
+Contract for the kernel: `runs/m1-coord/requests-for-CODEX-TB.md` (how the panel is driven today; K1-K12:
+dcpext as a second CRTC/plane/connector on the same card node, DP/HDMI connector with EDID modes and mm
+size, hotplug through a `kern.pd_dcp.hotplug_seq` sysctl because nothing like udev exists, independent
+per-CRTC flips with `crtc_id` in the events, a modeset of one CRTC that leaves the panel alone, no hang on
+a vanished link, 4K linear buffers, mirroring done by the compositor). Compositor side (patch 15):
+- `outputs.rs`: the layout policy (macOS's defaults): the external is primary (dock column, launcher strip,
+  new windows), the panel to its left, tops aligned; per-output scale (the panel keeps the owner's
+  `scale` file; an external gets `scale-<id>` or a default from its density: a 27" 4K 150 %, 32" 4K 125 %,
+  24" 1080p 100 %; never the panel's file); the pointer crosses where outputs touch and stops at other
+  edges; on unplug windows come to the panel with their centre at the same relative place (shrunk when
+  larger), Spaces of the external join the panel's of the same number; mirroring (one picture at the
+  primary's logical size). Host tests with a virtual second output (plug, same set again, unplug, a panel
+  briefly listed disconnected, a mode change, crossing, re-homing, mirroring, a scale change).
+- `outputs::Watch` reads `kern.pd_dcp.hotplug_seq` twice a second, re-reads the connectors when it moves and
+  logs the decision (`WMOUTPUT hotplug seq=N changes=[...] layout: ...`); this kernel has no counter (said
+  once). `kms.rs` lists and logs every connector (`WMOUTPUT connector ...`) and takes the eDP panel when
+  several are connected (before: whichever came first). `chonkstep-darwin-desktop --outputs` lists
+  connectors/CRTCs/planes read only (observed on the M1: 1 CRTC, eDP-1 2560x1600@60 286x179 mm, a primary
+  and an overlay plane, no hotplug counter).
+- **Not done:** the second scanout (per-CRTC state and flips in `kms.rs`), rendering per output, a
+  wl_output per output, the scene's global space with per-output scale, layer-shell surfaces bound to the
+  primary, window re-homing and per-display Spaces wired into wm-core, mirroring's rendering. No nested or
+  headless run with two outputs was made.
+
+### 5. Leftovers
+- Done: the session's startup terminals no longer lie under the launcher strip: when the strip maps for
+  the first time, the windows already there are moved clear of it (`WMLAYER placed window=1 clear of the
+  launcher strip: x 0 -> 112`, capture `desk4-tests/shots/desk4-start.png`; before:
+  `desk4-notice.png`).
+- Not done: a running dot (and reopen/quit) for a Mac application with no windows; stale minimised tiles;
+  flicker of the dock's hover tooltips.
+
+### Host tests (`runs/m1-desktop-010/desk4-tests/`)
+wm-darwin lib 148/148 (007 source; every installed build host-tested first: 002, 003, 005, 006, 007), wayland_dmabuf 5/5, wayland_theme 3/3, wayland_shm 16/17 and
+wayland_scale 3/4 (the base's two failures, unchanged), dock_host 1/1 (003 source, host dock build).
+`test_sf_session.sh` 21/21.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop.next` = desk4-next-007 `045466b1…` (inject), `/usr/bin/chonkstep-darwin-desktop`
+  = desk4-daily-007 `4a4ce94e…` (hashes right after the copy); the builds of before: `.before-desk4` (DESK3's
+  desk3-next/daily-008), `.before-desk4b` (desk4-002), `.before-desk4c` (003), `.before-desk4d` (005),
+  `.before-desk4e` (006) for both names. `.safe` unchanged (`b1104b75…`).
+  `/usr/libexec/sf-session` new (`5fdab6d2…`), before: `sf-session.before-desk4`. New on the disk:
+  `/var/log/desktop-exits/`, `/private/var/db/desk4/` (test scripts; remove).
+- Revert: `ln -f <path>.before-desk4 <path>.back && mv -f <path>.back <path>` for both compositor names and
+  `/usr/libexec/sf-session`; then a reboot (the running session keeps the old script open) or, for the
+  compositors only, `echo relaunch > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x
+  chonkstep-darwin-desktop.next`.
+- Source: compositor patches 14-16 in `integrations/puredarwin/terminal-app/compositor/` (applied to a fresh
+  copy of `desk3-src`, 14 gives the build source of desk4-002, 14+15 of 003, 14+15+16 of 007, exactly, `diff -r`).
+
+### For the owner, at the M1 (real keys and fingers)
+1. Move the pointer in circles and type fast in a terminal while opening menus and closing windows for a
+   minute: the desktop stays; `grep WMHID /var/log/desktop-session.log` shows any queue gap it survived.
+2. Drag a window quickly across the screen with Terminal.app scrolling output: the pointer keeps up, no
+   jumps.
+3. (Only if you want to see the restart path) `pkill -TERM -x chonkstep-darwin-desktop.next` over SSH: the
+   desktop comes back by itself within seconds with a notice; the machine does not restart.
+4. Shift held, then press a key while the trackpad is in use: no key stays stuck after letting go.
+
+### Taken from Finch (DESK4)
+Nothing.
