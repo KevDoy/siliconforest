@@ -28,8 +28,12 @@ int main(int argc,char **argv)
  if(!service){fprintf(stderr,"no native PDAppleCIO service\n");return 1;}
  uint32_t before=0,after=0;int had=count(service,&before);
  kern_return_t ret=IORegistryEntrySetCFProperty(service,CFSTR("pd-cio-prepare-i210-mapper"),kCFBooleanTrue);
- int has=count(service,&after);IOObjectRelease(service);
- printf("I210 mapper request: uid=%u result=0x%08x count=%u->%u; BME remains blocked; translation setup is not DMA proof\n",(unsigned)geteuid(),ret,before,after);
+ int has=count(service,&after);
+ CFTypeRef state=IORegistryEntryCreateCFProperty(service,CFSTR("pcie-endpoint-DMA-admitted"),kCFAllocatorDefault,0);
+ const char *admission=state && CFGetTypeID(state)==CFBooleanGetTypeID()?(CFBooleanGetValue((CFBooleanRef)state)?"reported-enabled":"reported-blocked"):"unknown";
+ IOObjectRelease(service);
+ printf("I210 mapper request: uid=%u result=0x%08x count=%u->%u; kernel DMA admission checkpoint=%s; independent interface/packet evidence required\n",(unsigned)geteuid(),ret,before,after,admission);
+ if(state)CFRelease(state);
  if(!had || !has)return 1;
  if(deny)return ret==kIOReturnNotPrivileged && before==after?0:1;
  return ret==KERN_SUCCESS && before!=UINT32_MAX && after==before+1?0:1;

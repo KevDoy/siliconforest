@@ -43,6 +43,9 @@ int PDCIOPCIEnumeration::catalogueSafe()
 #endif
  if(!drivers || !drivers->getCount() || drivers->getCount()>64)return E2BIG;
  unsigned bridges=0,wifi=0;int ret=0;
+#if PD_CIO_I210_NETWORK
+ unsigned ethernet=0;
+#endif
  for(unsigned i=0;i<drivers->getCount();++i){
   auto dict=OSDynamicCast(OSDictionary,drivers->getObject(i));
   auto cls=dict?OSDynamicCast(OSString,dict->getObject("IOClass")):NULL;
@@ -51,9 +54,16 @@ int PDCIOPCIEnumeration::catalogueSafe()
   auto id=dict?OSDynamicCast(OSString,dict->getObject("IOPCIPrimaryMatch")):NULL;
   if(cls && cls->isEqualTo("PDBwfm") && bundle && bundle->isEqualTo("org.puredarwin.driver.PDBwfm") && id && id->isEqualTo("0x442514e4") &&
      !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch")){++wifi;continue;}
+#if PD_CIO_I210_NETWORK
+  if(cls && cls->isEqualTo("PDFBSDem") && bundle && bundle->isEqualTo("org.puredarwin.driver.PDFBSDem") && id && id->isEqualTo("0x15338086") &&
+     !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch") && !dict->getObject("IOPCITunnelCompatible")){++ethernet;continue;}
+#endif
   ret=EOPNOTSUPP;break; // No generic endpoint personality, including PCI xHCI.
  }
  if(!ret && (!bridges || !wifi))ret=ENODEV;
+#if PD_CIO_I210_NETWORK
+ if(!ret && ethernet!=1)ret=ENODEV;
+#endif
  owner->setProperty("pcie-catalogue-error",(uint32_t)ret,32);
  owner->setProperty("pcie-catalogue-count",drivers->getCount(),32);
  owner->setProperty("pcie-catalogue-generation",(uint32_t)generation,32);
@@ -206,6 +216,12 @@ int PDCIOPCIEnumeration::prepareI210Mapper()
  mapper->registerService();
  owner->setProperty("pcie-i210-mapper-stage","actual-object-bound-no-BME");
  owner->setProperty("pcie-i210-mapper-created",true); // Historical binding, not a live/DMA proof.
+#if PD_CIO_I210_NETWORK
+ // Initial matching refused before the mapper existed. Retry the exact
+ // endpoint only after binding and fresh native readiness checks above.
+ endpoint->registerService(kIOServiceSynchronous);
+ owner->setProperty("pcie-i210-mapper-stage","mapper-bound-network-match-requested");
+#endif
  endpoint->release();return 0;
 }
 #endif

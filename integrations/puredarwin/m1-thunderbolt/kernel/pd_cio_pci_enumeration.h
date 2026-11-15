@@ -41,7 +41,7 @@ public:
  int deactivate();
  int publishAfterApproval();
 #ifdef PD_CIO_ENDPOINT_MAPPER
- int prepareI210Mapper(); // Actual IOMapper only; no BME or endpoint admission.
+ int prepareI210Mapper(); // IOMapper; explicit NETWORK variant then retries I210 matching.
 #endif
  bool blocksStop() const;
  bool pristineForRetrain(); // No reserved controller or attempted host.

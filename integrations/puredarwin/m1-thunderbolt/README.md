@@ -450,3 +450,22 @@ renewals with the real IP_BOUND_IF option, uses a separate lease filename,
 and retires only a successfully applied address on daemon exit/lease loss.
 An EEXIST address is refused rather than acquired for later cleanup. The
 tools compile for the native SDK; target DHCP and cleanup remain untested.
+
+
+`build-pci-ethernet-kext.nix` and `build-ethernet-admission-kext.nix` are a
+separate, paired I210 network variant. They accept the exact I210 personality
+in addition to the four inventory personalities; the ordinary/enum/mapper/
+MSI builds retain their previous catalogue and BME policy. Initial Ethernet
+matching refuses before a real native mapper exists. The explicit root
+mapper request binds and verifies that object, then retries only this I210.
+The private FreeBSD wrapper removes three early bus-master requests. After
+real IRQ registration it uses a bounded attach-only wait for the actual
+armed MSI route. Native host admission freshly validates mapper, topology,
+physical power/link and the complete blocked inventory; it enables and reads
+back BME on only the derived I210 forwarding bridges and endpoint, leaving
+every xHCI blocked. No synthetic PCI domain, BDF, IRQ or DMA acknowledgment
+is used. The CLI reports the kernel admission checkpoint separately from
+independent interface/packet evidence. Ambiguous BME/startup failures retain
+IRQ/context/pages until reboot. Both native SDKs compile; hardware Ethernet
+link/DHCP and actual IRQ delivery still await testing. This is not hot-remove
+support or a ten-cycle result.

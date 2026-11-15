@@ -16,6 +16,9 @@ bool PDCIOPCIHost::initForEnumeration(IOService *owner,void *ctx,bool (*proof)(v
 #if PD_CIO_PCI_MSI
     msi=NULL;interruptAdmitted=0;
 #endif
+#if PD_CIO_I210_NETWORK
+    bzero(grants,sizeof(grants));grantCount=bmeActive=0;networkAttempted=false;
+#endif
     view={0x10000000,0,127,false};startAttempted=false;stopped=true;
     if(!owner || !ctx || !proof || !IOPCIBridge::init())return false;
     accessLock=IOLockAlloc();if(!accessLock)return false;
@@ -86,7 +89,15 @@ IOReturn PDCIOPCIHost::blockConfiguration()
     if(!accessLock)return kIOReturnNotReady;
     // Joins actual in-flight config accesses. Later calls cannot reach either
     // the borrowed power context or the controller mappings after revocation.
-    IOLockLock(accessLock);view.admitted=false;IOLockUnlock(accessLock);return kIOReturnSuccess;
+    IOLockLock(accessLock);view.admitted=false;
+#if PD_CIO_I210_NETWORK
+    bmeActive=0;
+#endif
+    IOLockUnlock(accessLock);
+#if PD_CIO_I210_NETWORK
+    setProperty("PDCIOPCIDMAAdmitted",false); // Admission revoked, not DMA drained.
+#endif
+    return kIOReturnSuccess;
 }
 #if PD_CIO_PCI_MSI
 bool PDCIOPCIHost::msiPhysicalAccess()
@@ -126,6 +137,12 @@ bool PDCIOPCIHost::interruptPower(void *context)
 IOReturn PDCIOPCIHost::callPlatformFunction(const OSSymbol *name,bool wait,
  void *p1,void *p2,void *p3,void *p4)
 {
+#if PD_CIO_I210_NETWORK
+    if(name && name->isEqualTo("PDCIOPCIEnableI210DMA")){
+        if(p2 || p3 || p4 || ml_at_interrupt_context())return kIOReturnBadArgument;
+        return admitI210(OSDynamicCast(IOPCIDevice,(IOService *)p1));
+    }
+#endif
     if(name==gIOPlatformGetMessagedInterruptControllerKey){
         if(p2)*(IOPCIMessagedInterruptController **)p2=NULL;
         if(!p2 || !msi || !msi->ready())return kIOReturnNotReady;
@@ -179,7 +196,11 @@ void PDCIOPCIHost::writeConfig(IOPCIAddressSpace space,UInt8 offset,unsigned wid
     if(!accessLock || ml_at_interrupt_context())return;
     IOLockLock(accessLock);auto p=address(space,offset,width);UInt32 filtered;
     unsigned reg=((unsigned)space.es.registerNumExtended<<8)|offset;
-    if(p && !pd_pciec_config_write_filter(reg,width,value,false,&filtered)){
+    bool bme=false;
+#if PD_CIO_I210_NETWORK
+    if(p)bme=busMasterAllowed(space);
+#endif
+    if(p && !pd_pciec_config_write_filter(reg,width,value,bme,&filtered)){
         if(width==4)OSWriteLittleInt32((volatile void *)p,0,filtered);
         else if(width==2)OSWriteLittleInt16((volatile void *)p,0,(UInt16)filtered);
         else *p=(UInt8)filtered;

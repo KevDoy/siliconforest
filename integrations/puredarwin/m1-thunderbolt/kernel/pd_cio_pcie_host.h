@@ -41,6 +41,13 @@ class PDCIOPCIHost : public IOPCIBridge {
     static int msiWrite(void *,uint32_t,uint32_t);
     bool msiPhysicalAccess();
 #endif
+#if PD_CIO_I210_NETWORK
+    struct Grant { IOPCIDevice *device; UInt32 id,code; UInt8 bus,slot,function; } grants[8];
+    UInt32 grantCount,bmeActive;
+    bool networkAttempted;
+    IOReturn admitI210(IOPCIDevice *);
+    bool busMasterAllowed(IOPCIAddressSpace);
+#endif
     bool physicalPower(); // Always-on PMGR proof before any PCIe-C access.
     volatile uint8_t *address(IOPCIAddressSpace,UInt8,unsigned);
     UInt32 readConfig(IOPCIAddressSpace,UInt8,unsigned);
