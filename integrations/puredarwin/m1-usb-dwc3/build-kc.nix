@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Experimental USB2 host collection. The daily kernel is unchanged.
+# Experimental USB2/USB3 host collection. The daily kernel is unchanged.
 import ../rebase/build-kc.nix {
   platform = import ../m1-native-boot/build-platform.nix;
   cpupower = import ../m1-native-boot/reboot/build-cpupower.nix;

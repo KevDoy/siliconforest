@@ -1,7 +1,8 @@
 The ATC power/mode/DP sequences select GPL-2.0 from the upstream dual license.
 No firmware or device calibration values are included.
 
-src/pd_atc_usb2.c, src/pd_atc_modes.c, src/pd_atc_dp.c, their public headers
+src/pd_atc_usb2.c, src/pd_atc_modes.c, src/pd_atc_dp.c, src/pd_atc_pipe.c,
+their public headers
 and upstream/atc-t8103-dp.inc port the T8103 subset of
 Omacom linux-aurora 6a08a08e drivers/phy/apple/atc.c:
   SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause

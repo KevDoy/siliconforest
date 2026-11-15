@@ -1,9 +1,10 @@
 # Apple DWC3 / xHCI port (SF-AF milestone 1, in progress)
 
 `build-xhci.nix` builds an experimental replacement RavynXHCIPort bundle
-against the PureDarwin ARM64 SDK. It is not installed or in the daily kernel.
+against the PureDarwin ARM64 SDK. USB03 is installed as an experimental
+collection; the default collection recipe remains unchanged.
 `build-dma.nix` builds the DMA adapter alone. Neither has performed controller
-DMA on the M1; the installed hardware sampler belongs to `../m1-typec`.
+DMA on the M1; the installed port-1 sampler belongs to `../m1-typec`.
 
 `patches/apple-dma-lifetime.patch` retains upstream's MIT notices and binds a
 prepared `pd,apple-dwc3-host` IOPlatformDevice. Its parent must initialize the
@@ -73,3 +74,13 @@ Remaining hardware work starts with a captured first boot and direct USB2
 attachment, followed by enumeration, HID, read-only storage, DHCP and ten
 hotplug cycles. Common tunable/MMIO correctness, DART DMA/cache behavior and
 IOKit removal are not proved by register models or SDK compilation.
+
+The newer native adapter selects USB3 when the immutable Type-C sample
+reports USB3 and still defers every DP/TBT/USB4 cable. It copies and retains
+the runtime lane bundle before PMGR/PHY writes, powers/calibrates the
+correct orientation, initializes DWC3, then routes PIPE before publishing
+xHCI. The qualified T8103 path skips host BIST, matching Linux's workaround.
+A change in USB2/USB3 mode drains the old session. Stop parks PIPE only
+after native controller drain and synchronous termination; failed handoff
+completion keeps PHY ownership and blocks a new session. No calibration
+values are shipped. This source SDK-builds but is not installed in USB03.

@@ -9,14 +9,16 @@
  * ADT tunable mapping: m1n1 MIT, Copyright The Asahi Linux Contributors;
  * see the bundled NOTICE for its permission/warranty notice.
  *
- * Port 0 is never accessed. This initial host session uses USB2 with the
- * SuperSpeed lanes off, and refuses DP/TBT/USB4 ownership. No PD commands.
+ * Port 0 is never accessed. Direct USB2/USB3 hosts use runtime calibration;
+ * DP/TBT/USB4 ownership is deferred. No PD commands.
  */
 #include "pd_usb_dart.h"
 #include "pd_cd321x.h"
 #include "pd_dwc3_host.h"
 #include "pd_atc_usb2.h"
 #include "pd_atc_tunables.h"
+#include "pd_atc_calibration.h"
+#include "pd_atc_pipe.h"
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
@@ -56,11 +58,13 @@ class PDAppleUSB : public IOService {
     OSDeclareDefaultStructors(PDAppleUSB)
     PDMmio core, usb2, pipe, lpdptx, axi, dwc, fuses;
     OSData *common[10];
+    OSDictionary *laneData; // retained immutable per-session calibration
+    pd_atc_pipe_state pipeState;
     PDUSBDart *domain; // tables and domain deliberately live for this kernel
     PDAppleUSBHostNub *nub;
     IOWorkLoop *loop;
     IOTimerEventSource *timer;
-    bool mapped, active, reversed, quarantined;
+    bool mapped, active, reversed, superSpeed, quarantined;
     uint32_t session, lastSample;
     int lastError;
     pd_atc_io atcIO;
@@ -88,7 +92,9 @@ class PDAppleUSB : public IOService {
     static void writeTunable(void *ctx,uint32_t r,uint32_t v) { ((PDMmio*)ctx)->w32(r,v); }
     static int applyCommon(void *ctx);
     bool map();
-    int begin(bool flip);
+    static const void *getLane(void *,const char *,const char *,size_t *);
+    int stopPHY();
+    int begin(bool flip,bool ss);
     bool end();
     void sample();
     static void tick(OSObject *owner,IOTimerEventSource *);
@@ -182,9 +188,47 @@ int PDAppleUSB::applyCommon(void *ctx)
     return 0;
 }
 
-int PDAppleUSB::begin(bool flip)
+const void *PDAppleUSB::getLane(void *ctx,const char *path,const char *name,size_t *bytes)
+{
+    PDAppleUSB *self=(PDAppleUSB*)ctx;
+    *bytes=0;
+    if (strcmp(path,atcPath) || !self->laneData) return NULL;
+    OSData *data=OSDynamicCast(OSData,self->laneData->getObject(name));
+    if (!data) {
+        IORegistryEntry *entry=IORegistryEntry::fromPath(path,gIODTPlane);
+        OSObject *value=entry?entry->copyProperty(name):NULL;
+        data=OSDynamicCast(OSData,value);
+        // Copy the bytes: even an unexpected property mutation cannot change
+        // a validated bundle between preflight and apply.
+        OSData *copy=data?OSData::withBytes(data->getBytesNoCopy(),data->getLength()):NULL;
+        bool kept=copy && self->laneData->setObject(name,copy);
+        OSSafeReleaseNULL(copy);OSSafeReleaseNULL(value);OSSafeReleaseNULL(entry);
+        if (!kept) return NULL;
+        data=OSDynamicCast(OSData,self->laneData->getObject(name));
+    }
+    *bytes=data->getLength();return data->getBytesNoCopy();
+}
+int PDAppleUSB::stopPHY()
+{
+    // Callers have either validated the initial stopped host or completed
+    // the xHCI drain + synchronous child termination. No live bypass.
+    int ret=pd_atc_pipe_park(&atcIO,&pipeState,true);
+    if (!ret) ret=pd_atc_usb2_stop(&atcIO);
+    return ret;
+}
+int PDAppleUSB::begin(bool flip,bool ss)
 {
     if (quarantined || !map()) return ENODEV;
+    OSSafeReleaseNULL(laneData);
+    pd_atc_cal_bundle bundle={};bundle.io=&atcIO;bundle.adt_ctx=this;bundle.getprop=getLane;
+    auto cal=pd_atc_calibration_callbacks(&bundle);
+    if (ss) {
+        laneData=OSDictionary::withCapacity(8);
+        pd_atc_program program;
+        int preflight=pd_atc_mode_plan(PD_ATC_MODE_USB3,flip,&program);
+        if (!preflight) preflight=cal.validate(cal.ctx,&program);
+        if (preflight) return preflight;
+    }
     int ret=pd_pmgr_enable_node(atcPath,-1,0,true);
     if (!ret) ret=pd_pmgr_enable_node(usbPath,-1,0,true);
     if (ret) return ret;
@@ -196,40 +240,52 @@ int PDAppleUSB::begin(bool flip)
             return EBUSY;
     }
     // Initial Linux probe establishes OFF before configuring the cable mode.
-    ret=pd_atc_usb2_stop(&atcIO);
+    // Adopt only the actual mux state after the controller stop check above.
+    // Preserve a previously failed handoff rather than bypassing its retry.
+    if (!pipeState.dummy_pending) {
+        switch(pipe.r32(0xc)&0x3f) {
+        case 8: pipeState.backend=PD_ATC_USB3_BACKEND;break;
+        case 0x11: pipeState.backend=PD_ATC_USB4_BACKEND;break;
+        case 0x22: pipeState.backend=PD_ATC_DUMMY;break;
+        default: return EBUSY;
+        }
+    }
+    ret=stopPHY();
     if (!ret && !domain) domain=new PDUSBDart;
     if (!ret) ret=domain?domain->prepare():ENOMEM;
-    if (!ret) ret=pd_atc_usb2_start(&atcIO,flip);
+    if (!ret) ret=ss?pd_atc_mode_start(&atcIO,PD_ATC_MODE_USB3,flip,&cal):pd_atc_usb2_start(&atcIO,flip);
     if (!ret) {
         pd_atc_usb2_release_reset(&atcIO);
         ret=pd_dwc3_host_init(&dwcIO);
+        if (!ret && ss) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB3_BACKEND);
     }
     if (ret) {
-        int cleanup=pd_atc_usb2_stop(&atcIO);
+        int cleanup=stopPHY();
         if (cleanup) quarantined=true;
         LOG("session initialization failed %d, PHY cleanup=%d",ret,cleanup);
         return ret;
     }
     pd_atc_usb2_select_host(&atcIO);
     nub=OSTypeAlloc(PDAppleUSBHostNub);
-    if (!nub || !nub->init()) { OSSafeReleaseNULL(nub); pd_atc_usb2_stop(&atcIO); return ENOMEM; }
+    if (!nub || !nub->init()) { OSSafeReleaseNULL(nub); if (stopPHY()) quarantined=true; return ENOMEM; }
     nub->domain=domain;
     nub->setName("pd,apple-dwc3-host");
     nub->setProperty("port-index",1,32);
-    nub->setProperty("usb2-only",true);
+    nub->setProperty("usb2-only",!ss);
     nub->setProperty("pd-usb-dma-live",false);
     IOMemoryDescriptor *md=IOMemoryDescriptor::withPhysicalAddress(dwc.phys,dwc.len,kIODirectionInOut);
     OSArray *mem=md?OSArray::withObjects((const OSObject**)&md,1):NULL;
     if (mem) nub->setDeviceMemory(mem);
     OSSafeReleaseNULL(mem); OSSafeReleaseNULL(md);
     if (!nub->getDeviceMemory() || !nub->attach(this)) {
-        nub->release(); nub=NULL; pd_atc_usb2_stop(&atcIO); return ENOMEM;
+        nub->release(); nub=NULL; if (stopPHY()) quarantined=true; return ENOMEM;
     }
-    active=true; reversed=flip; ++session;
+    active=true; reversed=flip; superSpeed=ss; ++session;
+    setProperty("usb2-only",!ss);
     setProperty("host-session",session,32);
     setProperty("host-active",true);
     nub->registerService();
-    LOG("port 1 session %u USB2 host nub published (enumeration not established)",session);
+    LOG("port 1 session %u %s host nub published (enumeration not established)",session,ss?"USB3":"USB2");
     return 0;
 }
 
@@ -239,8 +295,12 @@ bool PDAppleUSB::end()
     auto clients=nub?nub->getClientIterator():nullptr;
     if (nub && !clients) return false;
     IOService *client=clients?OSDynamicCast(IOService,clients->getNextObject()):NULL;
+    // Client iteration retains the child only until the iterator is released.
+    if (client) client->retain();
+    OSSafeReleaseNULL(clients);
     if (client) {
         IOReturn ret=client->callPlatformFunction("PDAppleUSBDrain",false,NULL,NULL,NULL,NULL);
+        client->release();
         if (ret!=kIOReturnSuccess) { LOG("host drain busy; retaining PHY/DMA"); return false; }
     }
     if (nub && nub->getProperty("pd-usb-dma-live")==kOSBooleanTrue) {
@@ -252,7 +312,7 @@ bool PDAppleUSB::end()
     // with it; a failed-start driver that quarantined DMA must still block us.
     if (nub && nub->getProperty("pd-usb-dma-live")==kOSBooleanTrue) return false;
     if (nub) { nub->detach(this); nub->release(); nub=NULL; }
-    int ret=pd_atc_usb2_stop(&atcIO);
+    int ret=stopPHY();
     active=false;
     setProperty("host-active",false);
     if (ret) { quarantined=true; LOG("PHY stop failed %d; no new session",ret); return false; }
@@ -273,13 +333,14 @@ void PDAppleUSB::sample()
     bool host=pd_cd321x_usb_role(state.status,state.data_status)==PD_CD321X_USB_HOST;
     bool alt=state.data_status&(PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4);
     bool flip=state.status&PD_TPS_STATUS_UPSIDE_DOWN;
-    if (active && (!host || alt || flip!=reversed)) {
+    bool ss=state.data_status&PD_TPS_DATA_USB3;
+    if (active && (!host || alt || flip!=reversed || ss!=superSpeed)) {
         if (!end()) { setProperty("removal-blocked",true); return; }
     }
     setProperty("removal-blocked",false);
     setProperty("alternate-mode-deferred",alt);
     if (host && !alt && !active && !quarantined) {
-        int ret=begin(flip);
+        int ret=begin(flip,ss);
         setProperty("last-error",(uint32_t)ret,32);
         if (ret && ret!=lastError) LOG("port 1 host start error=%d",ret);
         lastError=ret;
@@ -315,6 +376,7 @@ bool PDAppleUSB::start(IOService *provider)
     if (!IOService::start(provider)) return false;
     setProperty("port-index",1,32); setProperty("usb2-only",true);
     setProperty("host-active",false);
+    setProperty("super-speed-capable",true);
     loop=IOWorkLoop::workLoop(); timer=IOTimerEventSource::timerEventSource(this,tick);
     if (!loop || !timer || loop->addEventSource(timer)!=kIOReturnSuccess) return false;
     timer->setTimeoutMS(1); registerService();
@@ -332,6 +394,7 @@ void PDAppleUSB::free()
     if (active || quarantined) { LOG("quarantined session resources retained"); return; }
     OSSafeReleaseNULL(timer); OSSafeReleaseNULL(loop);
     for(unsigned i=0;i<10;++i) OSSafeReleaseNULL(common[i]);
+    OSSafeReleaseNULL(laneData);
     core.unmap();usb2.unmap();pipe.unmap();lpdptx.unmap();axi.unmap();dwc.unmap();fuses.unmap();
     IOService::free();
 }

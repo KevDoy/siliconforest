@@ -54,3 +54,13 @@ application failure ordering, ten calibrated bundles and 56 missing
 properties, changed programs and late malformed records. These source
 backends SDK-compile; native calibration attachment and PIPE transitions
 remain separate work. No SuperSpeed/DP/TBT hardware result is claimed.
+
+`pd_atc_pipe.c` directly ports T8103 USB3 routing (without host BIST), USB4
+routing and dummy parking. A live USB3 park retries lock ACK ten times,
+restores only touched override fields if the mux did not move, and records
+a moved mux with pending completion if unlock fails. Retry completes that
+handoff without locking on the dummy clock. Only an actually halted/reset
+controller allows the stopped clockless lock fallback. USB4's advisory
+lock follows Linux, while failed unlock is propagated. Host tests cover
+100 cycles plus stuck ACK, late completion, field restoration and backend
+refusals. The native USB adapter uses the stopped path after its drain.

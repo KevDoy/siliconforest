@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Port-1 USB2 lifecycle + paired DART + prepared xHCI, one bundle.
+# Port-1 USB2/USB3 lifecycle + paired DART + prepared xHCI, one bundle.
 let
   source = import ../rebase/pd.nix;
   inherit (source) pkgs;
@@ -11,9 +11,9 @@ in base.overrideAttrs (old: {
     chmod -R u+w "$out"
     dest="$out/src/Kernel/Extensions/RavynXHCIPort"
     cp ${./kernel}/PDAppleUSB.cpp ${./kernel}/pd_dwc3_host.* "$dest/"
-    cp ${../m1-atcphy/include}/* ${../m1-atcphy/src}/*.c "$dest/"
+    cp ${../m1-atcphy/include}/* ${../m1-atcphy/src}/*.c ${../m1-atcphy/upstream}/*.inc "$dest/"
     cp ${../m1-typec/kernel/pd_cd321x.h} "$dest/pd_cd321x.h"
-    printf '\ntarget_sources(RavynXHCIPort.kext PRIVATE PDAppleUSB.cpp pd_atc_usb2.c pd_dwc3_host.c)\n' >> "$dest/CMakeLists.txt"
+    printf '\ntarget_sources(RavynXHCIPort.kext PRIVATE PDAppleUSB.cpp pd_atc_usb2.c pd_atc_dp.c pd_atc_modes.c pd_atc_calibration.c pd_atc_pipe.c pd_dwc3_host.c)\n' >> "$dest/CMakeLists.txt"
     python3 - "$dest/Info.plist" <<'PY'
 import plistlib, sys
 p=sys.argv[1]

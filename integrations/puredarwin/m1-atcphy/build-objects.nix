@@ -12,7 +12,7 @@ in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
     mkdir -p "$dest"
     cp ${./include}/* ${./src}/*.c ${./upstream}/*.inc "$dest/"
     cat > "$dest/CMakeLists.txt" <<'CMAKE'
-add_library(PDATCLogic OBJECT pd_atc_usb2.c pd_atc_dp.c pd_atc_modes.c pd_atc_calibration.c)
+add_library(PDATCLogic OBJECT pd_atc_usb2.c pd_atc_dp.c pd_atc_modes.c pd_atc_calibration.c pd_atc_pipe.c)
 target_include_directories(PDATCLogic PRIVATE "''${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(PDATCLogic PRIVATE xnu_kernel_private_headers)
 target_compile_options(PDATCLogic PRIVATE -Os -Wall)

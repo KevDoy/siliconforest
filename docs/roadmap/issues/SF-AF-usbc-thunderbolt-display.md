@@ -359,3 +359,25 @@ the existing USB2 native bundle still builds with the shared power program
 All six repository checks pass (274 Python tests, 77 C groups). USB03
 remains installed; native lane-calibration selection and safe USB3 PIPE
 routing are the next attachment work. This is source/SDK evidence only.
+
+### Direct USB3 native attachment prepared, 2026-11-15 03:22Z
+
+The USB adapter now selects USB3 from the Type-C snapshot, copies and
+retains its runtime calibration before PMGR/PHY writes, programs the
+orientation, initializes DWC3's host role and routes PIPE before publishing
+xHCI. USB2/USB3 changes drain the previous session. T8103 skips host BIST
+as the qualified Linux workaround does. Shutdown uses stopped parking
+only after the existing controller drain and synchronous child termination.
+Failed handoff completion retains PHY ownership. The child iterator is
+released after retaining its client, avoiding a reference leak each removal.
+
+Host tests pass 100 PIPE cycles, live lock retries and field restoration,
+clockless stopped parking and failed-completion retry, plus all existing
+USB DMA/lifetime and ATC tests. The native bundle and USB04 collection build;
+USB04 KC is `/nix/store/1z98228ka748b3ak671wadlwbrskhsnh-puredarwin-kc-arm64-0.1`,
+capsule SHA256 `03d39b8176db0069c397e2d9f979a087f853b25626c4aadec408148c26f7febf`.
+Its unchanged boot.bin hash is `81d58f1b40e8139dc797ceac8314bb74a6308ccf18b28e42f1c902c7b4912e3e`;
+all 11 kit checks and six repository checks pass. Installation is announced
+for after PERF's measurement (no earlier 03:31Z), subject to a fresh log
+check inside gui.lock. USB03 remains installed at this checkpoint; neither
+controller DMA nor direct-device enumeration has been observed.
