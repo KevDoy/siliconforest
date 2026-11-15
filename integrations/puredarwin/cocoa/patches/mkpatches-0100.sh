@@ -16,7 +16,8 @@
 #   am-0128/  = am-0127/ + 0128 (frozen; TERM6)
 #   am-0129/  = am-0128/ + 0129 (frozen; TERM6)
 #   am-0130/  = am-0129/ + 0130 (frozen; TERM6; 0130 diffs from am-0128: am-0129 changed NSView.m too)
-#   am/       = am-0130/ + 0131 on (the current tree; TERM6)
+#   am-0131/  = am-0130/ + 0131 (frozen; TERM6)
+#   am/       = am-0131/ + 0132 on (the current tree; TERM6)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -95,3 +96,6 @@ mk am-0128 am-0130 0130-appkit-column-drag-scroll-copy-split-panes.patch $A/NSVi
   $A/NSTableViewViewBased.m $A/NSTableHeaderView.m $A/NSSplitView.m $A/NSStringDrawer.h $A/NSStringDrawer.m $A/NSWindow.m \
   $A/NSClipView.m $A/NSScroller.m $A/NSGradient.m
 ( diff -rq am-0129 am-0130 ) | sed 's/^/differs from am-0129: /'
+# 0131 (TERM6): am-0130 -> am-0131
+mk am-0130 am-0131 0131-appkit-typeset-cache-generation-kept.patch $A/NSStringDrawer.m
+( diff -rq am-0130 am-0131 ) | sed 's/^/differs from am-0130: /'

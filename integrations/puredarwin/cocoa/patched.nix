@@ -337,6 +337,9 @@
 #         left fills the split view (Terminal's grey box when a split closed), panes are not laid out again at
 #         -addSubview: (Terminal places them itself; its window shrank at each split and close), the last pane
 #         takes the rounding remainder; PD_SPLIT_TRACE, PD_WINFRAME_TRACE (who changed a window's frame)
+#   0131  AppKit (TERM6): the string layout cache of 0130 let go of a generation while a layout found in it was
+#         being drawn and kept (use after free: Activity Monitor's text garbled after a few minutes, the owner's
+#         report; a crash within 20 s with PD_TYPESET_LIMIT=30, the generation size, now settable to test)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -417,6 +420,7 @@ let
     ./patches/0127-appkit-float-value-abi-colour-well-click-opaque-menus.patch
     ./patches/0128-appkit-table-header-sort-indicator-slot.patch
     ./patches/0130-appkit-column-drag-scroll-copy-split-panes.patch
+    ./patches/0131-appkit-typeset-cache-generation-kept.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
