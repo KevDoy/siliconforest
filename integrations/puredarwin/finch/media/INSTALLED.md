@@ -1,5 +1,11 @@
 # Installed media evidence (15 November 2026)
 
+Later updates: [canonical opt-in Metal](../Metal/README.md) and
+[realtime AVFAudio](../AVFAudio/engine/realtime-README.md) are now installed and
+qualified. Metal resolves the plain-root bottle gap below; realtime output
+resolves the older AVAudioEngine limitation. Their separate cold hashes and
+receipts supersede the earlier AVFAudio row while preserving this first pass.
+
 Nine reviewed providers were installed one at a time on the M1. Each main-image
 hash below comes from the target receipt, verified while cold before public
 activation/execution. Existing files remain adjacent as `.pre-finch`; a zero

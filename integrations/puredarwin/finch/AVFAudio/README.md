@@ -1,4 +1,8 @@
-# AVFAudio device-independent slice (staged only)
+# AVFAudio file/converter and engine variants
+
+The installed [realtime variant](engine/realtime-README.md) now wires engine
+output to retained PD AudioQueue/HAL. The original source slices below remain
+available for earlier receipts; their output limitations are historical.
 
 The extended [engine variant](engine/README.md) adds the complete offline graph
 source and compressed file/converter input. Its M1 offline engine,WAV and ALAC

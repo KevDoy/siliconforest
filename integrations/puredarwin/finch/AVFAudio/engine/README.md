@@ -1,4 +1,9 @@
-# AVFAudio files, compressed conversion and offline engine
+# AVFAudio files, compressed conversion and engine
+
+The installed [realtime variant](realtime-README.md) now connects this graph to
+the retained PD AudioQueue/HAL path. `build.nix` remains the old offline-only
+recipe so earlier receipts can be reproduced. Its NoConnection behavior below
+describes that older recipe, not the installed realtime provider.
 
 Stage-only variant of the six value/file/converter sources plus the whole
 AVAudioEngine.m graph/player/mixer/source/sink implementation. Own declarations
