@@ -722,3 +722,210 @@ wayland_scale 3/4 (the base's two failures, unchanged), dock_host 1/1 (003 sourc
 
 ### Taken from Finch (DESK4)
 Nothing.
+
+## The pointer on its own plane, a second output, the dock's leftovers (DESK5, 15 November)
+
+**Truthfulness.** All input below is synthetic: pointer records from the compositor's inject module (a
+thread pushing absolute records into the input thread's queue, as the device records arrive) and keys
+through the same queue. Nobody touched the M1. Latencies are from a motion's read (or injection) to the
+flip-complete event of the frame that shows it; the panel's scan-out after the flip is not in them. What
+the panel shows of the pointer's plane is **not observed by anyone**: the compositor's captures blend the
+pointer in software where the plane is placed; only the owner can see whether the DCP draws it right
+(checklist, first line).
+
+### 1. The pointer: one frame or less
+**Change (patch 17, `wm-darwin-cursor-plane.patch`).** The panel's CRTC has an overlay plane (id 37,
+ARGB8888 among its 11 formats). The pointer now lives there (`kms.rs OverlayPlane`, `glrender.rs
+CursorBuffers`): three 128x128 ARGB8888 buffers drawn by GL with straight alpha (the DCP treats ARGB as
+not premultiplied: linux-aurora `apple_plane_atomic_update`), and the plane is part of every commit
+while it is on. A move of the pointer alone is a commit that only moves the plane: no scene render.
+The DCP takes no plane that leaves the screen or is smaller than 32x32 (`apple_plane_atomic_check`), so
+the plane always lies wholly on the screen and near an edge the image is drawn shifted inside its buffer
+(`place_cursor`). Client cursor images (hotspot, the 1.5 scale), a client's hide (plane off), the hide
+until the pointer moves 6 px, and the theme's arrow all go through the same `set_cursor`; an image larger
+than 128 px, a recording (its frames must contain the pointer), `cursorplane off`, or a commit the
+display refuses (not EBUSY; then for good, with `WMCURSOR plane refused`) put the pointer back into the
+frames. During a window drag the plane shows the pointer where the frame drew the window (no slipping);
+`capture` and the autopilot's read-back blend the pointer in where the plane has it. Off switch:
+`CHONKSTEP_DARWIN_CURSOR_PLANE=0` in the session.
+**Timing.** A frame aims at a blank; it is committed `margin` before it and, when the scene changed,
+rendered `render budget` before that (`input_latency.rs FramePacer`). Staged frames wait for their commit
+moment, so the pointer is placed by the newest input even in a rendered frame. The margin is learned:
+the display needs a commit about 2.0 ms before the flip event's time (sweep below), plus how late the loop
+woke for its last 30 commits, plus 0.2 ms. Also: the loop's wake-up no longer rounds up to the next whole
+millisecond (it made commits up to 1 ms late), a commit due is made first thing after a wake (before
+clients are served), the frame loop and the input thread run at QoS user-interactive (looked up at run
+time), and when a client's buffer comes too late for the next blank the pointer still goes on that blank
+alone (without this a terminal flooding the screen held the pointer to every other refresh: desk5-001,
+oldest 31 ms). The input thread polls the HID queues every 1 ms while input arrives, 2 ms after 250 ms
+quiet, 4 ms after 2 s (8 ms before): the first motion after a pause waits at most 4 ms (the nodes have no
+select; asked of the kernel).
+
+Measured on the M1 (desk5-next-003, `desk5-tests/m1/install-003.txt`; plane off = DESK4's late latching on
+the same build; 10 s phases, a motion every 8 ms, ~575 frames each):
+
+| phase | pointer | oldest motion per frame p50 / p90 / p99 / max (ms) | newest p50 / p90 / p99 / max (ms) | missed blanks |
+|---|---|---|---|---|
+| idle | drawn into frames | 19.0 / 22.0 / 24.3 / 32.7 | 10.0 / 13.3 / 16.1 / 23.3 | 1 of 576 |
+| idle | **plane** | **15.5** / 18.8 / 21.5 / 35.9 | **6.9** / 10.2 / 12.8 / 22.9 | 2 of 577 |
+| vkcube mailbox | drawn | 22.7 / 27.1 / 30.6 / 31.4 | 14.1 / 18.1 / 22.1 / 24.2 | 1 of 614 |
+| vkcube mailbox | **plane** | **15.5** / 18.9 / 21.6 / 39.0 | **6.9** / 10.2 / 12.2 / 30.2 | 3 of 611 |
+| terminal flooding | drawn | 25.3 / 30.8 / 36.1 / 46.0 | 17.0 / 22.0 / 25.0 / 30.6 | 5 of 590 |
+| terminal flooding | **plane** | **17.4** / 29.4 / 35.4 / 45.9 | **7.7** / 11.3 / 16.3 / 26.8 | 5 of 532 |
+
+The installed build (desk5-next-005, `install-005.txt`, the same phases) gave the same: plane - idle 15.5 / 18.6 /
+19.5 / 35.6 and 6.8 / 10.0 / 10.9 / 26.4 (2 of 576 missed), vkcube 15.6 / 18.5 / 20.9 / 35.1 and 6.9 / 10.0 / 12.8 /
+26.4 (3 of 611), terminal flooding 16.9 / 29.3 / 35.5 / 48.4 and 7.5 / 10.8 / 13.5 / 24.2 (5 of 535; 319 rendered
+frames, the rest pointer-only); pointer drawn - 21.2 / 24.6 / 29.0 / 37.9 and 12.5 / 16.0 / 19.9 / 29.2 (1 of 578),
+20.3 / 25.1 / 29.6 / 34.9 and 11.6 / 16.8 / 20.7 / 26.2 (1 of 613), 23.9 / 27.9 / 30.2 / 37.8 and 15.2 / 19.2 / 22.0 /
+23.4 (2 of 596). DESK4's numbers with the pointer drawn and late latching: oldest 18.9-21.5 ms, newest 10.2-13.2 ms;
+the drawn path (now only a fallback: recordings, `cursorplane off`, a refused plane) is 1-2 ms slower than that
+because its margin now follows the loop's recent wake lateness too.
+At 125 motions a second and 60 frames, the oldest motion a frame shows is on average 12.7 ms old when the
+frame is committed, so ~15.5 ms is about one refresh: the floor for this measure is that plus the margin.
+**Commit lead sweep** (fixed margins, pointer-only frames, desk5-001/002/003): 1.0 and 1.5 ms: every frame
+a refresh late; 2.0 ms: 89-99 % late; 2.5 ms: 5-31 % late (the ones whose real lead fell under 2 ms);
+3.0 ms: 1-2 %. **Missed blanks are not 0**: 2-5 in ~600 frames (0.3-0.9 %), as with the pointer drawn
+(0.2-0.8 % in the same runs). Every late frame had a commit made 0-2 ms before its blank, i.e. the loop
+woke 1-2.5 ms late (also at QoS user-interactive); a larger fixed margin would trade latency for them
+(3.0 ms: 1-2 % late). Not done: a commit thread with a real-time policy, which would remove the loop
+from the commit's timing.
+**Window drag** (the window follows the pointer: every frame rendered; desk5-next-003): oldest 18.2 / 21.5 /
+22.4 / 22.8, newest 9.7 / 12.8 / 13.8 / 14.8, no missed blank during the drag; pointer drawn: 18.5 / 21.8 /
+22.5 / 22.9 and 9.9 / 13.2 / 14.7 / 17.2 (desk5-next-005: 18.6 / 21.8 / 23.3 / 26.2 and 9.8 / 13.2 / 15.2 / 15.9 with
+the plane, 18.4 / 21.7 / 22.8 / 23.1 and 9.7 / 13.1 / 14.4 / 15.1 drawn). That is the render budget (~2-3 ms) plus the
+margin plus the refresh: about one frame to the oldest motion, the newest under one frame. During a drag the plane
+follows the frame's pointer, so window and pointer move together. **Interactive resize: not measured on the M1.**
+The instrumentation is in (`WMLATENCY ... resize asked->client-buffer | client-buffer->flip`: the client's round
+trip, then the compositor's part), but none of three synthetic attempts started a resize (a press at the frame's
+bottom-right corner border, Option + right drag (the standalone desk has no drag modifier), and a press at the
+centre of wm-core's south-east resize hitbox, which the inject `dump` now reports): each ran as pointer motion with
+the button held. Not chased further; a person's corner drag is the test (checklist). The compositor-side cost of a
+resize frame is the same render as a drag frame (~1.8 ms, below); the client's redraw is the client's.
+
+**Frame time before/after (single output).** With the pointer drawn, every move is a rendered frame (600 moves,
+`desk5-tests/m1/framet5.sh`): GL draw + glFinish of the panel, before the second-output code (desk5-base004 =
+desk5-003 + the timing) p50 1.76-1.77 ms, p90 1.79-1.80, p99 1.88-1.93, max 2.00-2.22 (two runs); after
+(desk5-next-005) p50 1.75-1.76, p90 1.79-1.80, p99 1.92-1.97, max 1.96-2.13. No difference beyond run-to-run noise.
+
+### 2. A second output (the compositor's half; no kernel exposes one yet)
+**Change (patch 18, `wm-darwin-outputs.patch`).** The scene is one space in the panel's density
+(`outputs.rs Layout::scene_outputs`): the panel at its origin, pixel for pixel as before, an external
+display beside it (the primary, macOS's default) at a size of its pixels times the panel's scale over its
+own (a 27" 4K at 150 %, like the panel: pixel for pixel; at another scale it is resampled: per-output
+client buffer scales are not done). `displays.rs` makes the desk follow a set of outputs at run time:
+wm-core's monitors (work areas, placement of new windows), Spaces per display (wm-core
+`reconcile_display_spaces`; without separate Spaces the departed output's windows are rescued onto the
+remaining ones), a `wl_output` per output with its own mode, scale and position (`xdg_output` gives the
+logical size), each window's surface entering the output its centre lies on, the layer surfaces (the dock's
+column and launcher strip) on the primary, the pointer crossing where outputs touch and stopping below
+the shorter one. Rendering: the GL renderer draws the panel from the scene's origin as before and, for each
+extra head, the scene's rectangle of that output into its own buffers (`u_view` in the shader).
+Scanout: `kms.rs ExtraHead` - a second CRTC on the same card node for a named connector, its own primary
+plane and mode, a modeset touching only it, its own flips (events routed by `crtc_id`), switched off on
+unplug (contract K1-K12; additions K5/K13 in `runs/m1-coord/requests-for-CODEX-TB.md`). The hotplug watch
+applies a new layout only when the renderer drives every output of it; otherwise the desk stays on the
+panel and says why. The single-output path: no extra head, the panel's view is the origin (one more
+uniform per frame); frame time before/after below.
+**Tested:** host - `tests/wayland_outputs.rs` (a real Wayland client: plug a virtual 4K beside the panel,
+a wl_output appears, the external is the primary and the scene 6400x2160, the window moved onto it is told
+it entered `DP-1`, the pointer crosses at the shared edge and stops at the external's left edge below the
+panel, unplug: the window is back on the panel, the external's wl_output is removed and the surface is on
+the panel's again; the same with the desk's own session, where wm-core keeps the external's Spaces for its
+return), `glrender a_second_outputs_head_shows_its_rectangle_of_the_scene` (GL on the host: the head's
+picture equals the CPU render's rectangle of that output, every pixel), outputs/displays unit tests.
+**Headless two-output run on the workstation** (`tests/headless_outputs.rs`, ignored by default; run with
+`HEADLESS_DIR`): the desk's session on a Wayland socket, two real `foot` terminals (Linux programs), a
+virtual 4K plugged at run time, the second terminal dragged by its title bar across the panel's edge onto
+it by pointer events through the desk's input path (frame at 3437,688 on DP-1, the pointer on the
+external), then the external unplugged: the terminal back on the panel (879,725). Pictures per output in
+the run directory (`c-both-small.png`: the panel with the wallpaper and terminal-one, the external with
+terminal-two focused). foot needs a `wl_subcompositor` global, which the desk does not offer (subsurfaces
+are not composited); the headless run offers it for foot alone (`offer_subcompositor_for_host_clients`),
+the installed desk does not. weston-terminal was refused (xdg window geometry with shadows is not
+implemented).
+**Not done:** a run against a real second display (no kernel has one); the wallpaper on the external (the
+background image is the panel's size; the external shows the theme's colour); per-output client buffer
+scale; mirroring's rendering; the desk menu's Display entries for the external; freeing the GEM buffers
+of an unplugged head (kept for a replug at the same mode).
+
+### 3. Leftovers
+- **A Mac application without windows** (AppKit applications outlive their last window): the compositor
+  publishes a foreign-toplevel handle for each one (a client still connected whose toplevels gave an
+  application id, with no mapped window, serving an application-menu socket), title = its name, no state.
+  The dock lights its tile's dot from it (`WMFOREIGN windowless applications: [...]`); the dock's click
+  activates the handle and the compositor reopens the application (`org.puredarwin.appkit.reopen`,
+  `WMFOREIGN reopen windowless application pid=...`); the handle's close quits it through the
+  application's own menu (the item with Command-Q, over `$XDG_RUNTIME_DIR/app-menu/<pid>`; SIGTERM only
+  without a socket). The Command-Tab switcher already listed such applications and reopened them; its Q
+  now quits a windowless one through its menu too (before: SIGTERM). **Observed on the M1** (desk5-005 with
+dock-005, synthetic input, `desk5-tests/m1/install-005.txt`, captures `desk5-tests/shots/i3-*`): Terminal.app opened
+from the socket request, Command-W closed its window, the process stayed, `WMFOREIGN windowless applications:
+["com.apple.Terminal(37756)"]`, and the dock's Terminal.app tile kept its dot (`i3-a-windowless`, zoomed in
+`i3-tile-zoom.png`); a click on the tile: `WMFOREIGN reopen windowless application pid=37756`, `WMMAC reopen ...
+posted=true`, the window back and the list empty (`i3-c-reopened`); Command-Q then quit it (its client
+disconnected). Quit from the dock was not exercised (the dock's tile has no Quit item; the handle's close is what a
+dock menu would send); the switcher's Q on a windowless application was not exercised.
+- **Stale minimised tiles** (TERM 5.1): not reproduced. A new host test closes a minimised window while
+  its application keeps running (the AppKit case) and the tile goes, as it does when the client
+  disconnects (DESK2's test). The desk's own tiles are at the bottom left; the dock's at the bottom of its
+  side. If the owner sees one again: `inject dump` lists every desk surface with its owner.
+- **Dock tooltips**: a launcher tile shows its application's name beside it after a 0.5 s rest
+  (`launchdock.rs tick_tip`): a plain tile of the strip's own kind on the Top layer, not a popup, no
+  pointer grab, never under the pointer while it is on the strip; leaving the tile, another tile or a press
+  takes it away at once. DESK3's attempt (a popup parented to the right column, slid to x=0 under the
+  pointer, its dismiss backdrop taking the pointer) flickered every 0.6 s. Host test
+  `a_tiles_name_shows_beside_it_after_a_rest_and_goes_when_the_pointer_leaves`. **Observed on the M1:** dock-005 drew
+the name cut to "T..." (an estimate by character count, `i3-b-tooltip`); dock-006 sizes the label to the measured
+text: "Terminal" whole beside its tile after a 0.9 s rest, gone when the pointer moved away (`f-tooltip-zoom.png`).
+Seen there too: the name overlaps the tile's right edge by ~20 px - the dock's positions are converted at its own
+buffer scale (2) while the desk is at 150 %, a mismatch older than the name (not fixed). Flicker is not judged by
+captures; the design has nothing that could cause it (no popup, no grab, nothing under the pointer).
+- **SIGSTOP** (for the kernel owner, `runs/m1-coord/requests-for-CODEX-TB.md`): minimal programs stop (six
+  thread layouts, including a thread at user-interactive QoS and a poll on the DRM card node); the
+  compositor does not (STAT `R`, threads `S`, CPU time +0.1 s in 2.5 s while "stopped"); reproducer
+  `runs/m1-desktop-010/desk5-tests/sigstop/stopthreads.c` and the compositor check `desk5-tests/m1/sigstop5.sh`.
+  A second kernel note there: the HID queue nodes have no select.
+
+### 4. Requests
+No requests file was addressed to DESK5. For TERM6's menu tests (the example in my brief): `motions <n>`
+delivers the next n event steps in one frame (a device faster than the refresh); `stream` (timed, from a
+thread) was already there; noted in `runs/m1-coord/requests-for-TERM5.md` with the pointer-plane notes
+(captures blend the pointer in; `cursorplane off`).
+
+### Host tests (`runs/m1-desktop-010/desk5-tests/`)
+wm-darwin (`--features desktop-shell`, final source): lib 155/155 (with the plane placement, straight alpha,
+pointer-only commits, read-back blend, pacer, motion-latency, scene-output, pointer-on-outputs and GL second-head
+tests), wayland_outputs 2/2 (new), wayland_dmabuf 5/5, wayland_theme 3/3, wayland_shm 17/18 and wayland_scale 3/4 (the
+base's two failures, unchanged: `autopilot_exercises_the_whole_desktop_against_a_real_window`,
+`a_window_too_large_for_the_panel_at_a_scale_is_shrunk_and_gets_its_size_back`), headless_outputs 1/1 (ignored by
+default; run by hand with foot). chonk-dock 208/208 (+2 ignored). Every installed build was host-tested first.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop.next` = desk5-next-005 `6443913601f4…` (inject; running), `/usr/bin/chonkstep-darwin-desktop`
+  = desk5-daily-005 `d6de681b6a01…` (no inject); `/usr/bin/chonkstep-dock` = desk5-dock-006 `3e5ca103ac8b…`. Hashes taken on
+  the M1 right after each copy. `.safe` unchanged (`b1104b75…`). The files of before: `.before-desk5` (DESK4's 007 pair and
+  DESK3's dock), `.before-desk5-002/-003/-005` (my 001-003 builds; `.next.before-desk5-005` is the timing build
+  desk5-base004, `.next.before-desk5-base` desk5-next-003), `chonkstep-dock.before-desk5-006` (dock-005). The session
+  script, the theme (obsidian since 03:16Z, wallpaper `host:siliconforest` since 03:19Z: not changed by DESK5), the scale
+  and the pins are untouched. `/private/var/db/desk5` removed; `/private/var/db/desk4` (DESK4's) left.
+- Revert: `ln -f <path>.before-desk5 <path>.back && mv -f <path>.back <path>` for both compositor names and the dock,
+  then `echo relaunch-next > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop.next`
+  (desk_m1.sh `relaunch next`). To keep 005 and only drop the pointer's plane: `CHONKSTEP_DARWIN_CURSOR_PLANE=0` in the
+  session's environment.
+- Source: patches 17-19 in `integrations/puredarwin/terminal-app/compositor/` (README there).
+
+### For the owner, at the M1 (real keys and fingers)
+1. **First: is the pointer there and right?** Move it around, over windows, to every edge and corner, over the dock;
+   type in Terminal.app (it hides), move (it is back). It should look exactly as before (arrow, I-beam over text), with
+   no dark or light fringe and no box around it. If it is missing, boxed or wrong: tell me, and put
+   `CHONKSTEP_DARWIN_CURSOR_PLANE=0` into the session (the pointer is then drawn as before).
+2. Move the pointer fast in circles with Terminal.app scrolling output: it should keep up with the finger (about one
+   frame behind, as before only under load).
+3. Drag a window quickly: the window and the pointer stay together. Resize one by its corner: the frame follows.
+4. Open Terminal.app from the dock, close its window with Command-W: its dock tile keeps the dot; click the tile: a
+   window comes back. Command-Tab shows it while windowless; Q there quits it.
+5. Rest the pointer on a dock tile for half a second: its name appears beside it, whole, and goes when you move off.
+
+### Taken from Finch (DESK5)
+Nothing.
