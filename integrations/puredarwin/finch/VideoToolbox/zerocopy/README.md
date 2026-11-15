@@ -36,8 +36,8 @@ their vacuous results are retained, not called successful replays. The script
 now resolves explicit inputs first and rejects missing inputs.
 
 Linux/Nix PDAppleAVD kext SDK build passes; no collection was built or installed.
-CODEX-TB owns kernel review/inclusion/boot. The ready-source receipt and exact
-artifact are in runs/sffinch/avd-external-buffers-kext-v1-build.log; kernel-owner
+CODEX-TB owns kernel review/inclusion/boot. The initial v1 artifact is superseded for hardware review by the safety
+follow-up described below; kernel-owner
 handover is requests-for-CODEX-TB.md. AVE remains paused and untouched.
 
 Next producer contract (not yet qualified): GPU-backed NV12 IOSurface,420v/420f,
@@ -52,3 +52,22 @@ this path. CODEX-FX is implementing the single NV12 IOSurface/CGL path.
 Evidence: runs/sffinch/avd-external-host-{legacy,import}-v2.log and the host test
 binary/import source here. No1080p60 result, browser smoothness or GPU-copy
 claim follows from these builds/model tests.
+
+Safety follow-up: a DART invalidate timeout now poisons the mapper, retains
+IOVA reservations and all prepared mappings/descriptors, and rejects further
+map/allocate/decode work until reboot. Partial rollback has the same policy.
+Context ownership retains task identity in addition to PID. The actual source
+extraction fixture injects failures and checks no completion/release or IOVA
+reuse before invalidation; this is logical host coverage, not hardware safety.
+
+The public lifetime probe originally used GetUseCount to decide recycling. A
+real native cross-process test caught early AVBuffer release while the child
+still held its surface. That failure is retained. The corrected bridge uses
+IOSurfaceIsInUse: native GetUseCount is process-local, whereas IsInUse observes
+any process ([public API definitions](https://developer.apple.com/documentation/iosurface/iosurface-functions?language=objc)).
+With an explicit child-held handshake, the parent sees local count0 and in-use1
+while retaining the frame; after child release it sees in-use0 and releases
+exactly once. This does not prove a GPU fence or prevent a consumer that first
+acquires its hold after producer release. Consumer handoff ordering and
+completion-held counts remain prerequisites. FX owns the one IOSurface/CGL
+implementation; its shared numeric count differs from native local diagnostics.
