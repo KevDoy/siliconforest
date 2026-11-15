@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 13:09Z)
+## Current target and observed state (owner change; updated 13:22Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,12 +15,12 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO19, source `0f7052ab3`, capsule
-`fb0925264c91…`, qualified13:04:43Z; owned UART reaped13:04:44Z before
+**Observed in Darwin:** non-AVE CIO20, source `a92aa5bab`, capsule
+`aec4d08c8731…`, qualified13:18:41Z; owned UART reaped13:18:42Z before
 lock release. The normal desktop, Wi-Fi, RTKit/NHI control DMA/IRQs, host router,
 PHY ownership and privileged snapshot ABI remain healthy. Both physical lanes
 still report UNPLUGGED (state7), no remote router. CD3217 S0, exact Linux
-MASK1 bits1/9/10 and EVENT1 acknowledgement/readback all work, with no dock link.
+MASK1 bits1/9/10 and EVENT1 acknowledgement/readback work, with no dock link.
 The actual IOCatalogue contains exactly the four allowed PCI personalities
 (three bridges and the exact existing Wi-Fi match), profile valid/error0.
 UID65534 authorization is denied without changing its counter; root advances
@@ -1827,3 +1827,35 @@ Source follow-up adds six bounded, read-only AUX/USB2 control words to the
 existing lease-checked PHY snapshot (two AUX and four USB2 registers). No
 new timer or mode write. The native USB SDK and all six repository checks
 pass; this diagnostic source has not yet run on the target.
+
+### CIO20 AUX/USB2 comparison and SID0 source checkpoint
+
+CIO20 adds six bounded reads to the existing lease-checked PHY snapshot;
+programming, IRQs and timers are unchanged. Five complete words match the
+same boot's Linux capture: both AUX controls and USB2 RUN/CTL/SIG. USB2
+MISCTUNE differs only at bit11; the pinned power sequence changes only bits29/30
+there. That unknown bit is preserved, not forced. All174 native PHY tuning
+words remain unchanged between the pre-M3 and late snapshots. Neither AUX
+power-down nor USB2 startup explains the measured phase2/3 divergence.
+The identical-version/cable firmware still reaches Phase2 only on Darwin.
+No dock/router/PCI/USB/Ethernet/DP success is added. Loadavg1.18/0.50/0.20 at
+about80s after boot is retained as startup evidence, not a quiet idle sample.
+The reported AppKit slowdown is unresolved.
+
+A separate, uninstalled SID0 DART transaction helper now checks the actual
+64TCR/256root blocked bank before setup, validates a16KiB/36-bit owned root,
+uses TTBR0 at400 and both invalidate selectors34/38, preserves global gates
+while enabling bit0, and writes TCR0 exactly80 without bypass/remap. In
+particular it does not copy an all-ones upper enable mask into100, the SID0
+TCR. A native owner must prove real tunnel/power/RUN/link and blocked endpoint
+BME, serialize access, publish actual retained table pages, and retain all
+backing after any uncertain write/flush. Retirement verifies the same root
+and isolated bank; endpoint/IRQ/work drain remains a separate prerequisite.
+No parameter read, fault acknowledgement or IRQ enable is added.
+
+Host ASAN/UBSAN tests pass all350 setup and349 retirement I/O failures, all
+64 stale TCR and256 stale root preconditions, foreign-root rejection, preserved
+gate bits, ordered publication/flush, readback failures and100us timeout bounds.
+All six repository checks pass (274 Python/77 C groups; six mutations caught;
+plans remain dry runs). This is a source/host component, excluded from CIO20;
+there is still no native endpoint IOMapper or DMA admission on the M1.

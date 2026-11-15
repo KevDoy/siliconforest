@@ -58,3 +58,5 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I 
 "$tmp/requesters"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/pciec-dart-block.c" -o "$tmp/pciec-dart-block"
 "$tmp/pciec-dart-block"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/pciec-dart-sid0.c" -o "$tmp/pciec-dart-sid0"
+"$tmp/pciec-dart-sid0"
