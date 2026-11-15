@@ -130,7 +130,16 @@ at currentTime0/0frames for the14s playback deadline, no media error and no AVD
 work. Their initial preloaded-source runs fail the automation handshake; those
 failures are preserved. A possible cause is the software VT display-order queue
 withholding the first callback while Firefox waits before submitting packet2.
-A private paired FFmpeg/VT decode-order candidate is built, not yet qualified.
+A private paired FFmpeg/VT decode-order candidate now passes native controls
+and Firefox005. It retains DPB/reference decoding and opts into decode-order
+output with a private FFmpeg flag; hardware/default FFmpeg ordering is unchanged.
+Native3codec controls return300 real callbacks per300 packets,300 unique PTS,
+all300 NV12 hashes percodec equal to software references. Installed H264/HEVC
+controls withhold the first2 callbacks; VP9 already passes. Firefox005 ends
+all3 clips with300/0 and the same hardware final hashes, AVD remains0.
+Its first clip retains an old harness deadline error after actual end because
+cold play startup plus a fixed12s wait exceed14s; new fixtures await ended
+under a separate18s deadline. No error has been erased from old results.
 Audible output, A/V sync,
 non-DRM streaming and zero-copy are still unproven. Earlier single-video-tab
 runs remain blank; multi-tab switching exposes the content correctly. A
@@ -162,8 +171,28 @@ and displays1024/1024 exact NV12 red pixels on Apple M1; legacy control reads
 0 tracks/NaN and displays0/1024 pixels. Speech truthfully reports no voices.
 Probev1's own wrapper install-name load failure remains failed evidence; only
 our probe was relinked to the canonical framework name and rehashed forv2.
-No Firefox binary was changed. Browser qualification with this provider and
-canonical AudioToolbox is next; no installed AVFoundation changed.
+No Firefox binary was changed. Browser001 then fails XUL load with missing
+AVCaptureDevice: the wrapper accidentally selected the asset-only recipe. The
+corrected base is the owner’s installed `media/bottle/avfoundation.nix` family,
+which also preserves capture discovery. Probev3 verifies that class truthfully
+reports no devices, plus the same asset and NV12 controls. Browser002 is pending;
+no installed AVFoundation changed.
+
+One paired deferred-source run (HW002/SW005) measures decoder/RDD CPU for
+H2640.47/1.34s, HEVC0.53/1.70s, VP90.47/2.04s. Full-family CPU is respectively
+19.43/19.21s over14.45/14.35wall seconds,14.42/15.78s over12.28/12.18s,
+12.87/13.92s over12.13/12.18s. These include startup/readback/audio and are one
+pair, not a spread or a claim of adequate end-to-end speed. The parent still
+dominates. Optional0205 does not establish a CPU reduction and stays off.
+
+A separate headless GPU-sharing M1 probe allocates one Asahi render-node GEM
+buffer, exports it as a dma-buf and passes it through SCM_RIGHTS to an exec'd
+process. Both use Apple M1. The child imports it once and observes the parent's
+green and subsequent blue GPU clears, each1024/1024 exact pixels, GLerror0.
+Fileport creation/makefd roundtrip also returns0. Readback verifies the pixels;
+it does not transport frames. No primary DRM node, display mode or compositor
+state is touched. This proves a buffer-sharing building block, **not Firefox
+IOSurface GPU backing or zero-copy presentation**.
 
 ## Gaps and ownership
 
