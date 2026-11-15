@@ -258,6 +258,19 @@
 #         model and components from its header; CGColorSpaceCreateIndexed and the indexed getters (Codex's
 #         bodies); kCGColorSpaceCoreMedia709
 #   0119  Onyx2D: the path a gradient fills under a clip path is released (its edges leaked at each one)
+#   0120  AppKit (TERM5, the owner's hands-on round): -centerScanRect: and -backingAlignedRect:options: (NSView,
+#         NSWindow) put edges on the backing store's own pixels (its pixels per point along each axis), dirty
+#         rects too (Terminal's rows and selection no longer end half way through a pixel at 150 %); with no
+#         preference set, transparency is reduced while the compositor cannot blur behind a window (Terminal's
+#         default profile then draws opaque, as macOS with Reduce Transparency; `defaults write
+#         com.apple.universalaccess reduceTransparency -bool false` gives translucency back); windows tell the
+#         window server whether they are opaque; menus: motion coalesced, a submenu opens after the pointer
+#         rests 60 ms on its item instead of being built while the pointer passes, PD_WS_TIMING lines
+#   0121  WindowServer: the opaque region of an opaque toplevel; _windowServerCanBlurBehind; PD_WS_SCALE (a test
+#         instrument: one application's backing stores at a chosen scale); pointer motion in PD_WS_TIMING
+#   0122  Onyx2D: a clip's edges within 1/1024 of a pixel boundary are on it (a dirty rect that went to points
+#         and back took one more row, which the window's clear made transparent and no fill covered);
+#         O2_FILL_TRACE lists the rectangles filled
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -332,6 +345,7 @@ let
     ./patches/0114-appkit-overlay-scrollers.patch
     ./patches/0115-appkit-cgevent-autoreleased.patch
     ./patches/0116-appkit-owner-findings-windows-cursor-colors.patch
+    ./patches/0120-appkit-device-pixels-opaque-default-menu-tracking.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -342,6 +356,7 @@ let
     ./patches/0043-windowserver-sheet-parent.patch
     ./patches/0058-windowserver-activation-configure-timing.patch
     ./patches/0117-windowserver-cursor-shown-when-the-pointer-moves.patch
+    ./patches/0121-windowserver-opaque-region-blur-query-test-scale.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -354,6 +369,7 @@ let
     ./patches/0042-tip-onyx2d-icns-png-entries.patch
     ./patches/0054-onyx2d-rectangles-without-edges.patch
     ./patches/0119-onyx2d-shading-path-released.patch
+    ./patches/0122-onyx2d-clip-edges-on-pixels.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {

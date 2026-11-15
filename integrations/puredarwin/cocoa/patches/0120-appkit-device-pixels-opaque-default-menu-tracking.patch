@@ -1,0 +1,384 @@
+--- a/src/Frameworks/AppKit/NSView.m
++++ b/src/Frameworks/AppKit/NSView.m
+@@ -84,6 +84,11 @@
+ -(void)_setContentsWithoutRender:(id)value;
+ @end
+ 
++// the backing store's pixels per point along each axis (NSWindow.m)
++@interface NSWindow(PDBackingPixels)
++-(NSSize)_backingPixelsPerPoint;
++@end
++
+ @implementation NSView
+ 
+ static BOOL NSViewLayersEnabled=NO;
+@@ -830,13 +835,93 @@
+    return NSMakeRect(point1.x,point1.y,point2.x-point1.x,point2.y-point1.y);
+ }
+ 
+--(NSRect)centerScanRect:(NSRect)rect {
+-   float minx=floor(NSMinX(rect)+0.5);
+-   float miny=floor(NSMinY(rect)+0.5);
+-   float maxx=floor(NSMaxX(rect)+0.5);
+-   float maxy=floor(NSMaxY(rect)+0.5);
++/* Edges on device pixels (macOS's -backingAlignedRect:options:, of which -centerScanRect: is the
++ * case "every edge to the nearest pixel"). Pixels are window coordinates times the backing store's
++ * pixels per point along each axis (the window's base CTM), from the store's corner. An edge within a millionth of a pixel of a boundary
++ * is on it, and nearest rounds halves up whichever edge it is, so the bottom of one rectangle and
++ * the top of the next, computed differently, come to the same pixel: at 150 % a terminal's rows of
++ * whole points (whole points were all the old -centerScanRect: aligned to) each ended half way
++ * through a pixel that the next row covered again. */
++static CGFloat pdAlignEdge(CGFloat v,BOOL isMin,NSUInteger bits){
++   const CGFloat e=1e-6;
++
++   if(bits&4)
++    return floor(v+0.5+e);
++   if(bits&1)
++    return isMin ? ceil(v-e) : floor(v+e);
++   if(bits&2)
++    return isMin ? floor(v+e) : ceil(v-e);
++   return v;
++}
++
++// one axis in pixels: bits of its min edge, max edge and size, each 1 inward, 2 outward, 4 nearest
++static void pdAlignAxis(CGFloat *lo,CGFloat *hi,NSUInteger minBits,NSUInteger maxBits,NSUInteger sizeBits){
++   const CGFloat e=1e-6;
++   CGFloat a=*lo,b=*hi,size=b-a;
++
++   if(sizeBits&4)
++    size=floor(size+0.5+e);
++   else if(sizeBits&1)
++    size=floor(size+e);
++   else if(sizeBits&2)
++    size=ceil(size-e);
++   if(minBits)
++    a=pdAlignEdge(a,YES,minBits);
++   if(maxBits)
++    b=pdAlignEdge(b,NO,maxBits);
++   if(sizeBits && minBits && !maxBits)
++    b=a+size;
++   else if(sizeBits && maxBits && !minBits)
++    a=b-size;
++   if(b<a)
++    b=a;
++   *lo=a;
++   *hi=b;
++}
++
++// a rectangle in window coordinates aligned to the pixels of a backing store of that scale; yFlipped
++// when the options' min and max y are the window's max and min (they were given for a flipped view)
++NSRect _NSBackingAlignedWindowRect(NSRect rect,CGFloat sx,CGFloat sy,NSAlignmentOptions options,BOOL yFlipped){
++   uint64_t o=options;
++   CGFloat x0=NSMinX(rect)*sx,x1=NSMaxX(rect)*sx,y0=NSMinY(rect)*sy,y1=NSMaxY(rect)*sy;
++   // NSAlignMinXInward is bit 0, the Outward options start at bit 8, the Nearest ones at bit 16
++#define PD_ALIGN_BITS(shift) ((((o>>(shift))&1)?1:0)|(((o>>((shift)+8))&1)?2:0)|(((o>>((shift)+16))&1)?4:0))
++   NSUInteger minX=PD_ALIGN_BITS(0),minY=PD_ALIGN_BITS(1),maxX=PD_ALIGN_BITS(2),maxY=PD_ALIGN_BITS(3);
++   NSUInteger width=PD_ALIGN_BITS(4),height=PD_ALIGN_BITS(5);
++#undef PD_ALIGN_BITS
++
++   if(sx<=0 || sy<=0)
++    return rect;
++   if(yFlipped){
++    NSUInteger t=minY;
++    minY=maxY;
++    maxY=t;
++   }
++   pdAlignAxis(&x0,&x1,minX,maxX,width);
++   pdAlignAxis(&y0,&y1,minY,maxY,height);
++   return NSMakeRect(x0/sx,y0/sy,(x1-x0)/sx,(y1-y0)/sy);
++}
++
++
++-(NSRect)backingAlignedRect:(NSRect)rect options:(NSAlignmentOptions)options {
++   NSWindow *window=[self window];
+ 
+-   return NSMakeRect(minx,miny,maxx-minx,maxy-miny);
++   if(window==nil){
++    // no backing store: points are the pixels
++    return _NSBackingAlignedWindowRect(rect,1.0,1.0,options,[self isFlipped]);
++   }
++   NSRect inWindow=[self convertRect:rect toView:nil];
++   NSPoint a=[self convertPoint:NSMakePoint(0,0) toView:nil],b=[self convertPoint:NSMakePoint(0,1) toView:nil];
++   // the backing store's own pixels: its size is whole pixels, so at 150 % a window of an odd number
++   // of points is drawn a little more than 1.5 pixels per point along that axis (NSWindow's base CTM)
++   NSSize pixels=[window _backingPixelsPerPoint];
++
++   inWindow=_NSBackingAlignedWindowRect(inWindow,pixels.width,pixels.height,options,b.y<a.y);
++   return [self convertRect:inWindow fromView:nil];
++}
++
++-(NSRect)centerScanRect:(NSRect)rect {
++   return [self backingAlignedRect:rect options:NSAlignAllEdgesNearest];
+ }
+ 
+ // as on macOS, a frame change goes through -setFrameOrigin: and -setFrameSize:, so a
+@@ -2083,12 +2168,14 @@
+            // here else we might get some artifact on clipping borders
+            // in device pixels: at a scale of 1.5 a rect of whole points ends inside a pixel, which the
+            // views behind fill (the clip is rounded out) and the view itself only partly covers
+-           CGFloat s=backingScale(self);
+-
+            rect = [self convertRect:rect toView:nil];
+-           rect = NSMakeRect(rect.origin.x*s,rect.origin.y*s,rect.size.width*s,rect.size.height*s);
+-           rect = NSIntegralRect(rect);
+-           rect = NSMakeRect(rect.origin.x/s,rect.origin.y/s,rect.size.width/s,rect.size.height/s);
++           if([self window]!=nil){
++            NSSize s=[[self window] _backingPixelsPerPoint];
++
++            rect = NSMakeRect(rect.origin.x*s.width,rect.origin.y*s.height,rect.size.width*s.width,rect.size.height*s.height);
++            rect = NSIntegralRect(rect);
++            rect = NSMakeRect(rect.origin.x/s.width,rect.origin.y/s.height,rect.size.width/s.width,rect.size.height/s.height);
++           }
+            rect = [self convertRect:rect fromView:nil];
+            _invalidRectCount++;
+            _invalidRects=NSZoneRealloc(NULL,_invalidRects,sizeof(NSRect)*_invalidRectCount);
+--- a/src/Frameworks/AppKit/NSView.h
++++ b/src/Frameworks/AppKit/NSView.h
+@@ -194,6 +194,7 @@
+ - (NSRect)convertRect:(NSRect)rect fromView:(NSView *)viewOrNil;
+ - (NSRect)convertRect:(NSRect)rect toView:(NSView *)viewOrNil;
+ - (NSRect)centerScanRect:(NSRect)rect;
++- (NSRect)backingAlignedRect:(NSRect)rect options:(NSAlignmentOptions)options;
+ 
+ - (void)setFrame:(NSRect)frame;
+ - (void)setFrameSize:(NSSize)size;
+--- a/src/Frameworks/AppKit/NSWindow.m
++++ b/src/Frameworks/AppKit/NSWindow.m
+@@ -207,6 +207,8 @@
+ -(BOOL)_pdTabCommandEnabled:(SEL)action;
+ @end
+ 
++static void pdSendOpaque(NSWindow *self,BOOL value);
++
+ @implementation NSWindow
+ 
+ +(NSWindowDepth)defaultDepthLimit {
+@@ -363,6 +365,7 @@
+    // as on macOS a window starts opaque (Terminal makes a window with a translucent profile
+    // clear only when -setOpaque:NO changes that)
+    _isOpaque=YES;
++   pdSendOpaque(self,YES);
+ 
+    _delegate=nil;
+    _firstResponder=self;
+@@ -1485,8 +1488,19 @@
+    _collectionBehavior=behavior;
+ }
+ 
++// the window server tells the compositor that an opaque window covers what is behind it everywhere
++static void pdSendOpaque(NSWindow *self,BOOL value){
++   struct wsRPCSimple data = {
++       { kWSWindowSetOpaque, sizeof(struct wsRPCSimple) - sizeof(struct wsRPCBase) },
++       (int)[self windowNumber], value ? 1 : 0
++   };
++
++   _windowServerRPC(&data, sizeof(data), NULL, NULL);
++}
++
+ -(void)setOpaque:(BOOL)value {
+    _isOpaque=value;
++   pdSendOpaque(self,value);
+ }
+ 
+ -(void)setParentWindow:(NSWindow *)value {
+@@ -1821,6 +1835,27 @@
+    return point;
+ }
+ 
++// window coordinates with their edges on the backing store's pixels (NSView.m)
++extern NSRect _NSBackingAlignedWindowRect(NSRect rect,CGFloat sx,CGFloat sy,NSAlignmentOptions options,BOOL yFlipped);
++
++/* Device pixels per point of the backing store along each axis, the factors of its base CTM
++ * (-createCGContextIfNeeded): the store is whole pixels, wsPixelsForPoints() of the frame's size */
++-(NSSize)_backingPixelsPerPoint {
++   int scale120=_backingScale120>0 ? _backingScale120 : _windowServerBackingScale120();
++   CGFloat s=scale120/120.0;
++
++   if(scale120==120 || _frame.size.width<1 || _frame.size.height<1)
++    return NSMakeSize(s,s);
++   return NSMakeSize(wsPixelsForPoints(_frame.size.width,scale120)/floor(_frame.size.width),
++                     wsPixelsForPoints(_frame.size.height,scale120)/floor(_frame.size.height));
++}
++
++-(NSRect)backingAlignedRect:(NSRect)rect options:(NSAlignmentOptions)options {
++   NSSize pixels=[self _backingPixelsPerPoint];
++
++   return _NSBackingAlignedWindowRect(rect,pixels.width,pixels.height,options,NO);
++}
++
+ -(NSRect)convertRectToScreen:(NSRect)rect {
+    rect.origin=[self convertBaseToScreen:rect.origin];
+    return rect;
+--- a/src/Frameworks/AppKit/NSWindow.h
++++ b/src/Frameworks/AppKit/NSWindow.h
+@@ -501,6 +501,7 @@
+ - (NSPoint)convertBaseToScreen:(NSPoint)point;
+ - (NSPoint)convertScreenToBase:(NSPoint)point;
+ - (NSRect)convertRectToScreen:(NSRect)rect;
++- (NSRect)backingAlignedRect:(NSRect)rect options:(NSAlignmentOptions)options;
+ - (NSRect)convertRectFromScreen:(NSRect)rect;
+ - (NSPoint)convertPointToScreen:(NSPoint)point;
+ - (NSPoint)convertPointFromScreen:(NSPoint)point;
+--- a/src/Frameworks/AppKit/NSWorkspaceOpenConfiguration.m
++++ b/src/Frameworks/AppKit/NSWorkspaceOpenConfiguration.m
+@@ -144,9 +144,21 @@
+     return [self _universalAccessFlag:@"differentiateWithoutColor"];
+ }
+ 
++// libWindowServer: whether the compositor blurs behind translucent windows (weak: an older library has no answer)
++extern int _windowServerCanBlurBehind(void) __attribute__((weak_import));
++
++/* macOS draws a translucent window (Terminal's default profile, a sidebar, a popover) over a blur of
++ * what is behind it. A compositor that cannot blur would show what is behind sharp, as if the window had a
++ * hole: there transparency is reduced, as macOS reduces it when the user asks (Accessibility > Display),
++ * and applications draw their windows opaque. The user's own setting decides when there is one:
++ * `defaults write com.apple.universalaccess reduceTransparency -bool false` gives translucency back. */
+ - (BOOL)accessibilityDisplayShouldReduceTransparency
+ {
+-    return [self _universalAccessFlag:@"reduceTransparency"];
++    id value = [(id)CFPreferencesCopyAppValue(CFSTR("reduceTransparency"), CFSTR("com.apple.universalaccess")) autorelease];
++
++    if ([value respondsToSelector:@selector(boolValue)])
++        return [value boolValue];
++    return _windowServerCanBlurBehind == NULL || !_windowServerCanBlurBehind();
+ }
+ 
+ - (BOOL)accessibilityDisplayShouldReduceMotion
+--- a/src/Frameworks/AppKit/NSMenu.subproj/NSMenuView.m
++++ b/src/Frameworks/AppKit/NSMenu.subproj/NSMenuView.m
+@@ -32,6 +32,22 @@
+ // a clear margin round the panel holds its drop shadow, the demo's 0 10px 30px at a quarter black
+ #define SHADOW_M     16.0
+ #define MENU_MIN_W  210.0
++
++// PD_WS_TIMING: when the highlight follows the pointer, on the window server's clock (wall clock, ms)
++static int pdTiming(void) {
++    static int on = -1;
++
++    if (on < 0)
++        on = getenv("PD_WS_TIMING") != NULL;
++    return on;
++}
++
++static double pdNowMs(void) {
++    struct timespec ts;
++
++    clock_gettime(CLOCK_REALTIME, &ts);
++    return (double)ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
++}
+ // the room before the titles for check marks, in a menu that has a checked item
+ #define STATE_W      12.0
+ // how far the pointer goes from where the button went down before a release picks instead of leaving the menu open
+@@ -41,6 +57,9 @@
+ #define CLICK_TIME    [NSEvent doubleClickInterval]
+ // a submenu stays this long after the pointer went on to another item, so that a slanted move into it arrives
+ #define SUBMENU_LINGER 0.25
++// a submenu opens when the pointer has rested this long on its item (as on macOS): moving down a menu past
++// items with submenus builds none of them, and the highlight never waits for one to be built
++#define SUBMENU_DELAY  0.06
+ // typing selects by title prefix; a pause this long starts a new prefix
+ #define TYPE_SELECT_PAUSE 1.0
+ 
+@@ -759,6 +778,7 @@
+     }
+     [self closeSubmenu];
+ 
++    double pdOpenBegan = pdTiming() ? pdNowMs() : 0;
+     NSMenuItem *item = [[self presentedItems] objectAtIndex:index];
+     NSMenu *submenu = [item submenu];
+     NSArray *loose = (item == _macAppItem) ? _macAppItems : nil;
+@@ -858,6 +878,9 @@
+     _submenuWindow = [NSMenuView _pdWindowForView:view frame:frame anchor:anchor kind:kind parent:[self window]];
+     _submenuView = view;
+     _openSubmenuIndex = index;
++    if (pdTiming())
++        fprintf(stderr, "WSTIME %.1f menu-opened index=%ld window=%d began=%.1f\n", pdNowMs(), (long)index,
++                (int)[_submenuWindow windowNumber], pdOpenBegan);
+ }
+ 
+ - (void)closeSubmenu
+@@ -1069,6 +1092,10 @@
+     NSMenuView *lingerView = nil;
+     NSInteger lingerIndex = -1;
+     NSTimeInterval lingerSince = 0;
++    // the item with a submenu the pointer rests on, and since when (its submenu opens after SUBMENU_DELAY)
++    NSMenuView *openView = nil;
++    NSInteger openIndex = -1;
++    NSTimeInterval openSince = 0;
+     BOOL trace = getenv("PD_POPUP_TRACE") != NULL;
+ 
+     if (byButton) {
+@@ -1102,10 +1129,41 @@
+                           NSOtherMouseDraggedMask | NSMouseMovedMask | NSKeyDownMask | NSAppKitDefinedMask;
+ 
+         [self _pdDisplayChain];
++        /* wait for the next event, or until a submenu is due to open or to close: the loop wakes for those
++         * deadlines, not to look (0.1 s at most, for a cancel that reaches only the default mode) */
++        NSTimeInterval wait = 0.1, now_ = [NSDate timeIntervalSinceReferenceDate];
++
++        if (openView != nil)
++            wait = MIN(wait, MAX(0, openSince + SUBMENU_DELAY - now_));
++        if (lingerView != nil)
++            wait = MIN(wait, MAX(0, lingerSince + SUBMENU_LINGER - now_));
+         event = [NSApp nextEventMatchingMask:mask
+-                                   untilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]
++                                   untilDate:[NSDate dateWithTimeIntervalSinceNow:wait]
+                                       inMode:NSEventTrackingRunLoopMode
+                                      dequeue:YES];
++        /* Motion comes faster than a menu can be drawn when the pointer moves fast: only where it is now
++         * matters. Motion events of the same kind at the head of the queue are taken together and the last
++         * one stands for them (never one from behind a press or a release). */
++        if (event != nil && ([event type] == NSMouseMoved || [event type] == NSLeftMouseDragged ||
++                             [event type] == NSRightMouseDragged || [event type] == NSOtherMouseDragged)) {
++            NSEvent *next;
++
++            while ((next = [NSApp nextEventMatchingMask:mask untilDate:[NSDate distantPast] inMode:NSEventTrackingRunLoopMode dequeue:NO]) != nil &&
++                   [next type] == [event type] && [next window] == [event window]) {
++                event = [NSApp nextEventMatchingMask:mask untilDate:[NSDate distantPast] inMode:NSEventTrackingRunLoopMode dequeue:YES];
++            }
++        }
++        if (openView != nil && ![self _pdChainHas:openView])
++            openView = nil;
++        // the pointer rested on an item with a submenu: it opens now (its highlight is on the screen already)
++        if (openView != nil && [NSDate timeIntervalSinceReferenceDate] - openSince >= SUBMENU_DELAY) {
++            if ([openView highlightedItemIndex] == openIndex && openView->_openSubmenuIndex < 0 && [openView _pdItemOpensAtIndex:openIndex]) {
++                [openView openSubmenuAtIndex:openIndex];
++                if (pdTiming())
++                    fprintf(stderr, "WSTIME %.1f menu-submenu index=%ld window=%d\n", pdNowMs(), (long)openIndex, (int)[[openView window] windowNumber]);
++            }
++            openView = nil;
++        }
+         if (event == nil) {
+             // a click in another app reaches upstream's menu bar only through +_pdCancelTracking
+             [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate date]];
+@@ -1286,7 +1344,12 @@
+             else {
+                 NSMenuView *up_;
+ 
++                NSInteger was_ = [view highlightedItemIndex];
++
+                 [view setHighlightedItemIndex:[view _pdItemIsLiveAtIndex:index] ? index : -1];
++                if (pdTiming() && [view highlightedItemIndex] != was_)
++                    fprintf(stderr, "WSTIME %.1f menu-highlight index=%ld window=%d\n", pdNowMs(), (long)[view highlightedItemIndex],
++                            (int)[[view window] windowNumber]);
+                 for (up_ = view->_supermenuView; up_ != nil && view != self; up_ = (up_ == self) ? nil : up_->_supermenuView)
+                     [up_ setHighlightedItemIndex:up_->_openSubmenuIndex];
+                 if (view == self && _horizontal && _pdInWindow) {
+@@ -1308,8 +1371,15 @@
+                 else {
+                     if (lingerView == view || (lingerView != nil && view != lingerView))
+                         lingerView = nil;
+-                    if (view->_openSubmenuIndex < 0 && [view _pdItemOpensAtIndex:index])
+-                        [view openSubmenuAtIndex:index];
++                    if (view->_openSubmenuIndex < 0 && [view _pdItemOpensAtIndex:index]) {
++                        if (openView != view || openIndex != index) {
++                            openView = view;
++                            openIndex = index;
++                            openSince = [NSDate timeIntervalSinceReferenceDate];
++                        }
++                    }
++                    else if (openView == view)
++                        openView = nil;
+                 }
+                 keyView = view;
+             }

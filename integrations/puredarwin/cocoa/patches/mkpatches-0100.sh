@@ -8,7 +8,8 @@
 #   am-0107/  = am-0106/ + 0107 (frozen)
 #   am-0109/  = am-0107/ + 0108, 0109 (frozen; COCOA3, evening of 14 November)
 #   am-0115/  = am-0109/ + 0110..0115 (frozen; COCOA3)
-#   am/       = am-0115/ + 0116 on (the current tree; COCOA4)
+#   am-0119/  = am-0115/ + 0116..0119 (frozen; COCOA4, night of 14 November)
+#   am/       = am-0119/ + 0120 on (the current tree; TERM5)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -48,9 +49,16 @@ mk am-0109 am-0115 0114-appkit-overlay-scrollers.patch $A/NSScroller.m $A/NSScro
 mk am-0109 am-0115 0115-appkit-cgevent-autoreleased.patch $A/NSEvent.subproj/NSEvent_Modern.m
 ( diff -rq am-0109 am-0115 ) | sed "s/^/differs from am-0109: /"
 # 0116 on (COCOA4, night of 14 November): am-0115 -> am
-mk am-0115 am 0116-appkit-owner-findings-windows-cursor-colors.patch $A/NSWindow.m $A/NSCursor.m $A/NSApplication.m $A/NSPathCell.m \
+mk am-0115 am-0119 0116-appkit-owner-findings-windows-cursor-colors.patch $A/NSWindow.m $A/NSCursor.m $A/NSApplication.m $A/NSPathCell.m \
   $A/NSModernAppKit.m $A/NSColorPanel.m $A/NSSymbolImages.m $A/NSWindowMenuStrip.m $A/NSWindow-Private.h $A/NSColor.subproj/conversions.h
-mk am-0115 am 0117-windowserver-cursor-shown-when-the-pointer-moves.patch src/Frameworks/WindowServer/rpc_wayland.c
-mk am-0115 am 0118-coregraphics-icc-and-indexed-color-spaces.patch src/Frameworks/CoreGraphics/CGColorSpace.h src/Frameworks/CoreGraphics/CGColorSpace.m
-mk am-0115 am 0119-onyx2d-shading-path-released.patch src/Frameworks/Onyx2D/O2Context_builtin.m
-( diff -rq am-0115 am ) | sed 's/^/differs from am-0115: /'
+mk am-0115 am-0119 0117-windowserver-cursor-shown-when-the-pointer-moves.patch src/Frameworks/WindowServer/rpc_wayland.c
+mk am-0115 am-0119 0118-coregraphics-icc-and-indexed-color-spaces.patch src/Frameworks/CoreGraphics/CGColorSpace.h src/Frameworks/CoreGraphics/CGColorSpace.m
+mk am-0115 am-0119 0119-onyx2d-shading-path-released.patch src/Frameworks/Onyx2D/O2Context_builtin.m
+( diff -rq am-0115 am-0119 ) | sed 's/^/differs from am-0115: /'
+# 0120 on (TERM5, night of 14 November): am-0119 -> am
+mk am-0119 am 0120-appkit-device-pixels-opaque-default-menu-tracking.patch $A/NSView.m $A/NSView.h $A/NSWindow.m $A/NSWindow.h \
+  $A/NSWorkspaceOpenConfiguration.m $A/NSMenu.subproj/NSMenuView.m
+mk am-0119 am 0121-windowserver-opaque-region-blur-query-test-scale.patch src/Frameworks/WindowServer/rpc_wayland.c \
+  src/Frameworks/WindowServer/rpc.h src/Frameworks/WindowServer/message.h
+mk am-0119 am 0122-onyx2d-clip-edges-on-pixels.patch src/Frameworks/Onyx2D/O2Context_builtin.m
+( diff -rq am-0119 am ) | sed 's/^/differs from am-0119: /'
