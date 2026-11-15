@@ -1590,3 +1590,18 @@ serialize reads/acknowledges, handle reset/setup and failure, and avoid enabling
 an unhandled GPIO interrupt or adding a fast polling loop. T8103 also has
 lstx_explicit=false: its Linux M3-control RMW is already reproduced; the literal
 write3 used on newer T6030 is not a T8103 fix.
+
+### Port1 event acknowledgement prepared; source/SDK only
+
+A later Type-C variant follows Linux cd321x_interrupt ordering: read eight
+EVENT1 bytes, skip writes on zero, otherwise write exactly the observed eight
+bytes to CLEAR1, then sample negotiated status. It shares the existing1Hz
+workloop and changes no interrupt mask or GPIO/AIC enable. Failed reads do
+not acknowledge; ambiguous failed writes are counted separately and publish
+an unavailable sample, never an invented unplug. Actual-helper sanitizers
+exercise every one of64bits plus zero/read-error/write-error cases. The native
+Type-C SDK and all six required checks pass. No hardware event-clearing or
+link improvement is claimed. This variant is excluded from frozen CIO16B.
+Linux's mask/setup-reset recovery remains outstanding; acknowledging events
+alone does not establish that lifecycle or prove the source of the training
+failure.

@@ -7,13 +7,15 @@
  * Copyright (C) The Asahi Linux Contributors
  *
  * Port 1 only: perform the Linux S0/SSPS initialization when necessary,
- * then observe negotiated state. No role swap, IRQ acknowledge, firmware
- * update, mux write or port-0 transaction is sent.
+ * then acknowledge observed events and sample state on the existing 1 Hz
+ * workloop. No interrupt mask/enable, role swap, firmware update, mux write
+ * or port-0 transaction is sent.
  */
 #include "pd_i2c.h"
 #include "pd_cd321x.h"
 #include "pd_cd321x_power.h"
 #include "pd_cd321x_control.h"
+#include "pd_cd321x_events.h"
 #include <mach/mach_time.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -34,6 +36,7 @@ class PDAppleTypeC : public IOService {
     IOTimerEventSource *timer;
     IOCommandGate *gate;
     uint32_t acceptingControls,controlCount;
+    uint64_t eventReads,eventAcks,eventErrors;
     uint8_t address;
     uint32_t lastStatus, lastData, lastVdo, lastFlags, samples, failures;
     bool valid;
@@ -102,7 +105,21 @@ int PDAppleTypeC::blockWrite(uint8_t reg,const void *src,unsigned len)
 void PDAppleTypeC::sample()
 {
     uint8_t status[4], data[4], intel[9];
-    int ret = blockRead(PD_TPS_REG_STATUS, status, sizeof(status));
+    // Same ordering as Linux cd321x_interrupt: acknowledge the exact
+    // observed EVENT1 word before re-reading negotiated status. This shares
+    // the existing slow sampler, not an unhandled GPIO interrupt or new poll.
+    pd_cd321x_events_result events={};
+    int ret=pd_cd321x_events_ack(this,powerRead,powerWrite,&events);
+    if(events.read_valid)++eventReads;
+    if(events.acknowledged)++eventAcks;
+    if(ret)++eventErrors;
+    setProperty("event-read-count",eventReads,64);
+    setProperty("event-ack-count",eventAcks,64);
+    setProperty("event-error-count",eventErrors,64);
+    setProperty("event-last-error",(uint32_t)ret,32);
+    setProperty("event-ack-uncertain",events.acknowledge_attempted && !events.acknowledged);
+    if(events.read_valid)setProperty("event-last-pending",events.pending,sizeof(events.pending));
+    if (!ret) ret = blockRead(PD_TPS_REG_STATUS, status, sizeof(status));
     if (!ret)
         ret = blockRead(PD_TPS_REG_DATA_STATUS, data, sizeof(data));
     uint32_t vdo=0, flags=0;
@@ -204,6 +221,7 @@ bool PDAppleTypeC::start(IOService *provider)
     setProperty("port-label", "USB-C Left-front");
     setProperty("observer-only", false);
     setProperty("setup-policy","port1-S0-only");
+    setProperty("event-policy","polled-1Hz-exact-EVENT1-CLEAR1-mask-unchanged");
     setProperty("hpm-path", hpmPath);
     setProperty("error-count", (uint32_t)0, 32);
     if (!bus.attach("/arm-io/i2c0", 100000)) {
