@@ -381,6 +381,26 @@ wheel step 6-43 / 6-17 ms: no difference beyond the spread of either.
 Installed 13:12Z with Activity Monitor's fixes (SF-AA, "TERM7 round": hashes, gates, revert). After the install:
 Terminal's window, tab, Shell menu and Preferences identical to the build before (visual check, mean difference 0.00).
 
+### Terminal checks nobody had finished (installed files; synthetic input to my own Terminal in a test home)
+- Prompt marks: after `echo one`, `seq 1 3`, `echo two` a faint bar sits left of each of the three command lines
+  only, none on output lines or on the waiting prompt (`t1-marks-crop.png`): pass.
+- The desk's title-bar menu (right click on my window's title bar): Maximize ... Close, Hide Menu Bar, then one row per
+  application menu. Hide Menu Bar hides the strip; the menu then offers Show Menu Bar, which brings it back; Shell opens
+  Terminal's own Shell menu (New Window, New Tab, New Command... with their keys) and choosing New Command... ran it
+  (its panel opened; Escape closed it) (`m2-*`, `m3-*`): pass.
+- A fresh window at the top of the screen (1171,37) keeps its place through its first split and the close of it (it
+  grows 719 -> 740 px for the divider and back): the move seen once by TERM6 was not reproduced.
+- Preferences at 150 %: General, Profiles (Text tab), Window Groups, Encodings readable (`pf1-pane*-crop.png`). Window
+  Groups' two-line explanation showed one line, cut: a wrapping label lost its last line to the point its text is moved
+  down (32 points for two 16-point lines, 31 left). 0136 keeps the whole height: both lines shown (test prefix `c5`,
+  then installed 14:07Z: AppKit 96afb830, gated as above: visual check identical but for this pane, random input
+  Activity Monitor 252/240 and Terminal 228/228 actions before/after, no crash; `.pre-t7` still the file of before TERM7). Profiles' thumbnails are grey boxes
+  (only the first shows a strip of its preview): as in TERM6's captures, not changed by this round: FAIL.
+- Not walked: a typed opacity value + Return in the colour panel; Preferences' other Profiles tabs.
+- Wheel step, installed files (`term-fig.py`, two rounds): 9 14 35 16 14 and 16 6 14 14 16 ms (TERM6: 14-16, then
+  14-23). The median is 14-15 ms in every round measured; single steps of 23-43 ms appear in both the build before and
+  this one (43 in the build before, 35 in this): no regression found, the spread is not explained.
+
 ### Foundation networking (prepared, not installed)
 `terminal-app/build-foundation-networking.nix` puts CODEX's networking (Finch's NSURLSession, NSURLSessionSockets,
 NSURLCache, NSHTTPCookie, NSURLCredential, public names) into libFoundation. CODEX's proposal did not link (the error
@@ -393,7 +413,9 @@ on the M1: `networking-probe --native https://example.com` HTTP 200, 577 bytes (
 the library reports its install path, so the CA is found at `/usr/share/certs` once installed); missing CA -1202, 0
 bytes. Cost: libFoundation 2.5 -> 9.7 MB, load-time fixups 12.4k -> 39.5k; a tiny Foundation program 40.3/41.4 ms ->
 42.2/42.2 ms a run (40 runs each, the new one with `DYLD_LIBRARY_PATH`). Not rehearsed or installed (QEMU rehearsal and
-the guarded installer still to do).
+the guarded installer still to do). The install stage (`build-macos-apps-root.nix`) now carries it
+(`SF_FOUNDATION=plain` for the one without) and `build-compat.nix` takes QuartzCore's library from `patched.nix`, so a
+later `sf_terminal.sh install direct` does not put the unpatched QuartzCore back.
 
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's

@@ -274,6 +274,15 @@ Traced on the M1 (`PD_CA_TRACE=1`, `PD_VIEW_DUMP=1`, `PD_CV_TRACE=1`, my own Act
   the visual check, fixed before anything was installed (`vcd4`, `vcd5`: tables right after 1 and 3 minutes with the
   layout cache forced small).
 - Still wrong: "Context Switches:" cut ("Context Sv"), Mach Messages In/Out empty, per-process network bytes 0.
+  What is known (my traced libsysmon, `SYSMON_DEBUG=1`, now printing each request's attributes): with the inspector open
+  Activity Monitor asks for 2 4 5 6 12 13 15 21 22 28 29 33 34 35 36 44 46 50 51 52 53 54 55 56 59 62 66, never 30-32.
+  The six it asks for in 28-36 fill Faults, Page Ins, Mach System Calls, Unix System Calls, Context Switches and
+  Threads; libsysmon's 31/32 (messages sent/received, `pti_messages_*`) are never requested, so the two message rows
+  have no value: which attribute Apple's library serves them under is not known here. "Context Switches:" sits in a
+  column the layout solved to 59.3 points while the label needs 94.7 (`PD_VIEW_DUMP`): the solver gives the column the
+  width of another label instead of honouring this one's compression resistance; not fixed.
+- Activity Monitor ended normally (exit 0, no report) after 240 random actions in one gate run on the installed files:
+  a Quit reached through the menu strip, not a crash.
 
 ### Installed (13:12Z, direct; the files of before kept as `<path>.pre-t7`)
 AppKit e61d2001 (0133, with CODEX-FX's 0201/0203/0204; `.pre-t7` = ab15ee51), Onyx2D cd851066 (CODEX-FX's 0200;

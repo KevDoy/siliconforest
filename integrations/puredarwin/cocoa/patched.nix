@@ -379,6 +379,8 @@
 #         marked layers before it renders; CAOpenGLLayer (CGL: a
 #         context of the layer's pixel format, its offscreen surface read back as the contents; without OpenGL
 #         it draws nothing and says so)
+#   0136  AppKit (TERM7): a wrapping label keeps its whole height for its lines (a two-line explanation sized for
+#         two lines lost the second to the point the text is moved down: Terminal's Preferences > Window Groups)
 #   0135  CoreGraphics (TERM7): CGDisplayUsesOpenGLAcceleration; display fade reservations (none available)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
@@ -466,6 +468,7 @@ let
     ./patches/0203-appkit-layer-context-window-scale.patch
     ./patches/0204-appkit-replace-hosted-layer-root.patch
     ./patches/0133-appkit-hosted-layers-cpu-class-named-nibs-arranged-subviews-names.patch
+    ./patches/0136-appkit-wrapped-label-keeps-its-last-line.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch

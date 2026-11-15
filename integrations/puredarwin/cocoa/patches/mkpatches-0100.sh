@@ -20,7 +20,8 @@
 #   am-0132/  = am-0131/ + 0132 (frozen; TERM6)
 #   am-0207/  = am-0132/ + the Firefox patches 0200, 0201, 0202, 0203, 0204, 0207 (CODEX-FX's, applied as they are;
 #               QuartzCore and Onyx2D/O2Font_freetype.m added from the pin; TERM7)
-#   am/       = am-0207/ + 0133 on (the current tree; TERM7)
+#   am-0135/  = am-0207/ + 0133..0135 (frozen; TERM7)
+#   am/       = am-0135/ + 0136 on (the current tree; TERM7)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -113,3 +114,6 @@ mk am-0207 am 0133-appkit-hosted-layers-cpu-class-named-nibs-arranged-subviews-n
 mk am-0207 am 0134-quartzcore-layer-display-opengl-layer.patch $Q/CALayer.m $Q/CALayerContext.m $Q/CAOpenGLLayer.h $Q/CAOpenGLLayer.m $Q/CoreAnimation.h
 mk am-0207 am 0135-coregraphics-display-fade-opengl-acceleration.patch src/Frameworks/CoreGraphics/CGDirectDisplay_puredarwin.m
 ( diff -rq am-0207 am ) | sed 's/^/differs from am-0207: /'
+# 0136 (TERM7): am-0135 -> am
+mk am-0135 am 0136-appkit-wrapped-label-keeps-its-last-line.patch $A/NSTextFieldCell.m
+( diff -rq am-0135 am ) | sed 's/^/differs from am-0135: /'

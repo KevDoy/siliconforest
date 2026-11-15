@@ -602,6 +602,13 @@ process_table(OS_sysmon_request *r)
 
 	r->generation++;
 	t->timestamp = mach_absolute_time();
+	if (debugging() && r->generation == 1 && attributes) {   /* (TERM7) which attributes this request asks for */
+		fprintf(stderr, "sysmon: process request %p attributes:", (void *)r);
+		for (uint32_t a = 0; a < attributes->size * 8; a++)
+			if (has(attributes, a))
+				fprintf(stderr, " %u", a);
+		fprintf(stderr, "\n");
+	}
 	if (capacity <= 64 || (pids = calloc((size_t)capacity, sizeof(pid_t))) == NULL)
 		return t;
 	n = proc_listallpids(pids, capacity * (int)sizeof(pid_t));

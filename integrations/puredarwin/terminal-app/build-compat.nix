@@ -16,7 +16,8 @@
 # A tree rooted at /. What the wrapped libraries are built from:
 #   libSystem, libFoundation, the Swift runtime   ./build-libsystem.nix, ./build-foundation.nix, ./build-swift-runtime.nix
 #   libobjc, libCoreFoundation, libicucore        upstream at ../rebase/pd.nix (the root's own)
-#   QuartzCore, Carbon                            ../macos-compat/build-appkit.nix (the Cocoa stream's root)
+#   QuartzCore                                    ../cocoa/patched.nix -A quartzcore
+#   Carbon                                        ../macos-compat/build-appkit.nix (the Cocoa stream's root)
 #   CoreServices                                  ../macos-compat/build-coreservices.nix
 #   AudioToolbox                                  ../m1-sound/sysaudio/build-sysaudio.nix
 #   libIOKitCF                                    upstream at ../rebase/pd.nix (the root's own)
@@ -30,6 +31,7 @@ let
   foundation = import ./build-foundation.nix;
   swift = import ./build-swift-runtime.nix;
   appkitRoot = import ../macos-compat/build-appkit.nix;
+  quartzcore = (import ../cocoa/patched.nix).quartzcore;
   coreservices = import ../macos-compat/build-coreservices.nix;
   audiotoolbox = (import ../m1-sound/sysaudio/build-sysaudio.nix).audiotoolbox;
   sdk = "${p.apple-sdk}/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
@@ -46,6 +48,10 @@ in pkgs.runCommand "siliconforest-macos-app-compat-arm64" { nativeBuildInputs = 
   cp -L ${swift}/usr/lib/swift/*.dylib $L/usr/lib/swift/
   # (Carbon is an umbrella: it re-exports frameworks inside it)
   for n in QuartzCore Carbon; do cp -a ${appkitRoot}/${F}/$n.framework $L/${F}/; done
+  # (TERM7) QuartzCore's library is the Cocoa series' (../cocoa/patched.nix -A quartzcore: CAOpenGLLayer, layer display,
+  # CODEX-FX's 0202/0207), as installed; it becomes QuartzCore.pd beside the wrapper
+  chmod -R u+w $L/${F}/QuartzCore.framework
+  cp -L ${quartzcore}/${F}/QuartzCore.framework/Versions/A/QuartzCore $L/${F}/QuartzCore.framework/Versions/A/QuartzCore
   mkdir -p $L/${F}/CoreServices.framework/Versions/A $L/${F}/AudioToolbox.framework/Versions/A
   cp -L ${coreservices}/${F}/CoreServices.framework/Versions/A/CoreServices $L/${F}/CoreServices.framework/Versions/A/
   cp -L ${audiotoolbox}/${F}/AudioToolbox.framework/Versions/A/AudioToolbox $L/${F}/AudioToolbox.framework/Versions/A/
