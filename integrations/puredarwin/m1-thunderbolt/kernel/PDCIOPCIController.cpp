@@ -16,6 +16,7 @@ bool PDCIOPCIController::initWithOwner(IOService *lease,void *ctx,
 {
  owner=NULL;context=NULL;powerProof=NULL;tunnelProof=NULL;lock=NULL;
  admitted=touched=poisoned=cold=linked=false;
+ requesters={};
  if(!lease || !ctx || !power || !tunnel || !OSObject::init())return false;
  uint32_t chip=0;if(!pd_adt_u32("/chosen","chip-id",0,&chip) || chip!=0x8103)return false;
  // Actual registry children, not a caller-supplied "unbound" flag.
@@ -82,6 +83,29 @@ int PDCIOPCIController::linkStart()
  if(!live() || !cold || !tunnelProof(context))ret=ENODEV;
  else if(linked)ret=EALREADY;
  else{ret=pd_pciec_link_start(&io);if(ret)poisoned=true;else linked=true;}
+ IOLockUnlock(lock);return ret<0?-ret:ret;
+}
+int PDCIOPCIController::reserveRequester(unsigned bus,unsigned device,unsigned function,uint32_t *sid)
+{
+ if(!sid || !lock || ml_at_interrupt_context())return EINVAL;
+ IOLockLock(lock);int ret=ENODEV;
+ if(live() && linked && tunnelProof(context)){
+  uint32_t run=0,link=0;
+  ret=read(this,PD_PCIEC_PORT,0x804,&run);
+  if(!ret)ret=read(this,PD_PCIEC_PORT,0x208,&link);
+  if(!ret && (run==UINT32_MAX || link==UINT32_MAX || !(run&1) || !(link&1)))ret=ENODEV;
+  if(!ret){
+   pd_pciec_requester_io access={this,
+    [](void *p,uint32_t off,uint32_t *v)->int {
+     int e=read(p,PD_PCIEC_PORT,off,v);return e<0?-e:e;
+    },
+    [](void *p,uint32_t off,uint32_t v)->int {
+     int e=write(p,PD_PCIEC_PORT,off,v);return e<0?-e:e;
+    }};
+   ret=pd_pciec_requester_reserve(&requesters,&access,bus,device,function,sid);
+   if(requesters.poisoned)poisoned=true;
+  }
+ }
  IOLockUnlock(lock);return ret<0?-ret:ret;
 }
 int PDCIOPCIController::revoke()

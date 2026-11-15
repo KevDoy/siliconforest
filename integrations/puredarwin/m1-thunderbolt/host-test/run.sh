@@ -54,3 +54,5 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I 
 "$tmp/dock-policy"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/pci-dma-retire.c" -o "$tmp/pci-dma-retire"
 "$tmp/pci-dma-retire"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/requesters.c" -o "$tmp/requesters"
+"$tmp/requesters"

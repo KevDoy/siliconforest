@@ -9,6 +9,7 @@
 #define PD_CIO_PCIE_CONTROLLER_H
 #include "pd_soc.h"
 #include "pd_pciec_port.h"
+#include "pd_pciec_requesters.h"
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOService.h>
 /* Unwired native controller backend: no matching personality, DART access,
@@ -29,6 +30,7 @@ class PDCIOPCIController : public OSObject {
  PDMmio windows[5],powerGate;
  bool admitted,touched,poisoned,cold,linked;
  pd_pciec_io io;
+ pd_pciec_requesters requesters;
  bool live();
  static int read(void *,pd_pciec_window,uint32_t,uint32_t *);
  static int write(void *,pd_pciec_window,uint32_t,uint32_t);
@@ -38,6 +40,8 @@ public:
  bool initWithOwner(IOService *,void *,bool (*)(void *),bool (*)(void *));
  int coldInit();
  int linkStart();
+ // Mapping-table reservation only; no BME/DART/MSI or endpoint admission.
+ int reserveRequester(unsigned bus,unsigned device,unsigned function,uint32_t *sid);
  int revoke();
  void free() override;
 };

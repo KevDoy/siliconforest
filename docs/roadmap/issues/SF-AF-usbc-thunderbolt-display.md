@@ -1641,3 +1641,21 @@ existing1Hz sampler, with no interrupt-mask/enable or role/mode write. Actual
 acknowledgement count, error/uncertainty, unchanged mask, standard desktop and
 NHI health must qualify before accepting it. CIO16B is the rollback. No event
 clearing or link improvement from CIO17 has yet been observed.
+
+### Native requester-map backend prepared, not wired or installed
+
+The unwired PDCIOPCIController now reserves actual dynamic BDFs in the64entry
+T8103 RID2SID table, using the pinned PCIe-C iommu mask0x3f. The native method
+requires current activated-tunnel/power and physical RUN/link readbacks; an
+all-ones read is rejected. The actual reservation helper checks an empty
+hardware slot, reserves it before the write, checks full readback and poisons
+on transport failure, stale occupied hardware or mismatched duplicate. No
+slot is recycled or retargeted. Error outputs remain unchanged. Multiple
+endpoints legitimately share SID0 as on Linux; this is not per-device DMA
+isolation. Intermediate bridge device numbers produce the observed8/16/24/32.
+
+Bounds, table capacity, shared SID, duplicate/no-rewrite, stale slot, every
+read/write failure and readback corruption pass actual-helper sanitizers.
+The native CM SDK and all six checks pass. This source backend is excluded
+from frozen CIO17; no mapping register is changed on the M1. It supplies no
+DART table, MSI, endpoint driver/BME admission or hot-remove drain proof.
