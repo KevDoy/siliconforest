@@ -79,5 +79,19 @@ class HoldTests(unittest.TestCase):
         text = 'T GFX2 in 2 min: risky GPU tests\nU GFX2 risky GPU test over SSH: interrupted\n'
         self.assertIsNone(gate.pending_hold(text+'V GFX2 M1 back in SiliconForest (other agents may use SSH again)\n'))
 
+    def test_new_kernel_owner_reboot_outlives_postponed_gpu(self):
+        text = 'T GFX2 in 2 min: risky GPU tests\nU CODEX-TB tc01 clean reboot to Linux\nV GFX2 postponed: an install started\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text+'W CODEX-TB M1 back in SiliconForest\n'))
+
+    def test_serialized_core_start_closes_older_actual_only(self):
+        text = 'T COCOA3 core.lock: guarded install of Foundation\nU PERF in 2 minutes: guarded core install\nV COCOA4 core.lock: GUARDED INSTALL now\nW COCOA4 core install finished: checked\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text+'X PERF core install finished: checked\n'))
+
+    def test_kernel_install_end_reports_actual_return(self):
+        text = 'T CODEX-TB tc01 clean reboot to Linux\nU CODEX-TB INSTALL END tc01: M1 back in SiliconForest; evidence saved\n'
+        self.assertIsNone(gate.pending_hold(text))
+
 if __name__ == '__main__':
     unittest.main()

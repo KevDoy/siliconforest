@@ -8,7 +8,8 @@ import re
 
 def pending_hold(text):
     active = {}
-    owners = 'VK|COCOA4|GFX2|PERF|TERM5'
+    owners = '[A-Z][A-Z0-9_-]*'
+    agent_names = set(re.findall(r'^\S+\s+('+owners+r')[: ]', text, re.M))
     for line in text.splitlines():
         # Completion must be the actual agent event, not a phrase inside a notice.
         event = re.match(r'^\S+\s+('+owners+r')[: ]+(.+)$', line)
@@ -20,7 +21,7 @@ def pending_hold(text):
             elif ('announced gpu tests' in lower_body and 'did not run' in lower_body
                   and 're-announced' in lower_body):
                 active.pop((owner, 'gpu-session'), None)
-            elif lower_body.startswith('gpu tests postponed') and 're-announced' in lower_body:
+            elif lower_body.startswith(('gpu tests postponed', 'postponed:')):
                 active.pop((owner, 'gpu-session'), None)
             elif lower_body.startswith('in ') and 'risky gpu test' in lower_body:
                 active[(owner, 'gpu-session')] = (line, [], owner)
@@ -32,14 +33,24 @@ def pending_hold(text):
                     del active[key]
             if lower_body.startswith(('core install finished', 'guarded core install finished', 'guarded install finished')):
                 active.pop((owner, 'core'), None)
-            elif (re.match(r'^(?:core\.lock:\s*)?guarded(?: core)? install\b', lower_body)
-                  or re.match(r'^in\b.*guarded(?: core)? install\b', lower_body)):
+                active.pop((owner, 'core-announced'), None)
+            elif re.match(r'^(?:core\.lock:\s*)?guarded(?: core)? install\b', lower_body):
+                # Actual guarded pipelines serialize on the shared core.lock.
+                # A later owner's actual start supersedes a missing historical
+                # end notice; future announcements must remain independent.
+                for key in list(active):
+                    if key[1] == 'core':
+                        del active[key]
                 active[(owner, 'core')] = (line, [], owner)
-            if lower_body.startswith('m1 back in siliconforest'):
+            elif re.match(r'^in\b.*guarded(?: core)? install\b', lower_body):
+                active[(owner, 'core-announced')] = (line, [], owner)
+            if (lower_body.startswith('m1 back in siliconforest') or
+                (lower_body.startswith('install end ') and 'm1 back in siliconforest' in lower_body)):
                 active.pop((owner, 'reboot'), None)
                 active.pop((owner, 'gpu'), None)
                 active.pop((owner, 'gpu-session'), None)
-            elif 'm1 reboot' in lower_body or 'siliconforest rebooting' in lower_body:
+            elif any(phrase in lower_body for phrase in
+                     ['m1 reboot', 'siliconforest rebooting', 'clean reboot to linux', 'reboot now']):
                 active[(owner, 'reboot')] = (line, [], owner)
             if lower_body.startswith('risky gpu test ') and ' finished:' in lower_body:
                 active.pop((owner, 'gpu'), None)
@@ -49,11 +60,15 @@ def pending_hold(text):
         if 'stay off' in lower and 'until' in lower:
             suffix = line[lower.index('until')+5:]
             quoted = re.findall(r"['\"]([^'\"]+)['\"]", suffix)
-            selected = [re.sub(r'^(?:'+owners+r') ', '', m) for m in quoted
-                        if any(word in m.lower() for word in ('back', 'done', 'siliconforest'))]
+            selected = []
+            for marker in quoted:
+                if not any(word in marker.lower() for word in ('back', 'done', 'siliconforest')):
+                    continue
+                prefix = marker.split(' ', 1)[0]
+                selected.append(marker.removeprefix(prefix+' ') if prefix in agent_names else marker)
             if selected:
                 owner = event[1] if event else None
-                active[(owner, 'explicit')] = (line, selected, owner)
+                active[(owner, 'explicit')] = (line, selected, None)
         if 'CODEX received coordinator M1 SSH hold;' in line:
             active[(None, 'explicit')] = (line, ['M1 back in SiliconForest'], None)
     return '\n'.join(notice for notice, _, _ in active.values()) or None
