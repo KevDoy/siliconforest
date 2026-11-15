@@ -54,10 +54,11 @@ in e.pkgs.runCommand "sffx-current-avfoundation-extra-classes-arm64" {nativeBuil
  PY
  CF="-isysroot ${e.sdk} -O2 -fblocks -Wno-nullability-completeness -Wno-macro-redefined -I${e.libsystem}/usr/include -I${a.base.libobjc}/usr/include -I${a.base.foundation}/usr/include -I${a.base.corefoundation}/include -I${a.appDeps.coregraphics}/usr/include -I${a.appDeps.onyx2d}/usr/include -I${headers} -I${a.src}/src/Frameworks -I${a.mesa}/usr/include -F${a.openglFramework}/System/Library/Frameworks"
  ${e.cc} $CF -c classes.m -o classes.o
+ ${e.cc} $CF -c ${./avfoundation-authorization.m} -o authorization.o
  F=$out/Frameworks/AVFoundation.framework
  mkdir -p $F/Versions/A/Resources/Source
  cp ${retained}/System/Library/Frameworks/AVFoundation.framework/Versions/A/AVFoundation $F/Versions/A/AVFoundation.pd
- ${e.cc} -dynamiclib classes.o --ld-path=${e.ld} -nostdlib -isysroot ${e.sdk} \
+ ${e.cc} -dynamiclib classes.o authorization.o --ld-path=${e.ld} -nostdlib -isysroot ${e.sdk} \
   -L${e.libsystem}/usr/lib -L${a.base.libobjc}/usr/lib -L${a.base.foundation}/usr/lib -L${a.base.corefoundation}/usr/lib \
   -L${a.appDeps.quartzcore}/usr/lib -L${a.appDeps.coregraphics}/usr/lib \
   -F${cm}/System/Library/Frameworks -F${cv}/System/Library/Frameworks -F${av}/System/Library/Frameworks \
@@ -68,6 +69,7 @@ in e.pkgs.runCommand "sffx-current-avfoundation-extra-classes-arm64" {nativeBuil
   -framework CoreMedia -framework CoreVideo -lQuartzCore -lCoreGraphics -lFoundation -lCoreFoundation -lobjc -lSystem \
   -o $F/Versions/A/AVFoundation
  cp classes.m $F/Versions/A/Resources/Source/
+ cp ${./avfoundation-authorization.m} $F/Versions/A/Resources/Source/
  cp ${a.src}/src/Frameworks/AVFoundation/AVFoundation.m $F/Versions/A/Resources/Source/PureDarwin-AVFoundation.m
  cp -r ${retained}/System/Library/Frameworks/AVFoundation.framework/Versions/A/Resources/Licenses $F/Versions/A/Resources/
  ln -s A $F/Versions/Current;ln -s Versions/Current/AVFoundation $F/AVFoundation

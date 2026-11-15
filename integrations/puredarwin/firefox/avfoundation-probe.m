@@ -6,9 +6,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <dispatch/dispatch.h>
+#include <pthread.h>
 @interface NSObject (FXAVProbe)
 +(NSArray *)speechVoices;
 +(NSArray *)devices;
++(NSInteger)authorizationStatusForMediaType:(NSString *)type;
++(void)requestAccessForMediaType:(NSString *)type completionHandler:(void (^)(BOOL))handler;
 -(BOOL)isSpeaking;
 +(id)URLAssetWithURL:(NSURL *)url options:(NSDictionary *)options;
 -(NSArray *)tracks;
@@ -31,7 +35,18 @@ int main(int argc,char **argv){@autoreleasepool{
  int noVoices=voice&&speech&&[[voice speechVoices] count]==0&&![synth isSpeaking];
  Class capture=NSClassFromString(@"AVCaptureDevice");
  int noDevices=capture&&[[capture devices] count]==0;
- printf("FXAV capture_class=%d no_devices=%d\n",capture!=Nil,noDevices);
+ int restricted=[capture authorizationStatusForMediaType:@"vide"]==1&&
+                [capture authorizationStatusForMediaType:@"soun"]==1;
+ dispatch_semaphore_t completion=dispatch_semaphore_create(0);
+ pthread_t caller=pthread_self();__block int calls=0;__block BOOL granted=YES,sameThread=YES;
+ [capture requestAccessForMediaType:@"vide" completionHandler:^(BOOL value){
+   calls++;granted=value;sameThread=pthread_equal(caller,pthread_self());
+   dispatch_semaphore_signal(completion);
+ }];
+ long waited=dispatch_semaphore_wait(completion,dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC));
+ int deniedAsync=waited==0&&calls==1&&!granted&&!sameThread;
+ printf("FXAV capture_class=%d no_devices=%d restricted=%d denied_async_once=%d\n",capture!=Nil,noDevices,restricted,deniedAsync);
+ dispatch_release(completion);
  Class assetClass=NSClassFromString(@"AVURLAsset");
  id asset=[assetClass URLAssetWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]] options:nil];
  CMTime duration=[asset duration];NSUInteger tracks=[[asset tracks] count];
@@ -67,5 +82,5 @@ int main(int argc,char **argv){@autoreleasepool{
  const char *renderer=(const char *)glGetString(0x1f01);
  printf("FXAV layer_status=%ld NV12_red_pixels=%u/1024 renderer=%s\n",(long)[layer status],red,renderer?renderer:"null");
  CGContextRelease(output);CGColorSpaceRelease(space);CGImageRelease(image);[context release];CFRelease(sample);CFRelease(format);CFRelease(pixel);
- return noDevices&&noVoices&&realAsset&&red==1024&&renderer&&strstr(renderer,"Apple M1")?0:1;
+ return noDevices&&restricted&&deniedAsync&&noVoices&&realAsset&&red==1024&&renderer&&strstr(renderer,"Apple M1")?0:1;
 }}
