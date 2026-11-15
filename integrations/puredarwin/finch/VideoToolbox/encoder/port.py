@@ -9,6 +9,13 @@ files=['VTSession.c','VTCompression.c','VTPixelSessions.c']
 # The declarations come from implementation signatures; constants from Finch's
 # source. No SDK/header extraction. Retained decoder declarations stay retained.
 constants=(root/'VTConstants.c').read_text()
+# VLC imports these four public constants even for progressive video. Their
+# values come from Finch's own generated source, not an Apple header extraction.
+generated=(root/'VideoToolboxConstants_Generated.m').read_text()
+for name in ['kVTDecompressionPropertyKey_DeinterlaceMode','kVTDecompressionPropertyKey_FieldMode',
+             'kVTDecompressionProperty_DeinterlaceMode_Temporal','kVTDecompressionProperty_FieldMode_DeinterlaceFields']:
+ match=re.search(r'\b'+name+r' = CFSTR\("([^"]+)"\);',generated);assert match,name
+ constants+='\nconst CFStringRef '+name+' = CFSTR("'+match[1]+'");\n'
 names=set(re.findall(r'const CFStringRef\s+(kVT\w+)\s*=',constants))
 names.update(re.findall(r'VT_PROFILE\((kVT\w+),',constants))
 header=types.read_text()
@@ -34,6 +41,14 @@ route=['VTSessionSetProperty','VTSessionCopyProperty','VTSessionCopySupportedPro
 for name in route:s=re.sub(r'\b'+name+r'\b','SFFinch'+name,s)
 p.write_text(s)
 p=root/'VideoToolbox.c';s=p.read_text()
+# No deinterlacer is implemented: a newly loadable client must receive the
+# real unsupported error rather than an ignored processing request.
+anchor='    *sessionOut = NULL;\n'
+assert s.count(anchor)==1
+s=s.replace(anchor,anchor+'''    if (specification && (CFDictionaryContainsKey(specification, CFSTR("FieldMode")) ||
+                          CFDictionaryContainsKey(specification, CFSTR("DeinterlaceMode"))))
+        return kVTPropertyNotSupportedErr;
+''')
 for name in route:s=re.sub(r'\b'+name+r'\b','SFDecoder'+name,s)
 for name in ['VTCompressionSessionCreate','VTCompressionSessionEncodeFrame','VTCompressionSessionCompleteFrames','VTCompressionSessionInvalidate']:
  s=re.sub(r'\b'+name+r'\b','SFUnsupported'+name,s)

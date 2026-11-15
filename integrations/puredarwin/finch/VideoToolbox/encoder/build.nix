@@ -9,6 +9,7 @@ let
  cxxabi=p.libcxxabiDylib-arm64;
  prep=''
   cp ${finch}/userland/VideoToolbox/{VTSession.c,VTCompression.c,VTPixelSessions.c,VTH264.cpp,VTInternal.h,VTConstants.c} .
+  cp ${finch}/userland/VideoToolbox/VideoToolboxConstants_Generated.m .
   cp ${../../media/bottle/vt-supplement.c} VTSupplement.c
   chmod u+w VT*.c VT*.cpp VT*.h
   mkdir -p headers/VideoToolbox

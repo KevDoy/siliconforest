@@ -36,12 +36,22 @@ The first native probe queried hardware use before encoding and failed;
 that receipt remains alongside the corrected one.
 
 No AVE hardware encoding has occurred. RequireHardware currently returns the
-actual unavailable error; no hardware capability is fabricated. The next backend
-is /dev/pdave after preload identity/cold-DATA/DPE/IPC/session qualification.
-This provider is STAGED ONLY. Before install, compare old exported symbols and
-run the retained H264/HEVC hardware decode, HAL/apps/compositor/compat18
-regressions; preserve .pre-finch and cold-copy hashes as usual.
+actual unavailable error; no hardware capability is fabricated. The /dev/pdave hardware backend is paused by owner2026-11-15; the installed
+software path remains independent.
+This provider is now INSTALLED after the staged native/target key comparison,
+1200 HW/SW decode PTS/hash matches, then the cold one-framework transaction.
+All83 old exports remain,172total; four new deinterlace/field constants match
+native M5. Requested field/deinterlace processing is explicitly unsupported,
+not ignored. Three copied files were hashed before activation, .pre-finch is
+retained, and600 hardware pictures, WAV/AAC HAL12000frames each, software
+compression, desktop/dock/coreaudiod, Terminal/Activity Monitor open-a and
+compat18/18 all pass. Main cold SHA256:
+`dba1d23e6510187f9b8f6b1d6b9a2bf63362e6b91b9158bd8f0c79b2360f2ea9`.
+No visual/acoustic or AVE hardware-encode claim.
 
 Evidence: runs/sffinch/vt-encoder-stage-v2/{candidate,quality}.json,
 m5-vt-encoder-v2-reference.json; provider pinned by the compiled probe's actual
 derivation input (provider.json). Source and generated video are ours.
+
+Installed evidence: runs/sffinch/install-VideoToolbox-v2/{qualified,regressions}.json;
+vt-encoder-stage-v3/qualification.json, m5-vt-keys-v1-reference.json.
