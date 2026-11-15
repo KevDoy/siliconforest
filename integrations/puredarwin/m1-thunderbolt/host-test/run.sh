@@ -50,3 +50,5 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I 
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" -c "$here/src/pd_pciec_tunables.c" -o "$tmp/pciec-tunables.o"
 ${CXX:-c++} -std=c++14 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/pciec-tunables.cpp" "$tmp/pciec-tunables.o" -o "$tmp/pciec-tunables"
 "$tmp/pciec-tunables"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/native" "$here/host-test/dock-policy.c" -o "$tmp/dock-policy"
+"$tmp/dock-policy"

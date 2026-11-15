@@ -1461,3 +1461,15 @@ that bit5 explains training. The same bounded lease snapshot includes13
 additional documented MAC/BIST/PLL registers for the Linux comparison,
 without recurring polling or writes. CIO14 remains installed until a
 separately validated and announced candidate is run.
+
+### TS3 authorization and tunnel hooks: source only
+
+An explicit native NHI authorization entry point and optional all-or-none
+PCIe backend hooks now build in the SDK. There is no installed caller or
+backend; absent hooks refuse authorization/activation. The real domain lock,
+actual root/remote relation, direct03d:0011 model/route and fresh physical
+UP read precede the actual CM approve call. Keyed, unplugged or ambiguous
+peers are refused. Authorization/event publication occurs only after real
+CM success. The bounded snapshot can report actual remote authorization.
+The host allowlist test is metadata evidence only; no dock has been authorized
+on Darwin. These source changes are excluded from the frozen CIO15 candidate.

@@ -148,3 +148,10 @@ and t8103.dtsi at the pinned Linux revision. The including t8103.dtsi carries
 GPL-2.0+ OR MIT, Copyright The Asahi Linux Contributors; this data source and
 its digest are recorded in native/provenance.json. No captured calibration,
 firmware or owner identifiers are included.
+
+The explicit native TS3 approval sequence in pd_tb_nhi.c follows the
+pinned drivers/thunderbolt/switch.c domain-approve/authorized/uevent
+sequence, GPL-2.0, retaining Andreas Noever and Intel Corporation
+attribution through the family NOTICE. switch.c and tb_regs.h digests
+are included in native/provenance.json. The standalone model/route
+allowlist is original MIT metadata policy, not a hardware identity proof.

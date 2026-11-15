@@ -15,6 +15,14 @@ struct pd_tb_nhi_config {
  int (*irq_request)(int,int (*)(void *),void *,const char *);
  void (*irq_enable)(int);
  void (*irq_free)(int);
+ /* Optional all-or-none native PCIe backend. prepare must establish real
+  * ownership/clock/reset facts; activated queues bounded link/enumeration
+  * OUTSIDE the domain lock; deactivate joins real children/DMA before
+  * releasing ownership. Callback success is not itself PCI/link evidence.
+  * Uninstalled callbacks refuse activation/authorization. */
+ int (*pci_prepare)(void *);
+ int (*pci_activated)(void *);
+ int (*pci_deactivate)(void *);
 };
 #ifdef __cplusplus
 extern "C" {
@@ -28,12 +36,18 @@ int pd_tb_nhi_start(void *,uint32_t cable_info);
 struct pd_tb_nhi_port_status {
  uint32_t port,state,error,remote,remote_vendor,remote_device;
  uint32_t cap_phy,flags_valid,lane_disabled,adapter_locked;
+ uint32_t remote_authorized;
 };
 struct pd_tb_nhi_status {
  uint32_t root_vendor,root_device,max_port,port_count,cable_info;
  struct pd_tb_nhi_port_status ports[16];
 };
 int pd_tb_nhi_snapshot(void *,struct pd_tb_nhi_status *);
+/* Explicit native administrative caller only; no user-facing API yet.
+ * Real domain lock, actual direct TS3 model/route and backend required.
+ * No arbitrary route, key enrollment, downstream dock or DMA admission.
+ * Native owner must pin its physical cable lease through this call. */
+int pd_tb_nhi_authorize_ts3(void *);
 /* Failure retains context, DMA and controller ownership. No timeout-free
  * retirement is implied: Linux domain teardown joins its actual workers. */
 int pd_tb_nhi_stop(void *);

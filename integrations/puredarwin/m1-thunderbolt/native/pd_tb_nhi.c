@@ -12,6 +12,7 @@
 #include "driver/nhi.h"
 #include "driver/nhi_regs.h"
 #include "pd_tb_lane_observation.h"
+#include "pd_tb_dock_policy.h"
 #define IRQ_STATUS 0xd0000
 #define IRQ_ENABLE 0xd0010
 #define IRQ_THROTTLE 0xd004c
@@ -94,13 +95,33 @@ static void configure(struct tb_ring *r,u32 flags,u32 e2e)
           r->size,flags|e2e,readl(options));
  if(readl(options)!=(flags|e2e))fail(s);
 }
-static int no_pcie(struct tb_nhi *nhi){(void)nhi;return -EOPNOTSUPP;}
+static int pci_prepare(struct tb_nhi *nhi)
+{
+ struct pd_tb_nhi *s=owner(nhi);
+ if(!present(nhi))return -ENODEV;
+ return s->config.pci_prepare?s->config.pci_prepare(s->config.ctx):-EOPNOTSUPP;
+}
+static int pci_activated(struct tb_nhi *nhi)
+{
+ struct pd_tb_nhi *s=owner(nhi);
+ if(!present(nhi))return -ENODEV;
+ return s->config.pci_activated?s->config.pci_activated(s->config.ctx):-EOPNOTSUPP;
+}
+static int pci_deactivate(struct tb_nhi *nhi)
+{
+ struct pd_tb_nhi *s=owner(nhi);
+ // The backend must also handle loss of power by retaining/quarantining
+ // real children/backing. Never infer their drain from a cached live flag.
+ return s->config.pci_deactivate?s->config.pci_deactivate(s->config.ctx):-EOPNOTSUPP;
+}
 static int no_dp(struct tb_nhi *nhi,struct tb_port *in,struct tb_port *out)
 {(void)nhi;(void)in;(void)out;return -EOPNOTSUPP;}
 static const struct tb_nhi_ops operations={
  .request_ring_irq=request_ring_irq,.release_ring_irq=release_irq,
  .ring_interrupt_active=active,.ring_interrupt_mask=mask,.ring_configure=configure,
- .is_present=present,.pci_tunnel_pre_activate=no_pcie,.dp_tunnel_pre_activate=no_dp,
+ .is_present=present,.pci_tunnel_pre_activate=pci_prepare,
+ .pci_tunnel_post_activate=pci_activated,.pci_tunnel_deactivate=pci_deactivate,
+ .dp_tunnel_pre_activate=no_dp,
 };
 static const struct tb_nhi_ring_layout layout={TX_BASE,RX_BASE,STRIDE,TX_BASE+0x10,RX_BASE+0x10,STRIDE};
 int pd_tb_nhi_check_stopped(void *opaque)
@@ -120,6 +141,8 @@ int pd_tb_nhi_create(const struct pd_tb_nhi_config *c,void **out)
  if(!c || !out || !c->device || !c->nhi_base || !c->pdf_base || !c->powered ||
     !c->irq_request || !c->irq_enable || !c->irq_free)return -EINVAL;
  if(!pd_tb_native_ready() || !c->powered(c->ctx))return -ENODEV;
+ unsigned pci_callbacks=!!c->pci_prepare+!!c->pci_activated+!!c->pci_deactivate;
+ if(pci_callbacks && pci_callbacks!=3)return -EINVAL;
  if((readl(c->nhi_base)&0x3ff)!=12 || readl(c->nhi_base+IRQ_ENABLE))return -EBUSY;
  for(unsigned i=0;i<12;++i){
   if(c->rx_irq[i]<=0 || c->tx_irq[i]<=0)return -EINVAL;
@@ -186,7 +209,40 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
   }
   if(port->remote){
    p->remote=1;p->remote_vendor=port->remote->sw->vendor;p->remote_device=port->remote->sw->device;
+   p->remote_authorized=port->remote->sw->authorized;
   }
+ }
+ done:mutex_unlock(&s->domain->lock);return ret;
+}
+int pd_tb_nhi_authorize_ts3(void *ctx)
+{
+ struct pd_tb_nhi *s=ctx;
+ if(!s || !s->domain || !s->started || !present(&s->nhi))return -ENODEV;
+ if(!s->config.pci_prepare || !s->config.pci_activated || !s->config.pci_deactivate)return -EOPNOTSUPP;
+ int ret=-ENODEV;struct tb_switch *dock=NULL;
+ mutex_lock(&s->domain->lock);
+ struct tb_switch *root=s->domain->root_switch;
+ if(!root || !root->ports || root->is_unplugged || !root->authorized || !present(&s->nhi))goto done;
+ struct tb_port *port;
+ tb_switch_for_each_port(root,port)if(tb_port_is_null(port) && port->remote){
+  struct tb_switch *sw=port->remote->sw;
+  if(!sw || sw->is_unplugged || !pd_tb_ts3_direct(sw->vendor,sw->device,tb_route(sw)))continue;
+  if(tb_to_switch(sw->dev.parent)!=root)continue;
+  int state=tb_port_state(port); // Fresh actual NHI read, not the topology cache.
+  if(state<0){ret=state;goto done;}
+  if(state!=TB_PORT_UP)continue;
+  if(dock && dock!=sw){ret=-EEXIST;goto done;}
+  dock=sw; // Both bonded lanes may lead to this same real router.
+ }
+ if(!dock)goto done;
+ if(dock->authorized){ret=dock->authorized==1?0:-EPERM;goto done;}
+ if(dock->key){ret=-EOPNOTSUPP;goto done;} // No key/challenge policy in this narrow API.
+ // Same actual approve + authorized/uevent sequence as pinned switch.c.
+ // Native cable ownership pins physical power; this is not a PM cache vote.
+ ret=tb_domain_approve_switch(s->domain,dock);
+ if(!ret){
+  char *env[]={"AUTHORIZED=1",NULL};dock->authorized=1;
+  ret=kobject_uevent_env(&dock->dev.kobj,KOBJ_CHANGE,env);
  }
  done:mutex_unlock(&s->domain->lock);return ret;
 }

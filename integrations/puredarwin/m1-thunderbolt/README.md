@@ -312,3 +312,16 @@ DART/MSI and child enumeration are unqualified. Link startup must run outside
 the CM domain lock; failures block later access and pin ownership until
 reboot. Revoke is not a DMA/child drain implementation. No boot is scheduled
 solely to run this adapter before a dock router exists.
+
+
+The native NHI API now has optional all-or-none PCIe prepare/activated/
+deactivate callbacks and an unwired explicit TS3 authorization entry point.
+Absent callbacks refuse authorization and activation. Under the real domain
+lock, authorization selects only the actual direct03d:0011 router on root
+route1/2, checks a fresh UP state, rejects unplugged/keyed/ambiguous peers,
+and invokes the pinned CM approve function before recording authorization
+and emitting its real change event. Actual remote authorization is included
+in the bounded snapshot when a remote exists. The model/route allowlist's
+host tests prove only metadata matching; the SDK build is not an authorized
+dock. No user-facing request or native backend is installed yet. Endpoint
+DMA remains outside this API.
