@@ -27,7 +27,9 @@ def compare(hardware,software):
     sw=modes[1];value=(sw['info'] or {}).get('WebRenderSoftware')
     confirmed=('software' in str(sw['layer_manager']).lower() or str(sw['layer_manager']).upper()=='SWGL'
                or value is True or value==1 or str(value).lower()=='true')
-    return dict(complete=all(r['beyond_one']==0 for r in rows) and confirmed,
+    calibrated=all(data.get('coordinate_calibration',{}).get('complete') for data in metadata)
+    return dict(complete=all(r['beyond_one']==0 for r in rows) and confirmed and calibrated,
+        coordinate_calibration_confirmed=calibrated,
         software_mode_confirmed=confirmed,modes=modes,regions=rows,
         method='Actual source=renderer RGB crops at frozen CSS animation time0; WebGL interior excludes border. Report exact counts and all errors; at most one channel value rounding accepted. Mode must independently confirm software WebRender.')
 

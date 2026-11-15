@@ -46,6 +46,7 @@ def main():
     ap.add_argument('--gpu-presentation', action='store_true', help='experimental private whole-window GPU layers')
     ap.add_argument('--gpu-vector-compare', action='store_true', help='diagnostic NEON equality scan of the real CPU base')
     ap.add_argument('--gpu-cache-lookups', action='store_true', help='diagnostic one-time GPU frame export symbol lookup')
+    ap.add_argument('--compositor-stats', action='store_true', help='existing compositor commit-lead/render histograms; gui.lock required')
     ap.add_argument('--frame-trace', action='store_true', help='private WindowServer actual compositor frame callback timestamps')
     ap.add_argument('--event-trace', action='store_true', help='private AppKit bounded headless event-loop diagnostics')
     ap.add_argument('--window-trace', action='store_true', help='diagnostic WindowServer create/map/tab/flush trace')
@@ -65,11 +66,14 @@ def main():
     ap.add_argument('--ui-qos', choices=['interactive','initiated'], help='diagnostic startup QoS; no affinity/frequency writes')
     ap.add_argument('--measure-video', action='store_true')
     ap.add_argument('--measure-all-videos', action='store_true', help='measure each owned video tab, with separate CPU/AVD counters')
+    ap.add_argument('--gpu-transfer-spec', help='UUID-matched private CGL counter specification for video')
+    ap.add_argument('--policy-probe-path', help='read-only native thread-policy/counter probe')
     ap.add_argument('--browse-stability', action='store_true', help='announced30minute ordinary-site browsing with abnormal-content-exit observer')
     ap.add_argument('--jit-probe', action='store_true', help='actual Baseline/Ion frames from a separate Gecko profile')
     ap.add_argument('--streaming', action='store_true', help='owned public non-DRM YouTube playback')
     ap.add_argument('--streaming-dash', action='store_true', help='official DASH-IF clear H264 MediaSource playback')
     ap.add_argument('--media-trace', action='store_true', help='decoder identity logs without GL/window traces')
+    ap.add_argument('--vt-frame-mode', choices=['copy','best-effort','require'], default='copy', help='private VT frame allocation diagnostic; require fails closed without import capability')
     ap.add_argument('--quality', action='store_true', help='owned new/private windows and content download')
     ap.add_argument('--panels', action='store_true', help='owned native open/save picker selection through synthetic seat input')
     ap.add_argument('--render-quality', type=int, choices=[0, 2], help='controlled ICC off/on pixels and glyph raster evidence')
@@ -83,11 +87,13 @@ def main():
     ap.add_argument('--measure-fixture', action='store_true')
     ap.add_argument('--fixture-repetitions', type=int, default=1,
                     help='one to four separately timed measurements in the same browser')
+    ap.add_argument('--fixture-pacing-sequence', help='temporary compositor latch modes, e.g. on,off,on; restores automatic mode')
     ap.add_argument('--fixture-qos-sequence', help='paired main-thread modes, e.g. default,interactive,default,interactive')
     ap.add_argument('--qos-library', help='already-inserted private diagnostic DSO for main-thread QoS')
     ap.add_argument('--fixture-seconds', type=int, default=10, choices=range(1,61), metavar='1..60')
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--pipeline-profile', action='store_true', help='diagnostic native/JS/IPC Gecko profile of this browser family')
+    ap.add_argument('--profile-benchmark', action='store_true', help='diagnostic Gecko profile around a stock benchmark; score is not timing-qualified')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
@@ -109,6 +115,8 @@ def main():
         raise ValueError('Supply both private surface-session and surface-broker paths')
     if args.expect_appkit_prefix and not args.sample_path:
         raise ValueError('AppKit provider verification requires --sample-path')
+    if args.gpu_transfer_spec and (not args.policy_probe_path or not args.expect_appkit_prefix or not (args.measure_video or args.measure_all_videos)):
+        raise ValueError('GPU counters require owned provider admission, native probe and video measurement')
     if args.gpu_coalesce_ticks and not args.gpu_presentation:
         raise ValueError('GPU notification batching requires --gpu-presentation')
     if (args.native_drag or args.clipboard_empty or args.precise_scroll) and not args.native_ui:
@@ -117,6 +125,14 @@ def main():
         raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
     if args.pipeline_profile and (not args.measure_fixture or args.profile_fixture or args.fixture_repetitions != 1):
         raise ValueError('Pipeline profiling requires one fixture measurement without a second sampler')
+    if args.profile_benchmark and (not args.benchmark or args.pipeline_profile or args.measure_fixture or args.profile_fixture):
+        raise ValueError('Benchmark profiling requires one benchmark without another profiled workload')
+    if args.fixture_pacing_sequence:
+        pacing_modes=args.fixture_pacing_sequence.split(',')
+        if not 2<=len(pacing_modes)<=4 or any(mode not in ['on','off'] for mode in pacing_modes):
+            raise ValueError('Pacing sequence requires2..4 on/off modes')
+        if not args.measure_fixture or args.pipeline_profile or args.profile_fixture or args.fixture_qos_sequence or args.fixture_repetitions!=1:
+            raise ValueError('Pacing control requires one unprofiled fixture, without another sequence')
     if args.fixture_qos_sequence:
         modes=args.fixture_qos_sequence.split(',')
         if not args.qos_library or args.qos_library not in (args.insert_library or '').split(':'):
@@ -198,6 +214,8 @@ def main():
             env.pop(name, None)
     if args.media_trace:
         env['MOZ_LOG'] = 'PlatformDecoderModule:5,AppleMedia:5'
+    if args.vt_frame_mode=='copy':env.pop('SF_VT_ZERO_COPY',None)
+    else:env['SF_VT_ZERO_COPY']='1' if args.vt_frame_mode=='best-effort' else 'require'
     if args.io_policy:
         env['SFFX_IO_POLICY'] = args.io_policy
     if args.ui_qos:
@@ -306,6 +324,11 @@ def main():
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current) if pid in current})
                                 result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned,
                                     result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix)
+                            if args.policy_probe_path:
+                                from scheduling_snapshot import inspect as inspect_policies
+                                current=process_identities()
+                                owned.update({pid:current[pid][1] for pid in descendants(p.pid,current) if pid in current})
+                                result['scheduling']=inspect_policies(args.policy_probe_path,current,owned,args.run/'scheduling.json')
                             if args.presentation_seat:
                                 from presentation_seat import admit
                                 result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json', fixture=args.measure_fixture)
@@ -322,8 +345,22 @@ def main():
                             if args.benchmark:
                                 from benchmark import measure
                                 client.socket.settimeout(max(1, min(90, deadline - time.monotonic())))
-                                result['benchmark'] = measure(client, args.benchmark, deadline, args.run / 'benchmark.json',
-                                    seat_activity=args.presentation_seat)
+                                admission=None
+                                if args.profile_benchmark:
+                                    from pipeline_profile import start as start_pipeline
+                                    admission=start_pipeline(client)
+                                    result['profile_interval']=[time.time()*1000,None]
+                                try:
+                                    result['benchmark'] = measure(client, args.benchmark, deadline, args.run / 'benchmark.json',
+                                        seat_activity=args.presentation_seat)
+                                finally:
+                                    if admission:
+                                        result['profile_interval'][1]=time.time()*1000
+                                        from pipeline_profile import stop as stop_pipeline
+                                        result['pipeline_profile']=stop_pipeline(client,args.run,admission)
+                                        if 'benchmark' in result:
+                                            result['benchmark'].update(diagnostic_only=True,timing_qualification=False)
+                                            (args.run/'benchmark.json').write_text(json.dumps(result['benchmark'],indent=2)+'\n')
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.browse_stability:
                                 from stability import measure
@@ -373,77 +410,91 @@ def main():
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
-                                client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline - time.monotonic())))
-                                profiler = None
-                                if args.profile_fixture:
-                                    import threading
-                                    cancel_profile = threading.Event()
-                                    profile_result = dict(diagnostic_only=True, timing_qualification=False,
-                                                          target=args.profile_target, delay=args.profile_delay)
-                                    target_pid = result['marionette']['capabilities']['moz:processID']
-                                    if args.profile_target == 'content':
-                                        client.command('Marionette:SetContext', {'value': 'chrome'})
-                                        target_pid = client.command('WebDriver:ExecuteScript', dict(script='''
-                                          const w=Services.wm.getMostRecentWindow("navigator:browser"),b=w.gBrowser.selectedBrowser;
-                                          for(const read of [()=>b.browsingContext.currentWindowGlobal.domProcess.osPid,
-                                              ()=>b.frameLoader.remoteTab.osPid,()=>b.browsingContext.currentWindowGlobal.osPid]){
-                                            try{const pid=read();if(Number.isInteger(pid)&&pid>0)return pid;}catch(e){}
-                                          }return null;''', args=[], newSandbox=False))
-                                    current = process_identities()
-                                    if target_pid not in descendants(p.pid, current):
-                                        raise RuntimeError('Profiler target is not in the owned browser family')
-                                    profile_result['pid'] = target_pid
-                                    target_identity = process_identities().get(target_pid)
-                                    def profile_fixture():
-                                        if cancel_profile.wait(args.profile_delay):
-                                            return
-                                        if target_identity is None or process_identities().get(target_pid) != target_identity:
-                                            profile_result['error'] = 'Owned profiler target identity changed'
-                                            return
-                                        try:
-                                            sampled = subprocess.run([args.sample_path, str(target_pid), '3', '5', '-file',
-                                                str(args.run / ('fixture-' + args.profile_target + '-profile.txt'))], capture_output=True, text=True, timeout=12)
-                                            profile_result.update(status=sampled.returncode, stderr=sampled.stderr)
-                                        except subprocess.TimeoutExpired:
-                                            profile_result['error'] = 'Sampler timeout'
-                                    profiler = threading.Thread(target=profile_fixture)
-                                    profiler.start()
-                                if args.fixture_qos_sequence:
-                                    from fixture_qos import set_main
-                                    result['fixture_qos']=set_main(client,args.qos_library,modes[0])
-                                result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
-                                pipeline_admission=None
-                                if args.pipeline_profile:
-                                    from pipeline_profile import start as start_pipeline
-                                    client.socket.settimeout(50)
-                                    pipeline_admission=start_pipeline(client)
-                                try:
-                                    result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
-                                finally:
-                                    if pipeline_admission:
-                                        from pipeline_profile import stop as stop_pipeline
-                                        result['pipeline_profile']=stop_pipeline(client,args.run,pipeline_admission)
-                                    if profiler:
-                                        cancel_profile.set()
-                                        profiler.join(timeout=15)
-                                        result['fixture_profile'] = profile_result
-                                result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
-                                if args.fixture_repetitions > 1:
-                                    fields = ['fixture_measurement', 'fixture_cpu_before', 'fixture_cpu_after']
-                                    if args.fixture_qos_sequence:fields.append('fixture_qos')
-                                    result['fixture_repetitions'] = [{key: result[key] for key in fields}]
-                                    for index in range(1, args.fixture_repetitions):
-                                        client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline-time.monotonic())))
-                                        qos=None
-                                        if args.fixture_qos_sequence:qos=set_main(client,args.qos_library,modes[index])
-                                        entry = dict(fixture_cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()))
-                                        if qos:entry['fixture_qos']=qos
-                                        entry['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
-                                        entry['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
-                                        result['fixture_repetitions'].append(entry)
-                                        (args.run / 'fixture-repetitions.json').write_text(
-                                            json.dumps(result['fixture_repetitions'], indent=2)+'\n')
-                                deadline = min(deadline, time.monotonic() + 2)
+                                if args.fixture_pacing_sequence:
+                                    from fixture_pacing import measure as measure_pacing
+                                    client.socket.settimeout(args.fixture_seconds+10)
+                                    result.update(measure_pacing(client,snapshot,lambda:time.monotonic()-start,args.run,
+                                        args.scroll_fixture,args.fixture_seconds,pacing_modes))
+                                    deadline=min(deadline,time.monotonic()+2)
+                                else:
+                                    client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline - time.monotonic())))
+                                    profiler = None
+                                    if args.profile_fixture:
+                                        import threading
+                                        cancel_profile = threading.Event()
+                                        profile_result = dict(diagnostic_only=True, timing_qualification=False,
+                                                              target=args.profile_target, delay=args.profile_delay)
+                                        target_pid = result['marionette']['capabilities']['moz:processID']
+                                        if args.profile_target == 'content':
+                                            client.command('Marionette:SetContext', {'value': 'chrome'})
+                                            target_pid = client.command('WebDriver:ExecuteScript', dict(script='''
+                                              const w=Services.wm.getMostRecentWindow("navigator:browser"),b=w.gBrowser.selectedBrowser;
+                                              for(const read of [()=>b.browsingContext.currentWindowGlobal.domProcess.osPid,
+                                                  ()=>b.frameLoader.remoteTab.osPid,()=>b.browsingContext.currentWindowGlobal.osPid]){
+                                                try{const pid=read();if(Number.isInteger(pid)&&pid>0)return pid;}catch(e){}
+                                              }return null;''', args=[], newSandbox=False))
+                                        current = process_identities()
+                                        if target_pid not in descendants(p.pid, current):
+                                            raise RuntimeError('Profiler target is not in the owned browser family')
+                                        profile_result['pid'] = target_pid
+                                        target_identity = process_identities().get(target_pid)
+                                        def profile_fixture():
+                                            if cancel_profile.wait(args.profile_delay):
+                                                return
+                                            if target_identity is None or process_identities().get(target_pid) != target_identity:
+                                                profile_result['error'] = 'Owned profiler target identity changed'
+                                                return
+                                            try:
+                                                sampled = subprocess.run([args.sample_path, str(target_pid), '3', '5', '-file',
+                                                    str(args.run / ('fixture-' + args.profile_target + '-profile.txt'))], capture_output=True, text=True, timeout=12)
+                                                profile_result.update(status=sampled.returncode, stderr=sampled.stderr)
+                                            except subprocess.TimeoutExpired:
+                                                profile_result['error'] = 'Sampler timeout'
+                                        profiler = threading.Thread(target=profile_fixture)
+                                        profiler.start()
+                                    if args.fixture_qos_sequence:
+                                        from fixture_qos import set_main
+                                        result['fixture_qos']=set_main(client,args.qos_library,modes[0])
+                                    if args.compositor_stats:
+                                        from compositor_stats import start as start_stats, stop as stop_stats
+                                        clock_admission=start_stats()
+                                    result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                    pipeline_admission=None
+                                    if args.pipeline_profile:
+                                        from pipeline_profile import start as start_pipeline
+                                        client.socket.settimeout(50)
+                                        pipeline_admission=start_pipeline(client)
+                                    try:
+                                        result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
+                                    finally:
+                                        if pipeline_admission:
+                                            from pipeline_profile import stop as stop_pipeline
+                                            result['pipeline_profile']=stop_pipeline(client,args.run,pipeline_admission)
+                                        if profiler:
+                                            cancel_profile.set()
+                                            profiler.join(timeout=15)
+                                            result['fixture_profile'] = profile_result
+                                    result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                    if args.compositor_stats:result['compositor_stats']=stop_stats(clock_admission)
+                                    if args.fixture_repetitions > 1:
+                                        fields = ['fixture_measurement', 'fixture_cpu_before', 'fixture_cpu_after']
+                                        if args.fixture_qos_sequence:fields.append('fixture_qos')
+                                        if args.compositor_stats:fields.append('compositor_stats')
+                                        result['fixture_repetitions'] = [{key: result[key] for key in fields}]
+                                        for index in range(1, args.fixture_repetitions):
+                                            client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline-time.monotonic())))
+                                            qos=None
+                                            if args.fixture_qos_sequence:qos=set_main(client,args.qos_library,modes[index])
+                                            if args.compositor_stats:clock_admission=start_stats()
+                                            entry = dict(fixture_cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()))
+                                            if qos:entry['fixture_qos']=qos
+                                            entry['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
+                                            entry['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                            if args.compositor_stats:entry['compositor_stats']=stop_stats(clock_admission)
+                                            result['fixture_repetitions'].append(entry)
+                                            (args.run / 'fixture-repetitions.json').write_text(
+                                                json.dumps(result['fixture_repetitions'], indent=2)+'\n')
+                                    deadline = min(deadline, time.monotonic() + 2)
                             if args.scene_reference:
                                 from scene_reference import measure
                                 result['scene_reference'] = measure(client, args.run / 'scene-reference.json')
@@ -452,21 +503,38 @@ def main():
                                 result['cgl_export_cache'] = inspect(client, result['providers'], args.run / 'cgl-export-cache.json')
                             if args.measure_video:
                                 client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
+                                if args.gpu_transfer_spec:
+                                    from gpu_transfer_stats import snapshot as gpu_snapshot
+                                    result['video_gpu_before']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
                                 result['video_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                                 result['video_measurement'] = client.measure_video()
                                 result['video_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                if args.gpu_transfer_spec:
+                                    result['video_gpu_after']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
                             if args.measure_all_videos:
                                 result['video_measurements'] = []
-                                for handle in client.video_handles():
+                                video_handles=client.video_handles()
+                                if not video_handles:raise RuntimeError('No owned video fixture found')
+                                result['video_tab_count']=len(video_handles)
+                                for handle in video_handles:
                                     client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
                                     counters = lambda: subprocess.run(['sysctl', 'kern.pd_avd.stats'],
                                         capture_output=True, text=True).stdout.strip()
+                                    if args.compositor_stats:
+                                        from compositor_stats import start as start_stats, stop as stop_stats
+                                        clock_admission=start_stats()
                                     entry = dict(cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()),
                                                  avd_before=counters())
                                     result['video_measurements'].append(entry)
+                                    if args.gpu_transfer_spec:
+                                        from gpu_transfer_stats import snapshot as gpu_snapshot
+                                        entry['gpu_before']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
                                     entry['video'] = client.measure_video(handle)
                                     entry['avd_after'] = counters()
                                     entry['cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                    if args.gpu_transfer_spec:
+                                        entry['gpu_after']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
+                                    if args.compositor_stats:entry['compositor_stats']=stop_stats(clock_admission)
                                 deadline = min(deadline, time.monotonic() + 2)
                         except Exception as error:
                             result['marionette_error'] = str(error)
@@ -541,7 +609,7 @@ def main():
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference']:
+            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]

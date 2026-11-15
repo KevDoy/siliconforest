@@ -53,7 +53,7 @@ def analyze(directory, data=None):
         gpu_vector_compare=data.get('gpu_vector_compare'), gpu_cache_lookups=data.get('gpu_cache_lookups'),
         gpu_dirty_frames=data.get('gpu_dirty_frames', False),
         gpu_export_cache=data.get('gpu_export_cache', False), presentation=presentation,
-        fixture_qos=data.get('fixture_qos'),
+        fixture_qos=data.get('fixture_qos'), compositor_pacing=data.get('pacing'),
         gpu_coalesce_ticks=data.get('gpu_coalesce_ticks', False),
         cpu=dict(cpu_seconds=seconds, wall_seconds=wall, percent_one_core=seconds/wall*100),
         method='Unique compositor_ms callback stamps whose callback wall time lies inside the fixture interval; callbacks sharing a stamp count once. The compositor sends these after observed page-flip completion using event-loop elapsed time, not the DRM hardware timestamp; they count completion batches, not exact hardware phase. CPU is family TIME delta as percent of one core; exited-before-final-snapshot children are omitted. rAF is reported separately.')
