@@ -2,6 +2,8 @@
 // Fixed PCIe-C domain, separate from the NHI's SID1/0x200-root DART.
 #include "pd_cio_pci_mapper.h"
 #include "pd_usb_iova.h"
+#include "pd_pciec_dma_inspect.h"
+#include "pd_cpu_par.h"
 #include <IOKit/IORegistryEntry.h>
 #include <machine/machine_routines.h>
 #include <mach/vm_param.h>
@@ -60,7 +62,7 @@ int PDCIOPCIDartMapper::read(void *p,uint32_t off,uint32_t *value)
 {
  auto s=(PDCIOPCIDartMapper *)p;
  bool word=!(off&3) && ((off>=0x100 && off<0x200) || (off>=0x400 && off<0x800));
- if(!value || !(word || off==0x20 || off==0x40 || off==0x60 || off==0xfc))return EINVAL;
+ if(!value || !(word || off==0x20 || off==0x40 || off==0x50 || off==0x54 || off==0x60 || off==0xfc))return EINVAL;
  if(!s->live())return ENODEV;
  __asm__ volatile("dsb sy; isb" ::: "memory");
  *value=s->controller->endpointDart.r32(off);
@@ -176,6 +178,10 @@ IOReturn PDCIOPCIDartMapper::registerDockUSB(IOPCIDevice *device)
 IOReturn PDCIOPCIDartMapper::callPlatformFunction(const OSSymbol *name,bool wait,
  void *p1,void *p2,void *p3,void *p4)
 {
+ if(name && name->isEqualTo(PD_PCIEC_DMA_INSPECT_FUNCTION)){
+  if(!p1 || !p2 || p3 || p4 || wait)return kIOReturnBadArgument;
+  return inspectDMA((IOService *)p1,p2);
+ }
  if(!name || !name->isEqualTo("PDCIOPCIDMAReady"))
   return IOMapper::callPlatformFunction(name,wait,p1,p2,p3,p4);
  if(!p1 || p2 || p3 || p4 || ml_at_interrupt_context() || !lock || !controller)
@@ -194,6 +200,58 @@ IOReturn PDCIOPCIDartMapper::callPlatformFunction(const OSSymbol *name,bool wait
  }
  IOLockUnlock(controller->lock);IOLockUnlock(lock);
  // Translation ownership/readback only. Not an endpoint DMA/drain ACK.
+ return ok?kIOReturnSuccess:kIOReturnNotReady;
+}
+IOReturn PDCIOPCIDartMapper::inspectDMA(IOService *device,void *output)
+{
+ auto snapshot=(pd_pciec_dma_inspect *)output;
+ if(!device || !snapshot || ml_at_interrupt_context() || !lock || !controller ||
+    snapshot->version!=PD_PCIEC_DMA_INSPECT_VERSION || snapshot->size!=sizeof(*snapshot))
+  return kIOReturnBadArgument;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ // Identity and current ownership first. Do not use the normal health check:
+ // it poisons on a valid fault before the fault itself could be captured.
+ bool ok=device==endpoint && ready && live() && tableCount && mappings;
+ if(ok){
+  bzero(snapshot,sizeof(*snapshot));
+  snapshot->version=PD_PCIEC_DMA_INSPECT_VERSION;snapshot->size=sizeof(*snapshot);
+  snapshot->mapping_count=mappingCount;snapshot->table_count=tableCount;
+  static const uint32_t offsets[PD_PCIEC_DMA_INSPECT_REGS]={
+   0x20,0x40,0x50,0x54,0x60,0xfc,0x100,0x400,0x404,0x408,0x40c,0x104};
+  for(unsigned n=0;n<PD_PCIEC_DMA_INSPECT_REGS;++n)
+   if(read(this,offsets[n],&snapshot->regs[n])){ok=false;break;}
+  for(unsigned n=0;ok && n<64;++n){
+   if(PDCIOPCIController::read(controller,PD_PCIEC_PORT,0x828+4*n,&snapshot->rid2sid[n]) ||
+      read(this,0x100+4*n,&snapshot->tcr[n]))ok=false;
+  }
+  if(ok){
+   snapshot->root_physical=tables[0].physical;
+   snapshot->root_cpu_par=pd_cpu_par(tables[0].memory->getBytesNoCopy());
+   // First two live allocations are normally the rings; last two include
+   // current packet bounces. Select retained objects, never an input IOVA.
+   unsigned first[2]={pciMappings,pciMappings},last[2]={pciMappings,pciMappings};
+   for(unsigned n=0;n<pciMappings;++n)if(mappings[n].memory){
+    if(first[0]==pciMappings)first[0]=n;
+    else if(first[1]==pciMappings)first[1]=n;
+    last[0]=last[1];last[1]=n;
+   }
+   unsigned slots[4]={first[0],first[1],last[0],last[1]};
+   for(unsigned n=0;n<PD_PCIEC_DMA_INSPECT_SAMPLES;++n){
+    auto &s=snapshot->sample[n];s.slot=slots[n];
+    if(s.slot==pciMappings)continue;
+    auto &m=mappings[s.slot];s.iova=m.address;s.bytes=m.bytes;
+    IOByteCount span=0;s.physical=m.memory->getPhysicalSegment(0,&span,kIOMemoryMapperNone);s.span=span;
+    pd_dart_walk walked={};s.walk_error=pd_dart_table_walk(&pt,m.address,&walked);
+    s.walked=walked.phys;s.l1e=walked.l1e;s.pte=walked.pte;
+    auto bytes=(volatile uint64_t *)m.memory->getBytesNoCopy();
+    s.cpu_par=pd_cpu_par((const void *)bytes);
+    if(m.bytes>=sizeof(s.words))for(unsigned q=0;q<4;++q)s.words[q]=bytes[q];
+   }
+  }
+ }
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ // Read-only CPU view of retained tables/backing plus current DART words.
+ // Neither a device translation walk nor a DMA completion acknowledgement.
  return ok?kIOReturnSuccess:kIOReturnNotReady;
 }
 IOReturn PDCIOPCIDartMapper::iovmMapMemory(IOMemoryDescriptor *memory,uint64_t offset,

@@ -174,6 +174,17 @@ reject out-of-contract suspension-query values. No native shared connector
 aggregate, controller power, ACIO, DMA or tunnel binding is installed yet.
 
 
+## Machine pause and next diagnostic
+
+The owner paused Thunderbolt trials on the M1 on2026-11-15 pending an explicit
+exclusive window. CIO40TX failed DHCP and qualified NON-AVE CIO29 was restored.
+No install, reboot, Linux visit, GUI/core hold or M1 workload is scheduled.
+Offline source/host/native SDK work continues. See [DIAGNOSTICS.md](DIAGNOSTICS.md)
+for the Linux/native comparison, ranked hypotheses, bounded DMA inspection,
+12-minute first-window sequence and USB/display follow-on gates. The inspection
+SDK/collection is built only; it has no target result. Run its actual-method
+ASan/UBSan fixture with `python3 host-test/dma-inspect.py`.
+
 ## Native ACIO1 firmware stage
 
 `build-kext.nix` now builds PDAppleCIO, matching the port-1 shared PHY provider

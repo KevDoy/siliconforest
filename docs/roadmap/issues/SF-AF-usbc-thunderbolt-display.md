@@ -3133,3 +3133,121 @@ The earlier k2/USB04 comparison and shared NVMe hot stack remain scoped
 negative evidence for a new Thunderbolt polling loop. The original reported
 AppKit slowdown's cause remains unresolved; neither the host tests nor this
 replacement sample establish a fix.
+
+### CIO40TX: actual transmit submission, hardware head remains zero
+
+The visible finite logger trial ran21:44–21:52Z with source f8278e228.
+It again authorized the TS3 Plus, enumerated the12 native PCI functions and
+reached en1 UP/running at1Gb/s. It FAILED DHCP: no OFFER, ACK, native IPv4
+address or packet completion. Two342-byte packets reached encapsulation and
+both FreeBSD/IOKit handoffs returned zero. Their transmit tails advanced
+0→1→2 while TDH stayed0; RX head remained0 and tail0x80. The coherent TX ring
+IOVA was0x04000000; packet IOVAs0x04208000 and0x0420c000. Queue and transmit
+controls were enabled. This establishes software submission, not device DMA.
+No fresh post-doorbell native DART fault or CPU page-attribute snapshot was
+captured, so a DART/cache root cause remains unproved.
+
+In the normal Linux installer visit a fixed read-only helper captured20
+non-destructive words through the actual bound igb BAR0 resource. Linux had
+matching TX head/tail0x82 and RX head/tail0x5a/0x59. Its ring lengths were0x1000,
+versus native0x4000; the queue controls also differed. Those differences are
+observations, not explanations. No ICR/EICR, clear-on-read statistics, PHY/NVM,
+write or reset operation was used. Existing ethtool dump attempts remained
+failed because that program was absent; the independent helper succeeded.
+
+Darwin/SSH booted normally but the standard desktop launchd job initially
+exited1 before creating its runtime. Script syntax and a native shell command
+passed. One explicit start of that existing job inside the same owned boot
+slot returned1/connection reset, yet actual job/compositor processes appeared
+and the strict process/socket/inject prerequisite then passed. No installed
+script was edited and no input was injected. This cold-start cause is unknown;
+the restored29 boot did not reproduce it.
+
+Failure captures were retained privately and the normal installer restored
+qualified NON-AVE CIO29 at21:52:25Z. Actual.next/socket/inject checks passed;
+the owned UART reader was reaped21:52:26Z before unlocking. The collection had
+58 executable modules, no AVE/pdave, unchanged boot arguments/default Linux;
+only Ethernet changed versus39 and the other57 executable UUIDs matched.
+All six repository checks, native SDK/collection checks and the finite logger
+ASan/UBSan fixture passed before the trial. No USB or external-display runtime
+success follows from these results. Next is bounded DART/mapping/cache-attribute
+inspection at submission, then the dock Ethernet, Keychron, display and physical
+hotplug milestones in the owner's order.
+
+### Machine trials paused by the owner; offline preparation continues
+
+On2026-11-15 the owner deferred Thunderbolt until he explicitly opens an
+exclusive machine window. CIO40TX was already finished, with qualified NON-AVE
+CIO29 restored21:52:25Z, actual standard.next/process/socket/inject verified,
+owned UART stopped21:52:26Z and all TB locks released. The coordination log
+records `CODEX-TB M1 back in SiliconForest; Thunderbolt trials paused by owner`.
+There is no pending reboot waiter or slot. No further kernel install, reboot,
+Linux visit, GUI/core hold or M1 workload is allowed by this paused assignment;
+only a rare read-only check if needed. Local workstation source/build work
+continues. AVE remains separately paused, with no build/probe/extraction.
+
+| Piece | Observed on this M1 | Built or host-tested, not observed |
+|---|---|---|
+| Type-C/ATC/NHI/router/PCIe | Attached TS3 Plus authorized, NHI running, real PCIe tunnel,12 native PCI functions including4 xHCI and I210; repeated40 | Shared ownership/lifecycle extensions do not qualify physical hot-unplug |
+| Dock Ethernet | en1 UP/running/1Gb/s; two TX submissions and TDT0→1→2, TDH0; NO DHCP or packet completion | New finite DMA/PAR/RID/PCI/mask diagnostic SDKs and58-module collection; no target execution |
+| Dock USB/Keychron | No native USB device or physical typing yet | Exact selected FL1100, native PCI admission/DMA/MSI, generic HID/read-only storage, shared-broker-preserving SDK; host allocator/controller/composition checks pass; USB collection unbuilt |
+| DP/dcpext/Samsung | No native HPD/EDID/external connector/output | DP-IN/NHI protocol, PHY/crossbar/resource/mailbox/DART helpers have source/host/SDK evidence; actual native provider/resource/route glue remains |
+| DESK K1–K13 | Only internal panel exists in recorded output inventory | Compositor per-output path ready in its own stream; kernel must publish real same-card connector/CRTC/planes/flip IDs/hotplug |
+| K14 pinch/rotation | Not installed or physically verified |776-byte version2 contract read and acknowledged; source/host/native SDK preparation pending, version1 fallback preserved by compositor |
+| Ten physical dock cycles | Not run | Software retrain or quarantined backing is not removal/replug proof |
+| Idle regression | Valid guarded29 repeat21:14:33–15:33, kernel2.196%oneCPU/machineidle98.310%; owner-overlap20:21 run discarded | Original AppKit slowdown cause unresolved; new desktop versions require new measurements |
+
+The offline Ethernet comparison and ranked hypotheses are in
+[DIAGNOSTICS.md](../../../integrations/puredarwin/m1-thunderbolt/DIAGNOSTICS.md).
+It follows pinned Omacom igb, apple-dart and pcie-apple paths through allocation,
+direction/sync, actual descriptor/tail programming, interrupt masks/MSI, MAC/PHY,
+BME/bridge windows and the64-SID USB4 DART layout. The STATUS PHYRA delta is set
+in **Linux**, not native; both have the GIO master-enable bit. No cause has been
+proved by the difference. CPU table coherence in the Linux DART configuration
+also prevents treating absent table-cache flushes alone as the root cause.
+
+The one diagnostic kernel gathers a finite snapshot at the existing eight
+doorbell trace admissions: DART fault/address, all64 RID/TCR words, SID0 roots,
+retained ring/packet backing and CPU walks, CPU PAR attributes and first32 CPU
+bytes, guarded endpoint/MSI/upstream-bridge config and non-destructive queue/MAC/
+mask words. It adds no polling timer, work thread, fault ACK, flush or functional
+DMA-policy change. CPU walks/bytes are not device-fetch proof. Foreign endpoint,
+bad ABI, IRQ context and lost power/ownership refuse inspection.
+
+Local actual-method ASan/UBSan tests and both native SDKs pass. The final
+collection `/nix/store/nm95yi9gdi9lzz4lys9as5fyy9bxarls-puredarwin-kc-cio41dma-access-guarded`
+builds with zero overlapping segments,58 executable modules and semantic
+prelink equality after metadata compaction. Only PDAppleCIO and PDFBSDem differ
+from40; the other56 executable UUIDs match. Frozen source comparison verifies
+only the diagnostic files plus the existing IRQ health fix, with no uninstalled
+USB registration imported into the Ethernet baseline. All six required repo
+checks pass. It is **uninstalled**, no capsule uploaded and no boot scheduled.
+
+### Plan for the next exclusive window
+
+First allow12min for one diagnostic trial including normal29 recovery: fresh
+coordination/owner guards and core→GUI→bench order; one normal Linux installer
+session plus fixed read-only comparison; UART after installer and before first
+boot; actual standard desktop checks; TS3 authorization/native12-function
+inventory/mapper/MSI/late BME; one bounded DHCP attempt and all paired diagnostic
+captures; if a lease exists,16 ICMP replies strictly bound to that interface;
+retain every failure; normal29 recovery/standard-state verification/UART reap/
+unlock. The detailed sequence and prerequisites are in DIAGNOSTICS.md. No
+elapsed time or completed local build authorizes this boot.
+
+After evidence selects an Ethernet fix, qualify it separately before coupling
+the prepared USB profile. A USB trial needs roughly10–12min including recovery:
+actual selected FL1100 command/event completion and port/device/config/HID
+descriptors, then owner physical Keychron typing; request a stick only after
+that, mounted read-only. DP needs its missing native provider/graph glue built
+before a useful20min display window. Capture real tunnel/HPD/training/EDID,
+DESK `--outputs` and independent external scanout before physical hotplug cycles.
+No concurrent policy changes or synthetic typing count as these milestones.
+
+Open requests were answered offline: K1–K14 contract acknowledged; SIGSTOP is
+an unresolved compositor-specific finding (minimal native reproducers stop),
+with future owned EGL-only/HID-only isolation deferred. Firefox's stock Linux
+benchmark reference is noted for an authorized Linux window with a separate
+uninterrupted allowance of up to20min, installed browser only, matched scale/
+viewport/renderer/power/QoS and raw scores; no extra reboot/install or invented
+Linux result. Optional AVD changes stay separate; no AVE work.

@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 void pdos_log(const char *);
+void pd_i210_dma_trace(void);
 #ifdef __cplusplus
 }
 #endif

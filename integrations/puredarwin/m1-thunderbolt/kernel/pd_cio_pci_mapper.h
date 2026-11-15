@@ -34,6 +34,7 @@ class PDCIOPCIDartMapper : public IOMapper {
  bool inventoryBlocked();
  bool knownEndpoint(IOService *) const; // Mapper lock held; pointer identity only.
  bool live(); // Called with mapper and controller locks held.
+ IOReturn inspectDMA(IOService *,void *);
  void poison();
  static uint64_t *table(void *,uint64_t);
  static uint64_t allocateTable(void *);
