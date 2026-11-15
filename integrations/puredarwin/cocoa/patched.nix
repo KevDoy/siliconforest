@@ -318,6 +318,9 @@
 #         target after Escape on a sheet's Cancel); a button clicked by its key equivalent stays until its action
 #         is done (PD_KEYEQ_TRACE); the find bar's controls stop messaging a finder that is gone; PD_CA_TRACE
 #         says when a hosted layer is drawn on the CPU
+#   0129  WindowServer: frames are kept again unless PD_WS_TRIM_FRAMES=1 (0124's letting go of frames unused for
+#         2 s made Activity Monitor create an 8 MB frame at each refresh: CPU 2.5 -> 11 % with bursts, RSS
+#         swinging 75-111 MB; measured on the M1)
 #   0128  AppKit (TERM6, the owner's finding): a table column's sort indicator has its own slot at the header
 #         cell's trailing edge (-sortIndicatorRectForBounds:, -drawSortIndicatorWithFrame:inView:ascending:
 #         priority:), the title's rect excludes it while the column shows one (Activity Monitor's chevron was
@@ -414,6 +417,7 @@ let
     ./patches/0121-windowserver-opaque-region-blur-query-test-scale.patch
     ./patches/0124-windowserver-popup-role-ahead-idle-frames.patch
     ./patches/0126-windowserver-popup-configure-wait-timing.patch
+    ./patches/0129-windowserver-frames-kept-by-default.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
