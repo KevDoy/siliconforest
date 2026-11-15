@@ -1529,3 +1529,24 @@ J293), with the Linux adapter serializing each address-prefix/read transfer;
 no I2C_SLAVE_FORCE, command task or IRQ/mask write. ACIO samples use the
 same256 validated addresses and active-NHI/authorized-dock guard. Raw
 snapshots remain private. No extra visit/boot interrupts FX's stability slot.
+
+### I210 driver preparation: separate SDK artifact, not installed
+
+The existing PureDarwin em/igb source includes I2108086:1533. A dedicated SDK
+variant now builds it with its45 clean source files pinned and checked. Its
+private fbsdkpi patch requires the actual native PCIe-C mapper, rejects physical
+fallback and validates full owned spans within nonzero32-bit IOVA space.
+The named mapper is not implemented/registered yet, so this is intentionally
+not DMA admission. Transfers bounce through distinct page-owned descriptors;
+failed prepare/segment/sync/retire keeps command/backing and poisons further
+mapping. Posted PCI BAR mappings are confined to this Ethernet artifact;
+the native root/config path stays nonposted. No tunnel-compatibility bypass
+or boot-collection addition is made.
+
+Exact frozen XNU source confirms clearMemoryDescriptor(true) discards errors
+from complete(). The adapter calls/checks complete() explicitly and clears
+only an inactive descriptor before releasing backing. The actual callback-
+ordering helper passes failure/no-release sanitizer tests; this is not real
+DART TLB or device/IRQ/work-drain proof. Those native mapper, MSI/teardown and
+positive DMA/link/DHCP qualifications remain outstanding. The uninstalled
+Ethernet driver cannot be the installed kernel's idle-load cause.

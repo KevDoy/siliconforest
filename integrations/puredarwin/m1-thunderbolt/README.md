@@ -360,3 +360,25 @@ existing1Hz sampler. Its command gate rejects calls after stop; it publishes
 valid/error/count and invokes no task or IRQ-clear/mask write. These reads
 are sequential observations, not an atomic snapshot of firmware activity.
 Neither diagnostics nor host/SDK tests establish the dock link.
+
+
+`build-ethernet-kext.nix` now SDK-builds the existing em/igb/I210 driver in
+a separate, uninstalled variant. Its45 clean public source files are pinned
+and checked byte-for-byte; the minimal DRM package had omitted this driver.
+Only this variant patches fbsdkpi: every DMA path requires the actual
+PDCIOPCIDartMapper (not yet implemented/registered), rejects identity fallback
+and validates nonzero32-bit IOVAs for the entire owned span. DMA uses distinct
+page-owned bounce descriptors, copies via the caller's original descriptor
+only at setup/sync, and retains command/backing on prepare/segment/sync/
+retirement failures. A poisoned device refuses new mappings. PCI BAR maps
+use posted Device-nGnRE; root/config accesses remain in the separate native
+nonposted host adapter. No tunnel-compatibility admission flag is added.
+
+The exact frozen kernel's IODMACommand::clearMemoryDescriptor(true) discards
+complete() errors. The owned path explicitly checks complete(), then clears
+only an inactive descriptor, and releases backing only after both succeed.
+The actual shared ordering helper's host tests inject callback failures;
+they establish no device/IRQ/work drain or real DART TLB proof. Native mapper,
+MSI/IRQ/work teardown, positive DMA and Ethernet link/DHCP remain required.
+The Ethernet driver is not in any boot collection and no I210 has enumerated
+on Darwin. These changes do not explain idle CPU in the installed kernel.

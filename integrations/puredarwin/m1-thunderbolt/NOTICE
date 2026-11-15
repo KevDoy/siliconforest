@@ -155,3 +155,13 @@ sequence, GPL-2.0, retaining Andreas Noever and Intel Corporation
 attribution through the family NOTICE. switch.c and tb_regs.h digests
 are included in native/provenance.json. The standalone model/route
 allowlist is original MIT metadata policy, not a hardware identity proof.
+
+The dedicated, uninstalled PDFBSDem Ethernet SDK variant uses the existing
+PureDarwin/FreeBSD e1000 driver at e7aa00a60f0b56ef35aa24252e81467787bf71ea,
+with45 source files pinned in native/ethernet-provenance.json. Original
+Intel/FreeBSD per-file BSD licenses and Haiku glue notices remain unchanged.
+The scoped fbsdkpi Ethernet patch retains the seam's MIT selection and
+Haiku2019-2022/Augustin Cavalier bus_dma.cpp notices. New page-owned DMA,
+retirement sequencing and build adapter code select MIT. No firmware or
+runtime captures are included. This is a separate artifact; the shared
+fbsdkpi source and other kernel drivers are not modified by this recipe.

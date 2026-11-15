@@ -52,3 +52,5 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined
 "$tmp/pciec-tunables"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/native" "$here/host-test/dock-policy.c" -o "$tmp/dock-policy"
 "$tmp/dock-policy"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/pci-dma-retire.c" -o "$tmp/pci-dma-retire"
+"$tmp/pci-dma-retire"
