@@ -11,6 +11,7 @@
 #include "pd_usb_iova.h"
 #include <sys/errno.h>
 #include <mach/vm_param.h>
+#include "pd_cio_dart_reset.h"
 
 #define LOG(fmt, ...) IOLog("PDCIODart: " fmt "\n", ##__VA_ARGS__)
 #define PARAMS1 0x00
@@ -81,11 +82,11 @@ uint64_t PDCIODart::allocTable(void *ctx)
     return pa;
 }
 
-int PDCIODart::invalidate()
+int PDCIODart::invalidate(uint32_t streams)
 {
     visible();
     for (unsigned i = 0; i < 1; ++i) {
-        regs[i].w32(STREAM_SELECT, 1u << 1);
+        regs[i].w32(STREAM_SELECT, streams);
         regs[i].w32(STREAM_COMMAND, COMMAND_INVALIDATE);
         unsigned poll;
         for (poll = 0; poll < 10000; ++poll) {
@@ -94,7 +95,7 @@ int PDCIODart::invalidate()
         }
         if (poll == 10000) {
             poisoned = true;
-            LOG("bank %u stream %u invalidate timed out; mappings quarantined", i, i);
+            LOG("bank %u streams %04x invalidate timed out; mappings quarantined", i, streams);
             return ETIMEDOUT;
         }
     }
@@ -119,7 +120,7 @@ int PDCIODart::prepare()
     }
     // Validate the sole ACIO1 bank before changing its NHI stream.
     for (unsigned i = 0; i < 1; ++i) {
-        if (regs[i].len < 0x240 || ((regs[i].r32(PARAMS1) >> 24) & 15) != 14 ||
+        if (regs[i].len < 0x300 || ((regs[i].r32(PARAMS1) >> 24) & 15) != 14 ||
             (regs[i].r32(CONFIG) & CONFIG_LOCK)) {
             LOG("bank %u not an unlocked 16KiB T8103 DART", i);
             IOLockUnlock(lock);
@@ -137,15 +138,21 @@ int PDCIODart::prepare()
     if (!busy || !pt.l1) { IOLockUnlock(lock); return ENOMEM; }
     snapshot("before-prepare");
     visible();
-    // Reset/attach only NHI SID1. Every other stream and all PCIe-C DART
-    // state remain untouched. Reprogram the retained root after a power cycle.
-    for (unsigned i = 0; i < 1; ++i) {
-        regs[i].w32(TCR(1), 0);
-        for (unsigned n = 0; n < 4; ++n) regs[i].w32(TTBR(1, n), 0);
-        regs[i].w32(STREAMS_ENABLE, regs[i].r32(STREAMS_ENABLE) | (1u << 1));
-        regs[i].w32(ERROR, regs[i].r32(ERROR));
-    }
-    ret = invalidate();
+    // This owner has the entire NHI DART, as Linux does after RTKit boot.
+    // CIO06 observed unused reset-state TCRs enabled with no TTBR, then a
+    // SID15 fault before control-ring activation. Never map/bypass that stream.
+    // All PCIe-C DART state remains untouched.
+    pd_cio_dart_reset_io io={this,
+        [](void *ctx,uint32_t off,uint32_t *v)->int {
+            *v=((PDCIODart *)ctx)->regs[0].r32(off);return 0;
+        },
+        [](void *ctx,uint32_t off,uint32_t v)->int {
+            ((PDCIODart *)ctx)->regs[0].w32(off,v);return 0;
+        },
+        [](void *ctx,uint32_t streams)->int {return ((PDCIODart *)ctx)->invalidate(streams);}
+    };
+    ret = pd_cio_dart_reset(&io);
+    if (ret) poisoned = true; // retain bank/table ownership on uncertain reset
     if (!ret) {
         for (unsigned i = 0; i < 1; ++i) {
             regs[i].w32(TTBR(1, 0), TTBR_VALID | (uint32_t)(tables[0].pa >> 12));

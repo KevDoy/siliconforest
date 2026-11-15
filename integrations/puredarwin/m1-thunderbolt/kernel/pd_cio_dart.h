@@ -12,8 +12,9 @@
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLocks.h>
 
-/* ACIO1 NHI DMA only: /arm-io/dart-acio1, stream 1. This is neither
- * USB1's two-stream mapper nor dart-apciec1 for downstream PCI functions.
+/* ACIO1 NHI DART ownership: /arm-io/dart-acio1, DMA mapped only on SID1.
+ * Full-bank reset disables all unused streams before attaching SID1. This
+ * is neither USB1's paired mapper nor dart-apciec1 for downstream PCI functions.
  * The ACIO owner must disable/stop all NHI rings and join workers before
  * prepare()/suspend(). Tables and quarantined backing live until reboot. */
 class PDCIODart {
@@ -26,7 +27,7 @@ class PDCIODart {
     bool ready, poisoned;
     static uint64_t *table(void *ctx, uint64_t pa);
     static uint64_t allocTable(void *ctx);
-    int invalidate();
+    int invalidate(uint32_t streams = 1u << 1);
     void snapshot(const char *stage); // bounded startup/fault evidence, caller holds lock
 public:
     PDCIODart();

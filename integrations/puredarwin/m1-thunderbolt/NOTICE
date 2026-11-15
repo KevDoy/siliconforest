@@ -119,3 +119,9 @@ native/provenance.json). GPL-2.0:
   Copyright (C) 2021 Mark Kettenis <kettenis@openbsd.org>
 The native ordered MMIO, PHY/power ownership, bridge, MSI, DMA and hotplug
 adapters are still required. Host register models are not hardware evidence.
+
+kernel/pd_cio_dart_reset.h adapts the unlocked full-bank reset and finish
+sequence from drivers/iommu/apple-dart.c at the same pin (native/provenance.json),
+with native readback/error propagation. It retains the source copyright and
+GPL-2.0 notice. Host tests exercise the actual reset helper; the native
+owner must first establish the powered, unlocked, drained NHI DART.

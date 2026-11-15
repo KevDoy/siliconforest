@@ -999,7 +999,9 @@ adds creation/start stage+errno and one-time power/ring/IRQ snapshots. No new
 periodic poll is introduced. Native build/collection retry is in progress.
 
 PCIe-C survey refinement from native DT plus the pinned Linux DTS: endpoint
-DART is 0x521008000/SID15, separate from NHI's 0x501a80000/SID1. MSI base is
+DART is 0x521008000; raw ADT names mapper SID15, but this does not
+establish Linux's endpoint domain assignment (see live-DT correction below).
+It is separate from NHI's 0x501a80000/SID1. MSI base is
 818/count32; the root interrupt is 850. Exact resource names come from DTS:
 config 0x530000000, RC 0x520000000, port0 0x521000000, fabric 0x520004000,
 debug 0x520200000. Linux additionally names LTSSM 0x521010000 and OE-fabric
@@ -1066,3 +1068,44 @@ and timeout tests cover RUN, busy, tunnel reset and link-up under ASan/UBSan.
 These are host register-model results. The source is not in the installed
 kernel, has no IOPCIFamily bridge or SID15 endpoint DMA mapper, and does not
 enumerate a dock. Cable reprobe/removal and ten-cycle evidence remain open.
+
+### Live Linux PCIe-C topology correction (08:33Z)
+
+The same normal install visit captured the public live Linux properties for
+`pcie@530000000`: bus range 0..127, seven resource names
+`config,rc,port0,fabric,debug,ltssm,oe-fabric`, requester mask `0x3f`, and
+`iommu-map` mapping requester IDs 0..63 onto DART stream IDs 0..63. This
+corrects the earlier inference from the native ADT mapper's SID15: Linux
+does not assign all dock endpoints to SID15. The pinned `apple,t8103-usb4-dart`
+variant supports 64 streams and places TTBRs at `0x400`, unlike NHI's
+16-stream DART with TTBRs at `0x200`. The endpoint mapper must account for
+that variant and the native bridge's actual requester assignments; the NHI
+mapper cannot simply be reused. Linux still reports the authorized CalDigit
+TS3 Plus as generation 3. Native endpoint enumeration remains absent.
+
+The optional Linux MMIO snapshot was skipped because the NHI's runtime-PM
+status did not establish active power; no unqualified MMIO reads occurred.
+The public live-DT snapshot was saved privately.
+
+### CIO06 diagnostic result and full-bank reset correction
+
+CIO06 repeats the failure with no panic. Before preparation, every one of
+the NHI DART's 16 TCRs reads `0x00080080` and every root is zero. The old
+adapter changes only SID1 to its new root/TCR, leaving SID15 translating
+with no root. The first fault is again `0x8f0f0001`, at VA `0x00100100`,
+before the control-ring configuration diagnostic is reached. Native fault
+admission closes and NHI readiness remains false. CIO03 was restored at
+08:37:05Z, and the owned UART reader was reaped at 08:37:07Z.
+
+The source correction follows the pinned Linux full unlocked-bank reset:
+disable all 16 streams, clear all 64 TTBRs, enable streams globally with
+isolation controlled by TCR, acknowledge pending errors, flush all streams,
+then attach only SID1's root. It adds readback refusal for stale TCR/root/error
+state. Failed reset/invalidation retains the bank and backing through native
+stop, even if preparation failed before descriptor allocation. No SID15
+mapping, bypass, PCIe-C DART write or polling timer is added. The production
+reset helper is exercised by ASan/UBSan register-model tests covering all
+access failures, stale SID15/root/error state, and retained TLB timeouts.
+Native SDK/collection and all six repository checks pass for the final
+correction (274 Python tests, 77 C groups, six mutation detections); the
+collection has zero overlaps. Hardware qualification remains pending.

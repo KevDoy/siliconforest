@@ -187,7 +187,10 @@ int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
  if(!base || !pdf || (base[0]&0x3ff)!=12 || base[0xd0010/4])return EBUSY;
  for(unsigned i=0;i<12;++i)if(base[(0x10010+i*0x4000)/4]&(1u<<31) || base[(0x80010+i*0x4000)/4]&(1u<<31))return EBUSY;
  s->owner->setProperty("cm-start-stage","dart-prepare");
- int ret=s->dart.prepare();if(ret){s->owner->setProperty("cm-start-error",(uint32_t)ret,32);return ret;}s->dmaLive=true;
+ // prepare may change hardware before failing. Its poisoned/reset state
+ // must participate in stop, even when no NHI descriptor was allocated.
+ s->dmaLive=true;
+ int ret=s->dart.prepare();if(ret){s->owner->setProperty("cm-start-error",(uint32_t)ret,32);return ret;}
  s->owner->setProperty("cm-start-stage","irq-resolve");
  ret=pd_cio_nhi_irqs_resolve(s->irqs);if(ret)return -ret;
  ret=pd_rtkit_platform_irq_request(s->irqs[24],PDCIOCM::dartInterrupt,s,"acio1-dart");if(ret)return -ret;
