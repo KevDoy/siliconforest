@@ -113,6 +113,7 @@ class Marionette:
         return result
 
     def measure_video(self, handle=None):
+        self.command('WebDriver:SetTimeouts', {'script': 74000})
         if handle is None:
             handles = self.video_handles()
             if not handles:
@@ -121,7 +122,7 @@ class Marionette:
         self.command('WebDriver:SwitchToWindow', {'handle': handle})
         return self.command('WebDriver:ExecuteAsyncScript', {
             'script': 'const done=arguments[arguments.length-1]; window.fxMeasureVideo().then(done);',
-            'args': [], 'scriptTimeout': 16000, 'newSandbox': False,
+            'args': [], 'scriptTimeout': 74000, 'newSandbox': False,
         })
 
     def pages(self, capture=None):

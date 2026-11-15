@@ -220,14 +220,52 @@ stock test rows exist, throws Node.insertBefore and stalls; it is explicitly
 aborted with SIGINT to its PID+start-time-verified owned runner, whose cleanup
 runs. It has no score. The next harness waits for the actual Start Test link.
 
-Native synthetic seat controls prove Command-L focuses the URL bar and
-Command-T adds a tab. Command-W discards the automation's current browsing
-context, so the remaining checks have not passed yet; the harness now switches
-back to the original owned tab before inspecting it. No physical input claim.
-The native menu class/instance geometry control finds a22-point discrepancy;
-first0206 candidate fixes the class conversion but accidentally double-counts
-that space in NSThemeFrame, leaving78px of100px content. That failed candidate
-is preserved and a corrected frame-layout variant is building.
+Native synthetic seat controls prove Command-L focuses the URL bar,
+Command-T adds a tab, and the owned app-menu socket returns the Firefox menu
+tree with its in-window strip shown. Command-W actually closes the entire
+window: content and chrome handle lists become empty while the parent lives.
+The compositor's WMCLOSE record names that exact owned browser PID. Its Mac
+shortcut admission only recognizes bundle IDs catalogued under the four
+installed application directories; the private Firefox bundle is absent there.
+This is desktop interception, separate from the retained-layer teardown crash.
+No physical-input claim or owner application/catalog/default change is made.
+
+The corrected0206 menu geometry passes eight native controls, but Firefox006
+with that candidate stalls before Marionette. Its base also differs from the
+known0131 control, so browser causality is not isolated. The geometry candidate
+is excluded from the installer. TERM7 has adopted proven0200/0201/0202/0203/0204
+and0207 into the main framework series; the private recipes now follow those
+assembled sources and preserve subsequent owner fixes.
+
+The separate unmuted `audio-hw-002` completes60.1seconds at element volume0.2:
+1802 reported video frames,0 drops,1802 AVD jobs/done,0 errors/timeouts. The
+installed AudioToolbox output provider returns AudioOutputUnitStart/status0;
+235 actual per-process HAL clock samples advance at approximately48kHz. With
+HAL consumed frames interpolated at requestVideoFrameCallback wall times,
+the median relative offset changes-3.17ms between5–15s and45–55s windows.
+Constant latency is unknown; this is not acoustic or physical lip-sync evidence.
+The earlier audio001 run hit Marionette's actual30s session timeout; setting
+WebDriver timeouts explicitly fixes the harness. That failure is retained.
+The same run reports1428 rVFC callbacks, median40.12ms/p9566.66ms, so it does
+not establish30fps compositor presentation despite the zero-drop counter.
+
+`quality-002` opens and closes a second ordinary window and a genuine private
+window, then downloads53 exact UTF-8 bytes through a content Blob/link and the
+browser download stack. SHA256 is
+`c247e9ae1688056bdd65ed475bb5f7306e097c46dd3f018484fe22def17ce40b`.
+Quality001 inspected a newly created zero-byte file before completion and fails;
+the corrected check waits for the expected byte count. The required30-minute
+ordinary-site run is in progress; no completed stability claim is made yet.
+
+The first GPU CGL trial traps in IOSurface's shared-header atomic counter on a
+write-combined GEM mapping. A candidate uses the documented Asahi WRITEBACK
+allocation flag while preserving shared atomics; it is built but not yet
+qualified. A later repeated CPU-control child blocks opening the render node;
+its PID/start-time-owned family is cleaned, with one pending-kill child left
+for the already scheduled kernel reboot. Both failures remain evidence. New
+opt-in framebuffer export and whole-window GPU presentation candidates build,
+but are excluded from the stability run and daily installer until native pixel,
+alpha, reuse and fallback controls qualify them.
 
 ## Gaps and ownership
 

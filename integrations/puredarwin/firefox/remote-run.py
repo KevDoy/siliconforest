@@ -37,6 +37,8 @@ def main():
     ap.add_argument('--url', action='append', default=[])
     ap.add_argument('--framework-path')
     ap.add_argument('--library-path')
+    ap.add_argument('--gpu-surfaces', action='store_true', help='experimental actualGPU IOSurface allocation')
+    ap.add_argument('--gpu-presentation', action='store_true', help='experimental private whole-window GPU layers')
     ap.add_argument('--software', action='store_true')
     ap.add_argument('--no-sandbox', action='store_true', help='diagnosis only; labelled in result')
     ap.add_argument('--insert-library', help='private diagnostic DSO (e.g. the real SBPL compiler)')
@@ -51,6 +53,13 @@ def main():
     ap.add_argument('--io-policy', choices=['passthrough', 'utility', 'standard', 'default'], help='process-local diagnostic interposer mode')
     ap.add_argument('--measure-video', action='store_true')
     ap.add_argument('--measure-all-videos', action='store_true', help='measure each owned video tab, with separate CPU/AVD counters')
+    ap.add_argument('--browse-stability', action='store_true', help='announced30minute ordinary-site browsing with abnormal-content-exit observer')
+    ap.add_argument('--jit-probe', action='store_true', help='actual Baseline/Ion frames from a separate Gecko profile')
+    ap.add_argument('--streaming', action='store_true', help='owned public non-DRM YouTube playback')
+    ap.add_argument('--media-trace', action='store_true', help='decoder identity logs without GL/window traces')
+    ap.add_argument('--quality', action='store_true', help='owned new/private windows and content download')
+    ap.add_argument('--native-ui', action='store_true', help='finite synthetic native seat/menu checks on the owned Firefox PID')
+    ap.add_argument('--benchmark', choices=['speedometer', 'motionmark', 'jetstream'])
     ap.add_argument('--measure-fixture', action='store_true')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
@@ -87,9 +96,15 @@ def main():
                MOZ_LOG='PlatformDecoderModule:5,AppleMedia:5,DMABuf:4',
                PD_WS_TIMING='1', PD_CGL_TRACE='1', PD_SANDBOX_TRACE='1', PD_CA_TRACE='1',
                MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1')
+    if args.gpu_surfaces:
+        env['SFFX_IOSURFACE_GPU'] = '1'
+    if args.gpu_presentation:
+        env['SFFX_GPU_PRESENT'] = '1'
     if args.quiet_trace:
         for name in ['MOZ_LOG', 'PD_WS_TIMING', 'PD_CGL_TRACE', 'PD_SANDBOX_TRACE', 'PD_CA_TRACE']:
             env.pop(name, None)
+    if args.media_trace:
+        env['MOZ_LOG'] = 'PlatformDecoderModule:5,AppleMedia:5'
     if args.io_policy:
         env['SFFX_IO_POLICY'] = args.io_policy
     if args.no_startup_cache:
@@ -112,7 +127,7 @@ def main():
     cmd = [str(args.bundle / 'Contents/MacOS/firefox'), '--no-remote', '--profile', str(profile),
            '--marionette'] + (args.url or ['about:support'])
     result = dict(command=cmd, seconds=args.seconds, software_requested=args.software,
-                  sandbox_disabled=args.no_sandbox, synthetic_input=args.scroll_fixture, prefs=prefs,
+                  sandbox_disabled=args.no_sandbox, gpu_surfaces=args.gpu_surfaces, gpu_presentation=args.gpu_presentation, synthetic_input=args.scroll_fixture or bool(args.benchmark) or args.native_ui, prefs=prefs,
                   diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
                   io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
@@ -190,20 +205,48 @@ def main():
                                     return ''
                                 return subprocess.run(['ps', '-p', ','.join(map(str, active)),
                                     '-o', 'pid,ppid,time,rss,stat,command'], capture_output=True, text=True).stdout
+                            if args.benchmark:
+                                from benchmark import measure
+                                client.socket.settimeout(max(1, min(90, deadline - time.monotonic())))
+                                result['benchmark'] = measure(client, args.benchmark, deadline, args.run / 'benchmark.json')
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.browse_stability:
+                                from stability import measure
+                                client.socket.settimeout(max(1, min(25, deadline - time.monotonic())))
+                                result['stability'] = measure(client, args.run / 'stability.json', deadline, snapshot)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.jit_probe:
+                                from jit_probe import measure
+                                client.socket.settimeout(max(1, min(30, deadline - time.monotonic())))
+                                result['jit_probe'] = measure(client, args.run / 'jit-probe.json')
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.streaming:
+                                from streaming import measure
+                                client.socket.settimeout(max(1, min(50, deadline - time.monotonic())))
+                                result['streaming'] = measure(client, args.run / 'streaming.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.quality:
+                                from quality import measure
+                                result['quality'] = measure(client, args.run / 'quality.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.native_ui:
+                                from native_ui import measure
+                                result['native_ui'] = measure(client, args.run / 'native-ui.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
                                 client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
                                 result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                                 result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
                                 result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                             if args.measure_video:
-                                client.socket.settimeout(max(1, min(18, deadline - time.monotonic())))
+                                client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
                                 result['video_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                                 result['video_measurement'] = client.measure_video()
                                 result['video_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                             if args.measure_all_videos:
                                 result['video_measurements'] = []
                                 for handle in client.video_handles():
-                                    client.socket.settimeout(max(1, min(18, deadline - time.monotonic())))
+                                    client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
                                     counters = lambda: subprocess.run(['sysctl', 'kern.pd_avd.stats'],
                                         capture_output=True, text=True).stdout.strip()
                                     entry = dict(cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()),
@@ -215,6 +258,7 @@ def main():
                         except Exception as error:
                             result['marionette_error'] = str(error)
                             automation_failed = True
+                            deadline = min(deadline, time.monotonic() + 2)
                         finally:
                             try:
                                 if not session_started:
@@ -241,6 +285,10 @@ def main():
                 capture = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture', str(shot)],
                                          capture_output=True, text=True, timeout=15, env=env)
                 result['capture'] = dict(status=capture.returncode, stdout=capture.stdout, stderr=capture.stderr)
+        except BaseException as error:
+            automation_failed = True
+            result['interruption'] = repr(error)
+            raise
         finally:
             # Refresh ownership before signalling. No global name matching or pkill.
             if p.poll() is None:
@@ -262,9 +310,21 @@ def main():
                 result['exit_after_cleanup'] = p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 result['cleanup_timeout'] = True
+            result['automation_complete'] = session_started and not automation_failed
+            result['browser_survived_run'] = result.get('exit_before_cleanup') is None
+            result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
+            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming']:
+                if field in result:
+                    result['measurement_passed'] &= bool(result[field].get('complete'))
+            videos = [entry['video'] for entry in result.get('video_measurements', [])]
+            if 'video_measurement' in result:
+                videos.append(result['video_measurement'])
+            for video in videos:
+                result['measurement_passed'] &= bool(video.get('ended')) and not video.get('error') and not video.get('playError')
             (args.run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({k: v for k, v in result.items() if k not in ['samples', 'prefs']}, indent=2))
+    return 0 if result['measurement_passed'] else 1
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

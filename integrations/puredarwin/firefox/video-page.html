@@ -13,13 +13,16 @@ pre{white-space:pre-wrap;font-size:14px}
 const video=document.querySelector('#video'), output=document.querySelector('#result');
 const parameters=new URLSearchParams(location.search);
 const source=parameters.get('src') || 'media/bbb-1080p-h264-10s.mp4';
-window.fxVideoResult={source,muted:true,events:[],presented:[],quality:[],canPlay:{
+video.muted=parameters.get('muted')!=='0';
+video.volume=Math.max(0,Math.min(1,Number(parameters.get('volume')??1)));
+
+window.fxVideoResult={source,timeOrigin:performance.timeOrigin,muted:true,events:[],presented:[],quality:[],canPlay:{
   h264:video.canPlayType('video/mp4; codecs="avc1.640028"'),
   hevc:video.canPlayType('video/mp4; codecs="hvc1.1.6.L120.B0"'),
   vp9:video.canPlayType('video/webm; codecs="vp9"')
 }};
 function update(){
-  fxVideoResult.muted=video.muted;
+  fxVideoResult.muted=video.muted;fxVideoResult.volume=video.volume;
   fxVideoResult.currentTime=video.currentTime;
   fxVideoResult.duration=Number.isFinite(video.duration)?video.duration:null;
   fxVideoResult.readyState=video.readyState;
@@ -47,8 +50,9 @@ if(video.requestVideoFrameCallback){
   video.requestVideoFrameCallback(presented);
 }
 video.preload=parameters.get('autostart')==='0'?'metadata':'auto';
-video.src=source;
+if(parameters.get('deferred')!=='1')video.src=source;
 window.fxMeasureVideo=async()=>{
+  if(!video.getAttribute('src'))video.src=source;
   video.pause();video.currentTime=0;
   fxVideoResult.events=[];fxVideoResult.quality=[];fxVideoResult.presented=[];
   const initial=video.getVideoPlaybackQuality();
@@ -56,13 +60,17 @@ window.fxMeasureVideo=async()=>{
   fxVideoResult.measureStart=performance.now();
   // Some failed decoder paths leave play() pending. Bound the measurement
   // independently so an audio failure still produces a useful result.
-  let timer;
+  let timer,ended;
+  const timeout=Math.max(5000,Math.min(180000,Number(parameters.get('deadline'))||18000));
+  const completion=new Promise(resolve=>{
+    ended=()=>resolve();video.addEventListener('ended',ended,{once:true});
+  });
   try{await Promise.race([
-    (async()=>{await video.play();await new Promise(resolve=>setTimeout(resolve,12000));})(),
-    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Playback measurement deadline')),14000);})
+    (async()=>{await video.play();await completion;await new Promise(resolve=>setTimeout(resolve,100));})(),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Playback measurement deadline')),timeout);})
   ]);}
   catch(error){fxVideoResult.playError=String(error);}
-  finally{clearTimeout(timer);}
+  finally{clearTimeout(timer);video.removeEventListener('ended',ended);}
   fxVideoResult.measureEnd=performance.now();
   try {
     const canvas=document.createElement('canvas');canvas.width=64;canvas.height=36;

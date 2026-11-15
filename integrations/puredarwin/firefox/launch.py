@@ -19,6 +19,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', required=True)
     ap.add_argument('--tools', required=True)
+    ap.add_argument('--bundle', default='/private/var/db/sffx/baseline-160-001/Firefox.app')
     ap.add_argument('--avd-prewarm', action='store_true')
     ap.add_argument('--avd-counters', action='store_true')
     ap.add_argument('options', nargs=argparse.REMAINDER)
@@ -38,8 +39,17 @@ def main():
            'UserKnownHostsFile=' + str(Path.home() / '.ssh/known_hosts_m1_siliconforest'),
            'root@10.1.1.211']
     options = args.options[1:] if args.options[:1] == ['--'] else args.options
-    command = ['python3', args.tools + '/remote-run.py', '--bundle',
-               '/private/var/db/sffx/baseline-160-001/Firefox.app', '--run', remote] + options
+    if not args.bundle.startswith('/private/var/db/sffx/') or '..' in Path(args.bundle).parts or not args.bundle.endswith('.app'):
+        raise ValueError('Bundle must be an app inside the private prefix')
+    command = ['python3', args.tools + '/remote-run.py', '--bundle', args.bundle, '--run', remote] + options
+    seconds = 40
+    for index, option in enumerate(options):
+        if option == '--seconds' and index + 1 < len(options):
+            seconds = int(options[index + 1])
+        elif option.startswith('--seconds='):
+            seconds = int(option.partition('=')[2])
+    if not 1 <= seconds <= 3600:
+        raise ValueError('Owned run duration must be1..3600seconds')
     metadata = dict(command=command, avd_prewarm_diagnostic=args.avd_prewarm)
     if args.avd_prewarm:
         script = 'import os; fd=os.open("/dev/pdavd",os.O_RDWR); print("diagnostic_root_AVD_prewarm_fd",fd); os.close(fd)'
@@ -51,7 +61,7 @@ def main():
         (out / 'avd-before.log').write_text(r.stdout + r.stderr)
     try:
         with (out / 'launcher.log').open('w') as log:
-            r = subprocess.run(ssh + [shlex.join(command)], stdout=log, stderr=subprocess.STDOUT, timeout=180)
+            r = subprocess.run(ssh + [shlex.join(command)], stdout=log, stderr=subprocess.STDOUT, timeout=max(180, seconds + 90))
             metadata['runner_status'] = r.returncode
     finally:
         if args.avd_counters:
