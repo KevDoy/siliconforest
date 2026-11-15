@@ -65,7 +65,7 @@ static int makePipe(int ends[2]){
  close(raw[0]);close(raw[1]);return 1;
 }
 static void number(CFMutableDictionaryRef d,CFStringRef key,int64_t value){CFNumberRef n=CFNumberCreate(NULL,kCFNumberSInt64Type,&value);CFDictionarySetValue(d,key,n);CFRelease(n);}
-static int consumer(const char *argument){
+static int consumer(const char *argument,int exitWithoutRelease){
  IOSurfaceRef surface=NULL;int incremented=0,result=1;char *end=NULL;
  errno=0;unsigned long value=strtoul(argument,&end,10);
  if(errno||!argument[0]||!end||*end||!value||value>UINT32_MAX){fprintf(stderr,"CROSS_LEASE_FAIL invalid consumer surface ID\n");goto done;}
@@ -78,7 +78,13 @@ static int consumer(const char *argument){
  if(count<1){fprintf(stderr,"CROSS_LEASE_FAIL child count after increment=%d expected-positive\n",count);sendByte(3,'E');goto done;}
  if(!sendByte(3,'H')){fprintf(stderr,"CROSS_LEASE_FAIL child handshake H\n");goto done;}
  char request=0;
- if(!receiveByte(4,&request,5)||request!='R'){fprintf(stderr,"CROSS_LEASE_FAIL child release handshake\n");goto done;}
+ if(!receiveByte(4,&request,5)||request!=(exitWithoutRelease?'X':'R')){fprintf(stderr,"CROSS_LEASE_FAIL child release handshake\n");goto done;}
+ if(exitWithoutRelease){
+  /* Deliberately bypass CF/Objective-C cleanup and the explicit decrement.
+   * Only process-death bookkeeping may clear this consumer's usecount. */
+  printf("CROSS_CHILD process-exit-with-usecount=%d no-explicit-decrement=1 no-CFRelease=1\n",IOSurfaceGetUseCount(surface));
+  _exit(0);
+ }
  IOSurfaceDecrementUseCount(surface);incremented=0;count=IOSurfaceGetUseCount(surface);
  CFRelease(surface);surface=NULL;
  printf("CROSS_CHILD released-usecount=%d\n",count);
@@ -89,7 +95,7 @@ static int consumer(const char *argument){
  close(3);close(4);return result;
 }
 #define REQUIRE(condition,what) do{if(!(condition)){fprintf(stderr,"CROSS_LEASE_FAIL %s errno=%d\n",what,errno);result=1;goto cleanup;}}while(0)
-static int producer(int predicateOnly){
+static int producer(int predicateOnly,int consumerExit){
  IOSurfaceRef surface=NULL;CFMutableDictionaryRef properties=NULL;CFTypeRef lease=NULL;AVFrame *frame=NULL;uint8_t *bytes=NULL;
  int held[2]={-1,-1},release[2]={-1,-1};pid_t child=-1;int childStatus=0,result=1;
  posix_spawn_file_actions_t actions;int actionsReady=0;
@@ -109,7 +115,7 @@ static int producer(int predicateOnly){
  for(unsigned i=0;i<2;i++)REQUIRE(!posix_spawn_file_actions_addclose(&actions,held[i])&&!posix_spawn_file_actions_addclose(&actions,release[i]),"spawn close original pipe descriptors");
  char executable[PATH_MAX],resolved[PATH_MAX],identifier[32];uint32_t length=sizeof(executable);
  REQUIRE(!_NSGetExecutablePath(executable,&length)&&realpath(executable,resolved),"same executable path");
- snprintf(identifier,sizeof(identifier),"%u",IOSurfaceGetID(surface));char *argv[]={resolved,"--consumer",identifier,NULL};
+ snprintf(identifier,sizeof(identifier),"%u",IOSurfaceGetID(surface));char *argv[]={resolved,consumerExit?"--consumer-exit":"--consumer",identifier,NULL};
  int spawned=posix_spawn(&child,resolved,&actions,NULL,argv,environ);
  if(spawned){errno=spawned;child=-1;}REQUIRE(!spawned&&child>0,"same-binary posix_spawn");
  closeFD(&held[1]);closeFD(&release[0]);
@@ -126,28 +132,36 @@ static int producer(int predicateOnly){
  printf("CROSS_PARENT producer-released=1 observed-usecount=%d is-in-use=%d AVBuffer-free=%u\n",afterRelease,heldInUse,freeCount());
  REQUIRE(heldInUse,"global predicate sees explicit consumer H hold after producer release");
  if(!predicateOnly)REQUIRE(!freeCount(),"consumer keeps AVBuffer after producer release and worker polling");
- REQUIRE(sendByte(release[1],'R'),"release consumer only after held-buffer assertion");closeFD(&release[1]);
+ REQUIRE(sendByte(release[1],consumerExit?'X':'R'),"release consumer only after held-buffer assertion");closeFD(&release[1]);
  REQUIRE(reap(child,&childStatus,5),"consumer exit deadline");child=-1;
  REQUIRE(WIFEXITED(childStatus)&&WEXITSTATUS(childStatus)==0,"consumer normal exit0");
+ /* Process teardown can finish after waitpid observes the exit. Unlike the
+  * explicit R/decrement control, give only this death-control a bounded wait. */
+ if(consumerExit)for(unsigned n=0;n<400&&IOSurfaceIsInUse(surface);n++)usleep(5000);
  int finalInUse=IOSurfaceIsInUse(surface);
- printf("CROSS_PARENT after-R observed-usecount=%d is-in-use=%d AVBuffer-free=%u\n",IOSurfaceGetUseCount(surface),finalInUse,freeCount());
- REQUIRE(!finalInUse,"global predicate clears after explicit consumer R completion");
+ printf("CROSS_PARENT after-%c observed-usecount=%d is-in-use=%d AVBuffer-free=%u\n",consumerExit?'X':'R',IOSurfaceGetUseCount(surface),finalInUse,freeCount());
+ REQUIRE(!finalInUse,consumerExit?"global predicate clears after owned consumer process death":"global predicate clears after explicit consumer R completion");
  uint64_t issued=0,released=0,deferred=0;
  for(unsigned n=0;n<400;n++){SFVTFrameLeaseCounts(&issued,&released,&deferred);if(released==1)break;usleep(5000);}
  REQUIRE(issued==1&&released==1&&freeCount()==1&&IOSurfaceGetUseCount(surface)==0,"AVBuffer released exactly once");
  if(predicateOnly)puts("CROSS_PREDICATE_PASS child-before-R=in-use child-after-R=not-in-use no-frame-lifetime-claim=1 no-GPU-fence-claim=1");
- else {REQUIRE(deferred==1,"consumer required deferred AVBuffer release");puts("CROSS_LEASE_PASS cross-process-global-predicate=1 producer-before-H=held consumer-before-R=held AVBuffer-released-once=1 no-GPU-fence-claim=1");}result=0;
+ else {REQUIRE(deferred==1,"consumer required deferred AVBuffer release");
+  if(consumerExit)puts("CROSS_EXIT_PASS consumer-exited-with-count-held=1 global-ownership-cleared=1 AVBuffer-released-once=1 no-GPU-fence-claim=1");
+  else puts("CROSS_LEASE_PASS cross-process-global-predicate=1 producer-before-H=held consumer-before-R=held AVBuffer-released-once=1 no-GPU-fence-claim=1");
+ }result=0;
  cleanup:
  if(actionsReady)posix_spawn_file_actions_destroy(&actions);
- /* Only our spawned child is addressed. Prefer its explicit clean-release
-  * path, then kill/reap after a finite deadline. Never forge a remote count. */
- if(child>0){if(release[1]>=0)sendByte(release[1],'R');closeFD(&release[1]);if(!reap(child,&childStatus,1)){kill(child,SIGKILL);if(!reap(child,&childStatus,2)){fprintf(stderr,"CROSS_LEASE_FAIL owned child not reaped after SIGKILL\n");result=1;}}}
+ /* Only our spawned child is addressed. Request its explicit R release or X
+  * process exit, then kill/reap after a finite deadline. Never forge a count. */
+ if(child>0){if(release[1]>=0)sendByte(release[1],consumerExit?'X':'R');closeFD(&release[1]);if(!reap(child,&childStatus,1)){kill(child,SIGKILL);if(!reap(child,&childStatus,2)){fprintf(stderr,"CROSS_LEASE_FAIL owned child not reaped after SIGKILL\n");result=1;}}}
  closeFD(&held[0]);closeFD(&held[1]);closeFD(&release[0]);closeFD(&release[1]);
  if(lease)CFRelease(lease);if(frame)av_frame_free(&frame);free(bytes);if(properties)CFRelease(properties);if(surface)CFRelease(surface);return result;
 }
 int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);signal(SIGPIPE,SIG_IGN);@autoreleasepool{
- if(argc==3&&!strcmp(argv[1],"--consumer"))return consumer(argv[2]);
- if(argc==2&&!strcmp(argv[1],"--predicate"))return producer(1);
- if(argc!=1){fprintf(stderr,"usage: cross-probe [--predicate | --consumer surfaceID]\n");return 2;}
- return producer(0);
+ if(argc==3&&!strcmp(argv[1],"--consumer"))return consumer(argv[2],0);
+ if(argc==3&&!strcmp(argv[1],"--consumer-exit"))return consumer(argv[2],1);
+ if(argc==2&&!strcmp(argv[1],"--predicate"))return producer(1,0);
+ if(argc==2&&!strcmp(argv[1],"--process-exit"))return producer(0,1);
+ if(argc!=1){fprintf(stderr,"usage: cross-probe [--predicate | --process-exit | --consumer surfaceID | --consumer-exit surfaceID]\n");return 2;}
+ return producer(0,0);
 }}

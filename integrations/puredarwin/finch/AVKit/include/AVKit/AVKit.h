@@ -31,6 +31,13 @@ typedef NSUInteger AVVideoFrameAnalysisType;
 #define AVPlayerViewControlsStyleMinimal 3
 
 #define AVRoutePickerViewButtonStateNormal 0
+/* Our meter drawing; property layouts checked by a Linux-built native probe. */
+@interface AVAudioLevelIndicatorView : NSView {
+    double _sfLevelValue;
+}
+@property double doubleValue;
+@end
+
 @interface NSView (SFAVKitFullscreenDeclarations)
 @property(readonly,getter=isInFullScreenMode) BOOL inFullScreenMode;
 - (BOOL)enterFullScreenMode:(NSScreen *)screen withOptions:(NSDictionary *)options;

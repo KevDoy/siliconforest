@@ -71,3 +71,31 @@ exactly once. This does not prove a GPU fence or prevent a consumer that first
 acquires its hold after producer release. Consumer handoff ordering and
 completion-held counts remain prerequisites. FX owns the one IOSurface/CGL
 implementation; its shared numeric count differs from native local diagnostics.
+
+The extended `cross-probe --process-exit` control also passes on native: the
+child calls _exit with a held usecount and no explicit decrement/CFRelease;
+after the parent reaps it, global use clears and AVBuffer releases exactly once.
+That is process bookkeeping only. Current M1 canonical IOSurfaceLookup cannot
+find the producer's global surface: both original same-byte modes return77
+(unsupported), retained as FAIL rather than a lifetime pass. FX supplies a
+private standalone broker cohort for the next staged ownership tests. Its
+abnormal-exit behavior intentionally may quarantine counts; no native automatic
+cleanup or GPU-completion parity is claimed for that provider.
+
+The private VT producer's M1 default and best-effort controls match2400 original
+H264/HEVC HW/SW PTS/dimension/hash rows, including the actual hardware-selection
+query. Best effort explicitly reports zero shared frames and414720000 copied
+bytes per300720p frames. Strict requests fail-closed with-12900 and no frames
+when the installed kernel reports external-import capability0. Those results
+qualify unchanged copy/fallback policy, not real import or1080p60 zero-copy.
+
+`capture-probe.nix` builds a dedicated M1-only client from our existing MIT VT
+CLI decoder. It requests global IOSurface output, requires real GPU FD/16KiB
+data-offset/two-plane storage for every picture, retains the first CV buffer
+through64 subsequent callbacks, then verifies its visible hash is unchanged.
+It keeps the original per-picture PTS/hash output for independent FFmpeg
+comparison. This program hashes pixels on the CPU as a correctness control;
+its wall time is not a no-copy playback benchmark. It builds on Linux but
+has not run against actual kernel-import support. Use only a reviewed private
+VT/CV/FX IOSurface cohort, SF_VT_ZERO_COPY=require, and an authorized kernel
+owner's import-capable trial. No success may be inferred from the build.

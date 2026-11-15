@@ -18,7 +18,7 @@ variant below adds real bounded local-file VideoToolbox/AudioQueue playback.
 It remains staged and does not replace installed AVFoundation. PiP explicitly
 reports unsupported.
 
-QuickTime's reviewed inventory now has 6/18 AVKit imports provided: AVPlayerView
+QuickTime's prior qualified inventory has 6/18 AVKit imports provided: AVPlayerView
 class/metaclass, AVAssetIdentifier, AVTimecode and the two slow-motion range
 conversion functions. The actual export audit is
 `runs/sffinch/quicktime-avkit-mediatoolbox-stage-audit-v2.json`.
@@ -39,8 +39,8 @@ invent frame-number-to-SMPTE conversion. The constructor accepts four colon-
 or semicolon-separated nonnegative components within signed16-bit bounds.
 The native-reference vectors do not establish every private method.
 
-The remaining 12 imports are the two media-selection-menu functions,
-AVAudioLevelIndicatorView, AVCaptureView (+ metaclass), AVPlayerController,
+After the audio-level addition below, the remaining 11 imports are the two
+media-selection-menu functions, AVCaptureView (+ metaclass), AVPlayerController,
 AVPlayerControllerTimeResolver, AVPlayerControlsViewController (+ metaclass),
 AVTouchBarCaptureInputSourceItem, AVTouchBarRecordingControlsProvider and
 AVVolumeControlSlider. Native runtime method signatures alone do not supply
@@ -88,3 +88,14 @@ Evidence: `runs/sffinch/avkit-real-player-stage-v3/{qualified,hardware,native-va
 The earlier stage-v1/v2 passes remain separately. Final source also checks
 missing-file failure without false playback capability, preserves runtime output
 errors and resets the layer on item changes.
+
+`SFAudioLevel.m` adds a real AVAudioLevelIndicatorView with our normalized
+24-segment CPU meter. The caller's doubleValue is preserved without clipping;
+only drawing clamps to [0,1], and no audio/capture measurement is invented.
+A Linux-built metadata/property probe on native M5 observes initial0, all eight
+signed/out-of-range values preserved, intrinsic size(-1,9), and vibrancy true.
+Our property implementation follows those observations. `level-draw-probe.nix`
+checks changed bitmap pixels between quiet/half/full levels without a window.
+The new provider builds; M1 property/bitmap qualification remains pending the
+announced desktop hold. It adds the seventh reviewed QuickTime import at the
+source/export level, not a QuickTime launch or native pixel-style claim.
