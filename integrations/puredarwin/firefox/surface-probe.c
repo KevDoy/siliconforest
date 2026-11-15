@@ -25,8 +25,14 @@ int main(int argc,char **argv){
  if(argc==5&&!strcmp(argv[1],"child")){
   IOSurfaceRef s=IOSurfaceLookup((uint32_t)strtoul(argv[2],NULL,10));
   int expected=atoi(argv[3]);uint32_t want=(uint32_t)strtoul(argv[4],NULL,10);
-  int good=expected?(s&&hash(s)==want):!s;
-  printf("FXSURFACE child expected_global=%d mapped=%d pixels_equal=%d\n",expected,s!=NULL,good);
+  size_t mismatches=0;
+  if(s){
+   size_t size=IOSurfaceGetAllocSize(s);const unsigned char *bytes=IOSurfaceGetBaseAddress(s);
+   if(size!=2048)mismatches++;
+   for(size_t i=0;i<size;i++)mismatches+=bytes[i]!=(unsigned char)(i*37+(i>>5));
+  }
+  int good=expected?(s&&hash(s)==want&&!mismatches):!s;
+  printf("FXSURFACE child expected_global=%d mapped=%d byte_mismatches=%zu pixels_equal=%d\n",expected,s!=NULL,mismatches,good);
   if(s)CFRelease(s);return good?0:1;
  }
  int failures=0;

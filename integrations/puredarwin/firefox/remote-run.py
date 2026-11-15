@@ -42,12 +42,26 @@ def main():
     ap.add_argument('--insert-library', help='private diagnostic DSO (e.g. the real SBPL compiler)')
     ap.add_argument('--pref', action='append', default=[], help='NAME=JSON diagnostic preference')
     ap.add_argument('--catcher', help='external Mach exception catcher for this launch only')
+    ap.add_argument('--surface-session', help='private named-IOSurface-broker session wrapper')
+    ap.add_argument('--surface-broker', help='private standalone iosurfaced; requires --surface-session')
+    ap.add_argument('--capture-pages', action='store_true', help='capture each owned browser tab after diagnostics')
+    ap.add_argument('--page-load-strategy', choices=['normal', 'eager', 'none'], default='normal',
+                    help='explicit WebDriver strategy; measurements still verify real page/media state')
+    ap.add_argument('--quiet-trace', action='store_true', help='disable verbose media/GL/layer traces for timing runs')
+    ap.add_argument('--io-policy', choices=['passthrough', 'utility', 'standard', 'default'], help='process-local diagnostic interposer mode')
+    ap.add_argument('--measure-video', action='store_true')
+    ap.add_argument('--measure-all-videos', action='store_true', help='measure each owned video tab, with separate CPU/AVD counters')
+    ap.add_argument('--measure-fixture', action='store_true')
+    ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
+    ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
+    if bool(args.surface_session) != bool(args.surface_broker):
+        raise ValueError('Supply both private surface-session and surface-broker paths')
     args.run.mkdir(parents=True, exist_ok=False)
     profile = args.run / 'profile'
     profile.mkdir()
@@ -59,7 +73,7 @@ def main():
              'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False,
              'app.update.auto': False, 'marionette.port': 28290}
     if args.software:
-        prefs.update({'gfx.webrender.software': True, 'layers.gpu-process.enabled': False})
+        prefs['gfx.webrender.software'] = True
     for setting in args.pref:
         name, separator, value = setting.partition('=')
         if not name or not separator:
@@ -73,6 +87,15 @@ def main():
                MOZ_LOG='PlatformDecoderModule:5,AppleMedia:5,DMABuf:4',
                PD_WS_TIMING='1', PD_CGL_TRACE='1', PD_SANDBOX_TRACE='1', PD_CA_TRACE='1',
                MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1')
+    if args.quiet_trace:
+        for name in ['MOZ_LOG', 'PD_WS_TIMING', 'PD_CGL_TRACE', 'PD_SANDBOX_TRACE', 'PD_CA_TRACE']:
+            env.pop(name, None)
+    if args.io_policy:
+        env['SFFX_IO_POLICY'] = args.io_policy
+    if args.no_startup_cache:
+        # Mozilla's supported cache-path override. The parent deliberately does
+        # not exist, so writes fail promptly; profile data remains isolated.
+        env['MOZ_STARTUP_CACHE'] = str(args.run / 'cache-disabled-parent/startupCache')
     if args.framework_path:
         env['DYLD_FRAMEWORK_PATH'] = args.framework_path
     if args.library_path:
@@ -81,25 +104,34 @@ def main():
         env['DYLD_INSERT_LIBRARIES'] = args.insert_library
     if args.catcher:
         env['PD_NO_CRASH_REPORT'] = '1'
+    if args.surface_session:
+        env['SFFX_IOSURFACE_SERVICE'] = 'org.puredarwin.iosurfaced.sffx.' + str(os.getpid())
     if args.no_sandbox:
         for kind in ['CONTENT', 'GPU', 'RDD', 'SOCKET_PROCESS', 'UTILITY', 'GMP']:
             env['MOZ_DISABLE_' + kind + '_SANDBOX'] = '1'
     cmd = [str(args.bundle / 'Contents/MacOS/firefox'), '--no-remote', '--profile', str(profile),
-           '--marionette', '--remote-allow-system-access'] + (args.url or ['about:support'])
+           '--marionette'] + (args.url or ['about:support'])
     result = dict(command=cmd, seconds=args.seconds, software_requested=args.software,
-                  sandbox_disabled=args.no_sandbox, synthetic_input=False, prefs=prefs,
-                  diagnostic_library=args.insert_library)
+                  sandbox_disabled=args.no_sandbox, synthetic_input=args.scroll_fixture, prefs=prefs,
+                  diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
+                  io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
+    result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
+                                    service=env.get('SFFX_IOSURFACE_SERVICE'))
     owned = {}
     start = time.monotonic()
     early_captured = False
     gpu_sampled = False
     with (args.run / 'firefox.log').open('w') as log:
         launch = ([args.catcher] if args.catcher else []) + cmd
+        if args.surface_session:
+            launch = [args.surface_session, args.surface_broker] + launch
         result['launcher'] = launch
         p = subprocess.Popen(launch, env=env, cwd=args.bundle / 'Contents/MacOS',
                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         result['pid'] = p.pid
         support_attempted = False
+        session_started = False
+        automation_failed = False
         try:
             deadline = start + args.seconds
             samples = []
@@ -141,17 +173,62 @@ def main():
                     else:
                         support_attempted = True
                         try:
-                            client.socket.settimeout(max(1, min(10, deadline - time.monotonic())))
-                            result['marionette'] = client.start()
-                            result['automation'] = 'Marionette read-only diagnostics'
+                            client.socket.settimeout(max(1, min(45, deadline - time.monotonic())))
+                            result['marionette'] = client.start(args.page_load_strategy)
+                            session_started = True
+                            result['automation'] = 'Marionette owned-profile diagnostics and measurements'
                             client.socket.settimeout(max(1, min(10, deadline - time.monotonic())))
                             (args.run / 'support.json').write_text(json.dumps(client.support(), indent=2) + '\n')
+                            (args.run / 'runtime.json').write_text(json.dumps(client.runtime(), indent=2) + '\n')
+                            def snapshot():
+                                current = process_identities()
+                                owned.update({pid: current[pid][1] for pid in descendants(p.pid, current)
+                                              if pid in current})
+                                active = [pid for pid in sorted(owned)
+                                          if pid in current and current[pid][1] == owned[pid]]
+                                if not active:
+                                    return ''
+                                return subprocess.run(['ps', '-p', ','.join(map(str, active)),
+                                    '-o', 'pid,ppid,time,rss,stat,command'], capture_output=True, text=True).stdout
+                            if args.measure_fixture:
+                                client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
+                                result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                            if args.measure_video:
+                                client.socket.settimeout(max(1, min(18, deadline - time.monotonic())))
+                                result['video_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                result['video_measurement'] = client.measure_video()
+                                result['video_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                            if args.measure_all_videos:
+                                result['video_measurements'] = []
+                                for handle in client.video_handles():
+                                    client.socket.settimeout(max(1, min(18, deadline - time.monotonic())))
+                                    counters = lambda: subprocess.run(['sysctl', 'kern.pd_avd.stats'],
+                                        capture_output=True, text=True).stdout.strip()
+                                    entry = dict(cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()),
+                                                 avd_before=counters())
+                                    result['video_measurements'].append(entry)
+                                    entry['video'] = client.measure_video(handle)
+                                    entry['avd_after'] = counters()
+                                    entry['cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                         except Exception as error:
                             result['marionette_error'] = str(error)
+                            automation_failed = True
                         finally:
                             try:
+                                if not session_started:
+                                    raise RuntimeError('Session handshake incomplete; connection closed without further commands')
+                                if automation_failed:
+                                    raise RuntimeError('Automation failed; connection closed without further commands or stale replies')
                                 client.socket.settimeout(5)
-                                (args.run / 'pages.json').write_text(json.dumps(client.pages(), indent=2) + '\n')
+                                def capture_page(index, url):
+                                    shot = args.run / ('page-%d.png' % index)
+                                    captured = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture', str(shot)],
+                                        capture_output=True, text=True, timeout=15, env=env)
+                                    result.setdefault('page_captures', []).append(dict(url=url, status=captured.returncode, path=str(shot)))
+                                pages = client.pages(capture_page if args.capture_pages else None)
+                                (args.run / 'pages.json').write_text(json.dumps(pages, indent=2) + '\n')
                             except Exception as error:
                                 result['page_diagnostics_error'] = str(error)
                             client.close()

@@ -7,6 +7,7 @@ no mock page state is used. Diagnostic profiles opt into system-context access.
 """
 import json
 import socket
+import time
 
 
 class Marionette:
@@ -46,10 +47,12 @@ class Marionette:
             raise RuntimeError('Unexpected Marionette response: ' + repr(response))
         if response[2]:
             raise RuntimeError(response[2])
-        return response[3]
+        result = response[3]
+        return result['value'] if isinstance(result, dict) and set(result) == {'value'} else result
 
-    def start(self):
-        return self.command('WebDriver:NewSession', {'capabilities': {'alwaysMatch': {}}})
+    def start(self, page_load_strategy='normal'):
+        return self.command('WebDriver:NewSession', {
+            'capabilities': {'alwaysMatch': {'pageLoadStrategy': page_load_strategy}}})
 
     def support(self):
         self.command('Marionette:SetContext', {'value': 'chrome'})
@@ -60,7 +63,68 @@ class Marionette:
             'args': [], 'scriptTimeout': 15000, 'newSandbox': True,
         })
 
-    def pages(self):
+    def runtime(self):
+        self.command('Marionette:SetContext', {'value': 'chrome'})
+        return self.command('WebDriver:ExecuteScript', {
+            'script': '''const result={preferences:{},startup:{}};
+            try {
+              const prefs=Components.classes["@mozilla.org/preferences-service;1"]
+                .getService(Components.interfaces.nsIPrefBranch);
+              for(const name of ["javascript.options.baselinejit","javascript.options.ion",
+                "javascript.options.wasm_baselinejit","javascript.options.wasm_optimizingjit"]){
+                try{result.preferences[name]=prefs.getBoolPref(name);}
+                catch(error){result.preferences[name]={error:String(error)};}
+              }
+              const info=Components.classes["@mozilla.org/toolkit/app-startup;1"]
+                .getService(Components.interfaces.nsIAppStartup).getStartupInfo();
+              for(const [name,value] of Object.entries(info))
+                result.startup[name]=value instanceof Date?value.getTime():String(value);
+            } catch(error){result.error=String(error);}
+            return result;''', 'args': [], 'newSandbox': True,
+        })
+
+    def measure_fixture(self, scroll=False):
+        self.command('Marionette:SetContext', {'value': 'content'})
+        handles = self.command('WebDriver:GetWindowHandles')
+        for handle in handles:
+            self.command('WebDriver:SwitchToWindow', {'handle': handle})
+            found = self.command('WebDriver:ExecuteScript', {
+                'script': 'return typeof window.fxMeasureFrames === "function";',
+                'args': [], 'newSandbox': False,
+            })
+            if found:
+                return self.command('WebDriver:ExecuteAsyncScript', {
+                    'script': 'const done=arguments[arguments.length-1]; window.fxMeasureFrames(10000,arguments[0]).then(done);',
+                    'args': [scroll], 'scriptTimeout': 14000, 'newSandbox': False,
+                })
+        raise RuntimeError('No owned measurement fixture found')
+
+    def video_handles(self):
+        self.command('Marionette:SetContext', {'value': 'content'})
+        result = []
+        for handle in self.command('WebDriver:GetWindowHandles'):
+            self.command('WebDriver:SwitchToWindow', {'handle': handle})
+            found = self.command('WebDriver:ExecuteScript', {
+                'script': 'return typeof window.fxMeasureVideo === "function";',
+                'args': [], 'newSandbox': False,
+            })
+            if found:
+                result.append(handle)
+        return result
+
+    def measure_video(self, handle=None):
+        if handle is None:
+            handles = self.video_handles()
+            if not handles:
+                raise RuntimeError('No owned video fixture found')
+            handle = handles[0]
+        self.command('WebDriver:SwitchToWindow', {'handle': handle})
+        return self.command('WebDriver:ExecuteAsyncScript', {
+            'script': 'const done=arguments[arguments.length-1]; window.fxMeasureVideo().then(done);',
+            'args': [], 'scriptTimeout': 16000, 'newSandbox': False,
+        })
+
+    def pages(self, capture=None):
         self.command('Marionette:SetContext', {'value': 'content'})
         handles = self.command('WebDriver:GetWindowHandles')
         if isinstance(handles, dict):
@@ -68,10 +132,14 @@ class Marionette:
         result = []
         for handle in handles:
             self.command('WebDriver:SwitchToWindow', {'handle': handle})
-            result.append(self.command('WebDriver:ExecuteScript', {
+            page = self.command('WebDriver:ExecuteScript', {
                 'script': "return {url:location.href,title:document.title,body:document.body.innerText.slice(0,4000),fixture:window.fxResult||null,video:window.fxVideoResult||null};",
                 'args': [], 'newSandbox': False,
-            }))
+            })
+            result.append(page)
+            if capture:
+                time.sleep(.25)
+                capture(len(result)-1, page['url'])
         return result
 
     def close(self):

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Host launcher/collector for one finite private M1 Firefox run.
+
+Caller must hold runs/m1-coord/gui.lock and check the coordination gate first.
+All runner options after -- are forwarded as literal argv, including URL queries.
+No installed file or owner profile is written. AVD prewarm is diagnostic only.
+"""
+import argparse
+import json
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import tarfile
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--run', required=True)
+    ap.add_argument('--tools', required=True)
+    ap.add_argument('--avd-prewarm', action='store_true')
+    ap.add_argument('--avd-counters', action='store_true')
+    ap.add_argument('options', nargs=argparse.REMAINDER)
+    args = ap.parse_args()
+    if not re.fullmatch('[a-z0-9][a-z0-9-]{0,70}', args.run):
+        raise ValueError('Expected a fresh simple run name')
+    if not args.tools.startswith('/private/var/db/sffx/') or '..' in Path(args.tools).parts:
+        raise ValueError('Tools must be in the private target prefix')
+    repo = Path(__file__).resolve().parents[3]
+    out = repo / 'runs/firefox' / args.run
+    if out.exists():
+        raise FileExistsError(out)
+    out.mkdir(parents=True)
+    remote = '/private/var/db/sffx/' + args.run
+    ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
+           '-o', 'HostKeyAlias=m1-siliconforest', '-o',
+           'UserKnownHostsFile=' + str(Path.home() / '.ssh/known_hosts_m1_siliconforest'),
+           'root@10.1.1.211']
+    options = args.options[1:] if args.options[:1] == ['--'] else args.options
+    command = ['python3', args.tools + '/remote-run.py', '--bundle',
+               '/private/var/db/sffx/baseline-160-001/Firefox.app', '--run', remote] + options
+    metadata = dict(command=command, avd_prewarm_diagnostic=args.avd_prewarm)
+    if args.avd_prewarm:
+        script = 'import os; fd=os.open("/dev/pdavd",os.O_RDWR); print("diagnostic_root_AVD_prewarm_fd",fd); os.close(fd)'
+        r = subprocess.run(ssh + [shlex.join(['python3', '-c', script])], capture_output=True, text=True, timeout=20)
+        (out / 'avd-prewarm.log').write_text(r.stdout + r.stderr)
+        metadata['avd_prewarm_status'] = r.returncode
+    if args.avd_counters:
+        r = subprocess.run(ssh + ['sysctl kern.pd_avd.stats'], capture_output=True, text=True, timeout=10)
+        (out / 'avd-before.log').write_text(r.stdout + r.stderr)
+    try:
+        with (out / 'launcher.log').open('w') as log:
+            r = subprocess.run(ssh + [shlex.join(command)], stdout=log, stderr=subprocess.STDOUT, timeout=180)
+            metadata['runner_status'] = r.returncode
+    finally:
+        if args.avd_counters:
+            r = subprocess.run(ssh + ['sysctl kern.pd_avd.stats'], capture_output=True, text=True, timeout=10)
+            (out / 'avd-after.log').write_text(r.stdout + r.stderr)
+        (out / 'launch-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        # Preserve evidence on nonzero launcher exit too. Prefix is owned and fixed.
+        archive = out / 'target-evidence.tar'
+        with archive.open('wb') as stream:
+            copied = subprocess.run(ssh + [shlex.join(['tar', '-C', remote, '-cf', '-', '.'])],
+                                    stdout=stream, stderr=subprocess.PIPE, timeout=60)
+        if copied.returncode == 0:
+            with tarfile.open(archive) as tar:
+                tar.extractall(out, filter='data')
+        else:
+            (out / 'collection-error.log').write_bytes(copied.stderr)
+    print(json.dumps(dict(run=args.run, output=str(out), runner_status=metadata.get('runner_status'))))
+
+
+if __name__ == '__main__':
+    main()
