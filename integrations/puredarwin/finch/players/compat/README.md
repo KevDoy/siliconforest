@@ -102,3 +102,13 @@ zero new errors/timeouts/DART faults/stale replies and releases all contexts;
 102400 HAL-read frames and traced exit0. Vendor counters still report121 video
 and189 audio decodes for60 source samples/95 audio packets; retain that accounting
 limitation. No real GUI output was attempted by this dummy-video control.
+
+`frameworks-system-foundation.nix` is the post-TERM8-install variant. It omits
+our defaults/calendar/locale objects, using the operations now installed in
+Foundation proper. It retains our explicit unavailable AppleScript class and
+the existing framework/Swift exports. Its56 exports retain all VLC imports;
+the two removed exports are our obsolete internal defaults-category class and
+metaclass. Do not combine this variant with the older private Foundation f2
+prefix. Linux build/export evidence exists; the first new-profile M1 headless
+attempt refused real owner activity before starting VLC and is not a runtime
+qualification of this variant. See [the owner-input record](../VLC-2026-11-15.md).

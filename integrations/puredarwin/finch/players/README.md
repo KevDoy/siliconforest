@@ -1,5 +1,9 @@
 # Third-party media target
 
+Current bounded results and the owner-input invalidation are recorded in
+[the15 November qualification](VLC-2026-11-15.md). The step history below is
+retained; its earlier headless results are not a current visible-playback claim.
+
 Verified publisher downloads are described in downloads.json: [VLC's checksum](https://get.videolan.org/vlc/3.0.24/macosx/vlc-3.0.24-arm64.dmg.sha256)
 and [IINA's release page](https://iina.io/download/). DMGs, extracted apps,
 bundled libraries and signatures stay in ignored private/mac-apps/third-party/.

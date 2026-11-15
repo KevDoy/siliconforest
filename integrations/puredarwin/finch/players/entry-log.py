@@ -19,7 +19,19 @@ new=old+'''
 '''
 assert s.count(old)==1;s=s.replace(old,new).replace('#include <stdlib.h>','#include <stdlib.h>\n#include <stdio.h>\n#include "SFVLCHAL.h"\n#include "SFVLCModule.h"',1);anchors={
  '    /* Handle parameters */':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE signals-ready\\n");\n',
- '    /* Initialize libvlc */':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE before-libvlc-new argc=%d\\n", argc);\n',
+ '    /* Initialize libvlc */':'''    /* Explicit test profile only: registration defaults live in this process.
+     * Do not write VLCFirstRun to the user's persistent preferences. Network
+     * metadata access is still separately denied by our launch arguments. */
+    const char *sf_configured = getenv("SF_VLC_TEST_FIRST_RUN_CONFIGURED");
+    if (sf_configured && sf_configured[0] == '1' && !sf_configured[1]) {
+        @autoreleasepool {
+            [[NSUserDefaults standardUserDefaults] registerDefaults:
+                @{ @"VLCFirstRun": [NSDate date] }];
+        }
+        fprintf(stderr, "SF_VLC_TEST first-run=process-local-registration-only\\n");
+    }
+    if (sf_log) fprintf(stderr, "SF_VLC_STAGE before-libvlc-new argc=%d\\n", argc);
+''',
  '    if (vlc == NULL)':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE libvlc-new result=%p\\n", (void *)vlc);\n    if (sf_log && !vlc) { const char *sf_error=libvlc_errmsg(); fprintf(stderr, "SF_VLC_ERROR %s\\n", sf_error ? sf_error : "no public error supplied"); }\n',
  '    libvlc_add_intf(vlc, "hotkeys,none");':'    if (sf_log) fprintf(stderr, "SF_VLC_STAGE before-interface\\n");\n',
  '    libvlc_playlist_play(vlc, -1, 0, NULL);':'    sf_hal_begin();\n    if (sf_log) fprintf(stderr, "SF_VLC_STAGE interface-ready\\n");\n',
