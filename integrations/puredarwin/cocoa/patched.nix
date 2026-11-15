@@ -268,6 +268,13 @@
 #         rests 60 ms on its item instead of being built while the pointer passes, PD_WS_TIMING lines;
 #         NSPathControl has no intrinsic width (its cell's 10000 points made Terminal's Profiles > Text box
 #         10000 points wide: the black bar over "Background"); PD_IMAGE_TRACE
+#         (night, later): the colour panel's accessory view (Terminal's background well), one toggle per click of
+#         a colour well; a wrapping label longer than its width is as tall as its lines; click sequences need
+#         the same window, 4 points and 0.5 s (com.apple.mouse.doubleClickThreshold), a table's double action
+#         both clicks on one row; a window ordered out gives up key and main (Activity Monitor ended with
+#         SIGSEGV when its inspector closed); tab accessory views in a slot of their own; one-line strings
+#         truncated head/middle/tail with an ellipsis; the help button's question mark; crash reports in
+#         ~/Library/Logs/DiagnosticReports/<name>-<pid>.crash (PD_NO_CRASH_REPORT=1: none)
 #   0121  WindowServer: the opaque region of an opaque toplevel; _windowServerCanBlurBehind; PD_WS_SCALE (a test
 #         instrument: one application's backing stores at a chosen scale); pointer motion in PD_WS_TIMING
 #   0122  Onyx2D: a clip's edges within 1/1024 of a pixel boundary are on it (a dirty rect that went to points
