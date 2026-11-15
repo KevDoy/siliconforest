@@ -21,6 +21,7 @@
 #include "pd_atc_pipe.h"
 #include "pd_atc_dp.h"
 #include "pd_usbc_phy_lease.h"
+#include "pd_acio_pinmux.h"
 #include <IOKit/IOCommandGate.h>
 #include <kern/thread_call.h>
 #include <IOKit/IOPlatformExpert.h>
@@ -111,6 +112,7 @@ class PDAppleUSB : public IOService {
     static const void *getLane(void *,const char *,const char *,size_t *);
     int stopPHY();
     int priorACIOOff();
+    int prepareACIOPin();
     int begin(bool flip,bool ss);
     bool end();
     void sample();
@@ -309,6 +311,37 @@ int PDAppleUSB::priorACIOOff()
     // reconfigure command, not another physical power domain.
     setProperty("prior-acio-power-covers-m3",!ret);
     return ret;
+}
+
+int PDAppleUSB::prepareACIOPin()
+{
+    // Called under the PHY gate, before commit or ACIO power-up. The GPIO
+    // is ACIO1's default pinctrl in the pinned Linux T8103 device tree.
+    if(!lease.owner || lease.phase!=PD_USBC_PHY_PREPARING || lease.quarantined ||
+       (lease.mode!=PD_USBC_PHY_TBT && lease.mode!=PD_USBC_PHY_USB4))return EBUSY;
+    auto node=IORegistryEntry::fromPath("/arm-io/aop-gpio",gIODTPlane);
+    auto name=OSString::withCString("gpio,t8101");
+    bool valid=node && name && IODTCompareNubName(node,name,NULL);
+    OSSafeReleaseNULL(name);
+    auto clients=node?node->getChildIterator(gIOServicePlane):NULL;
+    bool bound=clients && clients->getNextObject();
+    OSSafeReleaseNULL(clients);OSSafeReleaseNULL(node);
+    uint32_t pins=0;PDMmio gpio;
+    if(!valid || !pd_adt_u32("/arm-io/aop-gpio","#gpio-pins",0,&pins) || pins!=42 ||
+       !gpio.mapNode("/arm-io/aop-gpio",0) || gpio.phys!=0x24a820000ULL || gpio.len!=0x4000){
+        gpio.unmap();return ENODEV;
+    }
+    if(bound){gpio.unmap();return EBUSY;}
+    int ret=priorACIOOff(); // Fresh physical proof immediately before pin access.
+    uint32_t before=0,after=0;
+    pd_acio_pinmux_io io={&gpio,
+        [](void *p)->uint32_t{return ((PDMmio *)p)->r32(41*4);},
+        [](void *p,uint32_t v){((PDMmio *)p)->w32(41*4,v);}};
+    if(!ret)ret=pd_acio1_pinmux(&io,&before,&after);
+    setProperty("acio1-pinmux-before",before,32);
+    setProperty("acio1-pinmux-after",after,32);
+    setProperty("acio1-pinmux-error",(uint32_t)ret,32);
+    gpio.unmap();return ret;
 }
 
 int PDAppleUSB::stopPHY()
@@ -593,6 +626,10 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
     setProperty("phy-start-stage","acio-off-check");
     ret=priorACIOOff();
     if (ret) return ret;
+    if(target==PD_ATC_MODE_TBT || target==PD_ATC_MODE_USB4){
+        setProperty("phy-start-stage","acio1-default-pinctrl");
+        ret=prepareACIOPin();if(ret)return ret;
+    }
     setProperty("phy-start-stage","power-enable");
     ret=pd_pmgr_enable_node(atcPath,-1,0,true);
     if (!ret) ret=pd_pmgr_enable_node(usbPath,-1,0,true);

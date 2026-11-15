@@ -29,3 +29,10 @@ core.c and dwc3-apple.c, selecting GPL-2.0:
     Copyright (c) 2018, The Linux Foundation. All rights reserved.
   and dwc3-of-simple.c: Copyright (c) 2015 Texas Instruments Incorporated.
 The ATC and m1n1 notices are appended by build-host.nix.
+
+kernel/pd_acio_pinmux.h ports ACIO1's GPIO41 function1/input-enable default
+from linux-aurora 6a08a08e, t8103.dtsi and pinctrl-apple-gpio.c:
+  Copyright (C) The Asahi Linux Contributors
+  Copyright (C) 2020 Corellium LLC
+  Based on pinctrl-pistachio.c, Copyright (C) 2014 Imagination Technologies
+  Ltd., Copyright (C) 2014 Google, Inc. GPL-2.0-only; original notices retained.

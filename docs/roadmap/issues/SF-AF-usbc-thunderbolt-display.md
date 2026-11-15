@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 14:52Z)
+## Current target and observed state (owner change; updated 15:20Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,15 +15,22 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** installed non-AVE CIO23, shared-PHY source `697d9eaeb`,
-capsule `fba293e054b2…`, qualified14:48:18Z/UART reaped14:48:20Z. It reproduces
-the published USB2 baseline with exact actual readbacks and retains the normal
-desktop/Wi-Fi/NHI/RTKit/PHY and snapshot/UID checks. It still stops at Phase2,
-with both lanes unplugged7/remote0, unchanged USB4 status, ENODEV19 approval
-and zero PCI functions. Matching the USB2 baseline did not fix training.
-Quiet60s: kernel2.88868% of one CPU, aggregate97.71052% idle,24 NHI interrupts
-including diagnostic boundaries; warm fixed-work timings remain unchanged.
-All57 modules are non-AVE, no pdave argument or endpoint mapper/MSI admission.
+**Observed in Darwin:** installed non-AVE CIO24, source `2a029b3f2`,
+capsule `91383c471306…`, installed15:13:29Z, qualified15:14:50Z, UART reaped
+15:14:51Z. Standard desktop/injection, Wi-Fi, NHI/RTKit/PHY, catalogue,
+UID and snapshot ABI checks pass. The recorded five firmware-log ACKs succeed;
+native mailbox controls exactly match Linux's active authorized TS3. It still
+stops at Phase2 with both lanes unplugged7/remote0, TS3 approval ENODEV19
+and zero PCI functions. No endpoint mapper/MSI/driver admission, AVE module
+or pdave argument is present in the57-module image. CIO23 is the qualified
+non-AVE rollback. CIO24 adds observation and the presently uninvoked PCI
+scan settling delay; it does not establish a working dock.
+
+CIO23 reproduced the published USB2 baseline, changing only bit11 to match
+Linux/m1n1; this did not fix training. Its quiet60s measured kernel2.88868%
+of one CPU, aggregate97.71052% idle and24 NHI interrupts including diagnostic
+boundaries. Warm fixed-work timings remain unchanged; the reported AppKit
+slowdown's cause remains unresolved.
 
 **Previous CIO22 observation:** kernel source `455ea303f`,
 capsule `8f3800a8bf4c…`, qualified14:31:04Z; UART reaped before lock release
@@ -209,7 +216,7 @@ current evidence establishes service presence, not its complete hotplug policy.
 - Capture `tc01-uart.txt`: new Darwin banner, no panic line through the
   captured first-boot interval. The compositor `.next` and inject directory
   were restored before releasing the lock. **Capture correction:** the owned
-  reader initially remained open after release; stopped at 01:15:24Z. GFX2
+  reader initially remained open after release; stopped at 01:15:20Z. GFX2
   was notified that any intervening captures may have shared UART bytes;
   supplemental bytes are in `tc01-uart-final.txt`. The first tc01 boot
   predates that overlap. Future cycles must stop/reap their reader before
@@ -2165,7 +2172,7 @@ PCI path. The next link investigation first checks whether firmware-log or
 IOReport acknowledgments/mailbox transport are stalled; it will expose control
 metadata only, with no firmware-byte extraction or guessed PHY programming.
 
-### RTKit ACK and mailbox observation: source/SDK, target pending
+### RTKit ACK and mailbox observation: observed CIO24
 
 The installed firmware logs repeatedly stop after Phase2. The next observation
 tests whether the native RTKit transport itself is stalled, rather than
@@ -2191,9 +2198,49 @@ unchanged. Ordinary, enumeration and MSI native SDKs and all six repository
 checks pass. Final observation omits an unsynchronized rearm-pending flag;
 its eight IRQ words are RX then TX, each registered/depth/taken/dispatched.
 No new timer, periodic worker or NHI transaction is introduced. This code is
-not installed yet; CIO23 remains the qualified non-AVE baseline and rollback.
-The next candidate also carries the previously SDK-built PCI scan settling
+installed and qualified in CIO24; CIO23 remains the non-AVE rollback.
+The candidate also carries the previously SDK-built PCI scan settling
 delay, which is uninvoked without a peer, and excludes endpoint mapper/MSI/
 driver admission. A normal Linux installation visit will read the same three
 mailbox controls against its active authorized TS3, without extra boots or
 firmware extraction.
+
+
+CIO24 observed protocol12, AP/IOP power32, running/active and no crash/shutdown,
+with an8-entry80-byte-message syslog ring in4096 mapped bytes. Five recorded
+syslog ACK attempts returned0; IOReport attempts0 and errors0. Initial messages
+before publication are excluded, so zero counts cannot prove no earlier ACKs.
+RX IRQ registration/depth/taken/dispatched is1/0/8/8; TX is1/1/0/0. Both
+startup and explicit snapshots agree. Native A2I50=`0x2bb01`, I2A80=`0x2dd01`
+and IRQ_ENABLE48=`9` exactly match the same Linux visit; both FIFOs report
+empty, not full. This weighs against a blocked mailbox/log ACK explanation;
+it does not prove firmware progress or handler completion. Training still
+reaches Phase2 only, both lanes7/remote0; actual approval returns ENODEV19
+and independent PCI inventory exit2/functions0, with no native PCI host.
+
+### ACIO1 default pinctrl gap: source, hardware result pending
+
+The pinned Linux T8103 DT assigns ACIO1 `pinctrl-0=<&acio1_pins>` with AOP
+GPIO41/function1; `apple_gpio_pinmux_set` also enables input. The native path
+had no corresponding operation. The actual saved J293 ADT identifies
+`/arm-io/aop-gpio`, compatible `gpio,t8101`,42 pins, physical0x24a820000
+span0x4000, matching Linux's AOP pinctrl. GPIO39 belongs to port0 and remains
+untouched. The pin's actual Linux and Darwin control values are not yet measured.
+
+The candidate applies mask0x260/set0x220 only to GPIO41 at offset0xa4, under
+the broker gate with an actual exclusive PREPARING TBT/USB4 lease and fresh
+physical ACIO1-off proof, before PHY clocks and lease commit. It validates
+the actual resource and refuses a bound GPIO bank, inaccessible register,
+locked mismatching configuration or failed readback. All other fields are
+preserved; DATA may change asynchronously. Already-correct settings need no
+write, including a locked correct setting. No IRQ configuration, timer,
+port0 operation, M3 control guess or USB4 status-bit force is added. As with
+Linux default pinctrl, no speculative pin reset on release is introduced.
+The next normal Linux installation visit will compare this one public control
+under bound-pinctrl/ACIO and authorized-TS3 guards, without an extra reboot.
+ASan/UBSan checks pass all mux/input combinations, unrelated-bit preservation,
+locked mismatch/correct idempotence, inaccessible/stuck reads and asynchronous
+DATA changes. The actual native USB SDK (`gdxa8is6…`) and all six repository
+checks pass (274 Python tests,77 C groups,6 mutations). The57-module non-AVE
+collection builds with no overlap; image inspection and the target test remain
+pending. No installed pin change or training fix is claimed.
