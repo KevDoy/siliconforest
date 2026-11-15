@@ -131,6 +131,13 @@ class HoldTests(unittest.TestCase):
         self.assertIsNotNone(gate.pending_hold(text+'U TERM6 in 2min: core.lock released: Foundation INSTALLED\n'))
         self.assertIsNone(gate.pending_hold(text+'U TERM6 core.lock released: Foundation INSTALLED, new probe ok\n'))
 
+    def test_exact_owner_core_lock_release_clears_only_its_hold(self):
+        text = 'T TERM7 core.lock: GUARDED INSTALL Foundation now\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX core.lock released\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM7 expect core.lock released\n'))
+        self.assertIsNone(gate.pending_hold(text+'U TERM7 core.lock released\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM7 core.lock released\nV GFX2 M1 REBOOT now\n'))
+
     def test_idle_measurement_survives_gui_release_with_time_margin(self):
         from datetime import datetime, timezone
         text = '2026-11-15T06:23:41Z TERM6 gui.lock: start my own Activity Monitor for an idle CPU/RSS measurement (no input), ~2 min\n'

@@ -53,6 +53,7 @@ def pending_hold(text, install_reservation=False, now=None):
                 if release_owner in (None, owner) and any(body.startswith(m) for m in markers):
                     del active[key]
             if (lower_body.startswith(('core install finished', 'guarded core install finished', 'guarded install finished', 'libobjc install finished')) or
+                lower_body == 'core.lock released' or
                 (lower_body.startswith('core.lock released:') and ' installed' in lower_body)):
                 active.pop((owner, 'core'), None)
                 active.pop((owner, 'core-announced'), None)
