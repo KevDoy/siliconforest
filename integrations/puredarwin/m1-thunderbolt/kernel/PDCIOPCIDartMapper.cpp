@@ -12,6 +12,7 @@ static constexpr unsigned pciPages=pciBytes/pciPage,pciMappings=2048;
 bool PDCIOPCIDartMapper::initWithController(PDCIOPCIController *ctl,IOPCIDevice *dev)
 {
  controller=NULL;endpoint=NULL;lock=NULL;busy=NULL;mappings=NULL;
+ bzero(usbEndpoints,sizeof(usbEndpoints));usbEndpointCount=0;
  tableCount=mappingCount=0;setupAttempted=ready=touched=poisoned=revoked=false;
  bzero(tables,sizeof(tables));pt={};io={};fIsSystem=false;
  if(!ctl || !dev || !IOMapper::init())return false;
@@ -132,15 +133,55 @@ bool PDCIOPCIDartMapper::initHardware(IOService *provider)
  if(unpin)release();return !error;
 }
 uint64_t PDCIOPCIDartMapper::getPageSize() const{return pciPage;}
+bool PDCIOPCIDartMapper::knownEndpoint(IOService *device) const
+{
+ if(device==endpoint)return true;
+ for(unsigned n=0;n<usbEndpointCount;++n)if(device==usbEndpoints[n])return true;
+ return false;
+}
+IOReturn PDCIOPCIDartMapper::registerDockUSB(IOPCIDevice *device)
+{
+ if(!device || !endpoint || ml_at_interrupt_context() || !lock ||
+    device->getDeviceNumber() || device->getFunctionNumber() ||
+    (device->configRead32(8)>>8)!=0x0c0330 || (device->configRead16(4)&4))return kIOReturnBadArgument;
+ UInt32 id=device->configRead32(0);
+ if(id!=0x11001b73 && id!=0x12421b21 && id!=0x15d48086)return kIOReturnUnsupported;
+ auto hostFor=[](IORegistryEntry *node)->IORegistryEntry *{
+  unsigned depth=0;
+  while(node && !node->metaCast("PDCIOPCIHost") && depth++<64)node=node->getParentEntry(gIOServicePlane);
+  return node && node->metaCast("PDCIOPCIHost")?node:NULL;
+ };
+ auto host=hostFor(endpoint);
+ if(!host || hostFor(device)!=host || device->getProperty("iommu-parent"))return kIOReturnNotPermitted;
+ // Query fresh TTBR/TCR/gate ownership before adding another requester to
+ // this root. Never call reserveRequester while holding controller->lock.
+ auto query=OSSymbol::withCString("PDCIOPCIDMAReady");
+ if(!query)return kIOReturnNoMemory;
+ IOReturn owned=callPlatformFunction(query,false,endpoint,NULL,NULL,NULL);
+ query->release();if(owned!=kIOReturnSuccess)return kIOReturnNotReady;
+ IOLockLock(lock);bool prior=knownEndpoint(device),full=usbEndpointCount==4;IOLockUnlock(lock);
+ if(prior || full)return kIOReturnNoResources;
+ uint32_t sid=UINT32_MAX;
+ if(controller->reserveRequester(device->getBusNumber(),device->getDeviceNumber(),device->getFunctionNumber(),&sid) || sid)
+  return kIOReturnIOError;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ bool ok=ready && live() && usbEndpointCount<4 && !knownEndpoint(device);
+ if(ok && pd_pciec_dart_sid0_check(&io)){poison();ok=false;}
+ if(ok){device->retain();usbEndpoints[usbEndpointCount++]=device;}
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ // The factory must bind this actual mapper object and verify native lookup
+ // before matching a driver. Registration alone publishes no such binding.
+ return ok?kIOReturnSuccess:kIOReturnNotReady;
+}
 IOReturn PDCIOPCIDartMapper::callPlatformFunction(const OSSymbol *name,bool wait,
  void *p1,void *p2,void *p3,void *p4)
 {
  if(!name || !name->isEqualTo("PDCIOPCIDMAReady"))
   return IOMapper::callPlatformFunction(name,wait,p1,p2,p3,p4);
- if(p1!=endpoint || p2 || p3 || p4 || ml_at_interrupt_context() || !lock || !controller)
+ if(!p1 || p2 || p3 || p4 || ml_at_interrupt_context() || !lock || !controller)
   return kIOReturnBadArgument;
  IOLockLock(lock);IOLockLock(controller->lock);
- bool ok=ready && live();
+ bool ok=knownEndpoint((IOService *)p1) && ready && live();
  if(ok){
   uint32_t tcr=0,root=0,gate=0;
   int error=pd_pciec_dart_sid0_check(&io);
@@ -167,13 +208,16 @@ IOReturn PDCIOPCIDartMapper::iovmMapMemory(IOMemoryDescriptor *memory,uint64_t o
  uint64_t alignment=spec && spec->alignment?spec->alignment:pciPage;
  if(alignment&(alignment-1))return kIOReturnUnsupported;
  if(alignment<pciPage)alignment=pciPage;
- if(alignment>pciBytes || (spec && (spec->options || (spec->device && spec->device!=endpoint))))return kIOReturnUnsupported;
+ if(alignment>pciBytes || (spec && spec->options))return kIOReturnUnsupported;
  unsigned bits=spec && spec->numAddressBits?spec->numAddressBits:32;
  if(bits>64)return kIOReturnBadArgument;
  if(bits<27)return kIOReturnNoResources;
  IOByteCount span=0;uint64_t pa=md->getPhysicalSegment(0,&span,kIOMemoryMapperNone);
  if(!pa || (pa&~pciMask) || span<length || length-1>((1ULL<<36)-1)-pa)return kIOReturnBadArgument;
  IOLockLock(lock);IOLockLock(controller->lock);
+ if(spec && spec->device && !knownEndpoint(spec->device)){
+  IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnNotPermitted;
+ }
  if(!ready || !live()){IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnNotReady;}
  if(pd_pciec_dart_sid0_check(&io)){
   poison();IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnIOError;
@@ -245,5 +289,6 @@ void PDCIOPCIDartMapper::free()
  if(touched || mappingCount){IOLog("PDCIOPCIDartMapper: retaining SID0 tables/backing until reboot\n");return;}
  for(unsigned n=0;n<tableCount;++n)tables[n].memory->release();
  if(busy)IOFree(busy,pciPages);if(mappings)IOFree(mappings,sizeof(Mapping)*pciMappings);
+ for(unsigned n=0;n<usbEndpointCount;++n)usbEndpoints[n]->release();
  if(lock)IOLockFree(lock);OSSafeReleaseNULL(endpoint);OSSafeReleaseNULL(controller);IOMapper::free();
 }
