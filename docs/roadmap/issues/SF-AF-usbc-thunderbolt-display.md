@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 11:07Z)
+## Current target and observed state (owner change; updated 11:54Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -29,6 +29,14 @@ UID65534 was denied without incrementing the query count, while root completed
 one request and advanced it1->2. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
 or `pdave` argument.
+
+**CIO16 failed qualification:** the same non-AVE diagnostic image reached
+healthy NHI/RTKit/Type-C/PHY startup, but the standard desktop and inject
+directory were absent at75s. It was restored to qualified CIO15 at11:45:55Z;
+the owned UART reader was reaped at11:45:56Z before lock release. No new
+compositor-start record or first SF_SESSION marker was captured. The cause
+is unresolved. A same-image CIO16B repeat is announced for12:00Z or later,
+with process/launchd state capture and bounded additional session waiting.
 
 **Not observed in Darwin:** the dock router, authorization, any dock PCI
 function, Ethernet link/DHCP, dock USB enumeration/HID/read-only storage,
@@ -1550,3 +1558,35 @@ ordering helper passes failure/no-release sanitizer tests; this is not real
 DART TLB or device/IRQ/work-drain proof. Those native mapper, MSI/teardown and
 positive DMA/link/DHCP qualifications remain outstanding. The uninstalled
 Ethernet driver cannot be the installed kernel's idle-load cause.
+
+### CIO16 observed readback; failed desktop qualification and CIO15 recovery
+
+Source2614eb5d7/capsule9b9baa004c1b… booted at11:42:05Z. The actual startup
+snapshot completed once with NHI/RTKit ready and no quarantine. All256 ACIO
+tuning registers, including full words and intended masks, match active
+Linux. All five host-router header words also match. Both lanes still report
+UNPLUGGED/state7, enabled/unlocked, no remote router. Lane basic-header DWORD4
+differs at bit30; PHY control DWORD18 differs at bits5/18/21/26/28. These
+include dynamic lane fields; no speculative write is justified by a diff.
+Type-C event1 differs at bits0/1/8/10; mask1 at bits0/2/8/9/54/55/59. Power,
+status and data-status match Linux. Raw snapshots and comparison remain private.
+
+The75s desktop/inject check failed at11:43:21Z. The standard recovery restored
+qualified CIO15 through the normal Linux installer, verified the desktop and
+inject directory, then stopped/reaped the owned UART reader before releasing
+gui.lock at11:45:56Z. No panic was captured. This is a failed collection
+qualification, not a working CIO16 deployment. Its late/root/unprivileged
+queries and planned60s idle/IRQ comparison did not run. Retained session logs
+show no CIO16 compositor-start record; the UART has no first SF_SESSION marker.
+The early launcher cause is unknown; capture did not include its process tree.
+CIO16B repeats the identical image with that missing evidence and a bounded
+255s session deadline; it changes no source, kernel module, argument or AVE state.
+
+Pinned Linux initializes the CD321x interrupt mask and acknowledges EVENT1
+through CLEAR1; native startup currently ensures S0 and observes state only.
+The observed mask/event mismatch identifies missing lifecycle work, not proof
+that this alone prevents physical training. A native implementation must
+serialize reads/acknowledges, handle reset/setup and failure, and avoid enabling
+an unhandled GPIO interrupt or adding a fast polling loop. T8103 also has
+lstx_explicit=false: its Linux M3-control RMW is already reproduced; the literal
+write3 used on newer T6030 is not a T8103 fix.
