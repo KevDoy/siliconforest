@@ -191,6 +191,45 @@ the same GPU faults are expected on Linux for a process killed with work in flig
 firmware recovery handles them. What must be robust is the recovery path, which the fix is about.
 Bringing `VmLifetime` to G13 would avoid the faults; not attempted.
 
+### Kernel round of agent GFX2 (14-15 November): video decode and Wi-Fi statistics on the disk system
+
+Two changes, each its own kit build, each booted once and checked before the next (`sf-bootbin-install.sh`
+from Linux, `asahi-bless --next`; `m1-vulkan/tools/sf-kernel-cycle.sh` does the whole cycle). Base check
+first: the kit rebuilt from the tree gave the installed `56759b9f…` byte for byte.
+
+| Kit | Change | `sf/kernel.bin` | `.old` | Checked on the M1 |
+|---|---|---|---|---|
+| k1 | `pdavd=1` on the command line (configuration record only; `kern.kernelcacheuuid` unchanged) | `35044741…` | `56759b9f…` | `/dev/pdavd` present; `m1-avd/tools/avd_disk_test.sh run`: H.264 High, HEVC Main, VP9 1080p, 300 pictures each, **900 of 900 identical** to the workstation's software decode (framemd5), 0 errors, timeouts or DART faults; 2.3-2.8 ms per picture |
+| k2 | k1 + `if_attach_nx=46` + IO80211Family counting packets out (collection: IO80211Family, PDBwfm) | `7ad3b4a9…` | `35044741…` | 50 MiB pushed into the M1 over SSH: `ipackets` 334 -> 36856, `ibytes` +52.4 MB, `opackets` 197 -> 4196 (k1, same test: all three stay 0) |
+
+- **AVD**: PDAppleAVD was already a member of the collection (`rebase/build-kc.nix`), inert without the
+  boot-arg. The decoder firmware `avd-fw-v2-t0.bin` (aurora-silicon/avd-fw, MIT, 49152 bytes, from the
+  M1's Linux) was copied to `/Library/Firmware/apple/` on the disk (not in git). Codex was told
+  (`runs/m1-coord/requests-for-CODEX.md`). `/dev/pdavd` is root-only (0600), as SF-W says.
+- **Wi-Fi receive statistics**: not a missing count in the driver. IO80211Family hands frames to
+  `IONetworkInterface::inputPacket`, whose queue flush calls `ifnet_input_extended` with packet and byte
+  counts. But en0 was marked `IFCAP_SKYWALK`: macOS's default `if_attach_nx` (0x2f) attaches a Skywalk
+  compat netif to every legacy Ethernet interface, and no flowswitch is attached to an interface with the
+  legacy transmit model (kernel log: `skip attaching fsw to en0 using legacy TX model`), so the compat
+  netif is never activated and input runs through DLIL's own handler, which skips its statistics for
+  `IFCAP_SKYWALK` interfaces (`dlil_input.c`: "the stats are already incremented there"). Nobody counted
+  them (`SIOCGIFCAP` on the M1: en0 `0x400`). `if_attach_nx=46` is that default without
+  `IF_ATTACH_NX_NETIF_COMPAT`: legacy interfaces stay plain legacy, which is what their data path
+  already was. Packets out were 0 for another reason: `IONetworkInterface` counts output bytes itself but
+  output packets only from the driver's `IONetworkStats`, which no 802.11 driver kept
+  (`m1-bwfm/patches/0001`, applied to the tree's IO80211Family). Byte counters read by non-platform
+  programs are rounded to 1 KiB by xnu (`rtsock.c`), as on macOS. `m1-bwfm/tools/ifcounters.py` reads
+  them on the M1 the way Activity Monitor does (`NET_RT_IFLIST2`).
+- `sfvk-careful.sh` lost lines of a command's output at each one-second streaming boundary (`tail -n` of
+  a file whose last line was being written); the first AVD comparison showed 3 "missing" pictures per
+  clip for that reason. Fixed (lines are streamed by number); the complete output stays on the M1 in
+  `/private/tmp/sfvk-careful-<name>.txt`, and the AVD test compares that.
+- `e2fsck -fn` before each install: rc 4, the same findings as since the 21:06Z crash (inode 65144,
+  blocks 636291-636295, group 17) plus 266 "extent tree could be narrower" optimisations, which are
+  not errors. Not repaired.
+- Revert: `sf-bootbin-install.sh <SFBOOT> --rollback` gives k1 (`35044741…`); the kits are in
+  `runs/gfx2/kit-{base,k1,k2}` and the one before in `runs/m1-desktop-010/install-out-before-gfx2-avd-wifi/`.
+
 ### GL, zink, conformance, Metal (after the milestones)
 
 **Native GL vs zink on Honeykrisp** (`m1-vulkan/test/gl-bench.c`: surfaceless EGL, 1024x1024 FBO, 64
@@ -224,12 +263,7 @@ was not tested. Those two tests are what to write first.
 
 ### Open items
 
-- `/dev/pdavd` absent on the disk kernel (Codex's finding, `runs/m1-coord/requests-for-VK.md`): PDAppleAVD is in
-  the collection but its `start` returns early without the boot-arg `pdavd`; the installed kernel.bin's
-  configuration has none. The next, separate kernel change: append `pdavd=1` to the final `ARGS` of
-  `m1-native-boot/install/build.sh` (or `SF_EXTRA_BOOTARGS=pdavd=1`), install with the rollback kept;
-  the first open then needs `/Library/Firmware/apple/avd-fw-v2-t0.bin` (MIT, aurora-silicon/avd-fw).
-  Not done here.
+- ~~`/dev/pdavd` absent on the disk kernel~~: done (kit k1, see "Kernel round of agent GFX2").
 - Install the GL Mesa with the clock and `ETIME` fixes (147a62f + 0011 + `pd-etime.h`); not done.
 - A test that would catch a missing implicit-sync fence (a heavy frame per present), and the
   compositor's fence counters; `wp_linux_drm_syncobj_v1` in Chonkstep (explicit sync) would be the

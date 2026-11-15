@@ -12,6 +12,12 @@ Owner's words: "we want avd support, port that from linux and make sure we have 
 - **Not done**: Firefox itself (it does not run on the system yet; its decode layer is ready for the Cocoa stream to pick up); zero-copy to the compositor (frames are copied; needs dma-buf export and NV12 import in Chonkstep); mpv (a small player was written instead); pause/seek/subtitles in the player; the device is root-only; AV1 is not in this SoC's decoder.
 - **Decisions for you**: put `PDAppleAVD` into the default collection (it is inert without `pdavd=1`)? Build the decoder's firmware from its MIT source and ship it, instead of taking the file from the M1's Linux per boot?
 
+## On the installed system (15 November 2026, agent GFX2)
+The disk kernel has `pdavd=1` since kit k1 (`SF-AC-vulkan.md`, "Kernel round of agent GFX2"): `/dev/pdavd`
+exists on SiliconForest booted from its disk, the decoder firmware is at `/Library/Firmware/apple/avd-fw-v2-t0.bin`,
+and `tools/avd_disk_test.sh` (over SSH, no RAM root) decoded the H.264, HEVC and VP9 1080p clips: 900 of 900
+pictures identical to the software decode.
+
 ## Status (2026-11-12)
 | Layer | State | Proof |
 |---|---|---|
