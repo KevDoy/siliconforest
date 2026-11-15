@@ -83,3 +83,19 @@ nonzero unimplemented status, dataUsed=0, output unchanged, no capture objects.
 Its M1 negative fixture passes in
 runs/sffinch/coremediaio-unavailable-stage-v1/candidate.json. These are stages
 only, not camera or private-service implementations; nothing was installed.
+
+`vt-queries.nix {}` stages two additive VideoToolbox queries above an exact
+retained decoder/encoder child. All172 child exports and its entire text
+section remain unchanged; the wrapper's effective exports total174. Public
+[extension-property query contract](https://developer.apple.com/documentation/videotoolbox/vtcopyvideodecoderextensionproperties?language=objc)
+and [stereo capability contract](https://developer.apple.com/documentation/videotoolbox/vtisstereomvhevcdecodesupported()?language=objc)
+are implemented truthfully: the retained H264/HEVC/VP9 codec family is built in,
+no MediaExtension dictionary exists, and multiview output is unsupported.
+The native Linux-built query observes-19510 for H264/HEVC and-12906 for an
+unknown codec, leaving the output slot untouched on failure. The source uses
+those same error/ownership facts; the output is never a fabricated extension.
+Native M5 stereo support is true; this platform must report false. That is a
+capability difference, not a reason to fabricate multi-image decoding.
+These queries build and the M1 stage is prepared, not yet executed. They cover
+the final two missing reviewed VT imports at the export level only. No decoder
+implementation or canonical library is replaced by this stage.
