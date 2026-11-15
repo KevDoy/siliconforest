@@ -54,7 +54,7 @@ def main():
     manifest = json.loads((a.packet/'manifest.json').read_text())
     name = manifest['framework']
     allowed = {'CoreVideo', 'CoreMedia', 'VideoToolbox', 'AudioToolbox', 'AVFAudio',
-               'AVFoundation', 'CoreImage', 'ColorSync', 'Accelerate', 'MediaAccessibility'}
+               'AVFoundation', 'CoreImage', 'ColorSync', 'Accelerate', 'MediaAccessibility', 'Metal'}
     if name not in allowed or set(a.installed)-allowed or name in a.installed:
         raise ValueError('Only reviewed media, one new transaction at a time')
     if not a.packet.name.startswith('install-') or not re.fullmatch(r'[A-Za-z0-9_-]+', a.packet.name):

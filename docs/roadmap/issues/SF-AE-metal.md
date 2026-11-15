@@ -68,3 +68,19 @@ Xcode versions, argument buffers, ray tracing, mesh shaders, indirect command bu
 ### Revert
 
 `rm -rf /private/var/db/sfmetal*` on the M1 (nothing of the system was replaced for Metal).
+
+### Canonical framework policy (CODEX, 05:38Z, 15 November)
+
+The owner subsequently authorized canonical Metal installation.
+[Policy recipe and evidence](../../../integrations/puredarwin/finch/Metal/README.md)
+retain all 185 darling-metal exports while returning nil/empty devices unless
+`SF_METAL_ENABLE_REAL_DEVICE=1`. The disabled path returns before Vulkan/Indium
+initialization. Real-device code remains intact and its exit hang is unresolved;
+no new real-device run was made. Support libraries are inside the framework.
+
+Cold target hashes were verified before activation, existing files kept
+`.pre-finch`, and all installed-family regressions including compatibility18/18
+passed. The unchanged Homebrew ffmpeg bottle now loads/decodes both codecs with
+no DYLD overrides. The old experiment-directory revert above applies only to
+that stage; canonical rollback uses its separate cold-install receipt at
+`/private/var/db/sffinch/install-Metal-v1/receipt.json`.

@@ -56,7 +56,7 @@ def main():
                    AudioToolbox='AudioQueueNewOutput', AVFAudio='OBJC_CLASS_$_AVAudioEngine',
                    AVFoundation='OBJC_CLASS_$_AVURLAsset', CoreImage='kCIInputImageKey',
                    ColorSync='ColorSyncProfileCreateWithName', Accelerate='vDSP_vadd',
-                   MediaAccessibility='MACaptionAppearanceGetForegroundOpacity')
+                   MediaAccessibility='MACaptionAppearanceGetForegroundOpacity', Metal='MTLCreateSystemDefaultDevice')
     providers = {}
     images = []
     for name in a.installed:
@@ -78,6 +78,7 @@ def main():
     commands += [('play-'+tone, [str(a.audio_stage/'bin/sf-afplay'),
                                 str(a.audio_stage/'fixtures'/tone)], a.work)
                  for tone in ['tone.wav', 'tone-aac.m4a']]
+    extras = {row['name']: row for row in json.loads(a.extra_commands.read_text())} if a.extra_commands else {}
     if a.extra_commands:
         commands += [(row['name'], row['argv'], row.get('cwd', a.work))
                      for row in json.loads(a.extra_commands.read_text())]
@@ -85,7 +86,11 @@ def main():
     for name, argv, cwd in commands:
         digest = hashlib.sha256(Path(argv[0]).read_bytes()).hexdigest()
         start = time.monotonic()
-        r = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=50)
+        command_env = dict(env)
+        if extras.get(name, {}).get('clean_dyld'):
+            command_env = {k: v for k, v in command_env.items() if not k.startswith('DYLD_')}
+        command_env.update(extras.get(name, {}).get('env', {}))
+        r = subprocess.run(argv, cwd=cwd, env=command_env, capture_output=True, text=True, timeout=50)
         programs.append(dict(name=name, sha256=digest, seconds=round(time.monotonic()-start, 3),
                              status='OK' if r.returncode == 0 else 'FAIL',
                              returncode=r.returncode, stdout=r.stdout, stderr=r.stderr))

@@ -110,5 +110,20 @@ class HoldTests(unittest.TestCase):
         for hold in ['U PERF core.lock: GUARDED INSTALL now\n', 'U GFX2 M1 REBOOT now\n']:
             self.assertIsNotNone(gate.pending_hold(text+hold, install_reservation=True))
 
+    def test_actual_libobjc_completion_clears_guarded_hold(self):
+        text = "T PERF core.lock: GUARDED INSTALL now; done when I log 'PERF libobjc install finished'\n"
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text+'U PERF libobjc install finished: checks pass\n'))
+
+    def test_ab_hold_survives_temporary_boot_and_ends_after_recovery(self):
+        text = 'T CODEX-TB IDLE A/B START under gui.lock: USB04 -> k2 -> USB04\n'
+        text += 'U CODEX-TB idle-k2 clean reboot to Linux\n'
+        text += 'V CODEX-TB temporary k2 back in SiliconForest under held gui.lock\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        text += 'W CODEX-TB IDLE-K2 restored USB04; M1 back in SiliconForest\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        text += 'X CODEX-TB IDLE-K2 owned UART reader stopped before gui.lock release\n'
+        self.assertIsNone(gate.pending_hold(text))
+
 if __name__ == '__main__':
     unittest.main()

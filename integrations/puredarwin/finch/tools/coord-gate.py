@@ -16,6 +16,12 @@ def pending_hold(text, install_reservation=False):
         if event:
             owner, body = event[1], event[2]
             lower_body = body.lower()
+            if lower_body.startswith('idle a/b start '):
+                active[(owner, 'measurement')] = (line, [], owner)
+            elif (lower_body.startswith('idle-') and
+                  'owned uart reader stopped before gui.lock release' in lower_body):
+                active.pop((owner, 'measurement'), None)
+                active.pop((owner, 'reboot'), None)
             if lower_body.startswith('gui.lock released'):
                 active.pop((owner, 'gpu-session'), None)
             elif ('announced gpu tests' in lower_body and 'did not run' in lower_body
@@ -35,7 +41,7 @@ def pending_hold(text, install_reservation=False):
             for key, (notice, markers, release_owner) in list(active.items()):
                 if release_owner in (None, owner) and any(body.startswith(m) for m in markers):
                     del active[key]
-            if lower_body.startswith(('core install finished', 'guarded core install finished', 'guarded install finished')):
+            if lower_body.startswith(('core install finished', 'guarded core install finished', 'guarded install finished', 'libobjc install finished')):
                 active.pop((owner, 'core'), None)
                 active.pop((owner, 'core-announced'), None)
             elif re.match(r'^(?:core\.lock:\s*)?guarded(?: core)? install\b', lower_body):
@@ -49,7 +55,9 @@ def pending_hold(text, install_reservation=False):
             elif re.match(r'^in\b.*guarded(?: core)? install\b', lower_body):
                 active[(owner, 'core-announced')] = (line, [], owner)
             if (lower_body.startswith('m1 back in siliconforest') or
-                (lower_body.startswith('install end ') and 'm1 back in siliconforest' in lower_body)):
+                (lower_body.startswith('install end ') and 'm1 back in siliconforest' in lower_body) or
+                (lower_body.startswith('idle-') and ' restored ' in lower_body and
+                 lower_body.endswith('; m1 back in siliconforest'))):
                 active.pop((owner, 'reboot'), None)
                 active.pop((owner, 'gpu'), None)
                 active.pop((owner, 'gpu-session'), None)
