@@ -248,14 +248,14 @@ int main(void)
         assert(feed(8, 1, 1, one, 0) == 0);
         assert(feed(8, 0, 1, one, 0) == 1 && out.buttons == 0);
     }
-    /* a two-finger pinch and a sideways two-finger swipe report nothing */
+    /* a pinch has a separate gesture event, never pointer/wheel bytes */
     {
         int16_t a[2][2] = { { 0, 4000 }, { 2000, 4000 } };
         long moved = 0;
         m1tp_mt_init(&st, 0);
         for (i = 0; i < 4; i++) feed(8, 0, 2, a, 0);
         for (i = 0; i < 40; i++) { a[0][0] -= 30; a[1][0] += 30; if (feed(8, 0, 2, a, 0)) moved++; }
-        assert(!moved && st.gesture == M1TP_MT_G_IGNORED);
+        assert(!moved && st.gesture == M1TP_MT_G_PINCH);
         for (i = 0; i < 3; i++) feed(8, 0, 0, 0, 0);
         a[0][0] = 0; a[1][0] = 2000;
         for (i = 0; i < 4; i++) feed(8, 0, 2, a, 0);

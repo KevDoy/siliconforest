@@ -35,6 +35,7 @@ let
   cp ${../../m1-trackpad-input-trace/core/m1tp_trace.h} "$out/m1tp_trace.h"
   cp ${./m1tp_mt.c} "$out/m1tp_mt.c"
   cp ${./m1tp_mt.h} "$out/m1tp_mt.h"
+  cp ${./pd_tp_gesture_ring.h} "$out/pd_tp_gesture_ring.h"
   cp ${./m1tp_mt_selftest.c} "$out/m1tp_mt_selftest.c"
   cp ${./NOTICE} "$out/NOTICE"
   cp ${/home/chrisk/src/darwin-lab/runs/m1-desktop-010/trackpad-child-reference-001/trackpad_reference.h} "$out/trackpad_reference.h"

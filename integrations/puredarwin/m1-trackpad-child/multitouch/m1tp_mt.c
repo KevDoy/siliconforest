@@ -24,7 +24,7 @@
  * (full permission notice in NOTICE). libinput works in floating point and on
  * evdev slots; this is integer arithmetic on the controller's own records,
  * and only the parts the 12-byte pointer record can carry: no tapping (off on
- * the reference desktop), no pinch events, no horizontal scrolling. Three- and
+ * the reference desktop), no horizontal scrolling. Pinches and three- and
  * four-finger swipes (libinput's swipe gesture) are given to the driver beside the
  * pointer report (m1tp_mt_out.swipe), for the desktop's switch between Spaces.
  */
@@ -620,7 +620,91 @@ static void gesture_detect(struct m1tp_mt_state *s, uint64_t now)
                       (int64_t)(s->slot[b].y - s->slot[b].start_y) * 1000 / s->cfg.res_y)))
         s->gesture = M1TP_MT_G_SCROLL;
     else
-        s->gesture = M1TP_MT_G_IGNORED;             /* a pinch */
+        s->gesture = M1TP_MT_G_PINCH;
+}
+
+/* libinput tp_gesture_get_pinch_info/handle_state_pinch, in fixed point.
+ * Coordinates are normalized to physical micrometres before distance/angle.
+ * Integer CORDIC avoids floating point in the kernel; angle is clockwise
+ * because our y grows towards the user. The constants are atan(2^-i), in
+ * millionths of a degree, rounded independently of the contact decoder.
+ */
+static int32_t pinch_angle(int64_t x, int64_t y)
+{
+    static const int32_t angles[] = {45000000,26565051,14036243,7125016,
+        3576334,1789911,895174,447614,223811,111906,55953,27976,13988,6994,3497,1749};
+    int32_t angle = 0;
+    unsigned i;
+    x *= 1048576; y *= 1048576;
+    if (x < 0) { angle = y >= 0 ? 180000000 : -180000000; x = -x; y = -y; }
+    for (i = 0; i < sizeof(angles)/sizeof(angles[0]) && y; ++i) {
+        int64_t dx = x / ((int64_t)1 << i), dy = y / ((int64_t)1 << i);
+        if (y > 0) { x += dy; y -= dx; angle += angles[i]; }
+        else { x -= dy; y += dx; angle -= angles[i]; }
+    }
+    return angle / 10000;
+}
+
+static void pinch_end(struct m1tp_mt_state *s, struct m1tp_mt_out *out, unsigned phase)
+{
+    out->swipe = (uint8_t)phase; out->swipe_fingers = 2; out->gesture_kind = 1;
+    out->scale_q16 = s->pinch_scale_q16; s->pinch_active = 0;
+}
+
+static void pinch_step(struct m1tp_mt_state *s, unsigned count, uint64_t now,
+                       struct m1tp_mt_out *out)
+{
+    unsigned i, a = M1TP_MT_SLOTS, b = M1TP_MT_SLOTS;
+    int64_t vx, vy;
+    uint64_t distance, scale;
+    int32_t angle, center_x, center_y, delta, dx = 0, dy = 0;
+    if (s->pinch_active && (s->gesture != M1TP_MT_G_PINCH || !count || s->finger_count != 2)) {
+        unsigned phase = s->button_down || s->fingers_down >= 2 ?
+            M1TP_MT_GESTURE_CANCEL : M1TP_MT_SWIPE_END;
+        pinch_end(s,out,phase);
+        return;
+    }
+    if (out->swipe || s->gesture != M1TP_MT_G_PINCH || count != 2) return; /* debounce: freeze values */
+    for (i = 0; i < M1TP_MT_SLOTS; ++i) if (active_for_gesture(s, i)) {
+        if (a == M1TP_MT_SLOTS) a = i; else if (b == M1TP_MT_SLOTS) b = i;
+    }
+    if (a == M1TP_MT_SLOTS || b == M1TP_MT_SLOTS) return;
+    if (s->pinch_active && (a != s->pinch_a || b != s->pinch_b)) {
+        pinch_end(s, out, M1TP_MT_GESTURE_CANCEL); s->gesture = M1TP_MT_G_NONE;s->finger_count = 0;
+        return;
+    }
+    vx = (int64_t)(s->slot[b].x-s->slot[a].x)*1000/s->cfg.res_x;
+    vy = (int64_t)(s->slot[b].y-s->slot[a].y)*1000/s->cfg.res_y;
+    distance = isqrt64((uint64_t)(vx*vx+vy*vy));
+    if (distance < 1000) { /* coincident contacts have no meaningful angle/scale */
+        if (s->pinch_active) pinch_end(s,out,M1TP_MT_GESTURE_CANCEL);
+        s->gesture = M1TP_MT_G_IGNORED; return;
+    }
+    angle = pinch_angle(vx,vy);
+    center_x = (s->slot[a].x+s->slot[b].x)/2;
+    center_y = (s->slot[a].y+s->slot[b].y)/2;
+    if (!s->pinch_active) {
+        s->pinch_active = 1;s->pinch_a = (uint8_t)a;s->pinch_b = (uint8_t)b;
+        s->pinch_distance = distance;s->pinch_angle = angle;
+        s->pinch_center_x = center_x;s->pinch_center_y = center_y;s->pinch_scale_q16 = 65536;
+        s->swipe_rem_x = s->swipe_rem_y = 0;s->accel_last_us = now;
+        out->swipe = M1TP_MT_SWIPE_BEGIN;out->swipe_fingers = 2;out->gesture_kind = 1;
+        return;
+    }
+    scale = distance*65536/s->pinch_distance;
+    if (scale > UINT32_MAX) scale = UINT32_MAX;
+    delta = angle-s->pinch_angle;
+    if (delta > 18000) delta -= 36000; else if (delta < -18000) delta += 36000;
+    accelerate_gain(s,center_x-s->pinch_center_x,center_y-s->pinch_center_y,now,100,
+                    &s->swipe_rem_x,&s->swipe_rem_y,&dx,&dy);
+    if (dx || dy || scale != s->pinch_scale_q16 || delta) {
+        out->swipe = M1TP_MT_SWIPE_UPDATE;out->swipe_fingers = 2;out->gesture_kind = 1;
+        out->swipe_dx = (int16_t)(dx>32767?32767:dx < -32767?-32767:dx);
+        out->swipe_dy = (int16_t)(dy>32767?32767:dy < -32767?-32767:dy);
+        out->scale_q16 = (uint32_t)scale;out->angle_cdeg = delta;
+    }
+    s->pinch_angle = angle;s->pinch_center_x = center_x;s->pinch_center_y = center_y;
+    s->pinch_scale_q16 = (uint32_t)scale;
 }
 
 /* tp_clickfinger_set_button() and tp_clickfinger_within_distance() */
@@ -680,7 +764,14 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
 
     if (!s || !f || !out) return 0;
     memset(out, 0, sizeof(*out));
+    out->scale_q16 = 65536;
+    if (f->kind == M1TP_MT_KIND_RESET) {
+        if (s->pinch_active) pinch_end(s,out,M1TP_MT_GESTURE_CANCEL);
+        s->gesture = M1TP_MT_G_NONE;s->finger_count = 0;s->finger_pending = 0;
+        return 0;
+    }
     if (f->kind == M1TP_MT_KIND_BASIC) {
+        if (s->pinch_active) pinch_end(s,out,M1TP_MT_GESTURE_CANCEL);
         /* The controller is (still) in its basic mode: its report is the result. */
         for (i = 0; i < M1TP_MT_SLOTS; i++) { touch_end(s, i); s->slot[i].used = 0; }
         s->gesture = M1TP_MT_G_NONE; s->finger_count = 0;
@@ -821,7 +912,7 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
     if (nactive != s->finger_count) {
         if (!nactive) {
             s->gesture = M1TP_MT_G_NONE; s->finger_count = 0; s->finger_pending = 0;
-        } else if (s->gesture != M1TP_MT_G_SCROLL && s->gesture != M1TP_MT_G_SWIPE) {
+        } else if (s->gesture != M1TP_MT_G_SCROLL && s->gesture != M1TP_MT_G_SWIPE && s->gesture != M1TP_MT_G_PINCH) {
             gesture_begin(s, nactive, now);
         } else if (nactive != s->finger_pending) {
             /* DEFAULT_GESTURE_SWITCH_TIMEOUT: a scroll survives 100 ms of a
@@ -850,7 +941,7 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
     if (s->swipe_fingers && (s->gesture != M1TP_MT_G_SWIPE || !nactive || s->finger_count != s->swipe_fingers)) {
         out->swipe = M1TP_MT_SWIPE_END; out->swipe_fingers = s->swipe_fingers;
         s->swipe_fingers = 0;
-    } else if (s->gesture == M1TP_MT_G_SWIPE && nactive) {
+    } else if (s->gesture == M1TP_MT_G_SWIPE && nactive && !out->swipe && !s->pinch_active) {
         if (!s->swipe_fingers) {
             s->swipe_fingers = s->finger_count; s->swipe_rem_x = s->swipe_rem_y = 0;
             s->accel_last_us = now;                 /* filter_restart() */
@@ -866,6 +957,8 @@ int m1tp_mt_step(struct m1tp_mt_state *s, const struct m1tp_mt_frame *f, uint64_
             }
         }
     }
+
+    pinch_step(s,nactive,now,out);
 
     if (s->gesture == M1TP_MT_G_POINTER && nactive) {
         if (s->header_motion) { dx = f->mouse_dx; dy = f->mouse_dy; }

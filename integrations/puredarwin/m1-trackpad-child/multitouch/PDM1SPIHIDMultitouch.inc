@@ -35,21 +35,8 @@
  * real time (8 ms apart): n = 3 or 4 fingers to the left, -3 or -4 to the right; those events
  * are marked synthetic. The sysctls are registered once and never removed (the kext is part of
  * the collection and is not unloaded; the handlers touch only these statics). */
-struct pd_tp_swipe_event {
-    uint32_t seq;
-    uint8_t phase;          /* M1TP_MT_SWIPE_BEGIN, _UPDATE, _END */
-    uint8_t fingers;
-    int16_t dx, dy;         /* libinput units, physical directions */
-    uint8_t synthetic, reserved;
-    uint32_t ms;            /* the host clock, milliseconds */
-};
-#define PD_TP_SWIPE_RING 32u
-struct pd_tp_swipe_ring {
-    uint32_t version;       /* 1 */
-    uint32_t next_seq;      /* the sequence number the next event will have (the first is 1) */
-    struct pd_tp_swipe_event ev[PD_TP_SWIPE_RING];
-};
-static struct pd_tp_swipe_ring gPdTpSwipe = { 1, 1, {} };
+#include "pd_tp_gesture_ring.h"
+static struct pd_tp_swipe_ring gPdTpSwipe = { 2, 1, {} };
 static IOLock *gPdTpSwipeLock;
 static struct m1tp_mt_state gPdTpSwipeScratch;
 static struct m1tp_mt_frame gPdTpSwipeFrame;
@@ -63,13 +50,14 @@ static void pd_tp_swipe_push(const struct m1tp_mt_out *out, bool synthetic)
     struct pd_tp_swipe_event *e=&gPdTpSwipe.ev[gPdTpSwipe.next_seq % PD_TP_SWIPE_RING];
     e->seq=gPdTpSwipe.next_seq++;
     e->phase=out->swipe; e->fingers=out->swipe_fingers; e->dx=out->swipe_dx; e->dy=out->swipe_dy;
-    e->synthetic=synthetic?1:0; e->reserved=0;
+    e->synthetic=synthetic?1:0; e->kind=out->gesture_kind;
+    e->scale_q16=out->gesture_kind?out->scale_q16:65536; e->angle_cdeg=out->angle_cdeg;
     e->ms=(uint32_t)(PDM1KeyboardHW::clockUS()/1000);
     IOLockUnlock(gPdTpSwipeLock);
     if (out->swipe==M1TP_MT_SWIPE_BEGIN && gPdTpSwipeLogged<4) {
         gPdTpSwipeLogged++;
-        IOLog("PDM1SPIHID: MT stage=swipe-begin fingers=%u synthetic=%u (kern.pd_trackpad_swipe)\n",
-              (unsigned)out->swipe_fingers,synthetic?1u:0u);
+        IOLog("PDM1SPIHID: MT stage=gesture-begin fingers=%u kind=%u synthetic=%u (kern.pd_trackpad_swipe)\n",
+              (unsigned)out->swipe_fingers,(unsigned)out->gesture_kind,synthetic?1u:0u);
     }
 }
 
@@ -91,6 +79,39 @@ static int pd_tp_swipe_test SYSCTL_HANDLER_ARGS
 #pragma unused(oidp, arg1, arg2)
     int value=0, error=SYSCTL_IN(req,&value,sizeof(value));
     if (error || !req->newptr) return error ? error : SYSCTL_OUT(req,&value,sizeof(value));
+    if (value==2 || value==-2 || value==90) {
+        if (!gPdTpSwipeLock) return EINVAL;
+        struct pd_tp_pinch_scratch {
+            struct m1tp_mt_state state;
+            struct m1tp_mt_frame frame;
+            struct m1tp_mt_out out;
+            uint8_t report[M1TP_MT_MAX_REPORT_BYTES];
+        };
+        auto memory=(pd_tp_pinch_scratch *)IOMallocZero(sizeof(pd_tp_pinch_scratch));
+        if (!memory) return ENOMEM;
+        auto &scratch=memory->state;auto &frame=memory->frame;auto &out=memory->out;
+        auto &report=memory->report;int result=0;
+        static const int16_t quarter[11][2]={{1000,0},{988,156},{951,309},{891,454},
+            {809,588},{707,707},{588,809},{454,891},{309,951},{156,988},{0,1000}};
+        m1tp_mt_init(&scratch,nullptr);
+        for (int i=0;i<=44;++i) {
+            int16_t xy[2][2];
+            int n=i<=40?2:0, step=i<=40?i:40;
+            int x=value==-2?2600-step*40:1000+step*40, y=0;
+            if (value==90) {x=quarter[step/4][0]*2;y=quarter[step/4][1]*2;}
+            xy[0][0]=(int16_t)-x;xy[1][0]=(int16_t)x;
+            xy[0][1]=(int16_t)(3000+y);xy[1][1]=(int16_t)(3000-y);
+            uint64_t t=PDM1KeyboardHW::clockUS();
+            size_t size=m1tp_mt_build(report,sizeof(report),0,(uint16_t)(t/1000),(unsigned)n,
+                                      (const int16_t (*)[2])xy,nullptr);
+            if (!size || m1tp_mt_parse(report,size,&frame)!=M1TP_MT_KIND_TOUCH) {result=EIO;break;}
+            (void)m1tp_mt_step(&scratch,&frame,t,&out);
+            pd_tp_swipe_push(&out,true);IOSleep(8);
+        }
+        if (!result) IOLog("PDM1SPIHID: MT stage=pinch-test value=%d (synthetic scratch reports)\n",value);
+        IOFree(memory,sizeof(*memory));return result;
+    }
+    if (value!=3 && value!=-3 && value!=4 && value!=-4) return EINVAL;
     int fingers=value<0?-value:value, sign=value<0?1:-1;
     if (fingers<3 || fingers>4 || !gPdTpSwipeLock) return EINVAL;
     int16_t xy[4][2];
@@ -119,9 +140,9 @@ static int pd_tp_swipe_test SYSCTL_HANDLER_ARGS
 
 SYSCTL_DECL(_kern);
 SYSCTL_PROC(_kern, OID_AUTO, pd_trackpad_swipe, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0,
-            pd_tp_swipe_read, "S", "three- and four-finger swipes of the trackpad: version, next sequence, the last 32 events");
+            pd_tp_swipe_read, "S", "version2 trackpad gesture ring: swipe/pinch, next sequence, last32 events");
 SYSCTL_PROC(_kern, OID_AUTO, pd_trackpad_swipe_test, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, 0, 0,
-            pd_tp_swipe_test, "I", "write 3 or 4 (to the left), -3 or -4 (to the right): a constructed swipe through the decoder");
+            pd_tp_swipe_test, "I", "synthetic scratch reports: +/-3,4 swipe; +/-2 pinch out/in;90 clockwise turn");
 
 static void pd_tp_swipe_register()
 {
@@ -251,6 +272,8 @@ void PDM1SPIHID::mtRoute(const struct dlsp_message *message)
         return;
     }
     if (kind==M1TP_MT_KIND_RESET) {
+        (void)m1tp_mt_step(&mtState,&mtFrame,PDM1KeyboardHW::clockUS(),&out);
+        pd_tp_swipe_push(&out,false);
         /* magicmouse_raw_event_spi(): "Touch controller was reset,
          * re-enabling touch mode", 10 ms later. */
         mtResets++;

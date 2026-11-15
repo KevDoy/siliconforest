@@ -127,16 +127,20 @@ struct m1tp_mt_out {
      * physical directions: x grows to the right, y towards the user. */
     uint8_t swipe, swipe_fingers;
     int16_t swipe_dx, swipe_dy;
+    uint8_t gesture_kind;           /* 0 swipe, 1 pinch; phase uses swipe above */
+    uint32_t scale_q16;             /* pinch scale since BEGIN, 65536 is 1.0 */
+    int32_t angle_cdeg;             /* clockwise rotation since previous report */
 };
 #define M1TP_MT_SWIPE_NONE 0u
 #define M1TP_MT_SWIPE_BEGIN 1u
 #define M1TP_MT_SWIPE_UPDATE 2u
 #define M1TP_MT_SWIPE_END 3u
+#define M1TP_MT_GESTURE_CANCEL 4u
 
 /* libinput's gesture states, as far as they are used */
 enum m1tp_mt_gesture { M1TP_MT_G_NONE = 0, M1TP_MT_G_UNKNOWN = 1, M1TP_MT_G_POINTER = 2,
-    M1TP_MT_G_SCROLL = 3, M1TP_MT_G_IGNORED = 4 /* pinch, five or more fingers */,
-    M1TP_MT_G_SWIPE = 5 /* three or four fingers */ };
+    M1TP_MT_G_SCROLL = 3, M1TP_MT_G_IGNORED = 4 /* five or more fingers */,
+    M1TP_MT_G_SWIPE = 5 /* three or four fingers */, M1TP_MT_G_PINCH = 6 };
 /* libinput's thumb states (evdev-mt-touchpad.h) */
 enum m1tp_mt_thumb { M1TP_MT_T_FINGER = 0, M1TP_MT_T_JAILED, M1TP_MT_T_PINCH,
     M1TP_MT_T_SUPPRESSED, M1TP_MT_T_REVIVED, M1TP_MT_T_REVIVED_JAILED, M1TP_MT_T_DEAD };
@@ -182,6 +186,10 @@ struct m1tp_mt_state {
     int64_t rem_scroll;             /* 1/65536 scroll unit */
     uint8_t swipe_fingers;          /* a swipe is under way with this many fingers (0: none) */
     int64_t swipe_rem_x, swipe_rem_y; /* 1/65536 libinput unit */
+    uint8_t pinch_active, pinch_a, pinch_b;
+    uint64_t pinch_distance;
+    int32_t pinch_angle, pinch_center_x, pinch_center_y;
+    uint32_t pinch_scale_q16;
     int64_t scroll_per_unit;        /* scroll units per contact unit, 1/65536 */
     uint32_t events;                /* M1TP_MT_EV_* seen so far */
     /* measurements for the self-test and the debug dump */

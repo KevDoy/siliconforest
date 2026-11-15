@@ -8,4 +8,7 @@ for cc in "${CC:-cc}"; do
   "$cc" -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
     -o "$out" test_m1tp_mt.c m1tp_mt.c m1tp_mt_selftest.c -lm
   "$out"
+  "$cc" -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -o "$out" test_m1tp_pinch.c -lm
+  "$out"
 done
