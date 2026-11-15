@@ -13,6 +13,7 @@ import sys
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--allow-retained-superset',action='store_true',help='Reviewed retained provider source port may add exports')
     for n in ['framework','tests','retained-pd','fixtures','stage','reference-packet']:
         ap.add_argument('--'+n,type=Path,required=True)
     a=ap.parse_args();here=Path(__file__).resolve().parent
@@ -22,14 +23,15 @@ def main():
     required={'_AudioQueueNewOutput','_AudioQueueDispose','_AudioQueueEnqueueBuffer','_AudioConverterNew','_AudioConverterDispose'}
     if not required.issubset(image.exported()[0]):raise ValueError('Incomplete retained PD provider')
     expected=set(json.loads(line.strip()[2:]) for line in (here/'codec/retained-provider.tbd').read_text().splitlines() if line.strip().startswith('- '+chr(34)))
-    if expected != set(image.exported()[0]):raise ValueError('Retained PD export set differs from reviewed interface')
+    actual=set(image.exported()[0])
+    if expected-actual or (actual != expected and not a.allow_retained_superset):raise ValueError('Retained PD export set differs from reviewed interface')
     old=image.id['name'];new='@loader_path/AudioToolbox.output-pd'
     after,changed=api['rewrite_names'](before,lambda n:new if n==old else n);after=api['resign'](after)[0]
     if api['verify'](after) or not changed:raise ValueError('Provider install-name rewrite failed')
     fw=a.stage/'System/Library/Frameworks/AudioToolbox.framework'
     shutil.copytree(a.framework/'System/Library/Frameworks/AudioToolbox.framework',fw,symlinks=True)
     fw.chmod(0o755);(fw/'Versions/A').chmod(0o755);(fw/'Versions/A/AudioToolbox.output-pd').write_bytes(after)
-    (a.stage/'retained-provider.json').write_text(json.dumps(dict(source_sha256=hashlib.sha256(before).hexdigest(),staged_sha256=hashlib.sha256(after).hexdigest(),old_install_name=old,new_install_name=new,note='Exact retained PD implementation; only install name and ad-hoc hashes change. All queue/private converter objects stay in this provider.'),indent=2)+'\n')
+    (a.stage/'retained-provider.json').write_text(json.dumps(dict(source_sha256=hashlib.sha256(before).hexdigest(),staged_sha256=hashlib.sha256(after).hexdigest(),old_install_name=old,new_install_name=new,additional_exports=sorted(actual-expected),note='Exact retained PD implementation; only install name and ad-hoc hashes change. All queue/private converter objects stay in this provider.'),indent=2)+'\n')
     shutil.copytree(a.tests/'bin',a.stage/'bin');(a.stage/'bin').chmod(0o755)
     subprocess.run([sys.executable,str(here.parent/'tools/portable-tests.py'),str(here.parent.parent/'homebrew/hb_macho.py'),str(a.stage/'bin'),str(a.stage/'binary-hashes.json')],check=True)
     (a.stage/'fixtures').mkdir()

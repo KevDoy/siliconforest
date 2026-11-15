@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /* Public FFmpeg codec/demux API bridge; no Apple headers or codec binaries. */
 #include "SFAudioFFmpeg.h"
+#include "SFAACCookie.h"
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/intreadwrite.h>
@@ -127,6 +128,12 @@ void SFDecoderReset(SFDecoder *d) {
 void SFDecoderSkip(SFDecoder *d, uint64_t frames) { if (d) d->skip=frames; }
 OSStatus SFDecoderCookie(SFDecoder *d, UInt32 size, const void *cookie) {
     if (!d || d->opened || !cookie || size > (1u << 20)) return kAudio_ParamError;
+    if (d->input.mFormatID == kAudioFormatMPEG4AAC) {
+        const uint8_t *config = NULL; size_t length = 0;
+        if (!sf_aac_cookie(cookie, size, &config, &length)) return kAudio_ParamError;
+        cookie = config;
+        size = (UInt32)length;
+    }
     uint8_t *copy=malloc(size ? size : 1); if (!copy) return -108;
     memcpy(copy,cookie,size); free(d->cookie); d->cookie=copy; d->cookieSize=size; return noErr;
 }

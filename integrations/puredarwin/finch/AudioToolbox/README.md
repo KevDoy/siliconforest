@@ -1,10 +1,12 @@
-# AudioToolbox file/converter slice (staged only)
+# AudioToolbox file/converter providers
 
 The extended variant is [codecs.nix](codecs.nix), documented in
 [codec/README.md](codec/README.md): M4A/MP3 demux, AAC/MP3/ALAC decoding through
 Linux/Nix FFmpeg, and queues through a distinct retained-PD image. Its M1 WAV/AAC
 CLI completes HAL buffers. The description below applies to the earlier PCM-only
-build.nix; neither variant replaces the installed AudioToolbox.
+build.nix. The complete install.nix family is installed with retained PD output;
+the earlier PCM-only build must stay staged. Browser AAC and real AUHAL device-ID
+updates are a prefix candidate, pending final regression/installation.
 
 Compile full AudioFile.c, AudioFormat.c, AudioFormatTables.c, AudioConverter.c,
 ExtendedAudioFile.c from Finch2d9b1bb in Linux/Nix using our declarations. No queue,

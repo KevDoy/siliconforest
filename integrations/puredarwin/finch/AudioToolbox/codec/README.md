@@ -1,4 +1,4 @@
-# Compressed files, conversion and retained PD output (staged only)
+# Compressed files, conversion and retained PD output
 
 `../codecs.nix` extends the five pinned Finch AudioFile/AudioFormat/tables/
 AudioConverter/ExtendedAudioFile implementation files. Original provenance stays
@@ -67,3 +67,34 @@ exports plus the retained provider;all78 previous PD names available). The earli
 receipts are retained separately. Hash-check the reference packet on M5,explicitly
 name its reviewed file/converter tests to the comparison runner,and enforce
 the fresh /tmp,30s/core0,no-DYLD,stdout/stderr-only,cleanup reference procedure.
+
+## Browser AAC and real AUHAL device selection candidate, 15 November
+
+Three source fixes proven by CODEX-FX's private Firefox H264/AAC and HEVC/AAC
+runs are included in the owned candidate: float PCM with bits matching its
+container may omit the redundant Packed flag; FormatList rejects an incomplete
+zero-rate/channel ASBD rather than overwriting a caller's valid description;
+AAC cookies accept bounded MPEG-4 ESDS/DecoderSpecificInfo and raw ASC before
+passing configuration to the real FFmpeg decoder. No non-AAC cookie is changed.
+The parser's raw/wrapped/truncation/length/20000 bounded fuzz checks pass ASan
+and UBSan. Original fix provenance: firefox/media-patches0001/2/3 and its owned
+MIT aac-cookie.h; no Apple SDK/header/binary input.
+
+The candidate also stages the PD private provider from ../units, retaining all78
+reviewed exports (80total) with validated per-unit actual output selection.
+Only AudioToolbox.output-pd changes in this retained family; generated CoreAudio
+is not staged. The complete Finch main keeps135/135 effective prior exports.
+No candidate is installed yet. prepare-codecs.py keeps exact reviewed exports
+by default; --allow-retained-superset explicitly records added symbols for this
+reviewed source port.
+
+M1 audio-browser-stage-v1 passes11of12 tests, including original converter/file
+programs, four decoders, WAV/AAC HAL completions, raw-ASC/ESDS PCM equality and
+real-device AUHAL. The one failure is a harness error: SystemSound was invoked
+without its required WAV filename (exit2); a corrected fresh probe is queued.
+Final-source M1 probe passes: raw ASC and ESDS each13312 float frames with
+identical PCM hash; AUHAL again consumes12288 frames with clean lifecycle. The same Linux-built new browser
+probe fails on native M5 because native AudioConverter rejects its raw5-byte ASC
+cookie with560226676. This is retained as a reference difference/failure, not
+claimed native-matched behavior or general AAC-cookie conformance. Existing
+native-matched lossless file/PCM tests are separate evidence.

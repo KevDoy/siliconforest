@@ -7,11 +7,12 @@ let
   base = import ./build.nix;
 in base.overrideAttrs (old: {
   name = "siliconforest-finch-AudioToolbox-codecs-arm64";
-  patches = (old.patches or []) ++ [ ./codec/0001-compressed-audio.patch ];
+  patches = (old.patches or []) ++ [ ./codec/0001-compressed-audio.patch ./codec/0002-browser-float-pcm.patch ./codec/0003-reject-incomplete-format-list.patch ];
   buildPhase = builtins.replaceStrings
     [ "mkdir objects" "${e.cc} -dynamiclib objects/*.o" "-lCoreFoundation -lSystem" ]
     [ ''
         cp ${./codec/SFAudioFFmpeg.h} SFAudioFFmpeg.h
+        cp ${./codec/SFAACCookie.h} SFAACCookie.h
         CF="$CF -I$PWD -I${ffmpeg}/usr/include"
         mkdir objects
       '' "${e.cc} $CF -c ${./codec/SFAudioFFmpeg.c} -o objects/SFAudioFFmpeg.o\n${e.cc} $CF -c ${./codec/PDQueue.c} -o objects/PDQueue.o\n${e.cc} -dynamiclib objects/*.o" "-lCoreFoundation -Wl,-reexport_library,${./codec/retained-provider.tbd} -L${ffmpeg}/usr/lib -lavformat -lavcodec -lswresample -lavutil -Wl,-unexported_symbols_list,${./codec/hidden-symbols.txt} -lSystem" ] old.buildPhase;

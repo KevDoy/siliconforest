@@ -10,6 +10,7 @@ in pkgs.stdenv.mkDerivation {
   buildPhase = ''
     export DARWIN_SDK_ROOT=${sdk}
     mkdir -p bin headers/AudioToolbox
+    cp ${./codec/SFAACCookie.h} headers/SFAACCookie.h
     cp ${toolbox}/System/Library/Frameworks/AudioToolbox.framework/Versions/A/Headers/Generated.h headers/AudioToolbox/
     # Keep every generated file inside the test packet's working directory.
     sed -i 's#/tmp/finch-extaudiofile-test#./finch-extaudiofile-test#g' userland/tests/extaudiofile-test.c
@@ -20,6 +21,7 @@ in pkgs.stdenv.mkDerivation {
     done
     ${cc} $CF ${./probe.c} $LF -o bin/audio-file-probe
     ${cc} $CF ${./codec/decode-probe.c} $LF -o bin/audio-decode-probe
+    ${cc} $CF ${./codec/browser-probe.c} $LF -o bin/browser-audio-probe
     ${cc} $CF ${./codec/afplay.c} $LF -o bin/sf-afplay
   '';
   installPhase = ''mkdir -p $out/bin; cp bin/* $out/bin/'';
