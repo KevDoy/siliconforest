@@ -25,6 +25,7 @@
  */
 class PDCIOPCIController : public OSObject {
  OSDeclareDefaultStructors(PDCIOPCIController)
+ friend class PDCIOPCIDartMapper;
  IOService *owner;
  void *context;
  bool (*powerProof)(void *),(*tunnelProof)(void *);
@@ -33,6 +34,7 @@ class PDCIOPCIController : public OSObject {
  bool admitted,touched,poisoned,cold,linked;
  pd_pciec_io io;
  pd_pciec_requesters requesters;
+ OSObject *dmaOwner; // One native SID0 owner; never an endpoint admission flag.
  bool live();
  static int read(void *,pd_pciec_window,uint32_t,uint32_t *);
  static int write(void *,pd_pciec_window,uint32_t,uint32_t);

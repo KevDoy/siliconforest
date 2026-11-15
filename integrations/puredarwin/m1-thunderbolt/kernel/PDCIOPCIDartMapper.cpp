@@ -1,0 +1,226 @@
+// SPDX-License-Identifier: GPL-2.0
+// Fixed PCIe-C domain, separate from the NHI's SID1/0x200-root DART.
+#include "pd_cio_pci_mapper.h"
+#include "pd_usb_iova.h"
+#include <IOKit/IORegistryEntry.h>
+#include <machine/machine_routines.h>
+#include <mach/vm_param.h>
+OSDefineMetaClassAndStructors(PDCIOPCIDartMapper,IOMapper)
+static constexpr uint64_t pciPage=0x4000,pciMask=0x0000000fffffc000ULL;
+static constexpr uint64_t pciLo=0x04000000,pciBytes=0x10000000;
+static constexpr unsigned pciPages=pciBytes/pciPage,pciMappings=2048;
+bool PDCIOPCIDartMapper::initWithController(PDCIOPCIController *ctl,IOPCIDevice *dev)
+{
+ controller=NULL;endpoint=NULL;lock=NULL;busy=NULL;mappings=NULL;
+ tableCount=mappingCount=0;setupAttempted=ready=touched=poisoned=revoked=false;
+ bzero(tables,sizeof(tables));pt={};io={};fIsSystem=false;
+ if(!ctl || !dev || !IOMapper::init())return false;
+ lock=IOLockAlloc();if(!lock)return false;
+ ctl->retain();controller=ctl;dev->retain();endpoint=dev;
+ pt.ops={this,table,allocateTable};io={{this,read,write,delay},publish};return true;
+}
+bool PDCIOPCIDartMapper::inventoryBlocked()
+{
+ if(!endpoint || endpoint->configRead32(0)!=0x15338086 ||
+    (endpoint->configRead32(8)>>8)!=0x020000 ||
+    endpoint->getDeviceNumber() || endpoint->getFunctionNumber())return false;
+ IORegistryEntry *host=endpoint;unsigned depth=0;
+ while(host && !host->metaCast("PDCIOPCIHost") && depth++<64)host=host->getParentEntry(gIOServicePlane);
+ if(!host || !host->metaCast("PDCIOPCIHost"))return false;
+ auto it=IORegistryIterator::iterateOver(host,gIOServicePlane,kIORegistryIterateRecursively);
+ if(!it)return false;
+ unsigned seen=0,xhci=0,i210=0;bool found=false,ok=true;
+ while(auto obj=it->getNextObject()){
+  if(++seen>256){ok=false;break;}
+  auto dev=OSDynamicCast(IOPCIDevice,obj);if(!dev)continue;
+  uint32_t id=dev->configRead32(0),cls=dev->configRead32(8)>>8;
+  if(id==UINT32_MAX || (dev->configRead16(4)&4)){ok=false;break;}
+  if(cls==0x0c0330)++xhci;
+  else if(id==0x15338086 && cls==0x020000)++i210;
+  else if((cls>>8)!=0x0604){ok=false;break;}
+  if(dev==endpoint)found=true;
+ }
+ if(!it->isValid())ok=false;
+ it->release();return ok && found && xhci==4 && i210==1;
+}
+bool PDCIOPCIDartMapper::live()
+{
+ return !revoked && !poisoned && controller && controller->dmaOwner==this &&
+  controller->endpointAccess();
+}
+void PDCIOPCIDartMapper::poison()
+{
+ poisoned=true;ready=false;
+ // Blocks all later accesses through this controller backend.
+ // Current enumeration host always strips BME, independent of this object.
+ controller->poisoned=true;
+}
+int PDCIOPCIDartMapper::read(void *p,uint32_t off,uint32_t *value)
+{
+ auto s=(PDCIOPCIDartMapper *)p;
+ bool word=!(off&3) && ((off>=0x100 && off<0x200) || (off>=0x400 && off<0x800));
+ if(!value || !(word || off==0x20 || off==0x40 || off==0x60 || off==0xfc))return EINVAL;
+ if(!s->live())return ENODEV;
+ __asm__ volatile("dsb sy; isb" ::: "memory");
+ *value=s->controller->endpointDart.r32(off);
+ __asm__ volatile("dsb sy; isb" ::: "memory");return 0;
+}
+int PDCIOPCIDartMapper::write(void *p,uint32_t off,uint32_t value)
+{
+ auto s=(PDCIOPCIDartMapper *)p;
+ if(!(off==0x100 || (off>=0x400 && off<0x410 && !(off&3)) ||
+      off==0x20 || off==0x34 || off==0x38 || off==0xfc))return EINVAL;
+ if(!s->live())return ENODEV;
+ __asm__ volatile("dsb sy; isb" ::: "memory");s->controller->endpointDart.w32(off,value);
+ __asm__ volatile("dsb sy; isb" ::: "memory");return 0;
+}
+void PDCIOPCIDartMapper::delay(void *,unsigned us){IODelay(us);}
+int PDCIOPCIDartMapper::publish(void *p)
+{
+ auto s=(PDCIOPCIDartMapper *)p;
+ if(!s->live() || !s->pt.l1 || !s->tableCount)return ENODEV;
+ __asm__ volatile("dsb sy" ::: "memory");return 0;
+}
+uint64_t *PDCIOPCIDartMapper::table(void *p,uint64_t physical)
+{
+ auto s=(PDCIOPCIDartMapper *)p;
+ for(unsigned n=0;n<s->tableCount;++n)if(s->tables[n].physical==physical)
+  return (uint64_t *)s->tables[n].memory->getBytesNoCopy();
+ return NULL;
+}
+uint64_t PDCIOPCIDartMapper::allocateTable(void *p)
+{
+ auto s=(PDCIOPCIDartMapper *)p;
+ if(s->tableCount==16)return 0;
+ auto md=IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+  kIODirectionInOut|kIOMemoryPhysicallyContiguous,pciPage,pciMask);
+ if(!md)return 0;
+ IOByteCount span=0;uint64_t pa=md->getPhysicalSegment(0,&span,kIOMemoryMapperNone);
+ if(!pa || (pa&~pciMask) || span<pciPage){md->release();return 0;}
+ bzero(md->getBytesNoCopy(),pciPage);s->tables[s->tableCount++]={md,pa};return pa;
+}
+bool PDCIOPCIDartMapper::initHardware(IOService *provider)
+{
+ if(provider!=endpoint || PAGE_SIZE!=pciPage || ml_at_interrupt_context() || !lock)return false;
+ IOLockLock(lock);bool attempted=setupAttempted;setupAttempted=true;IOLockUnlock(lock);
+ if(attempted || !inventoryBlocked())return false;
+ // No controller lock around reserveRequester: it takes that lock itself.
+ uint32_t sid=UINT32_MAX;
+ int error=controller->reserveRequester(endpoint->getBusNumber(),endpoint->getDeviceNumber(),endpoint->getFunctionNumber(),&sid);
+ if(error || sid)return false;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ if(ready || touched || controller->dmaOwner || !controller->endpointAccess()){
+  IOLockUnlock(controller->lock);IOLockUnlock(lock);return false;
+ }
+ busy=(uint8_t *)IOMallocZero(pciPages);
+ mappings=(Mapping *)IOMallocZero(sizeof(Mapping)*pciMappings);
+ uint64_t root=allocateTable(this);pt.l1=table(this,root);
+ if(!busy || !mappings || !root){IOLockUnlock(controller->lock);IOLockUnlock(lock);return false;}
+ controller->dmaOwner=this;
+ // A real self-reference keeps the owner/endpoint/tables alive even when
+ // start fails after an ambiguous hardware write and its caller releases
+ // the service. It is never dropped without a future real teardown path.
+ retain();
+ error=pd_pciec_dart_sid0_prepare(&io,root,&touched);
+ bool unpin=error && !touched;
+ if(error && touched)poison();
+ else if(error)controller->dmaOwner=NULL;
+ else ready=true;
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ setProperty("endpoint-DMA-admitted",false);setProperty("sid",(uint32_t)0,32);
+ setProperty("domain-setup-error",(uint32_t)error,32);
+ if(unpin)release();return !error;
+}
+uint64_t PDCIOPCIDartMapper::getPageSize() const{return pciPage;}
+IOReturn PDCIOPCIDartMapper::iovmMapMemory(IOMemoryDescriptor *memory,uint64_t offset,
+ uint64_t length,uint32_t options,const IODMAMapSpecification *spec,IODMACommand *command,
+ const IODMAMapPageList *,uint64_t *address,uint64_t *mappedLength)
+{
+ auto md=OSDynamicCast(IOBufferMemoryDescriptor,memory);
+ uint32_t allowed=kIODMAMapReadAccess|kIODMAMapWriteAccess|kIODMAMapPhysicallyContiguous|kIODMAMapPageListFullyOccupied;
+ if(!md || !command || !address || !mappedLength || offset || !length || length>pciBytes ||
+    length!=md->getLength() || (length&(pciPage-1)) || (options&~allowed) ||
+    !(options&(kIODMAMapReadAccess|kIODMAMapWriteAccess)) || ml_at_interrupt_context())return kIOReturnBadArgument;
+ uint64_t alignment=spec && spec->alignment?spec->alignment:pciPage;
+ if(alignment&(alignment-1))return kIOReturnUnsupported;
+ if(alignment<pciPage)alignment=pciPage;
+ if(alignment>pciBytes || (spec && (spec->options || (spec->device && spec->device!=endpoint))))return kIOReturnUnsupported;
+ unsigned bits=spec && spec->numAddressBits?spec->numAddressBits:32;
+ if(bits>64)return kIOReturnBadArgument;
+ if(bits<27)return kIOReturnNoResources;
+ IOByteCount span=0;uint64_t pa=md->getPhysicalSegment(0,&span,kIOMemoryMapperNone);
+ if(!pa || (pa&~pciMask) || span<length || length-1>((1ULL<<36)-1)-pa)return kIOReturnBadArgument;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ if(!ready || !live()){IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnNotReady;}
+ if(pd_pciec_dart_sid0_check(&io)){
+  poison();IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnIOError;
+ }
+ for(unsigned n=0;n<pciMappings;++n)if(mappings[n].memory==md){
+  IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnBusy;
+ }
+ unsigned slot=0;while(slot<pciMappings && mappings[slot].memory)++slot;
+ size_t pages=length/pciPage,first=pd_usb_iova_find(busy,pciPages,pciLo,pciPage,pages,alignment);
+ uint64_t dva=first==SIZE_MAX?0:pciLo+first*pciPage;
+ if(slot==pciMappings || !dva || (bits<32 && dva+length>(1ULL<<bits))){
+  IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnNoResources;
+ }
+ // Reserve and retain before PTE writes, including ambiguous flush failure.
+ md->retain();mappings[slot]={md,command,dva,length};++mappingCount;memset(busy+first,1,pages);
+ unsigned protection=(options&kIODMAMapReadAccess?PD_DART_PROT_READ:0)|
+  (options&kIODMAMapWriteAccess?PD_DART_PROT_WRITE:0);
+ int error=pd_dart_table_map(&pt,dva,pa,length,protection);
+ // Even a rolled-back map may have published a new table. Flush, but keep
+ // every reservation/backing on any PTE error or ambiguous completion.
+ int flushed=pd_pciec_dart_sid0_check(&io);
+ if(!flushed)flushed=pd_pciec_dart_sid0_flush(&io);
+ if(flushed || error)poison();
+ else{*address=dva;*mappedLength=length;}
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ return error || flushed?kIOReturnIOError:kIOReturnSuccess;
+}
+IOReturn PDCIOPCIDartMapper::iovmUnmapMemory(IOMemoryDescriptor *memory,IODMACommand *command,
+ uint64_t address,uint64_t length)
+{
+ if(!memory || !command || !length || ml_at_interrupt_context())return kIOReturnBadArgument;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ if(!ready || !live()){IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnNotReady;}
+ unsigned slot=0;
+ while(slot<pciMappings && !(mappings[slot].memory==memory && mappings[slot].command==command && mappings[slot].address==address && mappings[slot].bytes==length))++slot;
+ if(slot==pciMappings){IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnBadArgument;}
+ if(pd_pciec_dart_sid0_check(&io)){
+  poison();IOLockUnlock(controller->lock);IOLockUnlock(lock);return kIOReturnIOError;
+ }
+ uint64_t removed=pd_dart_table_unmap(&pt,address,length);
+ int error=pd_pciec_dart_sid0_check(&io);
+ if(!error)error=pd_pciec_dart_sid0_flush(&io);
+ if(removed!=length || error)poison();
+ auto md=mappings[slot].memory;bool release=!poisoned;
+ if(release){mappings[slot]={};--mappingCount;memset(busy+(address-pciLo)/pciPage,0,length/pciPage);}
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ if(release)md->release();return release?kIOReturnSuccess:kIOReturnIOError;
+}
+IOReturn PDCIOPCIDartMapper::iovmInsert(uint32_t,uint64_t,uint64_t,uint64_t,uint64_t)
+{return kIOReturnUnsupported;}
+uint64_t PDCIOPCIDartMapper::mapToPhysicalAddress(uint64_t address)
+{
+ if(ml_at_interrupt_context() || !lock || !controller)return 0;
+ IOLockLock(lock);IOLockLock(controller->lock);uint64_t physical=0;
+ if(ready && live())for(unsigned n=0;n<pciMappings;++n){
+  auto &m=mappings[n];if(!m.memory || address<m.address || address-m.address>=m.bytes)continue;
+  pd_dart_walk walk={};if(!pd_dart_table_walk(&pt,address,&walk))physical=walk.phys;break;
+ }
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);return physical;
+}
+void PDCIOPCIDartMapper::stop(IOService *)
+{
+ // No false endpoint/IRQ/work-drain proof. Keep all mappings and ownership.
+ if(lock){IOLockLock(lock);revoked=true;ready=false;IOLockUnlock(lock);}
+ setProperty("quarantined-until-reboot",true);
+}
+void PDCIOPCIDartMapper::free()
+{
+ if(touched || mappingCount){IOLog("PDCIOPCIDartMapper: retaining SID0 tables/backing until reboot\n");return;}
+ for(unsigned n=0;n<tableCount;++n)tables[n].memory->release();
+ if(busy)IOFree(busy,pciPages);if(mappings)IOFree(mappings,sizeof(Mapping)*pciMappings);
+ if(lock)IOLockFree(lock);OSSafeReleaseNULL(endpoint);OSSafeReleaseNULL(controller);IOMapper::free();
+}

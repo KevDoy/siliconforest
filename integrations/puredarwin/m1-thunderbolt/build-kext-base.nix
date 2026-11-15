@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Native ACIO1 firmware stage. No NHI/domain/PCI enumeration is implied.
-{ connectionManager ? false, pciEnumeration ? false }:
+{ connectionManager ? false, pciEnumeration ? false, endpointMapper ? false }:
 assert !pciEnumeration || connectionManager;
+assert !endpointMapper || pciEnumeration;
 let
   lkpi=import ../m1-rust-kext/lkpi;
   inherit (import ../m1-rust-kext/pins.nix) pkgs;
@@ -13,6 +14,12 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     dest="$out/src/Kernel/Extensions/PDAppleCIO"
     mkdir -p "$dest"
     cp ${./kernel}/* "$dest/"
+    ${pkgs.lib.optionalString endpointMapper ''
+      chmod u+w "$dest/CMakeLists.txt"
+      substituteInPlace "$dest/CMakeLists.txt" --replace-fail \
+        '"''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIController.cpp"' \
+        '"''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIController.cpp" "''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIDartMapper.cpp"'
+    ''}
     ${pkgs.lib.optionalString pciEnumeration ''
       chmod u+w "$dest/CMakeLists.txt"
       printf '\ntarget_sources(PDAppleCIO.kext PRIVATE PDCIOPCIEnumeration.cpp)\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_PCIE_ENUMERATION=1)\n' >> "$dest/CMakeLists.txt"

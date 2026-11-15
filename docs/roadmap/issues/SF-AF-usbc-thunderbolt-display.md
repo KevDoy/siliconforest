@@ -1859,3 +1859,33 @@ gate bits, ordered publication/flush, readback failures and100us timeout bounds.
 All six repository checks pass (274 Python/77 C groups; six mutations caught;
 plans remain dry runs). This is a source/host component, excluded from CIO20;
 there is still no native endpoint IOMapper or DMA admission on the M1.
+
+### Native I210 IOMapper: source/SDK only
+
+The explicit build-pci-dma-kext variant now compiles a concrete IOMapper for
+I210 SID0. Its native initializer walks the actual PDCIOPCIHost descendants,
+requires four xHCI and one8086:1533 I210, rejects every set endpoint/bridge BME,
+reserves the actual BDF->SID0 entry, and verifies the real blocked DART bank
+before installing its own retained root. Each MMIO callback checks the actual
+controller power/RUN/link/tunnel and exclusive mapper identity. The ordinary
+and enumeration CM variants exclude this mapper; all three SDK builds pass,
+and their actual ARM64 symbols verify that separation. No boot collection
+or CM factory call contains this new variant.
+
+Mapping accepts only complete16KiB-page IOBufferMemoryDescriptor bounces with
+independently checked contiguous physical spans below36bits. It constrains
+IOVAs below32bits, validates alignment/address-bit requests, rejects duplicate
+live descriptors and associates retirement with the actual descriptor and
+IODMACommand identities. Backing and IOVA reservations are retained before
+PTE writes. Any PTE, hardware-state or flush failure poisons the owner and
+retains backing/reservations; only an exact successful unmap plus completed
+flush releases a mapping. There is no physical-address fallback or generic
+page insertion. A real self-reference pins the mapper, controller, endpoint
+and tables before the first possible TTBR write, including partial-start
+failure. Stop revokes access and retains resources until reboot; no false
+endpoint/IRQ/work-drain or hot-remove success is returned.
+
+The controller refuses its whole-bank blocker while a real mapper owns the
+bank. The object has no personality, no automatic registration, no BME/MSI
+admission and no caller in the installed CM. Source/SDK and required repository
+checks pass; native mapping, I210 DMA/link/DHCP and teardown remain unobserved.

@@ -16,6 +16,7 @@ bool PDCIOPCIController::initWithOwner(IOService *lease,void *ctx,
 {
  owner=NULL;context=NULL;powerProof=NULL;tunnelProof=NULL;lock=NULL;
  admitted=touched=poisoned=cold=linked=false;
+ dmaOwner=NULL;
  requesters={};
  if(!lease || !ctx || !power || !tunnel || !OSObject::init())return false;
  uint32_t chip=0;if(!pd_adt_u32("/chosen","chip-id",0,&chip) || chip!=0x8103)return false;
@@ -142,7 +143,8 @@ int PDCIOPCIController::blockEndpointDMA()
 {
  if(!lock || ml_at_interrupt_context())return EINVAL;
  IOLockLock(lock);int ret=ENODEV;
- if(live() && linked && tunnelProof(context)){
+ if(dmaOwner)ret=EBUSY;
+ else if(live() && linked && tunnelProof(context)){
   auto node=IORegistryEntry::fromPath("/arm-io/dart-apciec1",gIODTPlane);
   auto clients=node?node->getChildIterator(gIOServicePlane):NULL;
   bool unbound=node && clients && !clients->getNextObject();
