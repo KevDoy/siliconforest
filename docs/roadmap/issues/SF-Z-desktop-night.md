@@ -929,3 +929,147 @@ default; run by hand with foot). chonk-dock 208/208 (+2 ignored). Every installe
 
 ### Taken from Finch (DESK5)
 Nothing.
+
+## Minimising and the dock's launchers (DESK6, 15 November)
+
+**Truthfulness.** All input below is synthetic (the compositor's inject module in `.next`: keys, pointer, captures),
+judged from the compositor's window list (`inject list`), its log (`WMMINI`, `chonk-dock:` lines), `ps` and its
+captures (looked at, zoomed). The owner's own hands-on findings are the reason for this round; whether the result
+feels right to his hands is his to say (checklist at the end). Captures: `runs/m1-desktop-010/desk6-tests/shots/`.
+
+### 1. "Minimizing windows closes or kills them ... two icons ... then it closes altogether"
+**Causes found.**
+- **Terminal.app crashes when it is minimised** (AppKit, not the desk): after its own Command-M the window is put
+  away and the process dies at once (`WMCLIENT disconnected ... ConnectionClosed`; kernel log `Terminal[651] Corpse
+  allowed 1 of 5`, `EXC_CORPSE_NOTIFY ... etype=10` = EXC_CRASH; 2 of 2 tries). TERM8 found it from the crash report:
+  `-[NSImage drawInRect:]` without a current graphics context in Terminal's miniaturise notification handler, a
+  regression of their patch 0133; fixed in their candidate c11 (not installed when this was written).
+- **A minimised window whose application took its picture away was forgotten.** An AppKit window ordered out
+  while miniaturised attaches a NULL buffer; the desk treated that as the window going away (wm-core `Unmapped` ->
+  forget), so its tile went and the window looked closed while the application ran on. Now such a window stays
+  minimised (`WMMINI window=N ... unmapped by its client while minimised: kept`); its next buffer shows it again,
+  and a click on its tile restores it at its place. Host test `a_minimised_window_whose_client_unmaps_it_stays_
+  minimised_and_comes_back_at_its_place` (wayland_shm), **fails on the old source** ("the desk still has the window",
+  `desk6-tests/basecheck-minimised-unmap-old-source.txt`).
+- **Two icons**: a minimise drew the desk's tile (the window's picture with a 40 % application badge in its corner)
+  and the dock's own icon tile of the minimised window (from the foreign-toplevel `minimized` state), both at the
+  bottom left; and the desk's tile sat at desktop level, under the windows: a window over the bottom left hid it and
+  took the click meant for it (my first synthetic run restored nothing for that reason).
+- The native Chonkstep terminal was not killed by minimising in any run here. Note: the owner's theme now is
+  System 7 (dark gray), whose title bar has a close box on the left and a zoom box on the right and no minimise
+  button.
+**Changes.** One tile: the window's picture (a dma-buf window's picture is read from its buffer through a CPU
+mapping when it is minimised: `WMMINI preview window=N dmabuf ...`), its title under it, no badge, above the windows
+(as macOS keeps minimised windows in its Dock); the Darwin dock draws no tile of its own for minimised windows.
+No animation. `WMMINI` lines for every step (minimised, restored, unmapped while minimised, destroyed while minimised).
+**Observed on the M1** (desk6-next-004, Command-M then a click on the tile, 10 rounds each, `desk6-tests/m1/t2.txt`):
+desk terminal 10/10 and Activity Monitor 10/10 (each round: lifecycle Miniaturized, one square tile, the process
+alive, back Normal, focused, at the same place); Terminal.app: crash (above); Firefox: **not tested** (my 18:50Z
+relaunch had disconnected CODEX-FX's Firefox; I left it alone). Captures `t2-am-cmdm-min` (one tile with the
+picture, over the terminal at the bottom left), `t2-am-cmdm-back`, `t1-desk-cmdm-min`. App exits while minimised:
+the tile goes (`destroyed by its client while minimised: its tile goes`, seen with Terminal.app's crash). Not
+exercised on the M1: the title-bar button (the owner's theme has none), the title-bar menu's Minimize, AppKit's own
+Window > Minimize, a quit while minimised (host-tested: `a_minimised_windows_tile_goes_with_its_client`).
+
+### 2. "The dock launchers disappeared when I clicked on them and tried to move them"
+**Cause.** A press on a launcher tile became a drag after ~7 px; during the drag the dock only darkened the tile in
+place (nothing followed the pointer, so it looked as if nothing happened), and a release anywhere half a tile or
+more away from the strip **removed the tile at once and rewrote the pins file** - no confirmation, no undo. Moving
+the tiles this way emptied the file; an empty strip is hidden. Firefox's installer then found the file empty and
+wrote Terminal / Activity Monitor / Firefox, so the Chonkstep terminal stayed missing. Second, quieter way: the dock
+read its application items once at start, so a pin whose item came later (Firefox's) did not resolve, and the next
+change of the strip wrote the file without it.
+**Changes** (`dock/crates/chonk-dock/src/launchdock.rs`, `runtime.rs`, `wayland.rs`, `main.rs`):
+- a tile picked up follows the pointer; the strip makes room where it will land; the drop writes the order;
+- dropped away from the dock it goes back to its place (nothing written); it is removed only when held away until a
+  "Remove from Dock" label shows above it (0.8 s), or from its context menu;
+- secondary click on a tile: Open (Show when it runs), Options > ✓ Keep in Dock / Remove from Dock, Quit (running
+  applications: `chonkstep-darwin-desktop --desktop-request quit <app id>`, which quits a Mac application through its
+  own menu's Quit, as the Command-Tab switcher's Q does, and closes a desk application's windows);
+- the drag threshold is 8/56 of a tile (was 4/56), and a click that wobbles less than that launches its tile wherever
+  it is released;
+- ids that resolve to no item are kept in the file; the items are scanned again when the application directories
+  change (and on `reload`); writes go to `dock.next` and are renamed over the file;
+- **defaults**: a pins file that is missing or holds no id when the dock starts gets the default set:
+  `chonkstep/dock-pins` in the data directories (`/usr/share/chonkstep/dock-pins` on SiliconForest, from
+  `integrations/puredarwin/desktop/system/dock-pins`), else on Darwin the built-in `org.siliconforest.terminal`,
+  `com.apple.Terminal`, `com.apple.ActivityMonitor`, `org.mozilla.firefox`. `chonkstep-dock --defaults` writes the
+  set (the file of before kept as `dock.before-defaults`) and tells the running dock; from the workstation
+  `desk_m1.sh dock-defaults`. The owner's pins were restored to this set (file of before: `dock.before-desk6`).
+- on SiliconForest the dock places its surfaces in panel pixels (the margins were converted with the whole buffer
+  scale while the pointer comes in panel pixels / 2, so anything placed by a margin - the tile's name, the dragged
+  tile, its label, the instrument panels - sat at 3/4 of the pointer's position; seen in `d2-c-away`).
+**Host tests** (chonk-dock 214/214 + 2 ignored): `a_click_that_wobbles_or_drifts_off_the_strips_edge_launches_and_
+never_unpins`, `dragging_a_tile_along_the_strip_reorders_it_live_and_the_order_persists`,
+`a_tile_dropped_away_from_the_dock_snaps_back_and_nothing_is_written`, `a_tile_held_away_shows_remove_and_only_then_
+a_release_removes_it`, `a_tiles_context_menu_has_open_options_and_quit_and_removes_it`, `a_missing_or_empty_pins_
+file_gets_the_default_set`, `a_pin_that_resolves_to_nothing_survives_a_move_in_the_file`. (DESK3's own test asserted
+"a deliberate drag well away unpins": the old behaviour.)
+**Observed on the M1** (desk6-next-004 with dock-001, `desk6-tests/m1/d2.txt`): move down two places and back, both
+written (`moved from place 1 to 3 (written)`); a quick drop far away: back, nothing written; held away: the label,
+then removed; `chonkstep-dock --defaults`: the four back; the context menu (`d2-h-menu`: Open, Options ▸); a click
+wobbling 5 px on Activity Monitor's tile: it opened (`WMMAC open ...`). Captures `d2-a-move-mid` (the strip making
+room, the tile following the pointer), `d2-b-moved`, `d2-c-away` (the tile at 3/4 of the pointer: the unit fault
+fixed in 005), `d2-e-remove-label`, `d2-f-removed`, `d2-g-defaults`.
+
+### 3. Requests addressed to the desk
+- **Pinch/rotate**: the compositor offers `zwp_pointer_gestures_v1` and gives pinches to the client under the pointer
+  (begin with the fingers; updates with the centre's motion, the scale since the begin and the turn; end/cancel).
+  Host test with a real client: `a_pinch_goes_to_the_client_under_the_pointer_through_pointer_gestures`. The trackpad
+  driver does not report pinches (`M1TP_MT_G_IGNORED`): the kernel requirement is **K14** in
+  `runs/m1-coord/requests-for-CODEX-TB.md` (ring version 2 with a kind, scale and angle; the compositor already reads
+  version 1 and 2, lib test `the_trackpad_ring_reads_swipes_of_version_1_and_pinches_of_version_2`). Until then inject
+  `pinch ...` in `.next`. AppKit's side (NSEvent magnify/rotate) is TERM8's.
+- **Command-W / Command-Q for Mac applications**: a window is a Mac application's when its app id is a bundle's in the
+  application folders, or its process runs from inside any `.app`, or it serves an app-menu socket (Firefox outside
+  the catalogue was taken by the desk: CODEX-FX's finding). Not exercised with Firefox on the M1.
+- **Dock catalog refresh** (CODEX-FX): done (above). Child surfaces (`wl_subcompositor`) and clipboard persistence:
+  not done.
+
+### 4. Missed blanks and interactive resize
+- **Real-time wait** (patch 22): the last 3 ms before a commit waited for with `mach_wait_until` in the time-constraint
+  scheduling class (`WMPACE precise wait: time-constraint policy ... rc=0` on the M1). **Measured: no gain**
+  (`desk6-tests/m1/l1.txt`, 10 s phases, synthetic `stream`): missed blanks idle 4/572 and 5/566 off vs 6/569 and
+  4/562 on; terminal flooding 6/529 off vs 7/573 on (0.7-1.2 % either way). The late frames had commit leads of
+  0-2.5 ms, several of 2-2.5 ms - i.e. not only late wake-ups: the display's needed lead varies above the learned
+  ~2.2 ms. So it is **off by default** (`CHONKSTEP_DARWIN_PRECISE_WAIT=1` or inject `precise on`). Missed blanks are
+  **not 0**; next step: a lead learned per percentile of the late frames' leads, not the minimum.
+- **Interactive resize latency: still not measured.** A press at the south-east handle of a desk terminal (the
+  `list` step gives its centre, `resize_se`) followed by a 1 s pointer stream did not resize it (size unchanged, no
+  `resize asked` samples), as in DESK5's three attempts. The owner's corner drag is the test.
+
+### 5. Second display (compositor side)
+- The wallpaper is fitted to an external output (scaled to cover, the middle kept; `scene.rs cover`), drawn by the
+  GL renderer on that head and by the CPU renderer; dropped on unplug. Lib test
+  `an_external_output_gets_the_wallpaper_fitted_to_its_shape`; wayland_outputs 2/2, GL second-head test pass.
+- Not done: per-output client buffer scale, mirroring's rendering, freeing an unplugged head's GEM buffers
+  (`ScanoutBuffer` keeps neither its EGL image nor its GEM handles, so a correct teardown needs those kept first;
+  the buffers stay for a replug at the same mode, as DESK5 left it).
+
+### Host tests (`runs/m1-desktop-010/desk6-tests/`)
+wm-darwin lib 157/157; wayland_shm 19/20 (+ the base's autopilot failure: its expected menu rows), wayland_scale 3/4
+(the base's failure), wayland_dmabuf 5/5, wayland_theme 3/3, wayland_outputs 2/2; chonk-shell 303/303 (+4 ignored);
+chonk-dock 214/214 (+2 ignored). Every installed build was host-tested first.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop.next` = desk6-next-005 `2124825f…` (inject), `/usr/bin/chonkstep-darwin-desktop` =
+  desk6-daily-005 `9203b446…`, `/usr/bin/chonkstep-dock` = desk6-dock-005 `fc0b2aad…` (hashes right after the copy).
+  Files of before: `.before-desk6` (DESK5's 005 pair and dock-006), `.before-desk6-004` (my 002 pair),
+  `.before-desk6-005` (my 004 pair, dock-001). `.safe` unchanged. New: `/usr/share/chonkstep/dock-pins`;
+  pins file restored to the default set (before: `/private/var/db/desktop-state/chonkstep/dock.before-desk6`).
+  `/private/var/db/desk6/` holds my test scripts (remove). Theme, wallpaper, scale untouched.
+- Revert: `ln -f <path>.before-desk6 <path>.back && mv -f <path>.back <path>` for both compositor names and the dock,
+  then `desk_m1.sh relaunch next`; pins: `mv dock.before-desk6 dock` in the state directory.
+- Source: patches 20-23 in `integrations/puredarwin/terminal-app/compositor/` (README).
+
+### For the owner, at the M1 (real keys and fingers)
+1. Minimise a Chonkstep terminal and Activity Monitor (Command-M, or right-click the title > Minimize): one tile with
+   the window's picture at the bottom left, nothing else; click it: the window comes back where it was.
+2. Terminal.app: Command-M still crashes it until TERM8's c11 is installed - try again after their note.
+3. Drag a dock launcher up or down: it follows your finger, the others make room, it stays where you drop it.
+4. Drag one far away and let go at once: it goes back. Hold it away until "Remove from Dock" shows: then it goes;
+   `desk_m1.sh dock-defaults` (or right-click > Options) brings the set back.
+5. Right-click a launcher: Open / Options / Quit; a slightly wobbly click still opens the app.
+
+### Taken from Finch (DESK6)
+Nothing.

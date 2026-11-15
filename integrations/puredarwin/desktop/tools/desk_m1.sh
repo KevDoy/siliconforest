@@ -7,9 +7,12 @@
 #                                          replaced; the files of before are kept as <path>.before-<tag> (hard links)
 #   desk_m1.sh put <local> <remote> [tag]  any other file, the one of before kept as <remote>.before-<tag>
 #   desk_m1.sh dock <chonk-dock>           the dock as /usr/bin/chonkstep-dock (the one of before kept), its launcher
-#                                          items (../system/applications) in /usr/share/applications, its pins
-#                                          (../system/dock-pins) where the session has none yet; it starts with
-#                                          the next compositor start (sf-session)
+#                                          items (../system/applications) in /usr/share/applications, the default
+#                                          pins (../system/dock-pins) as /usr/share/chonkstep/dock-pins (what a dock
+#                                          that finds no pins starts with, DESK6) and as the session's pins where it
+#                                          has none yet; it starts with the next compositor start (sf-session)
+#   desk_m1.sh dock-defaults [tag]         the session's pins set to the default set (the file of before kept as
+#                                          dock.before-<tag>); the running dock reloads them at once
 #   desk_m1.sh relaunch next|daily         the session starts its compositor again (sf-session of 14 November,
 #                                          night, or later): every window ends. Take runs/m1-coord/gui.lock first.
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
@@ -36,8 +39,13 @@ case "${1:-}" in
     put "$2" /usr/bin/chonkstep-dock "${3:-desk}"
     (cd "$(dirname "$0")/../system" && tar -cf - applications dock-pins) | "${SF[@]}" 'T=/private/tmp/desk-items.$$; mkdir -p $T /usr/share/applications /private/var/db/desktop-state/chonkstep && tar -xf - -C $T &&
       for f in $T/applications/*.desktop; do cp "$f" /usr/share/applications/ && chmod 644 "/usr/share/applications/$(basename "$f")"; done;
+      mkdir -p /usr/share/chonkstep && cp $T/dock-pins /usr/share/chonkstep/dock-pins && chmod 644 /usr/share/chonkstep/dock-pins;
       [ -e /private/var/db/desktop-state/chonkstep/dock ] || { cp $T/dock-pins /private/var/db/desktop-state/chonkstep/dock && chmod 644 /private/var/db/desktop-state/chonkstep/dock; };
       rm -rf $T; ls /usr/share/applications; cat /private/var/db/desktop-state/chonkstep/dock';;
+  dock-defaults)
+    "${SF[@]}" "S=/private/var/db/desktop-state/chonkstep/dock; [ -e \$S ] && [ ! -e \$S.before-${2:-desk} ] && cp -p \$S \$S.before-${2:-desk};
+      XDG_STATE_HOME=/private/var/db/desktop-state XDG_RUNTIME_DIR=/private/var/run/gpu-desktop WAYLAND_DISPLAY=wayland-0 /usr/bin/chonkstep-dock --defaults; cat \$S"
+    echo "$(date -u +%FT%TZ) DESK dock pins set to the default set (dock-defaults)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt";;
   relaunch)
     case "$2" in next) word=relaunch-next;; daily) word=relaunch;; *) echo "next|daily" >&2; exit 2;; esac
     "${SF[@]}" "grep -q relaunch-next /usr/libexec/sf-session || { echo 'the running session has no relaunch: reboot-next'; exit 1; }
@@ -56,5 +64,5 @@ case "${1:-}" in
     for i in $(seq 1 60); do "${SF[@]}" true 2>/dev/null && break; sleep 9; done
     for i in $(seq 1 30); do "${SF[@]}" 'pgrep -x chonkstep-darwin-desktop.next > /dev/null && [ -d /private/var/run/gpu-desktop/inject ]' && break; sleep 5; done
     state;;
-  *) sed -n 3,15p "$0"; exit 2;;
+  *) sed -n 3,19p "$0"; exit 2;;
 esac
