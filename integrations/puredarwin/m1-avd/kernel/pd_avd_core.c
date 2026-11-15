@@ -594,6 +594,12 @@ bool pd_avd_irq(struct pd_avd_device *dev)
 	bool finish = false, stale = false;
 	u32 status;
 
+	/* Keep mailbox consumption and job attribution in one critical section.
+	 * A completed job's owner may publish the next job on another CPU. If it
+	 * does so between this read and the ownership check, an old completion
+	 * can otherwise finish the new job. Session destruction uses this lock
+	 * too, so current remains valid through the VP submit callback. */
+	spin_lock_irqsave(&avd->job_lock, flags);
 	status = readl(avd->mbox + AVD_REG_MBOX1_RETRIEVE);
 
 	writel(AVD_MBOX1_NOT_EMPTY, avd->mbox + AVD_REG_MBOX_IRQ_CLR);
@@ -604,10 +610,10 @@ bool pd_avd_irq(struct pd_avd_device *dev)
 	if (status & 0x10000) { /* dbg */
 		dev->stats.unhandled++;
 		writel_relaxed(0, avd->mbox + AVD_REG_MBOX_IRQ_ENABLE);
+		spin_unlock_irqrestore(&avd->job_lock, flags);
 		return true;
 	}
 
-	spin_lock_irqsave(&avd->job_lock, flags);
 	s = dev->current;
 	if (status & 0x1000) {
 		/* pp is done ! we are done */

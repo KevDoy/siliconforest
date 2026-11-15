@@ -30,6 +30,7 @@ same "$HERE/kernel/shim/media/v4l2-h264.h" include/media/v4l2-h264.h
 same "$HERE/kernel/shim/media/v4l2-vp9.h" include/media/v4l2-vp9.h
 same "$HERE/include/pdavd/v4l2-controls.h" include/uapi/linux/v4l2-controls.h
 echo "AVDHOST linux commit $(git -C "$LINUX" rev-parse --short HEAD)"
+python3 "$HERE/host-test/test_irq_source.py"
 # Resolve explicit recording arguments before the build changes directory.
 # Missing explicit inputs are failures, never a vacuous ALL PASS.
 records=()
