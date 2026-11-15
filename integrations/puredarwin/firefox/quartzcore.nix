@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Private backing-pixel render target; wrapper identity follows terminal-app.
-{ skipUnchangedTransactions ? false, detachInvalidatedLayers ? true, gpuPresentation ? false }:
+{ skipUnchangedTransactions ? false, detachInvalidatedLayers ? true, gpuPresentation ? false,
+  releaseContextResources ? false, coalesceNotifications ? false, baseSource ? null }:
 let
  a = import ../cocoa/arm64.nix;
  p = import ../cocoa/patched.nix;
  src = a.pkgs.runCommand "sffx-quartz-backing-scale-source" {} ''
   mkdir -p $out/src/Frameworks
-  cp -r ${p.quartzcoreSrc} $out/src/Frameworks/QuartzCore
+  cp -r ${if baseSource == null then p.quartzcoreSrc else baseSource} $out/src/Frameworks/QuartzCore
   chmod -R u+w $out
   cd $out
   ${a.pkgs.lib.optionalString (!detachInvalidatedLayers) ''
@@ -16,6 +17,12 @@ let
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0208-layer-context-exportable-gpu-frame.patch}
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0213-cache-gpu-frame-export-provider-lookups.patch}
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch}
+    ${a.pkgs.lib.optionalString coalesceNotifications ''
+      ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0218-opt-in-gpu-notification-refresh-coalescing.patch}
+    ''}
+    ${a.pkgs.lib.optionalString releaseContextResources ''
+      ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch}
+    ''}
   ''}
   ${a.pkgs.lib.optionalString skipUnchangedTransactions ''
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0205-layer-transactions-skip-unchanged-contents.patch}
