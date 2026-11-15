@@ -2475,3 +2475,36 @@ warm50M work83.676–83.682ms, 100k syscalls14.476ms. There is no NHI storm
 or reproduced fixed-work slowdown; the reported AppKit timing regression
 remains unexplained. Next: real I210 mapper/MSI/checked driver admission,
 Ethernet link and interface-owned DHCP, then the attached keyboard.
+
+
+### 2026-11-15 16:42Z: MSI variant failed, recovered; setup correction built
+
+CIO28 installed capsule
+`17bc66193140c2ec8d111fc27d025312063b85196fa82a8d7bf20d0c4754c436`,
+reached the real router and activated the PCI tunnel, then failed native host
+startup with ENODEV19 before enumeration. The mapper request and independent
+PCI inventory were NOT RUN. Post-authorization dmesg/registry and the
+failure-before-recovery capture are preserved privately. Normal rollback
+restored the exact qualified non-AVE CIO27 capsule at16:40:07Z; UART was
+reaped and locks released16:40:09Z. The recovery boot has not repeated
+authorization; the positive12-function inventory belongs to the earlier
+qualified CIO27 trial. No endpoint BME or DMA was enabled.
+
+Source establishes a missing setup step: the installed cold reset explicitly
+zeros MSI config/base/address, while the MSI variant merely required their
+already-configured values. It did not restore them. The new helper follows
+the pinned Linux mask/ack/address/base/enable sequence, checks native retained
+ownership and physical power/RUN/link before every operation, then verifies
+all three configuration words before constructing native AIC parents.
+Before/after words, completion counts and errors are published for the next
+actual boot; CIO28 did not capture those register values, so they are not
+claimed as observed. Host sanitizer tests cover all12 I/O refusals plus
+inaccessible and mismatched readbacks. Native enum and MSI SDKs and all six
+repository checks pass. This correction is built, not installed or hardware
+qualified. Next retry still grants no BME and adds no endpoint driver.
+
+The first CIO28 collection was rejected for0x2ab4 overlap before installation.
+Removing CIO's local symbols alone recovered space: all17 non-debug section
+addresses, sizes and contents matched the input exactly, other56 code UUIDs
+were fixed, and the final installed trial had zero overlaps. No kernel
+address change or protected code change was used. AVE remains paused.

@@ -12,6 +12,7 @@
 #include "pd_pciec_config.h"
 #if PD_CIO_PCI_MSI
 #include "pd_cio_pci_msi.h"
+#include "pd_pciec_msi_setup.h"
 #endif
 /* Enumeration-only native adapter, wired only in the explicit CM profile.
  * The caller must activate the real tunnel, cold-init/start PCIe-C, retain
@@ -36,6 +37,9 @@ class PDCIOPCIHost : public IOPCIBridge {
     PDCIOPCIMSIController *msi;
     UInt32 interruptAdmitted;
     static bool interruptPower(void *);
+    static int msiRead(void *,uint32_t,uint32_t *);
+    static int msiWrite(void *,uint32_t,uint32_t);
+    bool msiPhysicalAccess();
 #endif
     bool physicalPower(); // Always-on PMGR proof before any PCIe-C access.
     volatile uint8_t *address(IOPCIAddressSpace,UInt8,unsigned);

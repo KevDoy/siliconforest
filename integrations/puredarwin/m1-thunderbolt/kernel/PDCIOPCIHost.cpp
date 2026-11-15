@@ -45,16 +45,30 @@ bool PDCIOPCIHost::start(IOService *provider)
     // The pinned T8103 sequence programs 32 per-port MSI vectors, base0.
     // Derive and verify the actual hardware configuration before exposing
     // any PCI child or resolving an endpoint's interrupt properties.
-    UInt32 msiConfig=port.r32(0x124),msiBase=port.r32(0x128),msiAddress=port.r32(0x168),dtBase=0;
-    if(msiConfig!=0x51 || msiBase || msiAddress!=0xfffff000 ||
-       !pd_adt_u32("/arm-io/apciec1","msi-vector-offset",0,&dtBase) || dtBase!=818){
-        blockConfiguration();return false;
+    UInt32 dtBase=0;
+    if(!pd_adt_u32("/arm-io/apciec1","msi-vector-offset",0,&dtBase) || dtBase!=818){
+        setProperty("msi-setup-stage","ADT-vector-base-refused");blockConfiguration();return false;
     }
+    // Cold init intentionally cleared these registers. Restore the pinned
+    // Linux sequence before constructing the native interrupt controller.
+    pd_pciec_msi_setup_io setup={this,msiRead,msiWrite};
+    pd_pciec_msi_setup_report report={};
+    int msiError=pd_pciec_msi_setup(&setup,&report);
+    setProperty("msi-setup-error",(UInt32)msiError,32);
+    setProperty("msi-before-count",report.before_count,32);
+    setProperty("msi-after-count",report.after_count,32);
+    setProperty("msi-before-registers",report.before,report.before_count*sizeof(UInt32));
+    setProperty("msi-after-registers",report.after,report.after_count*sizeof(UInt32));
+    if(msiError){setProperty("msi-setup-stage","register-setup-refused");blockConfiguration();return false;}
+    setProperty("msi-setup-stage","native-parent-setup");
     __atomic_store_n(&interruptAdmitted,1,__ATOMIC_RELEASE);
     msi=OSTypeAlloc(PDCIOPCIMSIController);
-    if(!msi || !msi->initForPort(this,this,interruptPower,dtBase,32,msiAddress)){
+    if(!msi || !msi->initForPort(this,this,interruptPower,dtBase,32,0xfffff000)){
         blockConfiguration();return false;
     }
+#endif
+#if PD_CIO_PCI_MSI
+    setProperty("msi-setup-stage","configured-parents-masked");
 #endif
     setProperty("PDCIOPCIEnumerationOnly",true);setProperty("PDCIOPCIDMAAdmitted",false);
     startAttempted=true;stopped=false;
@@ -75,6 +89,28 @@ IOReturn PDCIOPCIHost::blockConfiguration()
     IOLockLock(accessLock);view.admitted=false;IOLockUnlock(accessLock);return kIOReturnSuccess;
 }
 #if PD_CIO_PCI_MSI
+bool PDCIOPCIHost::msiPhysicalAccess()
+{
+    if(!physicalPower() || !powerProof || !powerProof(powerContext))return false;
+    UInt32 run=port.r32(0x804),link=port.r32(0x208);
+    return run!=UINT32_MAX && link!=UINT32_MAX && (run&1) && (link&1);
+}
+int PDCIOPCIHost::msiRead(void *context,uint32_t off,uint32_t *value)
+{
+    auto s=(PDCIOPCIHost *)context;
+    if(!value || (off!=0x124 && off!=0x128 && off!=0x168))return EINVAL;
+    if(!s->msiPhysicalAccess())return ENODEV;
+    __asm__ volatile("dsb sy; isb" ::: "memory");*value=s->port.r32(off);
+    __asm__ volatile("dsb sy; isb" ::: "memory");return 0;
+}
+int PDCIOPCIHost::msiWrite(void *context,uint32_t off,uint32_t value)
+{
+    auto s=(PDCIOPCIHost *)context;
+    if(off!=0x104 && off!=0x100 && off!=0x210 && off!=0x168 && off!=0x128 && off!=0x124)return EINVAL;
+    if(!s->msiPhysicalAccess())return ENODEV;
+    __asm__ volatile("dsb sy; isb" ::: "memory");s->port.w32(off,value);
+    __asm__ volatile("dsb sy; isb" ::: "memory");return 0;
+}
 bool PDCIOPCIHost::interruptPower(void *context)
 {
     auto s=(PDCIOPCIHost *)context;
