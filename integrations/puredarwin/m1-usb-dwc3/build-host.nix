@@ -22,7 +22,6 @@ info['IOKitPersonalities']['Apple USB lifecycle']={
  'CFBundleIdentifier':info['CFBundleIdentifier'], 'IOClass':'PDAppleUSB',
  'IOProviderClass':'PDAppleTypeC','IOProbeScore':5000}
 info['CFBundleGetInfoString'] += '; ATC GPL-2.0/BSD-2-Clause, Asahi Linux Contributors; DWC3 GPL-2.0, Texas Instruments 2010-2011; Apple glue Linux Foundation 2018/Texas Instruments 2015. See NOTICE.'
-info['OSBundleLibraries']['org.puredarwin.driver.PDAppleTypeC']='0.1.0'
 with open(p,'wb') as f: plistlib.dump(info,f)
 PY
   '';
