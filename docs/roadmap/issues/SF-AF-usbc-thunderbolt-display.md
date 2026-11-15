@@ -1169,3 +1169,31 @@ optional-AVE collection changes only CIO's UUID; the other 57 modules remain
 identical to the frozen CIO07+AVE candidate. All six repository checks pass.
 This diagnostic code is not installed; the active CIO07AVE cycle adds only
 the requested lazy INFO module and preserves the qualified CIO07 NHI binary.
+
+The next normal Linux visit observes a Keychron Q1 Pro `3434:0610` at USB
+device `1-1`, including a HID boot-keyboard interface (class03/subclass01/
+protocol01). The dock's four PCI xHCI endpoints and eight root hubs remain
+visible in Linux. No additional owner keyboard action is needed; leave it
+attached while the native PCIe path is brought up. This remains Linux
+evidence, not Darwin USB enumeration or physical typing.
+
+The native mapping audit confirms the XNU interfaces for PCIe-C ordering:
+`kIOMapInhibitCache` selects Device-nGnRnE for device memory, while
+`kIOMapPostedWrite` supplies Device-nGnRE. Root controller/configuration
+accesses and tunneled endpoint BARs must use their appropriate distinct
+settings, consistent with the pinned Linux T8103 warning. No endpoint BAR
+has been mapped by this work yet.
+
+The requested additive AVE INFO test used the exact frozen CIO07 collection
+plus one diagnostic module, with all 57 existing UUIDs unchanged and zero
+overlaps. The kernel and NHI boot passed, but root INFO returned ENODEV19
+with flags0, caps0, soc8103 and no segments/identities. This is an early
+inventory failure, before TEXT mapping; no DATA, AVE power/MMIO or encoder
+was enabled. The older actual DT capture has a 256-byte padded
+`firmware-version` property with the first NUL at byte16; the AVE reader's
+whole-property-size guard rejects it before copying the bounded string.
+The exact current failing property was not instrumented, so this source
+blocker was relayed for the media agent to correct and qualify. The guarded
+cycle restored NHI-qualified CIO07 at09:03:02Z and reaped its UART reader at
+09:03:03Z. The next CIO08 link-diagnostic candidate omits this failed module
+and changes only CIO against the qualified baseline.
