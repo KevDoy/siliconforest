@@ -93,6 +93,27 @@ The binary is never committed. Method and tools are Terminal.app's (SF-Y,
   stage: **0 of 405 imports missing, 0 classes missing** (`runs/sf-actmon/scan/actmon-stage1.md`).
   Nothing has run on the M1 yet at this point of the document.
 
+## TERM6 round (night of 15 November)
+Synthetic input; details and the Terminal side are in SF-Y, "TERM6 round".
+- **Crashes**: of the four unattributed reports, 03:15Z (SIGBUS in Onyx2D) came from drawing on
+  NSProgressIndicator's animation thread, and 03:18Z (`CFArrayGetValueAtIndex` trap) from a table click beside
+  every column. Both are fixed (cocoa 0123, installed 04:26Z). 02:34Z predates TERM5's constraint fix. 01:20Z has no
+  frames. Robustness pass on the installed build (test prefix before the install): 600 s, 1032 random clicks and
+  keys in the main window (the toolbar only for its tabs), `MallocScribble=1`, under `sf-catch`, kill() of other
+  processes blocked by `tools/sf-nokill.c`. Activity Monitor lived, with no report and no exception.
+- **Sample**: Activity Monitor runs `/usr/bin/sample <pid> <seconds> -file /dev/stdout` and shows and parses what
+  comes back. There was no such program, so the window stayed empty. `tools/sf-sample.c` is that program, installed
+  as `/usr/bin/sample` (new file, 04:05Z; remove it to revert). For each sample it suspends the target, reads
+  every thread's registers and walks its frame-pointer chain in the target's memory. Addresses are named from the
+  symbol tables of the images in the target's dyld list, read from the files on disk. The report is laid out like
+  macOS's (header, "Call graph:" per thread with sample counts, "Sort by top of stack", "Binary Images"). Checked on
+  the M1 from the command line: a busy zsh (744 samples in 1 s, frames named down to `execwhile`, `bin_test`, ...),
+  and `sleep`. Limits: frames are found through frame pointers only; no DWARF and no inlined frames.
+- **Per-process network**: `probe/sf-nstat-probe.c` drives the installed NetworkStatistics the way Activity
+  Monitor does. It reports sources with real bytes per process: sshd sessions rx 4.9-5.9 KB / tx 4.0 KB, UDP pid 15
+  rx 504 KB. Kernel message layouts match (`SFNS_TRACE=1` in `libs/NetworkStatistics.c`: TCP descriptions 384 =
+  40 + 344, updates 496 = 152 + 344). Why Activity Monitor's columns stay 0 is not found yet.
+
 ## Installed on the M1's disk, seventh round (14 November, night; COCOA4)
 - Core files by the guarded installer after QEMU `c4c`/`c4c-2` (failed=0, QDDESK_PASS both; `c4a` and `c4b` before them
   failed on staging and on their own probes, see SF-Y): `/usr/lib/libCoreFoundation.dylib` 82638edd (the first

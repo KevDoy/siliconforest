@@ -11,6 +11,10 @@
 //   SFPROF_FOCUS=name           the report counts only the samples with NAME on their stack
 //   SFPROF_PROGRAM=text         only the program whose name contains TEXT samples (the variable
 //                               reaches the program's children too: a terminal's shell)
+//   SFPROF_STACKS_ONLY=1        only the .stacks file (the summary's name lookups take long with
+//                               many samples of a deep program); the report then has its first line
+//   SFPROF_FLAG=path            the file that turns sampling on, instead of /tmp/sfprof.on (two
+//                               agents profiling at once each have their own)
 //
 // The main thread is suspended for each sample (thread_suspend, thread_get_state, a walk of the
 // frame-pointer chain, thread_resume). Names are what dladdr finds: the nearest symbol of the
@@ -24,7 +28,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define DEPTH 32
+#define DEPTH 64
 #define MAXSAMPLES 60000
 
 static thread_act_t mainThread;
@@ -61,7 +65,7 @@ static void report(void) {
     char buf[512];
     const char *focus = getenv("SFPROF_FOCUS");
     unsigned kept = 0;
-    for (unsigned s = 0; s < count; s++) {
+    for (unsigned s = 0; s < count && getenv("SFPROF_STACKS_ONLY") == NULL; s++) {
         if (focus != NULL) {
             unsigned d;
             for (d = 0; d < depths[s]; d++) {
@@ -122,9 +126,10 @@ static void report(void) {
 
 static void *sampler(void *unused) {
     useconds_t interval = getenv("SFPROF_US") ? (useconds_t)atoi(getenv("SFPROF_US")) : 1000;
+    const char *flag = getenv("SFPROF_FLAG") ? getenv("SFPROF_FLAG") : "/tmp/sfprof.on";
     int on = 0;
     for (;;) {
-        int now = access("/tmp/sfprof.on", F_OK) == 0;
+        int now = access(flag, F_OK) == 0;
         if (on && !now) { report(); count = 0; }
         on = now;
         if (!on) { usleep(20000); continue; }

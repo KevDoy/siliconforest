@@ -135,6 +135,65 @@ SPDX notice kept in the file that carries it:
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
 
+## TERM6 round (night of 15 November): crashes first, then menus, colours, first launch
+Input is synthetic throughout (the compositor's inject module). Measured in the application's own `WSTIME` lines
+(`PD_WS_TIMING=1`), its own pictures (`PD_WS_DUMP_DIR`, and `PD_WS_DUMP_ALPHA=1` for the alpha), and screen
+captures. Tools are in `runs/sf-term6` (not committed). Patches: cocoa 0123 (AppKit) and 0124 (WindowServer),
+installed; 0125 onwards follow.
+
+### Crash reports attributed and fixed (stability first)
+| Report (M1, `~/Library/Logs/DiagnosticReports`) | Cause | Fix |
+|---|---|---|
+| Activity Monitor 03:15Z, SIGBUS in `O2RasterizeWriteCoverageSpan8888_Copy`, pc garbage | `-[NSProgressIndicator _runThreadedAnimation:]` ran a run loop on a thread of its own. Its `-setNeedsDisplay:` scheduled `_displayAllWindowsIfNeeded` on that thread's run loop, so every window was drawn there while the main thread drew too (the stack shows a pop-up button drawn from that thread) | 0123: the animation runs on the main thread. A view marked for display from another thread has its display scheduled on the main thread |
+| Activity Monitor 03:18Z, SIGTRAP in `CFArrayGetValueAtIndex` under `-[NSTableView mouseDown:]` | a click on a row but beside every column gives column -1, which was used as an index (`objectAtIndex:-1`) | 0123: no column means no cell to track; the row is selected and a double click sends the double action, as on macOS |
+| Terminal (robustness pass, reproduced with the same seed under `sf-catch`), SIGTRAP in `CFArrayGetValueAtIndex` under `-[NSMenu performKeyEquivalent:]` | the item count was taken before `menuNeedsUpdate:`. Terminal's delegates rebuild their menus there, so fewer items were left than the loop went to | 0123: `-performKeyEquivalent:` and `-update` go over a copy of the items taken after the delegate. The same seed then ran 216 actions with no crash |
+| Activity Monitor 02:34Z, SIGSEGV in `objc_msgSend` under `_pdLayoutTreeFitting:apply:` (tab switch) | TERM5's case, fixed at 02:38Z (a removed view's constraints). The report predates that install | - |
+| Activity Monitor 01:20Z | the report has no frames (an early version of the reporter): not attributable | - |
+| (no report written for the Terminal trap above) | the reporter made only the last directory level: a new home has no `~/Library/Logs` | 0123: every level is made |
+
+Robustness pass: `runs/sf-term6/fuzz.sh` sends random clicks and keys to my own Activity Monitor and Terminal, in
+bursts of 12. Each burst is generated from a window dump and only when my app's window is on top. Points under the
+desk's layer surfaces are never clicked. Nothing is sent that closes, moves or resizes a window. Terminal gets no
+Return, Escape, Control key or paste, and its shell is `/bin/cat` (its `Shell` preference in a test home), so
+nothing typed ever runs. Activity Monitor runs with `sf-nokill.dylib` (`activity-monitor/tools/sf-nokill.c`):
+kill(), killpg() and proc_terminate() of other processes only log. Both apps ran with `MallocScribble=1` (freed
+memory reads 0x55: checked on the M1 with a small program) under `sf-catch`. Gate on the build installed afterwards
+(test prefix): Activity Monitor 600 s and 1032 actions, Terminal 600 s and 936 actions. Both stayed alive with no
+crash report. Terminal raised `NSInternalInconsistencyException: divider index out of range` twice, caught by
+the run loop: `-[NSSplitView setPosition:ofDividerAtIndex:]` asserted for a divider that is not there (fixed in
+0125: it does nothing, as on macOS). Two incidents in early versions of the pass, before I added the window rule:
+arrow keys and letters reached the desk's startup terminals (the root shells of `Terminal 000100000000` and
+`000200000000`). No Return was sent, so nothing ran, and I cleared both lines with Control-U (`runs/m1-coord/log.txt`).
+
+### Menus (item 1)
+Profile (`sf-prof`, 0.5 ms, with a new `SFPROF_FLAG` per agent and `SFPROF_STACKS_ONLY`; 14 menus opened) and the
+new `WSTIME menu-*` lines showed where the time goes. `orderFront` took 20-88 ms: the panel's eight shadow-ring
+path fills plus the panel fill over the whole menu (54 % of the drawing). `+[NSColor controlAccentColor]`
+re-read the global preferences file at every highlighted row (`CFPreferencesAppSynchronize`, 24 % of row
+drawing). The text system ran per row, and the flush waited for the compositor's configure of the new
+xdg_popup. 0123 changes:
+- The panel is drawn once into a small template (per appearance, scale and pixel phase). It is then cut into nine
+  pieces and copied for every size and every dirty row. `PD_MENU_VECTOR=1` draws the old vectors.
+- The accent colour is read again at most once a second.
+- The popup's role is requested from the window server before AppKit draws (0124 `kWSWindowPrepareRole`), so the
+  configure arrives while the menu draws.
+- The main menu is revalidated four times a second only while a menu bar server is connected. A window's strip
+  and the desk's title-bar menu validate a menu when they show it.
+
+| Shell menu opened by a click, 14 opens (my own Terminal, WSTIME) | Installed before (2cd9ea2a) | 0123 (test prefix) |
+|---|---|---|
+| tracking start to the popup's first commit, median / p90 / max | 44.1 / 72.8 / 96.1 ms | 17.0 / 35.4 / 56.6 ms |
+| tracking start to the release of that frame (the compositor took it), median / p90 | 57.8 / 84.8 ms | 28.6 / 47.9 ms |
+| `-openSubmenuAtIndex:` alone, median | 47.8 ms | 16.0 ms |
+
+### Installed (04:26Z, direct, the previous files kept as `.pre-t6`)
+AppKit f0bcba93 (0123; .pre-t6 = 2cd9ea2a) and libWindowServer df87120c (0124; .pre-t6 = 5d359f88). Both are the
+nix builds of the committed patches, byte-equal to the gated test builds. After-install checks
+(`runs/sf-term6/tcheck6.sh`, only my own pids): Terminal opened, Preferences opened, closed and reopened,
+Inspector, new tab, colour panel, Shell menu, Activity Monitor and its inspector opened and closed with the app
+alive (`shots/inst1-sheet.png`). `sf_compat_push.sh check` 18/18. `/usr/bin/sample` is new (SF-AA). Revert:
+`ln -f <path>.pre-t6 <path>.back && mv -f <path>.back <path>`.
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default
