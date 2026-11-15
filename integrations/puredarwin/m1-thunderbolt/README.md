@@ -469,3 +469,27 @@ independent interface/packet evidence. Ambiguous BME/startup failures retain
 IRQ/context/pages until reboot. Both native SDKs compile; hardware Ethernet
 link/DHCP and actual IRQ delivery still await testing. This is not hot-remove
 support or a ten-cycle result.
+
+
+The private I210 network variant uses IOPCIFamily's normal
+`IOPCITunnelCompatible=true` declaration, required by its existing tunnel
+matching policy. It retains that policy and never changes a device's actual
+IOPCITunnelled state. The exact-I210 catalogue check requires this declaration.
+Before FreeBSD attach, the native wrapper validates BAR0's real descriptor
+against the T8103 PCIe-C non-prefetchable CPU window and binds a retained
+native host/device access guard. Every private FreeBSD scalar/bulk BAR read
+and write checks that real host's live power/RUN/link/admission state; bulk
+operations use the scalar primitives. These guards and retained failure
+contexts are implemented and SDK-built; physical removal remains unqualified.
+The dedicated driver retains the original I210 initializer, rejects other
+MAC types, retains bootstrap/driver linker-set entries during dead stripping,
+and compiles only this private bundle with -Oz for collection capacity.
+
+`tools/compact_kc_prelink.py` removes structural XML whitespace from our
+generated __PRELINK_INFO, preserves all plist values and original tags,
+and shrinks only that segment's extents and section size. It validates
+metadata/payload separation and checks every other file byte is unchanged.
+The usual overlap gate still runs afterward. This recovers metadata space
+without moving the kernel or changing boot.bin. The candidate additionally
+checks all57 input bundle non-debug sections against their complete original
+SDKs after local-symbol stripping; this is build verification, not boot proof.

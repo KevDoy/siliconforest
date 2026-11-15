@@ -44,6 +44,7 @@ class PDCIOPCIHost : public IOPCIBridge {
 #if PD_CIO_I210_NETWORK
     struct Grant { IOPCIDevice *device; UInt32 id,code; UInt8 bus,slot,function; } grants[8];
     UInt32 grantCount,bmeActive;
+    IOPCIDevice *networkEndpoint;
     bool networkAttempted;
     IOReturn admitI210(IOPCIDevice *);
     bool busMasterAllowed(IOPCIAddressSpace);
@@ -59,6 +60,9 @@ public:
     void free() override;
 #if PD_CIO_PCI_MSI
     IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
+#endif
+#if PD_CIO_I210_NETWORK
+    int bindI210Access(IOPCIDevice *);
 #endif
     IOReturn blockConfiguration();
     bool configure(IOService *) override;

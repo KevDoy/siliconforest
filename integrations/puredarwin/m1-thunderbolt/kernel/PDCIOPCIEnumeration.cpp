@@ -56,7 +56,7 @@ int PDCIOPCIEnumeration::catalogueSafe()
      !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch")){++wifi;continue;}
 #if PD_CIO_I210_NETWORK
   if(cls && cls->isEqualTo("PDFBSDem") && bundle && bundle->isEqualTo("org.puredarwin.driver.PDFBSDem") && id && id->isEqualTo("0x15338086") &&
-     !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch") && !dict->getObject("IOPCITunnelCompatible")){++ethernet;continue;}
+     !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch") && dict->getObject("IOPCITunnelCompatible")==kOSBooleanTrue){++ethernet;continue;}
 #endif
   ret=EOPNOTSUPP;break; // No generic endpoint personality, including PCI xHCI.
  }
@@ -219,6 +219,7 @@ int PDCIOPCIEnumeration::prepareI210Mapper()
 #if PD_CIO_I210_NETWORK
  // Initial matching refused before the mapper existed. Retry the exact
  // endpoint only after binding and fresh native readiness checks above.
+ if(host->bindI210Access(endpoint)){endpoint->release();return fail(ENODEV);}
  endpoint->registerService(kIOServiceSynchronous);
  owner->setProperty("pcie-i210-mapper-stage","mapper-bound-network-match-requested");
 #endif

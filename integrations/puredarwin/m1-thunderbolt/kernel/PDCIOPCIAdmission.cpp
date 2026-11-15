@@ -7,6 +7,17 @@
 #include <libkern/OSByteOrder.h>
 #include <sys/errno.h>
 
+int PDCIOPCIHost::bindI210Access(IOPCIDevice *device)
+{
+    if(!device || ml_at_interrupt_context() || !interruptPower(this) ||
+       device->configRead32(0)!=0x15338086 || (device->configRead32(8)>>8)!=0x020000)return ENODEV;
+    IORegistryEntry *p=device;unsigned depth=0;
+    while(p && p!=this && depth++<64)p=p->getParentEntry(gIOServicePlane);
+    if(p!=this || networkEndpoint)return EBUSY;
+    device->retain();__atomic_store_n(&networkEndpoint,device,__ATOMIC_RELEASE);
+    return 0;
+}
+
 bool PDCIOPCIHost::busMasterAllowed(IOPCIAddressSpace space)
 {
     // accessLock is held. Never call a mapper/IRQ query here: they read config.

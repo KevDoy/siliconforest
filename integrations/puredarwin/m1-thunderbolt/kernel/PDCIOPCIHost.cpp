@@ -17,7 +17,7 @@ bool PDCIOPCIHost::initForEnumeration(IOService *owner,void *ctx,bool (*proof)(v
     msi=NULL;interruptAdmitted=0;
 #endif
 #if PD_CIO_I210_NETWORK
-    bzero(grants,sizeof(grants));grantCount=bmeActive=0;networkAttempted=false;
+    bzero(grants,sizeof(grants));grantCount=bmeActive=0;networkAttempted=false;networkEndpoint=NULL;
 #endif
     view={0x10000000,0,127,false};startAttempted=false;stopped=true;
     if(!owner || !ctx || !proof || !IOPCIBridge::init())return false;
@@ -138,6 +138,10 @@ IOReturn PDCIOPCIHost::callPlatformFunction(const OSSymbol *name,bool wait,
  void *p1,void *p2,void *p3,void *p4)
 {
 #if PD_CIO_I210_NETWORK
+    if(name && name->isEqualTo("PDCIOPCIEndpointAccess")){
+        if(p1!=__atomic_load_n(&networkEndpoint,__ATOMIC_ACQUIRE) || p2 || p3 || p4)return kIOReturnBadArgument;
+        return interruptPower(this)?kIOReturnSuccess:kIOReturnNotReady;
+    }
     if(name && name->isEqualTo("PDCIOPCIEnableI210DMA")){
         if(p2 || p3 || p4 || ml_at_interrupt_context())return kIOReturnBadArgument;
         return admitI210(OSDynamicCast(IOPCIDevice,(IOService *)p1));
