@@ -278,12 +278,50 @@ PNGs do not establish the actual GL display output. CPU fallback matches its con
 Verification-only pixel samples establish correct green/yellow and opaque alpha
 in the source framebuffer, exported layer, final framebuffer and raw exported
 BO memory (144×96, stride576, offset16384). Those samples are diagnostics, not
-transport. The existing inject capture command reads the actual GL framebuffer and
-is the next qualification path. An isolated GLES3 cross-exec sampler with the
+transport. The corrected v5 test uses the existing inject capture command, whose
+source=renderer log establishes actual compositor framebuffer readback. All
+13824 pixels match in both green and yellow phases, including premultiplied
+alpha (127,29,88) over the native base; CPU fallback matches its control exactly.
+CGL diagnostic readbacks are disabled in this run, and transport counters show
+zero CPU upload/readback, seven GPU compositions and one55296-byte base upload.
+The ordinary CPU screenshot limitation remains a desktop capture gap. An isolated GLES3 cross-exec sampler with the
 same dimensions/stride/offset passes both13824-pixel green/blue revisions.
 The candidate is
 excluded from Firefox qualification and the daily installer. No end-to-end
 zero-copy claim is made.
+
+Stock JetStream2.2 completes in `jetstream-002`: **94.079**, one observed
+run with the default workload,1280×876 visible viewport at1.5scale,
+230.54seconds measured by the benchmark harness. The browser survives and the
+measurement passes. Raw per-test metrics are retained; no between-run spread
+is claimed. The earlier001 premature-start harness failure remains preserved.
+
+All four GPU CGL controls subsequently pass on the M1: profiles3.2/4.1 with
+2D/rectangle textures, separate exec children,1024 exact GL+CPU-mapped pixels
+per process, no CGL CPU upload/readback, correct GPU blit/direct-commit counters
+and all owned processes reaped. Firefox GPU001/002 fail XUL loading; their
+trial command omitted the private AVFoundation.pd library directory. Host
+export comparison finds no removed AppKit/QuartzCore/IOSurface exports.
+Corrected003/004 trials are queued after the stock benchmark; native controls
+are not substituted for Firefox qualification.
+
+The full GPU Firefox candidates003/004 load XUL but do not complete startup:
+the parent waits in `GPUProcessManager::EnsureGPUReady`, while the GPU helper
+spins in the Cocoa next-event loop. Symbols were matched to the official XUL
+UUID through Mozilla's symbol server. A matched0131 AppKit candidate also
+stalls with GPU presentation disabled; WindowServer-only and Quartz-only
+components reach automation. Component runs001–003 then intentionally crash
+because opening `about:support` calls the missing
+`+[AVCaptureDevice authorizationStatusForMediaType:]`. This is an identified
+API gap, not an unexplained graphics fault. A private category reports
+Restricted and asynchronously denies requests; native controls and corrected
+Firefox comparisons are pending. Installed capture absence remains honest.
+
+Public `streaming-dash-001` opens the versioned DASH-IF4.7.4 reference player,
+fetches the clear Envivio H264/AAC-LC MPD and segments, and obtains a ready
+MediaSource blob. The15-second playback command exceeds the inherited10-second
+diagnostic socket timeout. That run remains failed; the transport deadline is
+corrected for a repeat. It does not yet qualify streaming playback.
 
 ## Gaps and ownership
 
@@ -311,7 +349,7 @@ Zero-import dependencies still have to load unless weakly linked.
 | Security | 8 | mostly installer/updater code-validity/digest imports; unsupported operations stay failures |
 | CGL desktop GL | private candidate passes | installed CGL crashes after its `/usr/lib/libEGL.1.dylib` load fails; private matching Asahi CGL passes both core-profile pixel checks |
 | Native layers to Wayland | unresolved | current NSView reads CALayerContext back to a CPU window bitmap; real composited subsurfaces requested from DESK5 |
-| GPU IOSurface backing | unresolved | existing CGLTexImageIOSurface2D uploads CPU memory and writes it back; cross-process dma-buf storage not implemented |
+| GPU IOSurface/presentation | native candidate pixel-qualified; Firefox pending | WRITEBACK fileport backing/CGL alias+blit/private layer presenter; actual compositor framebuffer exact green/yellow+alpha at150%, zero CGL CPU transfer; default fallback remains |
 | Shared FreeType raster/cache | private0200 proven | eight-thread800-render reference pixel check passes; installed control aborts; merge requested TERM5 |
 | Headless AppKit run loop | private0201 proven | nil-display timer probe CPU drops; real GPU main sleeps; TERM5 review requested |
 | AVD sandbox access | private narrow translation proven warm | explicit IOAccelerator grants exact /dev/pdavd read/write; unrelated service/device remain denied |
@@ -409,8 +447,10 @@ READ_ALL only for the one firmware literal when the profile explicitly and
 unconditionally allows IOAccelerator. Firmware writes and unrelated /dev/zero
 remain EPERM; /dev/null stays allowed. No firmware bytes are read back or copied,
 no prewarm is used, and no AVE operation occurs. Thirteen host SBPL cases pass.
-The installer now includes this native-qualified mitigation; a Firefox cold
-first-open on a future already scheduled boot remains separate evidence.
+The installer now includes this native-qualified mitigation; the subsequent actual Firefox `video-cold-001` passes from driver idle/opens0
+on CIO16B without root prewarm: H264/HEVC/VP9 each300frames/0reported drops,
+all ended at10/10/10.008seconds,900 AVD jobs/done,0 errors/timeouts.
+The former warm-only limitation is resolved for this private runtime.
 
 `open-url.nix` privately builds the patch to the Terminal owner's open(1).
 `url-test.py` uses an isolated HOME, LaunchServices defaults and a windowless
@@ -459,8 +499,8 @@ first installer assembly; that assembly remains rejected.
 |---|---|
 | 0 baseline | qualified private-prefix pass014: all3 visible with defaultGPU and WebGL |
 | 1 rendering | WebGL software pixel comparison; wall/presentation60fps scrolling/animation and CPU reduction; zero-copy native layers at150% (hardware WR+WebGL+checker observed) |
-| 2 media | hardware3codec visible pass above; CPU/pixel SW A/B, audible output and A/V clock, native pacing/zero-copy and non-DRM streaming remain |
-| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JetStream (Speedometer/MotionMark and actual Baseline/Ion observed above); completed30-minute run recorded above |
+| 2 media | cold hardware3codec and paired SW pixel/CPU A/B pass above; unmuted HAL/A-V clock measured; acoustic output/lip sync, native pacing/zero-copy and non-DRM streaming remain |
+| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); all3 benchmark numbers recorded above; actual Baseline/Ion observed; completed30-minute run recorded above |
 | 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
 
 Initial Speedometer/MotionMark scores and the completed30-minute crash-free
@@ -468,3 +508,11 @@ interval are recorded above. Audible audio/A-V and zero-copy remain unproven. Th
 panel sharpness/colours at 150%, physical trackpad feel and shortcuts, and
 audible output/lip sync. Logs, synthetic input and renderer captures cannot
 establish those physical observations.
+
+The r3 installer assembly cold-verifies609 regular files, but its first runtime
+fails to become automatable within110seconds and logs Wayland denial. It is
+unqualified. A matched-provider r4 assembly retains the exact AppKit0131,
+Onyx lock and Quartz lifetime builds used in successful browser controls;
+CGL and sandbox are rebuilt for its new prefix. `--provider-overrides` records
+these selections and refuses overriding the prefix-sensitive components.
+Native open/save and clipboard controls are prepared but not yet observed.
