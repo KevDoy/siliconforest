@@ -59,7 +59,10 @@ def rollback(receipt, root):
     base = framework_root(root, receipt['framework'])
     for row in reversed(receipt['activated']):
         dest = base/safe_relative(row['path'])
-        backup = dest.with_name(dest.name+'.pre-finch')
+        backup_rel = safe_relative(row.get('backup_path', str(safe_relative(row['path']).with_name(dest.name+'.pre-finch'))))
+        if backup_rel.parent != safe_relative(row['path']).parent:
+            raise ValueError('Backup escapes destination directory')
+        backup = base/backup_rel
         if row['had_previous']:
             if row.get('previous_directory'):
                 if os.path.lexists(dest):
@@ -74,7 +77,7 @@ def rollback(receipt, root):
     receipt['state'] = 'rolled-back'
 
 
-def install(manifest, source, root, journal):
+def install(manifest, source, root, journal, update=False):
     name = manifest['framework']
     base = framework_root(root, name)
     entries = manifest['entries']
@@ -83,6 +86,8 @@ def install(manifest, source, root, journal):
     paths = [str(safe_relative(row['path'])) for row in entries]
     if len(paths) != len(set(paths)) or 'Versions/A/'+name not in paths:
         raise ValueError('Duplicate entries or missing main image')
+    backups = {}
+    update_tag = secrets.token_hex(8)
     # Validate all inputs/backups before changing a target file.
     for row in entries:
         rel = safe_relative(row['path'])
@@ -91,7 +96,14 @@ def install(manifest, source, root, journal):
             raise ValueError('Destination parent escapes framework')
         backup = dest.with_name(dest.name+'.pre-finch')
         if os.path.lexists(backup) and not original_already_preserved(dest, backup):
-            raise ValueError('Original backup already exists: '+str(rel))
+            if not update:
+                raise ValueError('Original backup already exists: '+str(rel))
+            # Preserve the first .pre-finch and this transaction's actual prior
+            # provider independently. A failed update restores the latter.
+            backup = dest.with_name(dest.name+'.pre-finch-update-'+update_tag)
+            if os.path.lexists(backup):
+                raise ValueError('Update backup already exists')
+        backups[str(rel)] = str(backup.relative_to(base))
         if row['kind'] == 'symlink':
             target = row['target']
             normalized = posixpath.normpath(str(rel.parent/target))
@@ -137,7 +149,7 @@ def install(manifest, source, root, journal):
             previous = os.path.lexists(dest)
             directory = previous and dest.is_dir() and not dest.is_symlink()
             if previous:
-                backup = dest.with_name(dest.name+'.pre-finch')
+                backup = base/backups[row['path']]
                 if directory:
                     if row['kind'] != 'symlink':
                         raise ValueError('Cannot replace directory with a regular file')
@@ -147,11 +159,11 @@ def install(manifest, source, root, journal):
             # Record a moved directory before replacement so rollback can put it
             # back even if the symlink activation itself fails.
             if directory:
-                receipt['activated'].append(dict(path=row['path'], had_previous=True, previous_directory=True))
+                receipt['activated'].append(dict(path=row['path'], had_previous=True, previous_directory=True, backup_path=backups[row['path']]))
                 write_receipt(journal, receipt)
             os.replace(temp, dest)
             if not directory:
-                receipt['activated'].append(dict(path=row['path'], had_previous=previous))
+                receipt['activated'].append(dict(path=row['path'], had_previous=previous, backup_path=backups[row['path']]))
             write_receipt(journal, receipt)
         receipt['state'] = 'installed-awaiting-regressions'
         write_receipt(journal, receipt)
@@ -173,6 +185,7 @@ def main():
     ap.add_argument('--source', type=Path)
     ap.add_argument('--receipt', type=Path, required=True)
     ap.add_argument('--rollback', action='store_true')
+    ap.add_argument('--update', action='store_true', help='Keep first originals plus a separate prior-version rollback snapshot')
     args = ap.parse_args()
     if args.rollback:
         receipt = json.loads(args.receipt.read_text())
@@ -181,7 +194,7 @@ def main():
     else:
         if not args.manifest or not args.source:
             ap.error('Install requires manifest and source')
-        receipt = install(json.loads(args.manifest.read_text()), args.source, args.root, args.receipt)
+        receipt = install(json.loads(args.manifest.read_text()), args.source, args.root, args.receipt, update=args.update)
     print(json.dumps(receipt, indent=2))
 
 

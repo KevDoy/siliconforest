@@ -43,6 +43,7 @@ def decoded(text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('packet', type=Path)
+    ap.add_argument('--update', action='store_true', help='Explicit reviewed update; preserve original and prior-version backups')
     ap.add_argument('--installed', action='append', default=[], help='All previously installed media names')
     ap.add_argument('--baseline', type=Path, required=True, help='Qualified hardware candidate.json, 300 frames/codec')
     ap.add_argument('--hardware-stage', default='/private/var/db/sffinch/hardware-decode-v1')
@@ -94,7 +95,7 @@ def main():
         r.check_returncode()
         gate()
         prefix = 'cd '+shlex.quote(work)+' && python3 install-framework.py '
-        r = subprocess.run(SSH+[prefix+'--manifest manifest.json --source '+shlex.quote(name+'.framework')+' --receipt receipt.json'],
+        r = subprocess.run(SSH+[prefix+'--manifest manifest.json --source '+shlex.quote(name+'.framework')+' --receipt receipt.json'+(' --update' if a.update else '')],
                            capture_output=True, text=True, timeout=60)
         (a.packet/'install.stdout').write_text(r.stdout)
         (a.packet/'install.stderr').write_text(r.stderr)

@@ -49,6 +49,23 @@ class FrameworkInstallTests(unittest.TestCase):
         self.assertEqual(self.dest.read_bytes(), b'old implementation')
         self.assertEqual(self.dest.with_name('Example.pre-finch').read_bytes(), b'original')
 
+    def test_explicit_update_rollback_restores_prior_version_and_first_original(self):
+        first = installer.install(self.manifest, self.source, self.root, self.journal)
+        self.assertEqual(self.dest.read_bytes(), b'new implementation')
+        (self.source/self.rel).write_bytes(b'updated implementation')
+        self.manifest['entries'][0]['sha256'] = hashlib.sha256(b'updated implementation').hexdigest()
+        second = installer.install(self.manifest, self.source, self.root,
+                                   self.journal.with_name('update.json'), update=True)
+        self.assertEqual(self.dest.read_bytes(), b'updated implementation')
+        self.assertEqual(self.dest.with_name('Example.pre-finch').read_bytes(), b'old implementation')
+        snapshot = installer.framework_root(self.root, 'Example')/second['activated'][0]['backup_path']
+        self.assertEqual(snapshot.read_bytes(), b'new implementation')
+        installer.rollback(second, self.root)
+        self.assertEqual(self.dest.read_bytes(), b'new implementation')
+        self.assertEqual(self.dest.with_name('Example.pre-finch').read_bytes(), b'old implementation')
+        installer.rollback(first, self.root)
+        self.assertEqual(self.dest.read_bytes(), b'old implementation')
+
     def test_external_link_rejected_before_activation(self):
         (self.source/'Escape').symlink_to('/etc')
         self.manifest['entries'].append(dict(path='Escape', kind='symlink', target='/etc'))
