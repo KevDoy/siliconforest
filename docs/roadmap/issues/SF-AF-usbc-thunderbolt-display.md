@@ -3005,3 +3005,21 @@ No route owner, external firmware boot, HPD, link training, EDID, connector or
 second output is established by this source review. DESK K1–K13 still waits
 for the real kernel output. The immediate hardware path remains I210 DHCP,
 then the attached dock keyboard, before activating the external pipeline.
+
+
+### Fresh known-good idle sample, before the c12 framework install
+
+A GUI/bench-guarded61-second sample on CIO29 with actual desk6.next completed
+at20:22:20Z without reboot, input, capture, installation or session change.
+Kernel thread CPU was2.121% of oneCPU and aggregate host idle98.125%; an unnamed
+thread contributed1.494%, SPI HID0.332%, and other individual threads below
+0.068%. Earlier stackshots associated the dominant unnamed wait with
+PDAppleNVMeRW on both k2 and USB04; this run did not take a fresh stackshot.
+NHI counters advanced24 in total at the two explicit query boundaries,
+with no observed recurring interrupt storm. The desktop used3.605% of oneCPU:
+shared-memory cleanup2.259%, main0.936%, HID reader0.404%, about428 task wakeups
+per second. The fixed mix took165.375ms cold and83.838/83.682/83.677ms warm.
+These are consistent with prior controls and keep frequency warmup as a clue;
+they do not establish the cause of the reported AppKit slowdown. That finding
+remains unresolved. TERM8's c12 framework installation acquired GUI after this
+sample released it, so later app timing comparisons need that version boundary.
