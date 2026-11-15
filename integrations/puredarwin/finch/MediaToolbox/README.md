@@ -32,3 +32,20 @@ address, which does not establish its calling contract. The professional
 MediaExtension reader registry also does not exist, so
 MTRegisterProfessionalVideoWorkflowFormatReaders has no success placeholder.
 This framework is staged only and does not make QuickTime load or play.
+
+The staged QuickTime compatibility build also exports the documented **void**
+MTRegisterProfessionalVideoWorkflowFormatReaders opt-in. There is still no
+MediaExtension reader registry: it emits an unavailable diagnostic once and
+registers nothing. This is a loadable absence path, not a sixth implemented
+media utility. Five operations are real, one reports unavailable and the seventh
+(FigAssetCreateWithURL) remains absent because its callable ABI is unestablished.
+See ../QuickTime/ABI.md and the actual public
+[void declaration](https://developer.apple.com/documentation/MediaToolbox/MTRegisterProfessionalVideoWorkflowFormatReaders()?language=objc).
+
+The new provider passes the existing native-matched math/name programs again
+on the M1: 52 and 211 stdout lines, identical stdout/stderr and identical test
+binary SHA-256 values. See
+`runs/sffinch/quicktime-mt-math-stage-v1/comparison.json`. The private-provider
+contract separately calls the professional-reader opt-in twice and observes
+exactly one unavailable diagnostic. These checks do not establish the unknown
+FigAsset callable contract or introduce a MediaExtension registry.

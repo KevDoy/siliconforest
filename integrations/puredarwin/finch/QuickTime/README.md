@@ -1,0 +1,85 @@
+# Staged QuickTime private dependencies
+
+This builds eight minimal private frameworks from Linux/Nix and our own/PD
+OSS declarations. No Apple SDK or native implementation bytes are inputs.
+These providers do not supply Apple's private services:
+
+| Framework | QuickTime imports supplied | Unavailable behavior |
+|---|---|---|
+| TCC | TCCAccessPreflight, TCCAccessRequest, kTCCServiceScreenCapture | Denied; asynchronous false once; no prompt/grant |
+| PhotosFormats | PFSlowMotionUtilities, PFVideoAVObjectBuilder, PFVideoAdjustments | Mapper/asset factories and builder/adjustment initializers return nil |
+| MediaRemote | MRMediaRemoteGetLocalOrigin, MRMediaRemoteSetNowPlayingTintColor | No origin; void setter reports no service |
+| GeoKit | GEOManagedObjectContext, GEOCity, GeoKitPlace | No managed context/place store; initialization returns nil |
+| MobileAsset | ASAttributeContentVersion, MAAsset, MAAssetQuery, MADownloadOptions | Queries/downloads return nonzero unavailable status; no local assets; empty results |
+| MonitorPanel | MPDisplayMgr | No private manager; sharedMgr returns nil |
+| PerformanceAnalysis | PAMarkOperationStart, PAMarkOperationEnd | No recording token; no telemetry |
+| FeatureFlags | FeatureFlagsKey protocol and both property requirement descriptors | Actual compiler-emitted Swift metadata; feature queries false |
+
+FeatureFlags is a genuine Swift protocol/library, not three guessed exports.
+Its protocol shape comes from Finch (MIT/Apache-2.0); the Swift compiler and
+runtime are PureDarwin's source builds. A separate Swift conformance probe
+checks existential/witness behavior. This is not a complete FeatureFlags API.
+
+Our Linux-built native metadata probe loads the named frameworks and prints
+class/method encodings and the MobileAsset version key. It does not invoke
+services, permission requests, downloads or native implementation bytes.
+M5 reference evidence: runs/sffinch/m5-quicktime-private-metadata-v1-results.json
+(296lines; successful SHA check,30s bound, fresh deleted /tmp directory, no
+DYLD overrides). Observed MobileAsset key is _ContentVersion. PhotosFormats'
+source-duration argument is double and rate is float; its CMTimeRange layout
+matches our declarations. Only selected required method layouts are declared.
+
+REA opened the already-held QuickTime26.5.2 artifact9fff9ad…; Ghidra/Hopper/IDA
+remain unavailable. Local LLVM call-site observations are ordinary offline
+inspection, not REA decompilation. TCC takes service/options and a completion
+block; preflight compares a32-bit result0/1/2. MediaRemote origin is an object;
+tint receives that object and four floats. GEOManagedObjectContext receives
+a Boolean. PerformanceAnalysis' caller supplies two pointer-sized arguments.
+
+FigAssetCreateWithURL remains unimplemented: this binary only takes its address
+for a registry; neither its callable ABI nor ownership is established. No
+unsafe return-value stub is added merely to satisfy dyld. MediaToolbox's public
+void professional-reader opt-in now emits an explicit unavailable diagnostic
+once, since no MediaExtension registry exists. It registers no reader or asset.
+The public declaration is documented by
+[Apple](https://developer.apple.com/documentation/MediaToolbox/MTRegisterProfessionalVideoWorkflowFormatReaders()?language=objc).
+
+Build build.nix, tests.nix, swift-test.nix and ../MediaToolbox/build.nix. The
+failure-contract probe is M1-only (SF_QT_PD_ONLY plus /dev/pdavd); never use it
+against Apple's services on the M5. Native-probe.nix is the metadata-only
+reference. Providers remain staged; no installed framework is replaced.
+
+Current source build/export audit: all 21 imported symbols across these eight
+frameworks resolve, including all three Swift protocol imports. The complete
+v4 scan has 965 imports, 158 strong gaps, 40 missing classes and 466 selectors
+implemented by no image of its closure. Its root is the cached player-root-v3,
+overlaid with our coherent AVFoundation/AVKit player package v2, these private
+providers, MediaToolbox, the previously qualified WebKit absence provider and
+the CoreMediaIO absence provider. This inventory is not runtime evidence or a
+fresh installed-system snapshot. See runs/sffinch/quicktime-private-scan-v4.
+The v5 offline audit incorporates the final, independently qualified coherent
+player artifact and retains those same counts; remaining imports are grouped
+in runs/sffinch/quicktime-private-scan-v5/remaining-grouped.json. A corresponding
+fresh quicktime-load-v5 is prepared but has not executed; v4 remains the latest
+actual QuickTime load result.
+
+M1 failure-contract stage-v2 now passes both programs:8 frameworks/9 classes,
+exactly one denied TCC callback, one failed catalog and one failed query callback,
+plus a real Swift existential/witness call. All prefix bytes were cold-verified
+before loading. These are unavailable-service and ABI fixtures, not native
+service parity. Photo/GEO absence classes have NSObject-based shells; they do
+not provide the native private adjustment/CoreData storage hierarchy, and their
+initializers return nil.
+
+Actual unchanged staged QuickTime loads: v2 aborts in dyld at absent WebKit in
+0.052 s; v3 adds our already-qualified unavailable WebKit facade and reaches
+absent CoreMediaIO in 0.028 s; v4 adds CoreMediaIO and reaches absent
+Quartz.framework in 0.028 s. All return -6 before application startup, with no
+timeout or controller signal. Raw failures and cold-file verification receipts
+remain in runs/sffinch/quicktime-load-v{2,3,4}. No window or playback is claimed.
+The small CoreMediaIO absence provider is built separately from the public
+[seven-argument getter contract](https://developer.apple.com/documentation/coremediaio/cmioobjectgetpropertydata(_:_:_:_:_:_:_:)?language=objc):
+nonzero unimplemented status, dataUsed=0, output unchanged, no capture objects.
+Its M1 negative fixture passes in
+runs/sffinch/coremediaio-unavailable-stage-v1/candidate.json. These are stages
+only, not camera or private-service implementations; nothing was installed.
