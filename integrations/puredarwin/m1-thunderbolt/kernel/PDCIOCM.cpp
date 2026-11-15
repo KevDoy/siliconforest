@@ -221,6 +221,7 @@ int pd_cio_cm_snapshot(PDCIOCM *s)
  s->owner->setProperty("host-router-vendor",(uint64_t)status.root_vendor,32);
  s->owner->setProperty("host-router-device",(uint64_t)status.root_device,32);
  s->owner->setProperty("host-router-max-port",(uint64_t)status.max_port,32);
+ s->owner->setProperty("nhi-cable-info-readback",(uint64_t)status.cable_info,32);
  auto ports=OSArray::withCapacity(status.port_count);
  if(!ports)return ENOMEM;
  bool ok=true;

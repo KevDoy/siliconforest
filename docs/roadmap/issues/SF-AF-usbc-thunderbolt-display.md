@@ -1197,3 +1197,32 @@ blocker was relayed for the media agent to correct and qualify. The guarded
 cycle restored NHI-qualified CIO07 at09:03:02Z and reaped its UART reader at
 09:03:03Z. The next CIO08 link-diagnostic candidate omits this failed module
 and changes only CIO against the qualified baseline.
+
+
+### CIO08 observed, AVE paused, next PHY/link comparison (09:20Z)
+
+CIO08 is installed and verified on the M1: NHI and the host router are ready,
+RTKit is ready, and quarantine is clear. The once-only physical-port query
+ran exactly once with error0. Both physical ports1/2 report state7
+(UNPLUGGED), with no remote router. Dock authorization, tunneled PCI devices,
+Ethernet, USB HID, and external display have **not** been observed on Darwin.
+The next step is link training before router authorization and PCIe activation.
+
+The owner paused AVE on2026-11-15. Source and its pause handoff are preserved
+in SF-AD; all AVE requests are withdrawn. CIO08 is the known-good non-AVE
+collection (capsule `c63179b7b9f2…`): manifest57/noAVE, live service/device-node
+absent, no `pdave` argument. Installation verified09:08:35Z, UART reaped09:08:36Z.
+No further AVE builds, boots, probes or firmware/kernel-image extraction.
+The preceding paragraphs describing the AVE attempt and then-pending CIO08
+are historical; these observations supersede their active-state wording.
+
+CIO09 adds only bounded read-only diagnostics to the leased PHY/PIPE and
+actual host-router Apple VSE cable word. The existing one-shot startup query
+requests them while its owner/token and power proof are live; it never rearms
+and makes no mode, rate, authorization or tunnel change. Native SDK/collection
+build and all six required repository checks pass, with zero overlaps and
+exactly the USB-provider and CIO module UUIDs changed against CIO08; other55
+remain fixed and no AVE is included. This candidate is not yet installed.
+The normal Linux installation visit will read matching ATC/PIPE offsets and
+the active port1 host-router registers, guarded by a bound NHI, an authorized
+up TS3 Plus and the actual I210 endpoint. Raw captures remain private.

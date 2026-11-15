@@ -76,7 +76,7 @@ static inline int pd_usbc_phy_release(struct pd_usbc_phy_lease *s,void *owner,ui
 #define PD_USBC_PHY_FUNCTION "PDAppleUSBCPhy"
 #define PD_USBC_PHY_REVOKE_FUNCTION "PDAppleUSBCRevoke"
 #define PD_USBC_PHY_DRAIN_FUNCTION "PDAppleUSBCDrainStatus"
-enum pd_usbc_phy_command { PD_USBC_PHY_QUERY,PD_USBC_PHY_ACQUIRE,PD_USBC_PHY_RELEASE,PD_USBC_PHY_DP_RATE,PD_USBC_PHY_TUNNEL_RATE };
+enum pd_usbc_phy_command { PD_USBC_PHY_QUERY,PD_USBC_PHY_ACQUIRE,PD_USBC_PHY_RELEASE,PD_USBC_PHY_DP_RATE,PD_USBC_PHY_TUNNEL_RATE,PD_USBC_PHY_SNAPSHOT };
 /* Kernel-only callPlatformFunction ABI; not an IOUserClient/userspace ABI.
  * owner is a retained IOService while claimed. QUERY returns epoch/eligible/
  * reversed. ACQUIRE requires that epoch, prepares PHY and returns token.
@@ -86,6 +86,8 @@ enum pd_usbc_phy_command { PD_USBC_PHY_QUERY,PD_USBC_PHY_ACQUIRE,PD_USBC_PHY_REL
  * ACK. Clients copy its token and discard stale notifications. No client may
  * hold a lock needed by its DrainStatus handler across a broker call.
  * Both IOReturn and error must indicate success before using hardware. */
+/* SNAPSHOT requires the live owner/token and publishes bounded read-only
+ * PHY/PIPE register state on the provider. It never changes mode or rate. */
 struct pd_usbc_phy_request {
  uint32_t version,size,command,port;
  void *owner;

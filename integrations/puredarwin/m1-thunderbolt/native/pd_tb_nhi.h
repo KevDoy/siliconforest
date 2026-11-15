@@ -29,7 +29,7 @@ struct pd_tb_nhi_port_status {
  uint32_t port,state,error,remote,remote_vendor,remote_device;
 };
 struct pd_tb_nhi_status {
- uint32_t root_vendor,root_device,max_port,port_count;
+ uint32_t root_vendor,root_device,max_port,port_count,cable_info;
  struct pd_tb_nhi_port_status ports[16];
 };
 int pd_tb_nhi_snapshot(void *,struct pd_tb_nhi_status *);

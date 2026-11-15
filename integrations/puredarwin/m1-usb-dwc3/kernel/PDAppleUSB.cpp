@@ -671,6 +671,22 @@ int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
         if (ret && ret!=EINVAL) { lease.quarantined=true;quarantined=true;lease.phase=PD_USBC_PHY_REVOKED;queueRevoke(); }
         break;
     }
+    case PD_USBC_PHY_SNAPSHOT: {
+        if (stopping || !mapped || quarantined) { ret=EIO;break; }
+        ret=pd_usbc_phy_live(&lease,req->owner,req->token);if(ret)break;
+        uint32_t offsets[]={0x8,0x48,0x4c,0x1b0,0x20000,0x20004,0x20008,0x2a00,0x9010,0x10010};
+        uint32_t values[sizeof(offsets)/sizeof(offsets[0])];
+        for(unsigned i=0;i<sizeof(offsets)/sizeof(offsets[0]);++i)values[i]=core.r32(offsets[i]);
+        uint32_t pipeOffsets[]={0xc,0x10,0x14,0x1c,0x20};
+        uint32_t pipeValues[sizeof(pipeOffsets)/sizeof(pipeOffsets[0])];
+        for(unsigned i=0;i<sizeof(pipeOffsets)/sizeof(pipeOffsets[0]);++i)pipeValues[i]=pipe.r32(pipeOffsets[i]);
+        bool ok=setProperty("phy-snapshot-offsets",offsets,sizeof(offsets)) &&
+            setProperty("phy-snapshot-values",values,sizeof(values)) &&
+            setProperty("pipe-snapshot-offsets",pipeOffsets,sizeof(pipeOffsets)) &&
+            setProperty("pipe-snapshot-values",pipeValues,sizeof(pipeValues));
+        ret=ok?0:ENOMEM;
+        break;
+    }
     default:ret=EINVAL;
     }
 out:

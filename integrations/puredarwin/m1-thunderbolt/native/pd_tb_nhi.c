@@ -165,6 +165,10 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
  if(!root || !root->ports){ret=-ENODEV;goto done;}
  out->root_vendor=root->config.vendor_id;out->root_device=root->config.device_id;
  out->max_port=root->config.max_port_number;
+ int cap=tb_switch_find_vse_cap(root,0x00);
+ if(cap<0){ret=cap;goto done;}
+ ret=tb_sw_read(root,&out->cable_info,TB_CFG_SWITCH,cap+1,1);
+ if(ret)goto done;
  struct tb_port *port;
  tb_switch_for_each_port(root,port)if(tb_port_is_null(port)){
   if(out->port_count==ARRAY_SIZE(out->ports)){ret=-EOVERFLOW;break;}

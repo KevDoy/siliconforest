@@ -343,6 +343,8 @@ void PDAppleCIO::diagnosticTick(OSObject *owner,IOTimerEventSource *)
  auto s=OSDynamicCast(PDAppleCIO,owner);
  if(!s || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return;
  ++s->diagnosticCount;s->setProperty("link-query-count",(uint64_t)s->diagnosticCount,32);
+ auto request=s->request(PD_USBC_PHY_SNAPSHOT);int phyRet=s->phy(request);
+ s->setProperty("phy-query-error",(uint64_t)phyRet,32);
  int ret=pd_cio_cm_snapshot(s->cm);
  s->setProperty("link-query-error",(uint64_t)ret,32);
  // Deliberately no rearm: one delayed query per successful CM start.
