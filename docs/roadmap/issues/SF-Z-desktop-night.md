@@ -1064,7 +1064,7 @@ chonk-dock 214/214 (+2 ignored). Every installed build was host-tested first.
   Files of before: `.before-desk6` (DESK5's 005 pair and dock-006), `.before-desk6-004` (my 002 pair),
   `.before-desk6-005` (my 004 pair, dock-001). `.safe` unchanged. New: `/usr/share/chonkstep/dock-pins`;
   pins file restored to the default set (before: `/private/var/db/desktop-state/chonkstep/dock.before-desk6`).
-  `/private/var/db/desk6/` holds my test scripts (remove). Theme, wallpaper, scale untouched.
+  My test scripts (`/private/var/db/desk6/`) were removed. Theme, wallpaper, scale untouched.
 - Revert: `ln -f <path>.before-desk6 <path>.back && mv -f <path>.back <path>` for both compositor names and the dock,
   then `desk_m1.sh relaunch next`; pins: `mv dock.before-desk6 dock` in the state directory.
 - Source: patches 20-23 in `integrations/puredarwin/terminal-app/compositor/` (README).
