@@ -519,3 +519,45 @@ preselection, shared-field, gate-order and stuck-status cases. SDK objects:
 Six repository checks pass. No crossbar writes, HPD, link training, NHI
 traffic or scanout have run from this source on M1. USB04 stays installed;
 external topology/provider and router-device integration continue.
+
+### Router device/reference adapter, 2026-11-15 04:33Z
+
+`m1-thunderbolt` now SDK-compiles nineteen upstream manager files plus two
+native registry/device adapter objects. The recipe asserts the full/core
+object count (21/12), presence/absence of `domain.c.o`, and emits defined,
+undefined and remaining external symbol manifests. An evidence correction:
+initial full attempts through `tb-cm-full-08` only compiled the ten core
+files because the inherited configure phase ignored `cmakeFlags`. These
+receipts are not full-manager proof. Passing the option in the actual
+configure command exposed additional errors; the failed receipts remain.
+The corrected full native SDK build is
+`/nix/store/yma5kcgm68n6vpb0l03xk60lacynqzr5-puredarwin-thunderbolt-cm-objects-0.1`;
+core-only is `/nix/store/fspxvd6p2dmrhrg1ah2jczjfzr27m2yf-puredarwin-thunderbolt-cm-objects-0.1`.
+
+The native adapter supplies real metadata operations and reference-safe
+bus/child lookup, publication rollback, type release and bounded events.
+An iterator pins both child and parent; each child's separate parent
+reference lasts until final release. Structural changes require native
+owner serialization. Runtime-PM calls bypass the SDK's success/no-op
+helpers: actual native callbacks are mandatory before domain init, errors
+block new power/publication operations, and teardown traversal remains
+possible. OS information also requires a real native snapshot. Optional
+XDomain service-driver registration fails unsupported rather than reporting
+an unimplemented binding. Private staged LinuxKPI layout additions retain
+notices. The x86 Intel Apple NHI resume-link function is excluded on ARM;
+protocol/control bodies and runtime callback pointers remain intact.
+
+ASan/UBSan passes the production registry and device adapter using host
+reference/lock/publication fixtures: 100 self-removing trees with final
+parent lifetime, eight concurrent iterators, 1000 remove/re-add cycles,
+capacity/overflow/reference failures, watermark/reverse lookups, rollback,
+event bounds and native PM failure followed by cleanup. Logic/registry SDK:
+`/nix/store/wrjjx0s261vvxj2pc6kkz315qrxf7vvi-puredarwin-thunderbolt-objects-0.1`.
+All six repository checks pass (274 Python, 77 C groups, six mutations).
+
+This is not a linked/attached CM or full dependency closure. Native IORegistry/
+PM callbacks, USB4 port-device/quirks sources, crypto/UUID bindings, Apple
+NHI control DMA/interrupts, ACIO M3/RTKit/DART and PCIe-C remain. No ACIO
+writes or tunnels have run. USB04 is still the installed capsule and TS3
+remains deferred; no hardware milestone is marked complete. Continuing
+native attachment and external provider work without another reboot yet.

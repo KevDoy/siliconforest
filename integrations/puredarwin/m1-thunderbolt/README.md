@@ -56,18 +56,48 @@ No calibration bytes are included, and no native ACIO callback is wired yet.
 
 `upstream/family/` and `pininc/` retain the pinned Linux software CM and its
 protocol headers byte for byte; hashes are in `family-provenance.json`.
-`build-cm-objects.nix --arg full false` SDK-compiles ten original translation
-units: cap, clx, ctl, dma_port, lc, path, property, tmu, tunnel and usb4.
-Only tracepoint instrumentation is disabled in the staged copy. Wire
-helpers supply LinuxKPI's missing endian-array conversion and CRC32C;
-completion-on-stack uses the existing LinuxKPI counter initialization.
-Tests include the Castagnoli check vector, split seeds, unaligned/in-place
-conversions and bounds. These are objects, with unresolved native/kernel
-references; no linked/loaded CM is claimed.
+`build-cm-objects.nix` SDK-compiles nineteen upstream translation units and
+our two native device/registry objects. `--arg full false` selects ten core
+units plus the same adapters. The recipe verifies both the object count and
+domain object's presence; the inherited configure phase does not consume
+`cmakeFlags`, so the option is passed explicitly. Earlier purported full
+object results contained only the ten core files and are not full-build
+proof. `nix-support/required-external` records symbols still needed after
+subtracting definitions in these objects. This target neither links a kext
+nor proves the complete dependency closure (USB4 port devices, crypto and
+other kernel/native dependencies still need binding).
 
-The default full target still FAILS: the LinuxKPI lacks router bus/device
-traversal and release/type fields, runtime-PM/uevent/property APIs, crypto
-bindings, and newer cleanup variants. These remain implementation work.
-`device_may_wakeup` is explicitly a required native declaration, without
-a dummy definition. A successful core-object build does not resolve the
-router model, NHI control DMA/interrupts, ACIO RTKit/DART or PCIe-C bridge.
+Staged-only adaptations disable trace instrumentation, guard domain init
+until native callbacks are installed, and exclude the Intel x86 Apple PCI
+resume-link function on ARM. Original source files retain their hashes.
+The private LinuxKPI device layout extension preserves its BSD notices.
+Wire helpers provide CRC32C and endian arrays; workqueue names are formatted
+before creating a real ordered native queue. Byte properties use the real
+fwnode readers. Completion dispatch avoids the SDK macro's collision with
+the manager's `complete` member. Runtime-PM callback initializers are kept.
+
+`src/pd_tb_registry.c` owns device and parent references and supports
+concurrent traversal with removal/re-registration and a fixed watermark.
+`native/pd_tb_device.c` implements bus/child discovery, registration rollback,
+bounded uevents, release/type callbacks and parent ownership until the
+child's final release. Structural operations require the native owner's
+serialization; traversal invokes callbacks outside the registry lock.
+A deleted child cannot be re-added while retaining its old parent. Optional
+XDomain service-driver registration returns unsupported, without binding a
+dummy driver. Router metadata removal establishes no hardware drain.
+
+The native controller must install mandatory publication, event, real OS
+snapshot and runtime-power callbacks once before domain init. Missing
+callbacks defer initialization. Every runtime-PM call used by the CM bypasses
+LinuxKPI's successful no-op helpers. A native power error latches the adapter
+closed to new devices/power calls; metadata traversal and unpublication stay
+available for cleanup. No native callback provider is installed yet, so this
+code does not claim powered hardware or successful resume. A future NHI
+owner must also stop new hardware operations when the adapter faults.
+
+Host ASan/UBSan tests run the production registry and device adapter with
+host-only reference/lock/publication fixtures: self-removing trees and final
+parent lifetime, eight concurrent iterators, capacity and reference failure,
+watermark/reverse traversal, partial-publication cleanup, bounded events,
+and power failure followed by cleanup. These fixtures establish no actual
+IORegistry, RTKit, DMA, controller power, authorization or tunnel facts.

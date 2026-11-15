@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: MIT
+#define _POSIX_C_SOURCE 200809L
+#include "pd_tb_device_api.h"
+#include <linux/utsname.h>
+#include <assert.h>
+#include <pthread.h>
+struct node { struct device dev;unsigned index; };
+static bool destroyed[16];static unsigned published,unpublished,events,pm_calls;
+static bool fail_publish,fail_event,bad_os;static int pm_result;
+static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+static const struct bus_type bus={.name="test"};
+static void take_lock(void *ctx) { (void)ctx;assert(!pthread_mutex_lock(&lock)); }
+static void drop_lock(void *ctx) { (void)ctx;assert(!pthread_mutex_unlock(&lock)); }
+static int publish(void *ctx,void *dev,void *parent,const char *name,const char *type,void **token)
+{ (void)ctx;(void)parent;(void)type;assert(name && *name);if(fail_publish)return -EIO;*token=dev;++published;return 0; }
+static void unpublish(void *ctx,void *token) { (void)ctx;assert(token);++unpublished; }
+static int event(void *ctx,void *token,int action,const char *const *env,size_t count)
+{ (void)ctx;assert(token);assert(action>=0 && action<=2);assert(count==1 && !strcmp(env[0],"TYPE=router"));++events;return fail_event?-EIO:0; }
+static int runtime(void *ctx,void *dev,enum pd_tb_pm_op op,int arg)
+{ (void)ctx;(void)arg;assert(dev);assert(op<=PD_TB_PM_WAKE_POLICY);++pm_calls;return pm_result; }
+static int os_info(void *ctx,void *out,size_t size)
+{ (void)ctx;assert(size==sizeof(struct new_utsname));memset(out,bad_os?'x':0,size);if(!bad_os)strcpy(((struct new_utsname *)out)->sysname,"host-test");return 0; }
+static void destroy(struct device *dev)
+{
+ struct node *node=container_of(dev,struct node,dev);assert(!destroyed[node->index]);
+ if(dev->pd_parent_held)assert(!destroyed[container_of(dev->parent,struct node,dev)->index]);
+ destroyed[node->index]=true;free(node);
+}
+static int uevent(const struct device *dev,struct kobj_uevent_env *env) { (void)dev;return add_uevent_var(env,"TYPE=%s","router"); }
+static struct device_type type={.name="router",.release=destroy,.uevent=uevent};
+static struct device *node(unsigned index,struct device *parent)
+{
+ struct node *n=calloc(1,sizeof(*n));assert(n);n->index=index;
+ n->dev.kobj.name=strdup("router");device_initialize(&n->dev);
+ assert(!strcmp(dev_name(&n->dev),"router"));n->dev.bus=&bus;n->dev.type=&type;n->dev.parent=parent;return &n->dev;
+}
+static int unregister_child(struct device *dev,void *ctx)
+{
+ struct device *parent=ctx;device_unregister(dev);assert(!destroyed[1]);
+ device_unregister(parent);assert(!destroyed[0]);return 7;
+}
+static int count_child(struct device *dev,void *ctx) { (void)dev;++*(unsigned *)ctx;return 0; }
+static int match(struct device *dev,const void *ctx) { return dev==ctx; }
+int main(int argc,char **argv)
+{
+ (void)argv;assert(bus_register(&bus)==-EPROBE_DEFER);
+ struct pd_tb_native_ops ops={NULL,take_lock,drop_lock,publish,unpublish,event,runtime,os_info};
+ struct pd_tb_native_ops missing=ops;missing.runtime=NULL;assert(pd_tb_native_install(&missing)==-EINVAL);
+ bad_os=true;assert(pd_tb_native_install(&ops)==-EOVERFLOW);assert(!pd_tb_native_ready());bad_os=false;
+ assert(!pd_tb_native_install(&ops));assert(pd_tb_native_install(&ops)==-EALREADY);
+ assert(!strcmp(utsname()->sysname,"host-test"));assert(!bus_register(&bus));assert(bus_register(&bus)==-EBUSY);
+ assert(driver_register(NULL)==-EOPNOTSUPP);
+ struct device *parent=node(0,NULL);assert(!device_add(parent));
+ struct device *child=node(1,parent);
+ fail_publish=true;assert(device_add(child)==-EIO);assert(parent->kobj.kref.refcount==2);fail_publish=false;
+ fail_event=true;assert(device_add(child)==-EIO);assert(!child->pd_registered && !child->pd_parent_held);fail_event=false;
+ assert(!device_add(child));assert(device_add(child)==-EEXIST);assert(parent->kobj.kref.refcount==4);
+ struct device *found=bus_find_device(&bus,NULL,child,match);assert(found==child);put_device(found);
+ unsigned count=0;assert(!device_for_each_child_reverse(parent,&count,count_child));assert(count==1);
+ assert(!device_init_wakeup(child,true));assert(device_may_wakeup(child));
+ pm_result=1;assert(pm_runtime_suspended(child));pm_result=0;assert(!pm_runtime_suspended(child));
+ struct kobj_uevent_env env={0};char big[2049];memset(big,'x',sizeof(big));big[2048]=0;
+ assert(add_uevent_var(&env,"%s",big)==-ENOMEM);assert(!env.count && !env.used);
+ for(unsigned i=0;i<32;i++)assert(!add_uevent_var(&env,"%u",i));assert(add_uevent_var(&env,"x")==-ENOMEM);
+ if(argc>1) {
+  pm_result=-EIO;assert(pm_runtime_get_sync(child)==-EIO);assert(!pd_tb_native_ready());
+  assert(!pm_runtime_suspended(child));assert(!device_may_wakeup(child));
+  unsigned calls=pm_calls;assert(pm_runtime_resume_and_get(child)==-ENODEV && pm_calls==calls);
+  struct device *other=node(2,NULL);assert(device_add(other)==-ENODEV);put_device(other);
+ }
+ /* Callback removes both objects and drops all owner's references. The actual
+  * production iterator keeps child and parent alive through callback return. */
+ assert(device_for_each_child(parent,parent,unregister_child)==7);
+ assert(destroyed[0] && destroyed[1]);assert(published==unpublished);
+ bus_unregister(&bus);
+ printf("native device adapter: publication rollback, bounded events, parent final lifetime, traversal removal and %s power dispatch PASS\n",argc>1?"faulted":"live");return 0;
+}

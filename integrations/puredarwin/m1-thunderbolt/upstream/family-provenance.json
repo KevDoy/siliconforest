@@ -39,6 +39,8 @@
     "include/linux/uuid.h": "a7c5418fa73f15fc23a1c04a1580fbe48559a9394254c8b396ec2df6924e029e",
     "include/linux/gpio/consumer.h": "2781864a91513d0ea1468ddb272404bceb2f2b0eab502f2ae89ddfa1dcf1b884",
     "include/linux/gpio/defs.h": "017f45a15f02491f9710d8208f062e426f1282b4d7255bba42456a2fd364f9a9",
-    "include/linux/pci_ids.h": "55928d1f2c4f7e6b912c54baf64b876fc8cd4d083d2016a45a87ca33ebc9439d"
+    "include/linux/pci_ids.h": "55928d1f2c4f7e6b912c54baf64b876fc8cd4d083d2016a45a87ca33ebc9439d",
+    "include/crypto/utils.h": "8a06f23cce29f2aa15dc173699c679e888fa762f9aaf39e05f49bb8cfc8515e6",
+    "include/uapi/linux/utsname.h": "e6a7aeffebf22a2d74b5e671ab5ff8bb99b0655cefb544bfca0acc22aa396c2a"
   }
 }
