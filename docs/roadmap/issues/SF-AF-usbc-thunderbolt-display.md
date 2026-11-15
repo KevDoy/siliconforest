@@ -3007,9 +3007,11 @@ for the real kernel output. The immediate hardware path remains I210 DHCP,
 then the attached dock keyboard, before activating the external pipeline.
 
 
-### Fresh known-good idle sample, before the c12 framework install
+### Discarded owner-overlap sample: raw observations only
 
-A GUI/bench-guarded61-second sample on CIO29 with actual desk6.next completed
+DISCARDED after the owner-activity notice: this sample overlaps the owner's20:15–20:25Z physical use. Its values below are raw observations, not quiet
+or performance qualification; a fresh repeat is required. No input was injected
+by CODEX-TB during it. A GUI/bench-guarded61-second sample on CIO29 with actual desk6.next completed
 at20:22:20Z without reboot, input, capture, installation or session change.
 Kernel thread CPU was2.121% of oneCPU and aggregate host idle98.125%; an unnamed
 thread contributed1.494%, SPI HID0.332%, and other individual threads below
@@ -3019,8 +3021,8 @@ NHI counters advanced24 in total at the two explicit query boundaries,
 with no observed recurring interrupt storm. The desktop used3.605% of oneCPU:
 shared-memory cleanup2.259%, main0.936%, HID reader0.404%, about428 task wakeups
 per second. The fixed mix took165.375ms cold and83.838/83.682/83.677ms warm.
-These are consistent with prior controls and keep frequency warmup as a clue;
-they do not establish the cause of the reported AppKit slowdown. That finding
+These owner-overlap values cannot qualify a quiet comparison or establish
+the cause of the reported AppKit slowdown. That finding
 remains unresolved. TERM8's c12 framework installation acquired GUI after this
 sample released it, so later app timing comparisons need that version boundary.
 
@@ -3041,3 +3043,31 @@ It also captures the bound Linux I210 driver's read-only ethtool registers
 and live PCIe-C DMA-property/configuration evidence during the normal Linux
 visit. There is no additional Linux boot or configuration change. At this
 entry, CIO39NC remains uninstalled and its cache hypothesis unconfirmed.
+
+
+### Owner activity invalidates the20:21 measurement; repeat guarded
+
+The coordinator reported that the owner physically used the M1 during
+20:15–20:25Z. The20:21:19–20:22:20 measurement is therefore discarded as
+quiet/performance evidence. Raw receipts and original summaries are retained;
+current summaries explicitly say DISCARDED_OWNER_ACTIVITY_RAW_ONLY. The
+reported CPU percentages and cold/warm values from that run must not support
+a quiet-baseline or AppKit-cause claim. CODEX-TB injected no input during it.
+Other CODEX-TB M1 trials ended before20:15; contemporaneous local native SDK
+and host tests ran on the builder, so this notice does not invalidate them.
+
+The forthcoming DESK7 owner-input marker is absent on the current compositor.
+The pending Ethernet trial now waits outside all locks when that marker is
+missing or active, rechecks after acquiring GUI, and checks immediately before
+the first reboot outside the recovery handler. A refusal releases the slot
+without triggering rollback or reboot. Its kernel and input artifacts are
+unchanged. No CODEX-TB synthetic pointer/key hold is scheduled.
+
+The repeated CLI CPU/NHI sample is queued after21:08Z and a valid inactive
+owner marker. It records actual kernel identity, compositor PID and real
+pointer/key counters before and after; any counter/process change, active or
+missing marker, or native probe failure discards it. It sends no input and
+performs no capture, restart, install or reboot. At this entry it has not run;
+the original idle/AppKit cause remains unresolved. The compositor's Shm drop
+worker uses a blocking Rust channel in source, so its raw CPU cost must not
+be mislabeled an explicit polling loop without further evidence.
