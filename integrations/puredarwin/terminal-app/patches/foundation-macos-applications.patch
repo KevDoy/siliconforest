@@ -3202,8 +3202,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +- (id)_kvcCollectionOperator:(NSString *)name keyPath:(NSString *)keyPath { return kvcOperate(self, name, keyPath); }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-13 13:16:53.434729533 -0800
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-14 09:26:26.693833210 -0800
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-11 22:36:07.498471502 -0800
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueObserving.m	2026-11-14 20:18:26.709345003 -0800
 @@ -16,6 +16,13 @@
  #import <Foundation/NSLock.h>
  #import <Foundation/NSSet.h>
@@ -3633,7 +3633,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  }
  
  - (void)observeValueForKeyPath:(NSString *)keyPath
-@@ -223,77 +473,182 @@
+@@ -223,77 +473,204 @@
  }
  
  - (void)willChangeValueForKey:(NSString *)key {
@@ -3695,35 +3695,22 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +            unhookEntry(entry);
 +            hookEntry(self, entry);
          }
--
++        entryDidChange(self, entry);
++    }
++    [list release];
++}
+ 
 -        NSMutableDictionary *change = [NSMutableDictionary dictionary];
 -        [change setObject:[NSNumber numberWithUnsignedInteger:NSKeyValueChangeSetting]
 -                   forKey:NSKeyValueChangeKindKey];
--
++@end
+ 
 -        if (entry->_options & NSKeyValueObservingOptionOld) {
 -            if (entry->_priorValue != nil) {
 -                [change setObject:entry->_priorValue forKey:NSKeyValueChangeOldKey];
 -            }
 -            [entry->_priorValue release];
 -            entry->_priorValue = nil;
--        }
--        if (entry->_options & NSKeyValueObservingOptionNew) {
--            id value = [self valueForKeyPath:entry->_keyPath];
--            if (value != nil) {
--                [change setObject:value forKey:NSKeyValueChangeNewKey];
--            }
--        }
--        [entry->_observer observeValueForKeyPath:entry->_keyPath
--                                        ofObject:self
--                                          change:change
--                                         context:entry->_context];
-+        entryDidChange(self, entry);
-     }
-     [list release];
- }
- 
- @end
- 
 +// ---- setters that notify -------------------------------------------------------------------
 +// One eight-byte entry per wrapped setter loads its index and enters the common code, which
 +// keeps every argument register, calls NSKVOSetterWill (which answers the original
@@ -3838,8 +3825,34 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +        return;
 +    if (![class automaticallyNotifiesObserversForKey:key])
 +        return;
-+    for (int form = 0; form < 2; form++) {
-+        snprintf(buffer, sizeof(buffer), form == 0 ? "set%c%s:" : "_set%c%s:", toupper(name[0]), name + 1);
++    /* The setters, and (as macOS does) the indexed and unordered accessors that change a to-many key:
++     * -insertObject:in<Key>AtIndex:, -removeObjectFrom<Key>AtIndex:, -replaceObjectIn<Key>AtIndex:withObject:,
++     * -insert<Key>:atIndexes:, -remove<Key>AtIndexes:, -replace<Key>AtIndexes:with<Key>:, -add<Key>Object:,
++     * -remove<Key>Object:, -add<Key>:, -remove<Key>:. Called directly they changed the collection and nobody
++     * heard: Terminal adds the profiles of a brand-new user with -insertObject:inProfilesAtIndex:, after its
++     * Preferences window was bound, and its profile list stayed empty until it was started again. Observers
++     * hear such a change as the key's new value (NSKeyValueChangeSetting), which they all handle. */
++    static const char *const forms[] = {
++        "set%c%s:", "_set%c%s:", "insertObject:in%c%sAtIndex:", "removeObjectFrom%c%sAtIndex:",
++        "replaceObjectIn%c%sAtIndex:withObject:", "insert%c%s:atIndexes:", "remove%c%sAtIndexes:",
++        "add%c%sObject:", "remove%c%sObject:", "add%c%s:", "remove%c%s:",
++    };
++    for (unsigned form = 0; form < sizeof(forms) / sizeof(forms[0]) + 1; form++) {
++        // self and _cmd, and the arguments: two for insert-at-index and the replacements, one for the rest
++        unsigned args = (form == 2 || form == 4 || form == 5) ? 4 : 3;
++
++        if (form < sizeof(forms) / sizeof(forms[0]))
++            snprintf(buffer, sizeof(buffer), forms[form], toupper(name[0]), name + 1);
++        else {
++            // replace<Key>AtIndexes:with<Key>: names the key twice
++            snprintf(buffer, sizeof(buffer), "replace%c%sAtIndexes:with%c%s:", toupper(name[0]), name + 1, toupper(name[0]), name + 1);
++            args = 4;
+         }
+-        if (entry->_options & NSKeyValueObservingOptionNew) {
+-            id value = [self valueForKeyPath:entry->_keyPath];
+-            if (value != nil) {
+-                [change setObject:value forKey:NSKeyValueChangeNewKey];
+-            }
 +
 +        SEL selector = sel_getUid(buffer);
 +        Method method = class_getInstanceMethod(class, selector);
@@ -3850,8 +3863,9 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +        IMP imp = method_getImplementation(method);
 +        const char *types = method_getTypeEncoding(method);
 +
-+        // a setter returns nothing and takes one argument; leave anything else alone
-+        if (types == NULL || types[0] != 'v' || method_getNumberOfArguments(method) != 3)
++        // an accessor returns nothing and takes one argument (two for insert-at-index and the replacements);
++        // leave anything else alone
++        if (types == NULL || types[0] != 'v' || method_getNumberOfArguments(method) != args)
 +            continue;
 +        [observationLock() lock];
 +        if (!((char *)imp >= (char *)NSKVOSetterThunks && (char *)imp < (char *)NSKVOSetterThunks + 8 * NSKVO_SETTER_SLOTS) && wrappedSetterCount < NSKVO_SETTER_SLOTS) {
@@ -3861,12 +3875,19 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
 +            wrappedSetters[index].key = [key copy];
 +            wrappedSetters[index].selector = selector;
 +            method_setImplementation(method, (IMP)((char *)NSKVOSetterThunks + 8 * index));
-+        }
+         }
+-        [entry->_observer observeValueForKeyPath:entry->_keyPath
+-                                        ofObject:self
+-                                          change:change
+-                                         context:entry->_context];
 +        [observationLock() unlock];
-+    }
+     }
+-    [list release];
 +#endif
-+}
-+
+ }
+ 
+-@end
+-
  @implementation NSArray (NSKeyValueObserverRegistration)
  
  - (void)addObserver:(NSObject *)observer

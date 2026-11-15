@@ -225,6 +225,76 @@ I also tried a screen capture every few frames during the sweep. The captures st
 the pointer thread keeps moving, so they show the menu 3 rows behind. That measures the capture, not the
 desktop, and was not used.
 
+### A third crash found by the robustness pass (0127)
+Terminal, `MallocScribble=1`: SIGSEGV in `objc_msgSend` at 0x5555555555555555 (freed and scribbled memory) under
+`-[NSApplication sendAction:to:from:]` ← `-[NSButton performClick:]` ← `-[NSButton performKeyEquivalent:]`. This
+time the report was written (the reporter's directory fix). Same seed with `PD_KEYEQ_TRACE=1`: Escape clicked
+an alert sheet's Cancel. `-[NSAlert _alertButton:]` ends the sheet, and `-sheetDidEnd:` releases the alert and
+with it its window and buttons, while the click still ran in them. 0127: the alert and its window stay until the
+event is done; a button clicked by its key equivalent stays until its action returns; the find bar's controls
+stop messaging an NSTextFinder that is gone. The same seed then ran 240 actions with no crash.
+
+### Table headers: the sort indicator over the title (owner's finding)
+The owner saw the sort chevron printed on top of the column title in Activity Monitor ("% CPU"). The header view
+drew the chevron at a fixed place 16 points from the column's right edge. The cell drew the title over the whole
+width, so a right-aligned title ended under the chevron. 0128 implements `-sortIndicatorRectForBounds:` (an
+18-point slot at the trailing edge, the chevron 9 x 6 points centred in it and on whole pixels) and
+`-drawSortIndicatorWithFrame:inView:ascending:priority:` (a stroked chevron, round caps, the secondary label
+colour of the appearance). The header view tells the cell whether its column shows an indicator, and the cell's
+title rect then excludes the slot. A title too wide is cut with an ellipsis. Before/after crops of Activity
+Monitor's header at 150 % (`runs/sf-term6/shots/hdb-*-hdr.png`, `hda-*-hdr.png`): "% CPU" with the chevron on
+"U" before; "% CPU ⌄" after, the chevron in its own place and level with the text. Not walked yet: the other four
+tabs' tables, the inspector's tables, and an ascending header after a click. My click landed on the column divider,
+so it resized instead of sorting.
+
+### Colour panel and opacity (item 2)
+Terminal's Profiles > Background well (`TTBackgroundColorWell`) received the click (`PD_COLORPANEL_TRACE=1`) but never
+called `-activate:`. The compositor sends motion at every button change. The well took that motion "drag" in place
+as the start of a colour drag, which opens nothing. 0127: a drag needs a move of three points.
+After that fix the panel opens attached to the well, with Terminal's accessory (Blur, Inactive Windows Opacity
+and Blur) under the panel's own controls. Its opacity slider then set every value to 0, and the window went to
+Terminal's minimum of 5 %. The cause: this AppKit declared `-floatValue`/`-setFloatValue:` of NSCell and NSControl
+as CGFloat. macOS declares float, and an application built for macOS reads `s0` while we answered in `d0`.
+`PD_SLIDER_TRACE=1` showed the slider computing 0.86 while the panel read 0. 0127: float, as in macOS (NSCell,
+NSControl, NSActionCell, NSScroller; code built against the old header must be built again).
+
+Reduce Transparency. AppKit answers YES while the compositor cannot blur and nobody has decided (TERM5); Terminal
+then draws every profile opaque. A user who moves the panel's opacity below 100 % has decided. 0125 records that
+in the application's own defaults (`PDTranslucencyChosen`) and posts
+`NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification`. Terminal observes it (`-[TTView
+handleAXDisplayOptionsChange:]`) and redraws with the profile's opacity. The user's explicit
+`com.apple.universalaccess reduceTransparency` still wins either way. To return to opaque:
+`defaults delete com.apple.Terminal PDTranslucencyChosen`. Checked on the M1 with a new home (test prefix; the drag
+was synthetic): the slider dragged to 74.7 % gave the Terminal window alpha 190 (74.5 %), live, with the profile
+saved (12 profiles in the new home's plist, `PDTranslucencyChosen` true). The desk's wallpaper shows through, sharp,
+because there is no blur. The Text well opens the panel with the text colour and without the accessory.
+Still wrong: a value typed into the panel's opacity field and ended with Return did nothing in these test-prefix runs.
+The same runs log "no key bindings loaded" and lack AppKit's checkbox images, so AppKit's resources are not found
+under `DYLD_FRAMEWORK_PATH`. This is to be checked with the installed files. Image well, bold, selection and
+cursor wells, and Inactive Windows were not walked.
+
+### A new user's empty profile list (item 3)
+In a new home, Preferences > Profiles was empty and every control of the Text pane was blank: no font, grey wells.
+Terminal builds its Preferences window, and binds the list, before it imports its built-in profiles. It then adds
+each one with `-[TTProfileManager insertObject:inProfilesAtIndex:]` called on itself. Our Foundation's key-value
+observing only heard setters, so the array controller never learned of them. Foundation (`terminal-app/patches/
+foundation-macos-applications.patch`) now wraps the to-many accessors as macOS does: `insertObject:in<Key>AtIndex:`,
+`removeObjectFrom<Key>AtIndex:`, `replaceObjectIn<Key>AtIndex:withObject:`, `insert<Key>:atIndexes:`,
+`remove<Key>AtIndexes:`, `replace<Key>AtIndexes:with<Key>:`, `add<Key>Object:`, `remove<Key>Object:`, `add<Key>:`,
+`remove<Key>:`. Observers hear the key's new value. `probe/sf-kvo-probe.m` checks this ("to-many accessors", 0
+wanted): the installed library answers 31, the new one 0. On the M1 with a new home, the installed libFoundation
+gives an empty list. The new one from a test prefix gives the twelve profiles with Clear Dark the default selected,
+and the font and colours filled in. QEMU rehearsal t6f: libFoundation replaced, the compatibility check failed=0. Two
+verdicts failed: libobjc 2eca1460 (PERF's, already on the M1) did not take over through `DYLD_LIBRARY_PATH` on that
+root's old dyld. t6f-2 (the second boot) had one failure, the same probe. t6g repeated the rehearsal without
+libobjc in the list; that root keeps the old libobjc, so `sf-objc-probe` still failed: failed=1 in t6g and t6g-2. In
+all four, libFoundation was replaced and `sf-kvo-probe` was ok with the new to-many check. Guarded install on the
+M1 at about 06:05Z (`sf_terminal.sh install core libFoundation.dylib`, core.lock). The probe failed with the library
+in use and passed with the new one, and `/bin/sh`, node, claude, python3, bash, git, vim and nvim ran with it
+(tmux status 1 both with the old and the new). Installed as inode 85284; the previous file is
+`/usr/lib/libFoundation.dylib.old8` (a8aea7dc). `sf_compat_push.sh check` failed=0 afterwards. Revert:
+`ln -f /usr/lib/libFoundation.dylib.old8 /usr/lib/libFoundation.dylib.back && mv -f /usr/lib/libFoundation.dylib.back /usr/lib/libFoundation.dylib`.
+
 ### Installed (04:26Z, direct, the previous files kept as `.pre-t6`)
 AppKit f0bcba93 (0123; .pre-t6 = 2cd9ea2a) and libWindowServer df87120c (0124; .pre-t6 = 5d359f88). Both are the
 nix builds of the committed patches, byte-equal to the gated test builds. After-install checks

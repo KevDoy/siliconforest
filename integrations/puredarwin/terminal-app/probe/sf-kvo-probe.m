@@ -15,7 +15,8 @@
 // with weak entries, NSPointerArray, NSPersonNameComponents and its formatter, -[NSData
 // rangeOfData:options:range:], +[NSCalendar calendarWithIdentifier:], -[NSSet setByAddingObject:],
 // NSIndexPath in this library (it was in the Foundation wrapper);
-// the C map table API keeps working beside them.
+// the C map table API keeps working beside them. The eighth (TERM6, 15 November): the indexed and unordered
+// accessors of a to-many key called directly are heard (-insertObject:in<Key>AtIndex: and the others).
 #include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -205,6 +206,50 @@ static int seventh_build(void)
     @catch (id e) { return 7; }
 }
 
+// the eighth build: a to-many key's accessors called directly are heard (Terminal's profiles)
+@interface SFList : NSObject { NSMutableArray *_items; NSMutableSet *_tags; @public int heard; }
+@end
+@implementation SFList
+- (id)init { if ((self = [super init]) != nil) { _items = [[NSMutableArray alloc] init]; _tags = [[NSMutableSet alloc] init]; } return self; }
+- (NSArray *)items { return _items; }
+- (NSUInteger)countOfItems { return [_items count]; }
+- (id)objectInItemsAtIndex:(NSUInteger)i { return [_items objectAtIndex:i]; }
+- (void)insertObject:(id)o inItemsAtIndex:(NSUInteger)i { [_items insertObject:o atIndex:i]; }
+- (void)removeObjectFromItemsAtIndex:(NSUInteger)i { [_items removeObjectAtIndex:i]; }
+- (void)replaceObjectInItemsAtIndex:(NSUInteger)i withObject:(id)o { [_items replaceObjectAtIndex:i withObject:o]; }
+- (NSSet *)tags { return _tags; }
+- (void)addTagsObject:(id)o { [_tags addObject:o]; }
+- (void)removeTagsObject:(id)o { [_tags removeObject:o]; }
+- (void)observeValueForKeyPath:(NSString *)path ofObject:(id)object change:(NSDictionary *)change context:(void *)context { heard++; }
+@end
+
+static int eighth_checks(void)
+{
+    int bad = 0;
+    SFList *list = [[SFList alloc] init];
+    [list addObserver:list forKeyPath:@"items" options:NSKeyValueObservingOptionNew context:NULL];
+    [list addObserver:list forKeyPath:@"tags" options:NSKeyValueObservingOptionNew context:NULL];
+    [list insertObject:@"a" inItemsAtIndex:0];
+    if (list->heard != 1 || [[list items] count] != 1) bad |= 1;
+    [list replaceObjectInItemsAtIndex:0 withObject:@"b"];
+    if (list->heard != 2 || ![[[list items] objectAtIndex:0] isEqual:@"b"]) bad |= 2;
+    [list removeObjectFromItemsAtIndex:0];
+    if (list->heard != 3 || [[list items] count] != 0) bad |= 4;
+    [list addTagsObject:@"t"];
+    [list removeTagsObject:@"t"];
+    if (list->heard != 5) bad |= 8;
+    [list removeObserver:list forKeyPath:@"items"];
+    [list removeObserver:list forKeyPath:@"tags"];
+    [list insertObject:@"c" inItemsAtIndex:0];
+    if (list->heard != 5) bad |= 16;
+    return bad;
+}
+static int eighth_build(void)
+{
+    @try { return eighth_checks(); }
+    @catch (id e) { return 31; }
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -222,8 +267,9 @@ int main(void)
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
     int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16) | (seventh_build() << 25);
-    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0;
-    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, ok ? "ok" : "FAIL");
+    int eighth = eighth_build();
+    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0;
+    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ok ? "ok" : "FAIL");
     [pool release];
     return ok ? 0 : 1;
 }
