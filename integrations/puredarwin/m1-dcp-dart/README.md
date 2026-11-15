@@ -118,3 +118,36 @@ copied and the pages stay owned (and pinned) by whoever passed them. PDDcp uses 
 a buffer exported by the GPU driver (`../m1-dcp/kext/pd_dcp_prime.c`). On the M1 (boots pr02,
 km01) every page of each imported buffer translated back correctly through the tables. The
 host tests in `test/` do not cover this pair.
+
+### Checked retirement and backing quarantine (SF-AF source)
+
+`pd_dart_unmap_checked` validates every table walk, clears leaves and waits
+for the actual native invalidate result. Failed/unreachable retirement
+preserves the output and poisons the stream. PIODMA and the DCP/display
+streams can share backing, so any poisoned stream blocks new allocation,
+mapping and IOVA reclamation across this DCP backend until reboot. Caller
+producer/in-flight DMA quiescence remains a separate requirement; a host
+model or TLB acknowledgement does not establish it.
+
+Owned coherent allocations retain pages, CPU views, IOVA and a device
+reference after failed cleanup or free. Physical-page imports return
+`-EBUSY` with the quarantined address if failed mapping cleanup cannot
+retire it; their native PRIME caller retains the exporter reference and
+pin. `pd_dma_unmap_phys_pages` now returns an error and its caller must
+retain backing on any failure. The current PRIME caller does so, including
+errors before a GEM import object exists. Generic scatter-gather mappings
+here are backed by DCP-owned allocations; arbitrary borrowed callers must
+establish their own exporter pin/lifetime contract before using those APIs.
+
+The native DCP patch tracks PIODMA ownership on older T8103 firmware as
+well as later firmware, preventing a failed unmap from being hidden by a
+subsequent free. Failed first-map rollback is also flushed even when zero
+whole segments were published. A declared IOMMU that fails binding returns
+a blocked domain instead of falling through to physical DMA. Existing
+bindings cannot switch streams while mappings may be live.
+
+`make test` now includes 512 retirement cases using the production table
+code, timeout/poison retry, unreachable tables and invalid-range refusal,
+under ASan/UBSan. The full DCP SDK bundle builds. These are source/SDK
+checks; this newer lifetime implementation is not in installed USB04 and
+no injected hardware-failure or external-display runtime is claimed.

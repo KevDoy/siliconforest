@@ -40,6 +40,7 @@
 
 #include "pd_dart.h"
 #include "pd_dart_table.h"
+#include "pd_dart_retire.h"
 
 /* apple-dart.c, T8020 */
 #define DART_PARAMS1                   0x00
@@ -107,6 +108,7 @@ struct pd_dart_stream {
     TablePage owned[MAX_OWNED];
     uint8_t *busy; /* one bit per page of the window */
     uint32_t invalidates;
+    bool poisoned; // failed invalidate: no new mappings or IOVA reclamation
 };
 
 namespace {
@@ -114,6 +116,14 @@ namespace {
 IOLock *gLock;
 Dart gDarts[MAX_DARTS];
 pd_dart_stream gStreams[MAX_STREAMS];
+// PIODMA and RTKit/display streams can reach the same backing. Failure in
+// any stream therefore closes allocation/retirement across this DCP copy.
+bool anyPoisoned()
+{
+    for (unsigned i=0;i<MAX_STREAMS;++i)
+        if (gStreams[i].used && gStreams[i].poisoned) return true;
+    return false;
+}
 const char *gPrefix = "PDDcpDart: ";
 
 void dlog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -226,6 +236,7 @@ int invalidate(pd_dart_stream *s)
             return 0;
         IODelay(100);
     }
+    s->poisoned=true;
     dlog("dart %s stream %u: TLB invalidate BUSY did not clear in 100 ms", s->dart->path, (unsigned)s->sid);
     return -ETIMEDOUT;
 }
@@ -447,11 +458,12 @@ int pd_dart_map(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t
     if (!s)
         return -EINVAL;
     IOLockLock(gLock);
+    if (anyPoisoned()) { IOLockUnlock(gLock); return -EIO; }
     int ret = pd_dart_table_map(&s->tables, iova, phys, size, prot);
     /* also after a failure that took entries back: the DART must not keep what it may have fetched */
     int inv = invalidate(s);
     IOLockUnlock(gLock);
-    return ret ? ret : inv;
+    return inv ? inv : ret;
 }
 
 int pd_dart_map_deferred(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t size, unsigned int prot)
@@ -459,6 +471,7 @@ int pd_dart_map_deferred(struct pd_dart_stream *s, uint64_t iova, uint64_t phys,
     if (!s)
         return -EINVAL;
     IOLockLock(gLock);
+    if (anyPoisoned()) { IOLockUnlock(gLock); return -EIO; }
     int ret = pd_dart_table_map(&s->tables, iova, phys, size, prot);
     IOLockUnlock(gLock);
     return ret;
@@ -469,20 +482,30 @@ int pd_dart_flush(struct pd_dart_stream *s)
     if (!s)
         return -EINVAL;
     IOLockLock(gLock);
-    int ret = invalidate(s);
+    int ret = anyPoisoned() ? -EIO : invalidate(s);
     IOLockUnlock(gLock);
     return ret;
 }
 
-uint64_t pd_dart_unmap(struct pd_dart_stream *s, uint64_t iova, uint64_t size)
+static int retireInvalidate(void *ctx) { return invalidate((pd_dart_stream*)ctx); }
+int pd_dart_unmap_checked(struct pd_dart_stream *s,uint64_t iova,uint64_t size,uint64_t *unmapped)
 {
-    if (!s)
-        return 0;
+    if (!s || !unmapped) return -EINVAL;
     IOLockLock(gLock);
-    uint64_t done = pd_dart_table_unmap(&s->tables, iova, size);
-    invalidate(s);
+    int ret=anyPoisoned() ? -EIO : pd_dart_retire(&s->tables,&s->poisoned,iova,size,s,retireInvalidate,unmapped);
     IOLockUnlock(gLock);
-    return done;
+    return ret;
+}
+uint64_t pd_dart_unmap(struct pd_dart_stream *s,uint64_t iova,uint64_t size)
+{
+    uint64_t unmapped=0;
+    return pd_dart_unmap_checked(s,iova,size,&unmapped)?0:unmapped;
+}
+int pd_dart_poisoned(struct pd_dart_stream *s)
+{
+    if (!s) return 1;
+    IOLockLock(gLock);bool value=anyPoisoned();IOLockUnlock(gLock);
+    return value;
 }
 
 int pd_dart_iova_alloc(struct pd_dart_stream *s, uint64_t size, uint64_t *iova)
@@ -490,9 +513,10 @@ int pd_dart_iova_alloc(struct pd_dart_stream *s, uint64_t size, uint64_t *iova)
     uint64_t pages = (size + PD_DART_PAGE - 1) >> PD_DART_PAGE_SHIFT, run = 0;
     int ret = -ENOSPC;
 
-    if (!s || !iova || !pages || pages > WINDOW_PAGES)
+    if (!s || !iova || !size || size>WINDOW_HI-WINDOW_LO || !pages || pages > WINDOW_PAGES)
         return -EINVAL;
     IOLockLock(gLock);
+    if (anyPoisoned()) { IOLockUnlock(gLock); return -EIO; }
     for (uint64_t p = 0; p < WINDOW_PAGES; p++) {
         run = busyGet(s, p) ? 0 : run + 1;
         if (run == pages) {
@@ -512,9 +536,11 @@ void pd_dart_iova_free(struct pd_dart_stream *s, uint64_t iova, uint64_t size)
 {
     uint64_t pages = (size + PD_DART_PAGE - 1) >> PD_DART_PAGE_SHIFT;
 
-    if (!s || iova < WINDOW_LO || iova + (pages << PD_DART_PAGE_SHIFT) > WINDOW_HI)
+    if (!s || !size || size>WINDOW_HI-WINDOW_LO || iova < WINDOW_LO ||
+        iova>WINDOW_HI || (pages << PD_DART_PAGE_SHIFT)>WINDOW_HI-iova)
         return;
     IOLockLock(gLock);
+    if (anyPoisoned()) { IOLockUnlock(gLock); return; }
     for (uint64_t q = 0; q < pages; q++)
         busySet(s, ((iova - WINDOW_LO) >> PD_DART_PAGE_SHIFT) + q, false);
     IOLockUnlock(gLock);

@@ -7,8 +7,13 @@ build/table_test: test/table_test.c src/pd_dart_table.c include/pd_dart_table.h
 	mkdir -p build
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/table_test.c src/pd_dart_table.c
 
-test: build/table_test
+build/retire_test: test/retire_test.c src/pd_dart_table.c include/pd_dart_table.h include/pd_dart_retire.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/retire_test.c src/pd_dart_table.c
+
+test: build/table_test build/retire_test
 	./build/table_test
+	./build/retire_test
 
 clean:
 	rm -rf build

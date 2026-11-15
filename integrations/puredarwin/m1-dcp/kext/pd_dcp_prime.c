@@ -46,6 +46,7 @@ struct pd_dcp_import {
 };
 
 static LIST_HEAD(pd_dcp_imports);
+static LIST_HEAD(pd_dcp_import_quarantines); // pins + dma-buf refs retained until reboot
 static DEFINE_MUTEX(pd_dcp_import_lock);
 
 static void
@@ -56,6 +57,15 @@ pd_dcp_import_unpin(struct drm_gem_object *exp)
 		exp->funcs->unpin(exp);
 		dma_resv_unlock(exp->resv);
 	}
+}
+
+static void
+pd_dcp_import_quarantine(struct pd_dcp_import *imp)
+{
+    mutex_lock(&pd_dcp_import_lock);
+    list_add(&imp->link,&pd_dcp_import_quarantines);
+    mutex_unlock(&pd_dcp_import_lock);
+    kprintf("PDDcp: prime: DART retirement failed; retaining %u exporter pages/ref/pin until reboot\n",imp->npages);
 }
 
 static void
@@ -80,7 +90,10 @@ pd_dcp_import_free(struct drm_gem_object *obj)
 	/* the DART's state (error register included) while the mapping still exists */
 	pd_dcp_iommu_report(imp->dma_dev, "before an imported buffer is released");
 	/* the display must not reach the pages once the exporter may reuse them */
-	pd_dma_unmap_phys_pages(imp->dma_dev, imp->dma, imp->npages);
+	if (pd_dma_unmap_phys_pages(imp->dma_dev, imp->dma, imp->npages)) {
+		pd_dcp_import_quarantine(imp);
+		return;
+	}
 	pd_dcp_import_unpin(imp->exp);
 	dma_buf_put(imp->dmabuf);
 	if (dma_obj->sgt != NULL) {
@@ -109,7 +122,7 @@ pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	if (exp != NULL && exp->dev == dev)
 		return drm_gem_prime_import(dev, dma_buf);
 
-	if (exp == NULL || exp->funcs == NULL || exp->funcs->get_sg_table == NULL || npages == 0 ||
+	if (exp == NULL || exp->funcs == NULL || exp->funcs->get_sg_table == NULL || npages == 0 || dma_buf->size>UINT32_MAX ||
 	    (dma_buf->size & (PAGE_SIZE - 1)) != 0) {
 		kprintf("PDDcp: prime: dma-buf of %zu bytes cannot be imported (no page table from its exporter)\n",
 		    dma_buf->size);
@@ -153,9 +166,12 @@ pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	}
 
 	imp->dma_dev = drm_dev_dma_dev(dev);
+	get_dma_buf(dma_buf);
+	imp->dmabuf=dma_buf;imp->exp=exp;imp->npages=npages;
 	ret = pd_dma_map_phys_pages(imp->dma_dev, phys, npages, &imp->dma);
 	if (ret) {
 		kprintf("PDDcp: prime: mapping %u pages for the display failed: %d\n", npages, ret);
+		if (ret==-EBUSY)goto err_quarantine;
 		goto err_unpin;
 	}
 
@@ -174,7 +190,6 @@ pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 		goto err_unmap;
 	}
 
-	get_dma_buf(dma_buf);
 	imp->obj = obj;
 	imp->dmabuf = dma_buf;
 	imp->exp = exp;
@@ -219,12 +234,17 @@ pd_dcp_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	return obj;
 
 err_unmap:
-	pd_dma_unmap_phys_pages(imp->dma_dev, imp->dma, npages);
+	if (pd_dma_unmap_phys_pages(imp->dma_dev, imp->dma, npages))goto err_quarantine;
 err_unpin:
 	pd_dcp_import_unpin(exp);
+	if (imp->dmabuf)dma_buf_put(imp->dmabuf);
 err_free:
 	kfree(sgt);
 	kvfree(phys);
 	kfree(imp);
 	return ERR_PTR(ret);
+err_quarantine:
+	pd_dcp_import_quarantine(imp);
+	kfree(sgt);kvfree(phys);
+	return ERR_PTR(-EIO);
 }

@@ -121,8 +121,11 @@ int pd_dma_buffer_pages(struct device *dev, void *cpu_addr, size_t size, uint32_
 
 /* Counters and the last error of the DART behind a device, one line to the kernel log. */
 /* a list of physical pages at one contiguous device address (PDDcp's cross-kext import) */
+/* Map failure -EBUSY means backing may remain reachable: dma_handle names
+ * its quarantined range; caller MUST retain exporter ref/pin until reboot.
+ * Any nonzero unmap result likewise forbids backing/pin release. */
 int pd_dma_map_phys_pages(struct device *dev, const u64 *phys, unsigned int n, dma_addr_t *dma_handle);
-void pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n);
+int pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n);
 void pd_dcp_iommu_report(struct device *dev, const char *when);
 
 #ifndef PD_DCP_IOMMU_NO_REDIRECT

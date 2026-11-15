@@ -43,7 +43,7 @@ int pd_dcp_iommu_dva_mask;
 
 struct pd_binding {
 	struct device *dev;
-	int state;	/* 0 free, 1 bound, 2 looked at: not behind a DART */
+	int state;	/* 0 free, 1 bound, 2 no DART declared, 3 declared but unavailable */
 	struct pd_iommu_domain dom;
 };
 
@@ -58,7 +58,11 @@ struct pd_alloc {
 };
 
 static struct pd_binding pd_bound[PD_MAX_BOUND];
+// A declared IOMMU that failed to bind must never fall through to physical
+// DMA. A blocked domain routes all calls to fail-closed native operations.
+static struct pd_iommu_domain pd_blocked_domain;
 static LIST_HEAD(pd_allocs);
+static LIST_HEAD(pd_quarantines); // retained backing/device refs until reboot
 /* 0: no lock yet, 1: being set up, 2: ready */
 static int pd_lock_state;
 static struct mutex pd_lock;
@@ -102,6 +106,9 @@ static int pd_bind_stream(struct device *dev, struct pd_dart_stream *s)
 	b = pd_slot(dev, true);
 	if (!b) {
 		ret = -ENOSPC;
+	} else if (b->state==1) {
+		// A live device cannot change domains underneath published DMA.
+		ret=b->dom.pd_stream==s?0:-EBUSY;
 	} else {
 		b->dom.type = IOMMU_DOMAIN_DMA;
 		b->dom.pgsize_bitmap = PD_DART_PAGE;
@@ -153,6 +160,8 @@ static struct pd_iommu_domain *pd_domain(struct device *dev)
 		return &b->dom;
 	if (state == 2)
 		return NULL;
+	if (state == 3)
+		return &pd_blocked_domain;
 
 	if (dev->of_node && pd_of_dma_configure(dev, dev->of_node, true) == 0) {
 		mutex_lock(lock);
@@ -160,18 +169,24 @@ static struct pd_iommu_domain *pd_domain(struct device *dev)
 		mutex_unlock(lock);
 		return b && b->state == 1 ? &b->dom : NULL;
 	}
-	/* remember the answer; devices that are not ours come by often */
+	/* No IOMMU property permits the layer's normal DMA API. An existing
+	 * property with malformed/unpowered/unavailable resources does not. */
+	bool declared=dev->of_node && of_find_property(dev->of_node,"iommus",NULL);
 	mutex_lock(lock);
 	b = pd_slot(dev, true);
-	if (b)
-		b->state = 2;
+	// Another first caller may have completed the binding while we looked.
+	if (b && b->state==1) {
+		mutex_unlock(lock);return &b->dom;
+	}
+	if (b)b->state = declared?3:2;
 	mutex_unlock(lock);
-	return NULL;
+	return declared?&pd_blocked_domain:NULL;
 }
 
 int pd_dcp_iommu_bound(struct device *dev)
 {
-	return pd_domain(dev) != NULL;
+	struct pd_iommu_domain *dom=pd_domain(dev);
+	return dom && dom->pd_stream;
 }
 
 /* the address a device or its firmware is given for a stream address */
@@ -220,6 +235,7 @@ ssize_t pd_iommu_map_sgtable(struct pd_iommu_domain *domain, unsigned long iova,
 	struct scatterlist *sg;
 	size_t mapped = 0;
 	int i, ret;
+	bool touched=false;
 
 	if (!domain || !domain->pd_stream || !sgt)
 		return -ENODEV;
@@ -232,6 +248,7 @@ ssize_t pd_iommu_map_sgtable(struct pd_iommu_domain *domain, unsigned long iova,
 			ret = -EINVAL;
 			goto undo;
 		}
+		touched=true;
 		ret = pd_dart_map_deferred(domain->pd_stream, iova + mapped, phys, len, pd_prot(prot));
 		if (ret)
 			goto undo;
@@ -245,6 +262,8 @@ ssize_t pd_iommu_map_sgtable(struct pd_iommu_domain *domain, unsigned long iova,
 undo:
 	if (mapped)
 		pd_dart_unmap(domain->pd_stream, iova, mapped);
+	else if (touched)
+		pd_dart_flush(domain->pd_stream); // even a failed first map can roll back PTEs
 	return ret;
 }
 
@@ -256,7 +275,8 @@ bool pd_iommu_is_dma_domain(struct pd_iommu_domain *domain)
 int pd_iommu_device_use_default_domain(struct device *dev)
 {
 	/* Linux pins the default DMA domain; here the binding is that domain and never changes */
-	return pd_domain(dev) ? 0 : -ENODEV;
+	struct pd_iommu_domain *dom=pd_domain(dev);
+	return dom && dom->pd_stream ? 0 : -ENODEV;
 }
 
 void pd_iommu_device_unuse_default_domain(struct device *dev)
@@ -283,8 +303,9 @@ int pd_iommu_group_for_each_dev(struct iommu_group *group, void *data,
 int pd_dma_set_mask_and_coherent(struct device *dev, u64 mask)
 {
 	/* the stream's 32-bit address range is inside any mask the driver asks for (42 bits) */
-	if (pd_domain(dev))
-		return mask >= PD_IOVA_MASK ? 0 : -EIO;
+	struct pd_iommu_domain *dom=pd_domain(dev);
+	if (dom)
+		return !dom->pd_stream ? -ENODEV : mask >= PD_IOVA_MASK ? 0 : -EIO;
 	return dma_set_mask_and_coherent(dev, mask);
 }
 
@@ -308,6 +329,14 @@ static void pd_alloc_drop(struct pd_alloc *a, unsigned int have)
 	kfree(a);
 }
 
+static void pd_alloc_quarantine(struct pd_alloc *a)
+{
+    struct mutex *lock=pd_lock_get();
+    get_device(a->dev);
+    mutex_lock(lock);list_add(&a->link,&pd_quarantines);mutex_unlock(lock);
+    pr_err("PDDcpDart: failed DMA retirement; retaining %u pages and IOVA until reboot\n",a->npages);
+}
+
 void *pd_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp,
 			 unsigned long attrs)
 {
@@ -319,7 +348,8 @@ void *pd_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle
 
 	if (!dom)
 		return dma_alloc_attrs(dev, size, dma_handle, gfp, attrs);
-	if (!size || !dma_handle)
+	if (!size || size>UINT32_MAX || !dma_handle || pd_dart_poisoned(dom->pd_stream) ||
+	    size>SIZE_MAX-(PD_DART_PAGE-1))
 		return NULL;
 	n = ALIGN(size, PD_DART_PAGE) >> PD_DART_PAGE_SHIFT;
 	a = kzalloc(sizeof(*a), GFP_KERNEL);
@@ -342,6 +372,7 @@ void *pd_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle
 		pd_alloc_drop(a, n);
 		return NULL;
 	}
+	a->dev=dev;a->npages=n;a->iova=iova;
 	for (i = 0; i < n; i++) {
 		if (pd_dart_map_deferred(dom->pd_stream, iova + ((u64)i << PD_DART_PAGE_SHIFT),
 					 page_to_phys(a->pages[i]), PD_DART_PAGE,
@@ -356,7 +387,11 @@ void *pd_dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle
 		a->vmapped = n != 1;
 	}
 	if (i < n || !a->cpu) {
-		pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+		uint64_t unmapped=0;
+		if (pd_dart_unmap_checked(dom->pd_stream,iova,(u64)n << PD_DART_PAGE_SHIFT,&unmapped)) {
+			pd_alloc_quarantine(a);
+			return NULL;
+		}
 		pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
 		pd_alloc_drop(a, n);
 		return NULL;
@@ -392,7 +427,11 @@ void pd_dma_free_attrs(struct device *dev, size_t size, void *cpu_addr, dma_addr
 	if (!a)
 		return;
 	/* unmap and invalidate first: the device must not reach pages that are being freed */
-	pd_dart_unmap(dom->pd_stream, a->iova, (u64)a->npages << PD_DART_PAGE_SHIFT);
+	uint64_t unmapped=0;
+	if (pd_dart_unmap_checked(dom->pd_stream,a->iova,(u64)a->npages << PD_DART_PAGE_SHIFT,&unmapped)) {
+		pd_alloc_quarantine(a);
+		return;
+	}
 	pd_dart_iova_free(dom->pd_stream, a->iova, (u64)a->npages << PD_DART_PAGE_SHIFT);
 	if (a->vmapped)
 		vunmap(a->cpu);
@@ -418,15 +457,19 @@ int pd_dma_map_phys_pages(struct device *dev, const u64 *phys, unsigned int n, d
 	for (i = 0; i < n; i++)
 		if (phys[i] & (PD_DART_PAGE - 1))
 			return -EINVAL;
-	if (pd_dart_iova_alloc(dom->pd_stream, (u64)n << PD_DART_PAGE_SHIFT, &iova))
-		return -ENOMEM;
+	int allocated=pd_dart_iova_alloc(dom->pd_stream, (u64)n << PD_DART_PAGE_SHIFT, &iova);
+	if (allocated)return allocated;
 	for (i = 0; i < n; i++) {
 		if (pd_dart_map_deferred(dom->pd_stream, iova + ((u64)i << PD_DART_PAGE_SHIFT), phys[i],
 					 PD_DART_PAGE, PD_DART_PROT_READ | PD_DART_PROT_WRITE))
 			break;
 	}
 	if (pd_dart_flush(dom->pd_stream) || i < n) {
-		pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+		uint64_t unmapped=0;
+		if (pd_dart_unmap_checked(dom->pd_stream,iova,(u64)n << PD_DART_PAGE_SHIFT,&unmapped)) {
+			*dma_handle=pd_to_dma(iova);
+			return -EBUSY; // caller MUST retain its exporter ref and pin
+		}
 		pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
 		return -EIO;
 	}
@@ -435,16 +478,18 @@ int pd_dma_map_phys_pages(struct device *dev, const u64 *phys, unsigned int n, d
 }
 
 /* Undo pd_dma_map_phys_pages(): unmap, invalidate, give the address range back. */
-void pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n)
+int pd_dma_unmap_phys_pages(struct device *dev, dma_addr_t dma_handle, unsigned int n)
 {
 	struct pd_iommu_domain *dom = pd_domain(dev);
 	u64 iova;
 
-	if (!dom || !n)
-		return;
+	if (!dom || !n)return -EINVAL;
 	iova = dma_handle & dom->pd_mask;
-	pd_dart_unmap(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+	uint64_t unmapped=0;
+	int ret=pd_dart_unmap_checked(dom->pd_stream,iova,(u64)n << PD_DART_PAGE_SHIFT,&unmapped);
+	if(ret)return ret;
 	pd_dart_iova_free(dom->pd_stream, iova, (u64)n << PD_DART_PAGE_SHIFT);
+	return 0;
 }
 
 void *pd_dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle, gfp_t gfp)
@@ -545,7 +590,8 @@ int pd_dma_map_sgtable(struct device *dev, struct sg_table *sgt, enum dma_data_d
 	for_each_sgtable_sg(sgt, sg, i) {
 		if (pd_dart_map_deferred(dom->pd_stream, iova + at, sg_phys(sg), sg->length,
 					 PD_DART_PROT_READ | PD_DART_PROT_WRITE)) {
-			pd_dart_unmap(dom->pd_stream, iova, at);
+			if (at)pd_dart_unmap(dom->pd_stream, iova, at);
+			else pd_dart_flush(dom->pd_stream);
 			pd_dart_iova_free(dom->pd_stream, iova, total);
 			return -EIO;
 		}

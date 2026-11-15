@@ -443,3 +443,29 @@ connector is fabricated. DRM ioctl latency remains subject to DRM locks
 and must be measured on hardware; no 50 ms guarantee is claimed. The
 complete DCP bundle SDK-builds; this code is not in installed USB04. Native
 hotplug/connector/scanout evidence remains outstanding.
+
+### DCP DMA lifetime prerequisite, 2026-11-15 03:46Z
+
+The DART backend now provides checked retirement with preflight table
+walks and real invalidate error propagation. An unreachable table or
+failed invalidate poisons its stream; any poisoned DCP/PIODMA/display
+stream closes allocation/map/IOVA-reclaim across the backend because they
+can share backing. Caller producer/in-flight quiescence remains separate.
+Owned allocations retain pages/views/IOVA/device refs on failed cleanup.
+PRIME retains exporter DMA-buffer refs and pins on failed import cleanup
+or destruction, including failures before the import GEM exists. The
+physical-page unmap API now returns failure instead of silently freeing.
+
+The native template tracks PIODMA ownership on T8103's older firmware as
+well as later firmware. Failed first-segment rollback is flushed too.
+Declared-but-unavailable IOMMUs fail closed instead of falling back to
+physical DMA, and live bindings cannot change streams. Generic SG use in
+this driver is backed by owned DCP allocations; future arbitrary borrowed
+callers still need their own exporter lifetime contract.
+
+ASan/UBSan passes existing table checks and 512 retirement cases including
+timeout/poison retry, unreachable tables and invalid ranges. Full PDDcp SDK
+output: `/nix/store/fakwnsdwpmqgh4iqfmgs1bcyyav9abma-puredarwin-dcp-0.1`.
+This newer source is not installed in USB04. Mirrored framebuffer IOVAs in
+both display DARTs, external topology, native PHY/mux/Type-C and actual
+external DCP/link/scanout are still required.

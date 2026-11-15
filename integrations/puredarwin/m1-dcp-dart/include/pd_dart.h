@@ -62,8 +62,13 @@ int pd_dart_map(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t
  */
 int pd_dart_map_deferred(struct pd_dart_stream *s, uint64_t iova, uint64_t phys, uint64_t size, unsigned int prot);
 int pd_dart_flush(struct pd_dart_stream *s);
-/* Clears the range and invalidates. Returns the number of bytes that were mapped. */
+/* Clears the range and invalidates. Zero on an invalidate failure. Callers
+ * freeing backing MUST use unmap_checked and retain backing on failure. */
 uint64_t pd_dart_unmap(struct pd_dart_stream *s, uint64_t iova, uint64_t size);
+/* Output unchanged on failure; poisoned streams cannot allocate/map/reclaim. */
+int pd_dart_unmap_checked(struct pd_dart_stream *,uint64_t iova,uint64_t size,uint64_t *unmapped);
+/* Conservative across this DCP copy: PIODMA may share any buffer. */
+int pd_dart_poisoned(struct pd_dart_stream *);
 
 /*
  * Reserves `size` bytes of iova in the stream's window (first fit, page granular) without
