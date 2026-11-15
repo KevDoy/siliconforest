@@ -37,7 +37,7 @@ owner rather than hidden. AVTimecode independently stores frame number,
 duration, flags and SMPTE fields, matching the native setters; it does not
 invent frame-number-to-SMPTE conversion. The constructor accepts four colon-
 or semicolon-separated nonnegative components within signed16-bit bounds.
-Own large-layout/native-reference tests do not establish every private method.
+The native-reference vectors do not establish every private method.
 
 The remaining 12 imports are the two media-selection-menu functions,
 AVAudioLevelIndicatorView, AVCaptureView (+ metaclass), AVPlayerController,

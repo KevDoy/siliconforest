@@ -138,9 +138,15 @@ def main():
                     raise ValueError('Movie frame order/PTS/pixels changed from native reference')
                 summaries = re.findall(r'^MOVIE_SYNC (.*)$', row['stdout'], re.M)
                 sync = dict(item.split('=', 1) for item in summaries[0].split()) if len(summaries) == 1 else {}
+                if expected.get('movie_clock_relative'):
+                    clock_bad = not (abs(float(sync.get('clock_relative_drift_ms', 'inf'))) < 100 and
+                                     int(sync.get('clock_early_samples', '0')) > 0 and
+                                     int(sync.get('clock_late_samples', '0')) > 0)
+                else:
+                    clock_bad = not abs(float(sync.get('clock_wall_drift_ms', 'inf'))) < 100
                 if (sync.get('hardware') != '1' or sync.get('frames') != '900/900' or
                         sync.get('audio_queued') != '1440000' or sync.get('audio_completed') != '1440000' or
-                        sync.get('rate') != '48000' or abs(float(sync.get('clock_wall_drift_ms', 'inf'))) >= 100):
+                        sync.get('rate') != '48000' or clock_bad):
                     raise ValueError('Movie hardware/HAL/clock regression')
         gate()
         with (a.packet/'compat.log').open('w') as output:

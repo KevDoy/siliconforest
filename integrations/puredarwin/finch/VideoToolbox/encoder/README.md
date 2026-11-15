@@ -84,7 +84,15 @@ query. No AVE action is involved.
 Evidence: runs/sffinch/vlc-player-hardware-v2,
 vt-progressive-regressions-v1/qualification.json,
 vlc-compat-stage-v5/candidate.json, m5-vt-options-v2-results.json.
-The separate canonical update packet is install-VideoToolbox-progressive-v1;
-its qualified.json, when present, records the cold one-framework installation
-and consumer results. The earlier installed receipt above refers to the prior
-software-compression provider, which rejected every deinterlacing request.
+The canonical progressive update is now installed, with the cold source hash
+59871037fea0f33bf3ed99b523024ef4fb753f081ff2b8c4d09bf97e73f42b29.
+The first update rolled back on an installer classification bug; the second
+rolled back at a102.596ms wall/queue end-offset threshold. Both failures and
+rollbacks remain recorded. Controlled baseline/candidate runs distinguish fixed
+HAL producer lead from rate drift, documented in ../../tests/movie/README.md.
+The third packet passes all22 programs, desktop/app-open checks and compat18/18;
+its30-second movie has900 matching frames,1440000 audio frames and0.104ms
+relative clock drift, with-86.291ms fixed end offset still reported. All frame,
+hardware, HAL and rate checks remain required. Receipt:
+runs/sffinch/install-VideoToolbox-progressive-v3/qualified.json. The earlier
+receipt above describes the previous software-compression version.

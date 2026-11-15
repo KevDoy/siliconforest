@@ -210,3 +210,73 @@ HAL101376/direct103936 and traced exit0 provide real headless output evidence.
 The fresh canonical-audio v6 run also passes with no framework override,
 104448 HAL-consumed frames and traced direct exit0. TERM6 GUI window/capture
 remains pending, along with unique-source-frame accounting.
+
+## Installed browser media and VLC follow-up (15 November, 17:27Z)
+
+AVFoundation now retains the complete installed asset/capture family and adds
+CODEX-FX's three speech classes, NV12 display layer and honest restricted/
+asynchronous-denied capture authorization. Its export set grows2482->2501
+without losses. The prefix test reads two tracks/10.000s, reports no devices or
+voices, and draws1024/1024 red NV12 pixels on Mesa M1. The canonical update
+passes600 hardware decode PTS/hashes, WAV/AAC HAL, the30-second movie, app opens
+and compatibility18/18. Cold receipts and previous files are retained. Source:
+`media/bottle/avfoundation-complete.nix`; evidence:
+`runs/sffinch/install-AVFoundation-browser-v2`. CGL remains CODEX-FX's one
+implementation; this stream uses its private prefix, not a competing install.
+
+The installed VideoToolbox update accepts VLC's Temporal/DeinterlaceFields only
+when every supplied H264 SPS proves frame-only coding. Unknown/interlaced input
+still fails. Native Require/Enable literals retain observed conflict behavior;
+old key values remain unchanged. Host sanitizer/fuzz checks, six M1 options,
+four native creation cases and1200 hardware/software H264/HEVC PTS/hash values
+pass. Actual vendor VLC's prefix headless module completes120 PDAppleAVD jobs
+with no errors/timeouts/DART faults and accepts HAL buffers. No GUI inference.
+
+Two update attempts rolled back: a controller codec-name classification bug,
+then a102.596ms end wall/queue offset. Both receipts remain. Controlled runs
+and new instrumentation distinguish fixed HAL producer lead from clock-rate
+drift. Early/late mean-offset change is-0.365ms on the restored provider and
+-0.010ms on the candidate; each has900 matching frames and1440000 audio frames.
+The third cold packet passes all22 programs/apps/compat18. Its canonical movie
+reports0.104ms relative drift and-86.291ms fixed end offset. No bound was widened;
+the new expected-hash probe requires populated measurement windows, while all
+frame/hardware/HAL/rate checks remain. Source/limits:
+`tests/movie/README.md`; receipt: `install-VideoToolbox-progressive-v3`.
+
+VLC private compatibility now supplies real Gregorian/file/volume/scheme and
+CFPreferences suite operations, plus explicit unavailable contacts, automation,
+script, web and updater behavior. Both Foundation wrapper variants and their
+exports are retained. A private Foundation build honors AppKit's allocation
+hook before decoding cyclic NIB objects; a512-byte padded/cyclic-UID test passes.
+VLCv15 clears that failure and reaches the missing NSStatusItem update backend.
+With the upstream optional status icon disabled, subsequent Foundation calendar
+and locale gaps use existing CFCalendar/CFLocale engines. Same-byte native/M1
+vectors match42 calendar cases and16 direction cases. VLCv18 reaches extension
+setup, then catches missing +[NSColor currentControlTint] and exits1; the
+NSActionTemplate image is also absent. Exact AppKit requests and the private
+Foundation integration patch are with TERM7. No player window, GUI playback,
+compositor capture, acoustic output or screen-input claim.
+
+AVKit now provides6/18 reviewed QuickTime imports: the prior player view,
+immutable identity snapshots, independent timecode metadata and rational
+slow-motion ranges. MediaToolbox supplies5/7: format names, rotation/flips,
+dynamic-range labels and actual format-description color metadata. Expanded
+math/name vectors match native exactly. Persistent file-reference URLs remain
+unsupported; the identifier returns a working path URL and the difference is
+recorded. FigAsset's ABI and the professional reader registry remain unresolved.
+Both providers stay staged; the Finch player still lacks its H264/AAC backend.
+
+TERM7 installed Foundation networking through its guarded workflow: plain
+example.com HTTPS works without environment overrides; missing-CA verification
+fails closed. This stream does not install Foundation. Owner-paused AVE source
+and private inputs remain preserved, with no further builds/boots/probes or
+extraction. CODEX-TB's latest qualified kernel is non-AVE CIO29 per its ledger.
+
+The post-install canonical VLC hardware run also passes with no framework or
+library override: actual videotoolbox module,60 additional PDAppleAVD jobs/
+completions, zero additional errors/timeouts/DART faults/stale replies, contexts0,
+traced exit0 and102400 HAL-read frames. Its own counters still report121 video
+and189 audio decodes for the60-sample/95-packet fixture; do not treat those as
+unique pictures. Raw rc stats, kernel before/after and own HAL evidence are in
+`runs/sffinch/vlc-hardware-canonical-v1/qualification.json`. This remains dummy
+video output; the AppKit window dependency is unchanged.

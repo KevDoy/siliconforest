@@ -89,3 +89,23 @@ python3 integrations/puredarwin/finch/tests/movie/report.py \
   runs/sffinch/movie-fixtures-v1/movie.nv12.framemd5 --window \
   --output runs/sffinch/movie-window-cpu-v3-qualified.json
 ```
+
+
+Clock instrumentation update (2026-11-15): the old clock_wall_drift_ms field
+was an end-to-end wall/queue offset, including startup and HAL producer lead.
+It is retained for old receipts, with the explicit alias clock_wall_offset_ms.
+New probes also report clock_relative_drift_ms: change in mean wall-minus-queue
+offset between the 5-10% and 90-95% audio-clock windows, with both sample counts.
+This measures rate stability after startup, separately from A/V delivery lateness.
+It does not measure output latency, acoustic sound or physical display sync.
+
+A VideoToolbox update rolled back when the old offset reached-102.596ms despite
+all900 frames and1440000 audio frames completing. A controlled unchanged-
+provider/candidate/unchanged-provider run retained offsets-98.329/-102.623/
+-95.901ms. With explicit early/late instrumentation, installed/candidate relative
+drift was-0.365/-0.010ms (fixed end offsets-86.285/-81.810ms). Both900-frame
+PTS/hash sequences match the current Linux-built M5 decode reference exactly.
+Evidence: runs/sffinch/movie-clock-ab-v{1,2} and m5-locale-movie-v1-results.json.
+The installer opts into the new protocol only for the expected hashed new
+program and requires nonempty early/late windows and drift below100ms;
+frame order/hashes, hardware, all HAL buffers and rate checks remain required.

@@ -57,11 +57,14 @@ def main():
         audio_clock_monotonic=len(clocks) == 900 and all(x[1] <= y[1] for x, y in zip(clocks, clocks[1:])),
         av_delivery_drift=abs(av_drift) < 100,
         thirty_seconds=abs(float(sync.get('wall', 'inf')) - 30) < 1,
-        clock_drift=abs(float(sync.get('clock_wall_drift_ms', 'inf'))) < 100,
+        clock_drift=(abs(float(sync.get('clock_relative_drift_ms', 'inf'))) < 100 and
+                     int(sync.get('clock_early_samples', '0')) > 0 and int(sync.get('clock_late_samples', '0')) > 0)
+                    if 'clock_relative_drift_ms' in sync else abs(float(sync.get('clock_wall_drift_ms', 'inf'))) < 100,
         delivery_lateness=float(sync.get('max_delivery_late_ms', 'inf')) < 100)
     result = dict(status='PASS' if all(checks.values()) else 'FAIL', checks=checks, measured=sync,
                   note='Queued/completed counts describe source buffers returned by the retained PD HAL IOProc; '
-                  'the sample clock is recorded separately. '
+                  'the sample clock is recorded separately. Relative clock drift is the change in mean wall/queue offset '
+                  'between the 5-10% and 90-95% audio-clock windows; fixed end offset remains reported. '
                   'Delivery offsets use the scheduling audio-clock tick. CPU view drawing is not compositor presentation, panel scanout, acoustic output, '
                   'or proof of a general streaming player. One generated 30-second fixture.')
     a.output.write_text(json.dumps(result, indent=2)+'\n')

@@ -178,9 +178,15 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
             [host setTitle:@"Finch Movie Test"];layer=[CALayer layer];view=[[SFMovieView alloc] initWithFrame:NSMakeRect(0,0,320,192) frameLayer:layer];[host setContentView:view];[host makeKeyAndOrderFront:nil];[NSApp finishLaunching];[host displayIfNeeded];[host flushWindow];}
         AudioQueueRef queue=NULL;check(AudioQueueNewOutput(&pcm,returned,&audio,NULL,NULL,0,&queue),"queue output");check(AudioQueueSetParameter(queue,kAudioQueueParam_Volume,0.1f),"queue local volume");
         for(int n=0;n<3;n++){AudioQueueBufferRef buffer=NULL;check(AudioQueueAllocateBuffer(queue,1024*pcm.mBytesPerFrame,&buffer),"queue buffer");feed(&audio,queue,buffer);}
-        double start=now_seconds(),maximumLateness=0,totalLateness=0,lastClock=0;size_t delivered=0;check(AudioQueueStart(queue,NULL),"queue start");
+        double start=now_seconds(),maximumLateness=0,totalLateness=0,lastClock=0;
+        double earlyOffset=0,lateOffset=0;size_t earlySamples=0,lateSamples=0;size_t delivered=0;check(AudioQueueStart(queue,NULL),"queue start");
         while(now_seconds()-start<audioDuration+10){@autoreleasepool{
             AudioTimeStamp time={0};check(AudioQueueGetCurrentTime(queue,NULL,&time,NULL),"queue sample clock");double clock=time.mSampleTime/pcm.mSampleRate;if(clock<0)clock=0;lastClock=clock;
+            /* Compare change in wall/queue offset after startup, not the fixed
+             * HAL buffer lead at the end. Both quantities remain in evidence. */
+            double offset=now_seconds()-start-clock;
+            if(clock>=audioDuration*.05 && clock<audioDuration*.10){earlyOffset+=offset;earlySamples++;}
+            if(clock>=audioDuration*.90 && clock<audioDuration*.95){lateOffset+=offset;lateSamples++;}
             while(delivered<pictures.count && CMTimeGetSeconds(pictures.frames[delivered].pts)<=clock){
                 MovieFrame *frame=&pictures.frames[delivered];double pts=CMTimeGetSeconds(frame->pts),late=clock-pts;if(late>maximumLateness)maximumLateness=late;totalLateness+=late;
                 if(window){layer_submit(layer,frame,&scale);[view setMovieFrame:frame index:delivered];[host displayIfNeeded];[host flushWindow];require([view drawnFrameCount]==delivered+1,"CPU view draw callback");}
@@ -192,7 +198,8 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
             else usleep(2000);
         }}
         double elapsed=now_seconds()-start;check(AudioQueueStop(queue,true),"queue stop");check(AudioQueueDispose(queue,true),"queue dispose");
-        printf("MOVIE_SYNC mode=%s frames=%zu/%zu audio_queued=%zu audio_completed=%zu callbacks=%u rate=%.0f wall=%.6f audio_clock=%.6f clock_wall_drift_ms=%.3f max_delivery_late_ms=%.3f mean_delivery_late_ms=%.3f hardware=%d view_draws=%zu\n",window?"cpu-layer":"headless",delivered,pictures.count,audio.next/pcm.mBytesPerFrame,audio.completed/pcm.mBytesPerFrame,(unsigned)audio.callbacks,pcm.mSampleRate,elapsed,lastClock,(elapsed-lastClock)*1000,maximumLateness*1000,totalLateness*1000/pictures.count,hardware,window?[view drawnFrameCount]:0);
+        printf("MOVIE_SYNC mode=%s frames=%zu/%zu audio_queued=%zu audio_completed=%zu callbacks=%u rate=%.0f wall=%.6f audio_clock=%.6f clock_wall_drift_ms=%.3f max_delivery_late_ms=%.3f mean_delivery_late_ms=%.3f hardware=%d view_draws=%zu clock_wall_offset_ms=%.3f clock_relative_drift_ms=%.3f clock_early_samples=%zu clock_late_samples=%zu\n",window?"cpu-layer":"headless",delivered,pictures.count,audio.next/pcm.mBytesPerFrame,audio.completed/pcm.mBytesPerFrame,(unsigned)audio.callbacks,pcm.mSampleRate,elapsed,lastClock,(elapsed-lastClock)*1000,maximumLateness*1000,totalLateness*1000/pictures.count,hardware,window?[view drawnFrameCount]:0,(elapsed-lastClock)*1000,
+            earlySamples&&lateSamples?(lateOffset/lateSamples-earlyOffset/earlySamples)*1000:NAN,earlySamples,lateSamples);
         require(delivered==pictures.count && audio.completed==audio.bytes && !audio.error,"all streams consumed");require(fabs(elapsed-audioDuration)<1.0 && maximumLateness<0.1,"clock pacing/drift bound");
         sws_freeContext(scale);if(window){[host orderOut:nil];[host release];[view release];}
     }
