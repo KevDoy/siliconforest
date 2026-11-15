@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 
-def pending_hold(text):
+def pending_hold(text, install_reservation=False):
     active = {}
     owners = '[A-Z][A-Z0-9_-]*'
     agent_names = set(re.findall(r'^\S+\s+('+owners+r')[: ]', text, re.M))
@@ -24,7 +24,11 @@ def pending_hold(text):
             elif lower_body.startswith(('gpu tests postponed', 'postponed:')):
                 active.pop((owner, 'gpu-session'), None)
             elif lower_body.startswith('in ') and 'risky gpu test' in lower_body:
-                active[(owner, 'gpu-session')] = (line, [], owner)
+                # Some notices explicitly offer the slot to an install that
+                # claims gui.lock first. Only that locked installer may reserve
+                # the offer; an actual GPU run remains a separate hold below.
+                if not (install_reservation and 'skipped if an install starts' in lower_body):
+                    active[(owner, 'gpu-session')] = (line, [], owner)
             if lower_body.startswith('cancelled ') and 'no reboot' in lower_body:
                 active.pop((owner, 'explicit'), None)
                 active.pop((owner, 'reboot'), None)
@@ -78,8 +82,10 @@ def pending_hold(text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--log', type=Path, default=Path('runs/m1-coord/log.txt'))
+    ap.add_argument('--install-reservation', action='store_true',
+                    help='Caller holds gui.lock and may claim an explicitly offered future slot')
     args = ap.parse_args()
-    pending = pending_hold(args.log.read_text())
+    pending = pending_hold(args.log.read_text(), install_reservation=args.install_reservation)
     if pending:
         print('M1 SSH hold active; no connection attempted. '+pending)
         return 77

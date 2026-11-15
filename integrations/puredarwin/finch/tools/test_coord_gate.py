@@ -99,5 +99,16 @@ class HoldTests(unittest.TestCase):
         self.assertIsNotNone(gate.pending_hold(text))
         self.assertIsNone(gate.pending_hold(text+'W GFX2 M1 back in SiliconForest; recovered\n'))
 
+    def test_explicit_future_install_offer_requires_locked_reservation(self):
+        text = 'T GFX2 in ~2 min (gui.lock; skipped if an install starts): risky GPU test with UART\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text, install_reservation=True))
+        self.assertIsNotNone(gate.pending_hold(text+'U GFX2 risky GPU test over SSH: cube\n', install_reservation=True))
+
+    def test_install_offer_never_overrides_core_or_reboot(self):
+        text = 'T GFX2 in ~2 min (gui.lock; skipped if an install starts): risky GPU test\n'
+        for hold in ['U PERF core.lock: GUARDED INSTALL now\n', 'U GFX2 M1 REBOOT now\n']:
+            self.assertIsNotNone(gate.pending_hold(text+hold, install_reservation=True))
+
 if __name__ == '__main__':
     unittest.main()

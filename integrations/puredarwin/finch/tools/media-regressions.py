@@ -8,6 +8,7 @@ the installed providers are used; remaining staged dependencies are explicit.
 """
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -72,17 +73,22 @@ def main():
         if not providers[name].startswith(prefix):
             raise RuntimeError('Installed provider was overridden: '+name)
     commands = [('vt-'+codec, [str(a.hardware_stage/'bin/vt-software-test'),
-                               str(a.hardware_stage/'fixtures'/(codec+'.mp4'))])
+                               str(a.hardware_stage/'fixtures'/(codec+'.mp4'))], a.work)
                 for codec in ['h264', 'hevc']]
     commands += [('play-'+tone, [str(a.audio_stage/'bin/sf-afplay'),
-                                str(a.audio_stage/'fixtures'/tone)])
+                                str(a.audio_stage/'fixtures'/tone)], a.work)
                  for tone in ['tone.wav', 'tone-aac.m4a']]
     if a.extra_commands:
-        commands += [(row['name'], row['argv']) for row in json.loads(a.extra_commands.read_text())]
+        commands += [(row['name'], row['argv'], row.get('cwd', a.work))
+                     for row in json.loads(a.extra_commands.read_text())]
     programs = []
-    for name, argv in commands:
-        r = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=50)
-        programs.append(dict(name=name, returncode=r.returncode, stdout=r.stdout, stderr=r.stderr))
+    for name, argv, cwd in commands:
+        digest = hashlib.sha256(Path(argv[0]).read_bytes()).hexdigest()
+        start = time.monotonic()
+        r = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=50)
+        programs.append(dict(name=name, sha256=digest, seconds=round(time.monotonic()-start, 3),
+                             status='OK' if r.returncode == 0 else 'FAIL',
+                             returncode=r.returncode, stdout=r.stdout, stderr=r.stderr))
     appenv = {k: v for k, v in os.environ.items() if not k.startswith('DYLD_')}
     appenv.update(XDG_RUNTIME_DIR='/private/var/run/gpu-desktop', WAYLAND_DISPLAY='wayland-0')
     opens = []

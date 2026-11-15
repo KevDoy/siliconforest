@@ -33,7 +33,7 @@ def log(message):
 
 
 def gate():
-    subprocess.run([sys.executable, str(HERE/'coord-gate.py')], check=True)
+    subprocess.run([sys.executable, str(HERE/'coord-gate.py'), '--install-reservation'], check=True)
 
 
 def decoded(text):
@@ -62,6 +62,7 @@ def main():
     if (a.packet/'receipt.json').exists():
         raise ValueError('Packet already has a receipt; inspect it before any retry')
     baseline = {row['name']: row for row in json.loads(a.baseline.read_text())}
+    extras = {row['name']: row for row in json.loads(a.extra_commands.read_text())} if a.extra_commands else {}
     for codec in ['h264', 'hevc']:
         row = baseline['vt-'+codec+'-hardware']
         if row['status'] != 'OK' or row['returncode'] or len(decoded(row['stdout'])) != 300:
@@ -122,10 +123,28 @@ def main():
                 if (decoded(row['stdout']) != decoded(baseline['vt-'+codec+'-hardware']['stdout']) or
                         not re.search(r'VT_SUMMARY samples 300 pictures 300 errors 0 hardware 1\b', row['stdout'])):
                     raise ValueError('Hardware/PTS/pixel regression: '+codec)
+            expected = extras.get(row['name'], {})
+            if 'expected_sha256' in expected and row['sha256'] != expected['expected_sha256']:
+                raise ValueError('Framework-specific program bytes changed: '+row['name'])
+            if 'stage_expected_stdout' in expected:
+                skip = expected.get('skip_lines', 0)
+                if row['stdout'].splitlines()[skip:] != expected['stage_expected_stdout'].splitlines()[skip:]:
+                    raise ValueError('Output changed from qualified stage: '+row['name'])
+            if 'native_movie_frames' in expected:
+                actual = [list(values) for values in re.findall(
+                    r'^MOVIE_HEADLESS_DELIVER frame=(\d+) pts=([\d.]+).*?md5=([a-f0-9]{32})$', row['stdout'], re.M)]
+                if actual != expected['native_movie_frames'] or len(actual) != 900:
+                    raise ValueError('Movie frame order/PTS/pixels changed from native reference')
+                summaries = re.findall(r'^MOVIE_SYNC (.*)$', row['stdout'], re.M)
+                sync = dict(item.split('=', 1) for item in summaries[0].split()) if len(summaries) == 1 else {}
+                if (sync.get('hardware') != '1' or sync.get('frames') != '900/900' or
+                        sync.get('audio_queued') != '1440000' or sync.get('audio_completed') != '1440000' or
+                        sync.get('rate') != '48000' or abs(float(sync.get('clock_wall_drift_ms', 'inf'))) >= 100):
+                    raise ValueError('Movie hardware/HAL/clock regression')
         gate()
         with (a.packet/'compat.log').open('w') as output:
             r = subprocess.run(['integrations/puredarwin/macos-compat/tools/sf_compat_push.sh', 'check'],
-                               stdout=output, stderr=subprocess.STDOUT, timeout=90)
+                               stdout=output, stderr=subprocess.STDOUT, timeout=150)
         text = (a.packet/'compat.log').read_text()
         if r.returncode or text.count('COMPAT_VERDICT ok') != 18 or 'COMPAT_CHECK failed=0' not in text:
             raise ValueError('Compatibility regression')

@@ -36,8 +36,14 @@ require 300 hardware pictures per codec with the qualified PTS/pixels, play WAV
 and AAC through retained HAL, check exact executable process names, invoke
 `open -a` for Terminal and Activity Monitor with the actual desktop socket, and
 require the compatibility suite's 18/18 result. `--extra-commands` accepts
-reviewed JSON `{name,argv}` rows for framework-specific probes; these receive
-the same explicit dependency environment and a 50-second bound. Run the movie
+reviewed JSON `{name,argv}` rows for framework-specific probes; an optional
+`cwd` keeps relative-fixture programs in their own packet directory. These
+receive the same explicit dependency environment and a 50-second bound.
+`expected_sha256` binds a probe to previously exercised bytes, and
+`stage_expected_stdout` with `skip_lines` compares it to its qualified M1
+stage without asserting native equivalence. `native_movie_frames` requires all
+900 ordered native-reference PTS/hashes and the hardware/HAL/clock summary.
+Run the movie
 headless check after the audio/AVFoundation family is installed. App-open and
 process checks are not screen/scanout evidence: TERM5 owns that check and input.
 
