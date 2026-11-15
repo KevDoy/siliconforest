@@ -57,6 +57,7 @@ struct pd_iommu_domain {
 	unsigned int		type;		/* IOMMU_DOMAIN_DMA */
 	unsigned long		pgsize_bitmap;	/* SZ_16K */
 	struct pd_dart_stream	*pd_stream;
+	struct pd_dart_stream	*pd_mirror; /* display-subsystem second IOMMU, optional */
 	u64			pd_mask;	/* input-size mask applied to addresses */
 };
 
@@ -86,7 +87,8 @@ void pd_iommu_group_put(struct iommu_group *group);
 int pd_iommu_group_for_each_dev(struct iommu_group *group, void *data,
 				int (*fn)(struct device *, void *));
 
-/* of_dma_configure(): binds from np's `iommus`. 0, or -ENODEV when np names no DART. */
+/* of_dma_configure(): binds one or two T8103 `iommus` specs as one domain;
+ * malformed/unavailable specs fail closed, never as physical DMA. */
 int pd_of_dma_configure(struct device *dev, struct device_node *np, bool force_dma);
 
 /* ---- DMA API ---- */

@@ -11,9 +11,19 @@ build/retire_test: test/retire_test.c src/pd_dart_table.c include/pd_dart_table.
 	mkdir -p build
 	$(CC) $(CFLAGS) -Iinclude -o $@ test/retire_test.c src/pd_dart_table.c
 
-test: build/table_test build/retire_test
+build/group_test: test/group_test.c src/pd_dart_table.c include/pd_dart_table.h include/pd_dart_retire.h include/pd_dart_group.h include/pd_dart_pair.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -Iinclude -o $@ test/group_test.c src/pd_dart_table.c
+
+build/spec_test: test/spec_test.c include/pd_dart_spec.h ../m1-gpu-dt/src/dispdt.c ../m1-gpu-dt/src/dispdt.h
+	mkdir -p build
+	$(CC) $(CFLAGS) -Iinclude -I../m1-gpu-dt/src -o $@ test/spec_test.c ../m1-gpu-dt/src/dispdt.c
+
+test: build/table_test build/retire_test build/group_test build/spec_test
 	./build/table_test
 	./build/retire_test
+	./build/group_test
+	./build/spec_test
 
 clean:
 	rm -rf build

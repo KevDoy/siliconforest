@@ -151,3 +151,36 @@ code, timeout/poison retry, unreachable tables and invalid-range refusal,
 under ASan/UBSan. The full DCP SDK bundle builds. These are source/SDK
 checks; this newer lifetime implementation is not in installed USB04 and
 no injected hardware-failure or external-display runtime is claimed.
+
+### Mirrored display DMA domains (SF-AF source)
+
+A device may now bind both T8103 `iommus` entries, with Linux's one-cell
+SID or five-cell SID/start64/length64 arguments, including `apple,dma-range`
+consumer override. All declared windows must contain the backend's fixed
+0x10000000–0x90000000 allocator aperture; narrower/aliased windows are refused.
+Malformed/extra/duplicate/unavailable entries are rejected; a live
+domain cannot be rebound. The native backend has room for the four
+internal/external display DART blocks and eight streams. It still requires
+valid, powered, firmware-provisioned inherited tables; this does not power
+an external DART or invent its TTBR/firmware IOVA.
+
+Paired IOVA allocation finds one run free in both bitmaps and reserves it
+in both under the same native lock. Every coherent/page/SG/resource map,
+flush, undo and free follows the whole domain. Both tables and invalidates
+must complete before the address is published. A peer map failure undoes
+only the successful first mapping and preserves any pre-existing peer
+firmware PTE. Allocation cleanup retires only successfully mapped pages.
+Either stream's retirement failure retains all backing and both IOVAs.
+Translations used by the PRIME check must agree in both DARTs.
+
+`make test` checks 524,288 paired and 2,048 single-bitmap cases, production
+table pairs, partial rollback around a foreign peer PTE, and map/flush/
+retirement failure in either stream, in addition to the 512 retirement
+cases. A separate test feeds all three real display-builder five-cell
+bindings into the production aperture parser and covers malformed, narrow,
+unaligned and overridden windows. Full PDDcp SDK build passes. These are
+host models and SDK evidence;
+no external DART/framebuffer mapping or second output has run on the M1.
+External topology publication and native PHY/mux/Type-C bindings are still
+required, and all declared streams must stay powered while shared buffers
+exist. USB04 remains the installed collection.

@@ -41,6 +41,8 @@
 #include "pd_dart.h"
 #include "pd_dart_table.h"
 #include "pd_dart_retire.h"
+#include "pd_dart_pair.h"
+#include "pd_dart_spec.h"
 
 /* apple-dart.c, T8020 */
 #define DART_PARAMS1                   0x00
@@ -70,12 +72,12 @@
  * (vm-size / Linux's iommus window 0xfc000000). A slot that is not empty when the stream
  * is opened is left alone entirely.
  */
-#define WINDOW_LO      0x10000000ULL
-#define WINDOW_HI      0x90000000ULL
+#define WINDOW_LO      PD_DART_WINDOW_LO
+#define WINDOW_HI      PD_DART_WINDOW_HI
 #define WINDOW_PAGES   ((WINDOW_HI - WINDOW_LO) >> PD_DART_PAGE_SHIFT)
 
-#define MAX_DARTS      2
-#define MAX_STREAMS    4
+#define MAX_DARTS      4
+#define MAX_STREAMS    8
 #define MAX_FOREIGN    24 /* table pages that were there before us, mapped by physical address */
 #define MAX_OWNED      80 /* table pages of ours: one per first-level slot we fill */
 
@@ -292,7 +294,6 @@ Dart *dartFor(const char *path, uint64_t regsPhys)
     return free;
 }
 
-inline bool busyGet(pd_dart_stream *s, uint64_t page) { return s->busy[page >> 3] & (1u << (page & 7)); }
 inline void busySet(pd_dart_stream *s, uint64_t page, bool v)
 {
     if (v)
@@ -508,43 +509,39 @@ int pd_dart_poisoned(struct pd_dart_stream *s)
     return value;
 }
 
-int pd_dart_iova_alloc(struct pd_dart_stream *s, uint64_t size, uint64_t *iova)
+int pd_dart_iova_alloc_pair(struct pd_dart_stream *a,struct pd_dart_stream *b,uint64_t size,uint64_t *iova)
 {
-    uint64_t pages = (size + PD_DART_PAGE - 1) >> PD_DART_PAGE_SHIFT, run = 0;
-    int ret = -ENOSPC;
-
-    if (!s || !iova || !size || size>WINDOW_HI-WINDOW_LO || !pages || pages > WINDOW_PAGES)
-        return -EINVAL;
+    if (!a || a==b || !iova || !size || size>WINDOW_HI-WINDOW_LO)return -EINVAL;
+    uint64_t pages=(size+PD_DART_PAGE-1)>>PD_DART_PAGE_SHIFT,first=0;
     IOLockLock(gLock);
     if (anyPoisoned()) { IOLockUnlock(gLock); return -EIO; }
-    for (uint64_t p = 0; p < WINDOW_PAGES; p++) {
-        run = busyGet(s, p) ? 0 : run + 1;
-        if (run == pages) {
-            uint64_t first = p + 1 - pages;
-            for (uint64_t q = first; q <= p; q++)
-                busySet(s, q, true);
-            *iova = WINDOW_LO + (first << PD_DART_PAGE_SHIFT);
-            ret = 0;
-            break;
+    int ret=pd_dart_pair_find(a->busy,b?b->busy:NULL,WINDOW_PAGES,pages,&first);
+    if (!ret) {
+        for (uint64_t q=first;q<first+pages;++q) {
+            busySet(a,q,true);if(b)busySet(b,q,true);
         }
+        *iova=WINDOW_LO+(first<<PD_DART_PAGE_SHIFT);
     }
-    IOLockUnlock(gLock);
-    return ret;
+    IOLockUnlock(gLock);return ret;
 }
-
-void pd_dart_iova_free(struct pd_dart_stream *s, uint64_t iova, uint64_t size)
+int pd_dart_iova_alloc(struct pd_dart_stream *s,uint64_t size,uint64_t *iova)
+{ return pd_dart_iova_alloc_pair(s,NULL,size,iova); }
+void pd_dart_iova_free_pair(struct pd_dart_stream *a,struct pd_dart_stream *b,uint64_t iova,uint64_t size)
 {
-    uint64_t pages = (size + PD_DART_PAGE - 1) >> PD_DART_PAGE_SHIFT;
-
-    if (!s || !size || size>WINDOW_HI-WINDOW_LO || iova < WINDOW_LO ||
-        iova>WINDOW_HI || (pages << PD_DART_PAGE_SHIFT)>WINDOW_HI-iova)
-        return;
+    if (!a || a==b || !size || size>WINDOW_HI-WINDOW_LO || iova<WINDOW_LO ||
+        iova>WINDOW_HI || (iova&(PD_DART_PAGE-1)))return;
+    uint64_t pages=(size+PD_DART_PAGE-1)>>PD_DART_PAGE_SHIFT;
+    if ((pages<<PD_DART_PAGE_SHIFT)>WINDOW_HI-iova)return;
     IOLockLock(gLock);
     if (anyPoisoned()) { IOLockUnlock(gLock); return; }
-    for (uint64_t q = 0; q < pages; q++)
-        busySet(s, ((iova - WINDOW_LO) >> PD_DART_PAGE_SHIFT) + q, false);
+    uint64_t first=(iova-WINDOW_LO)>>PD_DART_PAGE_SHIFT;
+    for (uint64_t q=first;q<first+pages;++q) {
+        busySet(a,q,false);if(b)busySet(b,q,false);
+    }
     IOLockUnlock(gLock);
 }
+void pd_dart_iova_free(struct pd_dart_stream *s,uint64_t iova,uint64_t size)
+{ pd_dart_iova_free_pair(s,NULL,iova,size); }
 
 uint32_t pd_dart_check(struct pd_dart_stream *s, const char *when)
 {

@@ -76,6 +76,10 @@ int pd_dart_poisoned(struct pd_dart_stream *);
  */
 int pd_dart_iova_alloc(struct pd_dart_stream *s, uint64_t size, uint64_t *iova);
 void pd_dart_iova_free(struct pd_dart_stream *s, uint64_t iova, uint64_t size);
+/* Atomic reservation/reclamation of the same IOVA in two native streams;
+ * second may be NULL. Both allocations stay reserved on any poisoned DART. */
+int pd_dart_iova_alloc_pair(struct pd_dart_stream *,struct pd_dart_stream *,uint64_t size,uint64_t *iova);
+void pd_dart_iova_free_pair(struct pd_dart_stream *,struct pd_dart_stream *,uint64_t iova,uint64_t size);
 
 /* The DART's error register (read, never cleared); a flagged fault is logged with `when`. */
 uint32_t pd_dart_check(struct pd_dart_stream *s, const char *when);

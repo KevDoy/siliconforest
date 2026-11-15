@@ -469,3 +469,35 @@ output: `/nix/store/fakwnsdwpmqgh4iqfmgs1bcyyav9abma-puredarwin-dcp-0.1`.
 This newer source is not installed in USB04. Mirrored framebuffer IOVAs in
 both display DARTs, external topology, native PHY/mux/Type-C and actual
 external DCP/link/scanout are still required.
+
+### Mirrored framebuffer DMA source, 2026-11-15 03:54Z
+
+The display DMA adapter now consumes one or two complete T8103 IOMMU
+specs, reserves the same IOVA in both native bitmaps under one lock, and
+maps/flushes/unmaps the full domain for coherent, physical-page, SG and
+resource paths. It publishes only after both invalidates succeed. A peer
+map failure preserves a pre-existing firmware PTE; outer allocation
+cleanup clears only successfully mapped pages. Either stream's retirement
+failure preserves all backing and both address reservations. PRIME's
+translation check compares both banks. Capacity covers four DART blocks
+and eight streams; no TTBR or firmware IOVA is invented.
+
+ASan/UBSan passes 524,288 paired and 2,048 single-bitmap cases, actual table
+pairs, foreign-PTE-preserving rollback and both-stream map/flush/retire
+failure cases, plus the earlier table/512 retirement cases. Full SDK output:
+`/nix/store/7dcmfyxzsdzvgmam6w5ai5x1zmms35z6-puredarwin-dcp-0.1`.
+All declared DART streams must be valid/powered and retain their tables
+while shared buffers exist. These are source/SDK checks, not live external
+DMA. The current tree still publishes only the internal display path;
+external topology, real PHY/mux/Type-C providers and external DCP/link/
+scanout remain next work. USB04 remains installed.
+
+The initial mirrored-binding parser was too narrow (SID-only); source
+review caught the existing display builder's five argument cells before
+installation. It now accepts the actual one/five-cell forms and consumer
+aperture override, checks every property cell to reject malformed tails,
+and refuses unsupported windows rather than allocating beyond them. A
+host integration test passes all three bindings emitted by the actual
+internal display builder. The corrected SDK attempt also exposed a missing
+LinuxKPI u64-array reader; the final adapter uses its real u32-array reader
+and combines the pairs. The failed build receipt remains a failure.
