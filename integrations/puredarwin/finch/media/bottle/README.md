@@ -68,13 +68,32 @@ libraries and two Foundation/CF symbols;the local root snapshot is partial/stale
 so no clean static closure or general app ABI claim is made. The actual M1
 four-program capture is the execution evidence for this exact command.
 
-## Hardware AVD is a separate open gate
+## Hardware AVD: enabled and observed on the disk system
 
 ../audit-avd-config.py reads only a local SiliconForest record list,validates
-CRCs,and enumerates actual MH_FILESET members. The baseline disk collection
-already contains org.puredarwin.driver.PDAppleAVD;its config lacks pdavd=1.
-A filtered read of the current M1 also observes no pdavd argument/node.
+CRCs,and enumerates actual MH_FILESET members. The14 November baseline disk collection
+already contained org.puredarwin.driver.PDAppleAVD;its config lacked pdavd=1.
+A filtered M1 read at that time also observed no pdavd argument/node.
 PDAppleAVD::start returns early for absent/zero pdavd. The exact activation-only
 request is in runs/m1-coord/requests-for-VK.md;no kernel was built,installed or
 booted by this stream. First open additionally needs the separate **open-source
 MIT AVD** firmware image,not Apple's AVE firmware. Hardware decode remains open.
+
+Update15 November2026: GFX2 installed pdavd=1 and the open-source AVD image.
+The live device/flag/firmware are now present. `hardware-decode-v1` uses the
+staged media family with **the exact retained-PD-display-link CV variant**,
+and the actual disk kernel/device. H.264 and HEVC300-frame720p30 B-frame clips
+both complete through the Homebrew bottle with provider `hardware1`; every
+framemd5 record matches the bottle's software mode, Linux, and the Linux-built
+Nix control on M5. The Linux-built VT client also matches native M5's sorted
+PTS/dimensions/pixel hashes for all600 frames. Native reference packets are
+removed. Process-wall throughput (startup+hash output,normal desktop load,
+single trial) is179.6fps H.264 versus141.6software and121.0fps HEVC versus77.4.
+The actual required-hardware VT summaries report300 pictures/errors0/hardware1
+for each; callbacks are decode order,so consumers must reorder by PTS.
+Use hardware-fixtures.sh and hardware-report.py in the parent media directory.
+Receipts/qualification live in runs/sffinch/hardware-decode-v1/qualified.json
+and m5-hardware-media-v1-reference.json. The earlier absent-node finding above
+is historical,not the current decoder state. Framework installation has a
+separate per-provider cold-hash/backup/regression workflow;this hardware result
+alone does not claim an installed-framework swap or a GUI regression pass.

@@ -1,6 +1,6 @@
 # SF-AD — AVE encoder source-port study
 
-**Offline study, 14 November 2026. No kernel build, device access, firmware
+**Offline study, 14 November 2026; DPE clarification updated15 November. No AVE kernel build, AVE device access, firmware
 extraction, installation or encoder execution was performed.** The first target
 is the T8103/J293 M1. Keep the working PDAppleAVD decoder and audio stack.
 
@@ -58,6 +58,41 @@ They do not establish that AVE DMA, interrupts or firmware run on our M1.
 
 ## Apple-derived inputs: exact requirements and possible replacements
 
+### What “Acis DPE input unresolved” means
+
+It is a small **host-side hardware register initialization program**, not the
+encoder firmware and not simply a set of optional quality presets. For T8103,
+the `Acis_8103` input supplies one CAC-default and 39 CAC-8-bit
+`{register offset, bits to clear, bits to set}` entries. The reference applies
+them after power-on, checks the readback, and enables the DPE. Its normal source
+is a table in **AppleAVE2.kext**, not the ASC firmware iBoot preloads.
+
+**We cannot currently promise any encoding without it, including lower-quality
+encoding.** The driver's own comment says the option became enabled by default
+because every working encode needed it. `dpe_tunables=0` merely skips the entire
+programming/enable function and leaves reset defaults; returning zero there is
+not an encoder result. The reviewed M1 success used the correct Acis table.
+Another SoC's table failed readback on M1. Treat the missing input as a functional
+bring-up prerequisite, not a quality tradeoff. This does not prove that an
+independently developed initialization could never work; it means that neither
+successful output nor a safe reduced-function fallback has been demonstrated.
+See the pinned [driver's rationale and loader](https://github.com/aquarat/apple-m-series-ave-driver/blob/9ab14e45281e8f61fb499b760408028171a5f2b5/driver/ave_drv.c#L235)
+and [M1 differences](https://github.com/aquarat/apple-m-series-ave-driver/blob/9ab14e45281e8f61fb499b760408028171a5f2b5/docs/89-t8103-m1.md#2-the-port).
+
+**No demonstrated derivation from iBoot's remaining memory was found.** The
+preloaded ASC TEXT/DATA and its tunable records are different inputs; the driver
+notes that this firmware does not program the host DPE block. Nothing reviewed
+identifies the Acis host table inside those preloaded segments. Merely preserving
+them therefore does not resolve this dependency. If iBoot actually leaves the
+DPE programmed, an early, on-device capture of its powered register state could
+help develop an independent initializer. But that premise is unmeasured; a
+power-domain reset may already erase it, and final register values do not recover
+the original clear/set masks, ordering, or volatile/status-bit semantics. Reading
+unpowered or wrong-generation banks can reset the machine. Such a future capture
+needs the kernel/boot owner and must keep all runtime Apple-derived bytes private
+on the device. No MMIO access, memory dump, extraction, firmware copy or kernel
+change was performed for this update.
+
 The distinction between **ASC firmware tunables in DATA** and **host DPE
 register tables** is essential. An empty ASC table was used successfully in
 upstream's older M1 experiment; that experiment still used the Acis DPE table.
@@ -66,7 +101,7 @@ It does not prove the DPE data can be omitted.
 | Input in the current reference | Origin / current use | Owner-compliant route and limit |
 |---|---|---|
 | `apple/ave_h13g.bin` | Unwrapped AppleAVE2FW_H13G Mach-O, requested by `ave_fw_load()` and other identity/restore helpers | Do **not** fetch an IPSW, copy a Mac file or install this file. Adopt only the copy iBoot already loaded, identified by `pre-loaded` and `segment-ranges` (32-byte entries). Rewrite image-walk/validation paths to consume reserved segments and known protocol/layout facts. Whether all bytes needed for validation/restart remain in J293's preload must be measured; the upstream file loader cannot simply be called unchanged. |
-| `apple/ave-13.5-dpe-acis_8103.bin` | Host DPE settings from AppleAVE2.kext's `gs_sAVE_DPE_CfgSet_Acis_8103`, normally generated from a macOS13.5 `kernelcache.release.mac13g` (the extractor also finds the same set in the other13.5 kernelcaches). Acis has 0 CAT-default, 1 CAC-default and 39 CAC-8-bit entries. `AVEDPE01` stores three counts plus `{offset,clear,set}` triples. | **Unresolved input under current authorization.** No kernelcache extraction, old deleted header, other-SoC table or source-history copy is allowed as a shortcut. `dpe_tunables=0` bypasses this initialization in the code, but the cited T8103 success used the table; no equivalent-quality/stability result without it was found in the reviewed material. A future on-device derivation may study safely powered reset/iBoot register state and firmware behavior. One final register value does not reveal its clear/set masks, and iBoot preloading firmware does not prove it initialized the DPE. Neither a preload-only derivation nor a safe omission is established. |
+| `apple/ave-13.5-dpe-acis_8103.bin` | Host DPE settings from AppleAVE2.kext's `gs_sAVE_DPE_CfgSet_Acis_8103`, normally generated from a macOS13.5 `kernelcache.release.mac13g` (the extractor also finds the same set in the other13.5 kernelcaches). Acis has 0 CAT-default, 1 CAC-default and 39 CAC-8-bit entries. `AVEDPE01` stores three counts plus `{offset,clear,set}` triples. | **Unresolved functional prerequisite under current authorization.** No kernelcache extraction, old deleted header, other-SoC table or source-history copy is allowed as a shortcut. `dpe_tunables=0` skips initialization/enable; it does not establish even low-quality encoding. The source says every working encode needed it; the cited T8103 success used Acis. No successful omission or preload-memory derivation was found. An early private on-device register capture might inform independent initialization only if iBoot actually programmed and preserved the block, which is unmeasured. Final values alone do not reveal masks/order/status semantics. |
 | Pristine DATA / `apple/ave-13.5-h13g-data-pristine.bin` | Firmware DATA plus BSS and iBoot fills, used for owned DATA/restart. The T8103 reference DATA span is0x128000; actual placement must come from the live ADT. On stock-m1n1 J274 Linux overwrote the preload; the Linux solution builds DATA from the firmware **file**. | Reserve/copy this boot's cold DATA before allocator use or first ASC start, retain it privately on-device, restore only after proven quiescence. Do not dump it to Linux/M5/repository. If already overwritten, fail and require a fresh boot with a proper handoff; a disk firmware file or another machine's dump is outside scope. Check that our boot memory reservation actually covers both segments before any driver experiment. |
 | ASC tunables (`TUNS`/`TUNZ`) and tag fills (`CpAd`, `WrAd`, `IOBA`, `SOC_`) | iBoot writes fields in DATA. The image has an empty ASC-tunable table; upstream reconstructed T8103 DATA with that table when its live copy was gone. | Prefer the exact cold preload. A deliberate empty-table reconstruction would need the corresponding preloaded image bytes and separately reviewed validation, not borrowed H13S values. Upstream's successful empty-ASC result does not authorize skipping DPE tables. |
 | STKG stack-guard field | Per-boot iBoot value; an older research builder retained a sample cookie | Keep the current boot's value private with its DATA snapshot. Do not copy the research sample; no shared sample value is needed for the interface. |
