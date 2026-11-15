@@ -3193,7 +3193,7 @@ continues. AVE remains separately paused, with no build/probe/extraction.
 | Dock USB/Keychron | No native USB device or physical typing yet | Exact selected FL1100, native PCI admission/DMA/MSI, generic HID/read-only storage, shared-broker-preserving SDK; host allocator/controller/composition checks pass; USB collection unbuilt |
 | DP/dcpext/Samsung | No native HPD/EDID/external connector/output | DP-IN/NHI protocol, PHY/crossbar/resource/mailbox/DART helpers have source/host/SDK evidence; actual native provider/resource/route glue remains |
 | DESK K1–K13 | Only internal panel exists in recorded output inventory | Compositor per-output path ready in its own stream; kernel must publish real same-card connector/CRTC/planes/flip IDs/hotplug |
-| K14 pinch/rotation | Not installed or physically verified |776-byte version2 contract read and acknowledged; source/host/native SDK preparation pending, version1 fallback preserved by compositor |
+| K14 pinch/rotation | Not installed or physically verified |776-byte version2 producer/recognition, actual-decoder geometry/lifecycle ASan/UBSan tests and native SDK pass; compositor accepts old/new ABI |
 | Ten physical dock cycles | Not run | Software retrain or quarantined backing is not removal/replug proof |
 | Idle regression | Valid guarded29 repeat21:14:33–15:33, kernel2.196%oneCPU/machineidle98.310%; owner-overlap20:21 run discarded | Original AppKit slowdown cause unresolved; new desktop versions require new measurements |
 
@@ -3251,3 +3251,53 @@ benchmark reference is noted for an authorized Linux window with a separate
 uninterrupted allowance of up to20min, installed browser only, matched scale/
 viewport/renderer/power/QoS and raw scores; no extra reboot/install or invented
 Linux result. Optional AVD changes stay separate; no AVE work.
+
+### Offline K14 and DCP tunnel boundary prepared
+
+K14 now has source and a native PDM1SPIHID SDK, without any target execution.
+The existing two-finger decision emits pinch BEGIN/UPDATE/END/CANCEL instead of
+discarding it; normalized separation gives Q16 scale, integer CORDIC gives
+clockwise centidegree deltas, and centre motion uses libinput units. It keeps
+100ms count debounce and suppresses wheel/pointer motion during pinch. Physical
+lift ends it; click, another gesture/contact identity, controller reset or basic
+protocol fallback cancels it. The exact24-byte event/776-byte version2 ring has
+DESK's kind/scale/angle fields, with scale1 for swipes. The installed29 still has
+the old producer; no physical gesture or client delivery is claimed.
+
+Actual-decoder ASan/UBSan checks pass3601 independent angle vectors plus pinch
+in/out, rotation/wrap, centre motion, brief/long lift, third-finger/click/reset/
+basic cancellation, scroll exclusion and ABI offsets. Old pointer/scroll/stroke/
+three/four-finger swipe checks still pass. Initial click cancellation tests
+failed and led to an END→CANCEL correction; failures remain private. The native
+SDK `/nix/store/x6q4xlhpwh1fza7dzmbaqis3nvlin83g-puredarwin-m1-spi-hid-multitouch-0.1`
+builds, with constructed-test scratch storage on the heap. The new synthetic
+sysctl values2/-2/90 were not run on the M1. Details and qualification limits:
+[K14.md](../../../integrations/puredarwin/m1-trackpad-child/multitouch/K14.md).
+It requires a later isolated authorized kernel, not inclusion in the Ethernet
+diagnostic; allow roughly10min for boot/physical gesture checks/normal recovery.
+
+The DCP tunnel boundary now has a48-byte versioned native request and a
+PDDcp-local immutable epoch bridge to the actual pinned
+`apple_dcp_tb_dp_tunnel`. It admits a callback before attach returns, keeps full
+64-bit generation/owner/callback identity, forwards matching retries, rejects
+stale identity and blocks reactivation during detach. Actual driver errors stay
+errors; failed retirement keeps a failed epoch. Linux private node pointers
+remain local. The native provider must still retain actual connector/owner,
+serialize calls and establish power/shared-PHY/route ownership before this seam
+can be used. The helper publishes nothing and is currently uncalled.
+
+Actual-source host provider fixtures pass ABI/identity/generation/synchronous
+callback/retry/failure/retirement cases. Final native SDK
+`/nix/store/c3jsjqjgj65hn8k4ja59kq325pg9cp77-puredarwin-dcp-0.1` builds.
+The link map and actual final ARM64 bytes contain a direct BL from the bridge
+to the real Linux implementation. A name-only nm check failed because this SDK
+strips private local names; the earlier interpretation as removed code was
+wrong. Both SDK versions had the actual call. Failed checks and the corrected
+byte-level proof remain private. Retaining public entry points is explicit now;
+it does not turn the helper into a native provider.
+
+Offline dock USB allocation/controller/admission/composition and DP resource/
+mailbox/crossbar/notification fixtures also pass. One USB allocator invocation
+initially omitted its required prepared-source argument and failed before
+execution; the corrected run passes against the exact SDK source. No machine
+work, kernel installation, new AVE work or push accompanies these preparations.

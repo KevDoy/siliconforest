@@ -9,6 +9,31 @@ identifier that clashes with a LinuxKPI macro, and three stage-log lines.
 
 ## What is here
 
+Offline external-display preparation includes the48-byte private request ABI
+`include/pd_dcp_tunnel_request.h` and PDDcp-local immutable epoch bridge
+`kext/pd_dcp_tunnel_bridge.c`. It calls pinned `apple_dcp_tb_dp_tunnel` with the
+actual **local** connector; Linux device-node pointers never cross the kext
+boundary. No native provider, route graph, generic PHY/mux consumer or external
+connector is published by this helper. It is uninstalled and cannot light a display.
+
+The future native provider must retain its real connector and owner, prove
+power/shared-TBT-lease ownership and serialize requests before calling it.
+Each epoch keeps one full64-bit generation and immutable callback identity,
+admits synchronous activation before attach returns, allows matching provider
+retries and blocks stale owner/generation/callback/context changes. Detach
+prevents reactivation and closes callbacks after the actual driver returns;
+failed retirement retains the failed epoch. Epochs are never rebound/recycled.
+The pinned driver's callback-drain contract is a dependency, not a hardware
+drain observation. Native provider teardown and power-loss ordering remain required.
+
+`python3 host-test/tunnel-bridge.py` compiles and executes the actual bridge
+under ASan/UBSan with an explicit fake Linux provider: bad ABI, owner/generation
+identity, synchronous callbacks, matching retries, busy/address-in-use replies,
+callback errors and failed/complete detach. Native SDK compilation is separate.
+Bridge entries are retained against dead stripping so their direct Linux
+target must resolve in PDDcp; no cross-kext success stub or unresolved private
+KPI qualifies as a provider. Machine trials remain paused by the owner.
+
 | Path | What |
 | --- | --- |
 | `include/pd_dcp_compat.h` | Force-included in front of every driver file: names Linux 7.2 has and the layer lacks or spells differently. Each entry says which |

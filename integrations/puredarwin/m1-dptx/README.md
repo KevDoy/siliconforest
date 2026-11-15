@@ -12,6 +12,13 @@ external stream. The display PIODMA uses stream 4 of the display DART; it
 must not be confused with the second ADT register bank. The resource plan
 is not yet a synthetic device tree or a driver attachment.
 
+The offline PDDcp tunnel request/epoch bridge in `../m1-dcp` now compiles the
+actual `apple_dcp_tb_dp_tunnel` call behind a versioned native48-byte ABI and
+immutable callback generation. Actual-source host tests cover identity,
+synchronous activation and retirement/error paths. This closes a C ABI boundary,
+not the missing native provider publication or route/PHY/resource graph. No
+DP trial is scheduled while the owner has paused the machine.
+
 The actual directly ported T8103 DP AUX/link-rate and Thunderbolt pixel
 clock programs live in `../m1-atcphy`; Thunderbolt DP-IN lifecycle/handshake
 lives in `../m1-thunderbolt`. Their host tests do not establish a trained
