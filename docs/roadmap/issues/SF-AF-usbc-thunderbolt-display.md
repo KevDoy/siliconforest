@@ -2920,3 +2920,30 @@ code UUID among58 executable modules, with zero overlaps. These are build
 results, not a hardware trace or packet result. The purpose of the next trial
 is to distinguish native packet submission, real tail/head advancement and
 CPU-visible completion before choosing another functional change.
+
+
+### PCIe-C CPU cache mapping follow-up, uninstalled candidate
+
+Pinned Linux T8103 DT marks the internal PCIe controller dma-coherent but
+omits that declaration on apciec1. This is a source clue, not a readout of the
+running Linux device's DMA flags. The exact installed kernel source was located
+from its native derivation: IODMACommand, IOBufferMemoryDescriptor,
+IOMemoryDescriptor, ARM pmap and proc_reg sources match the inspected copies
+byte for byte. IODMACommand's mapped synchronize path walks copy buffers or
+returns for a cursor; it does not perform CPU cache maintenance. Thus retaining
+native synchronize calls alone does not establish noncoherent DMA visibility.
+The cached shared-ring and bounce mappings remain a plausible packet failure
+cause; the bounded CIO38TRACE control is unchanged and has not run yet.
+
+A separate private Ethernet SDK requests kIOMapWriteCombineCache for both
+allocator-owned coherent storage and native bounce buffers. In this frozen
+XNU pmap, WC DRAM uses normal noncacheable memory, permitting packet byte
+copies; inhibit-cache DRAM uses device memory. The candidate keeps complete
+owned pages, real IOMapper/IODMACommand translation and all existing refusal
+and retention paths, and adds explicit DSB SY ordering around DMA copies.
+Its property labels the requested CPU cache policy, not a measured PTE mode.
+Only pd_fbsd_os.cpp differs from the trace SDK source. The native SDK and
+actual allocator fixtures for flags, whole-page zeroing, identity and failure
+cleanup pass; all six repository checks pass. No collection, boot, page-table
+readout or Ethernet fix is claimed. The initial source-shape refusal is retained
+in private receipts. This candidate is excluded from the pending trace boot.

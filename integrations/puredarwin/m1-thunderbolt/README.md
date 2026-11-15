@@ -530,3 +530,12 @@ PCI-specific ownership/MSI/late-BME checks remain in the PCI branch.
 `host-test/usb-composition.py <combined-native-source>` exercises preservation
 and missing-component refusal. A detached SDK built without the broker was
 caught before any USB collection or boot and is not hardware-ready.
+
+
+`build-ethernet-noncoherent-kext.nix` is a separate, uninstalled candidate.
+It requests normal noncacheable WC RAM for the actual owned coherent and
+bounce buffers, retains native DMA translation, and orders copies with DSB SY.
+Frozen XNU mapped-command synchronization does not itself flush CPU caches.
+This variant native-builds and its actual allocator fixtures pass; the pending
+trace collection excludes it. CPU mapping policy is a source hypothesis until
+a real device trial establishes descriptor and packet behavior.
