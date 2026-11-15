@@ -2977,3 +2977,31 @@ the earlier cached/two-millisecond detached USB candidates. No USB collection
 or boot has occurred. These uninstalled changes cannot explain the currently
 reported idle-load regression; that cause remains unresolved. CIO38TRACE
 remains unchanged and waits behind TERM8's guarded core pipeline.
+
+
+### Dock DP integration: preserve TBT mode and distinguish route indices
+
+Pinned dptxep.c's activate callback explicitly keeps the ATC PHY in TBT/USB4
+mode for a tunnel. It wakes DP-IN through dcp_tunnel_dpin_activate only when
+DCP sends ACTIVATE; waking it earlier is documented there to hang the machine.
+Thus a dock DP trial must not switch the shared physical PHY to direct DP
+alt mode. The matching callback must carry the real CM generation and queue
+DCP/provider work outside the Linux domain lock, as the prepared native NHI
+callback contract already requires. Those owner callbacks remain uninstalled.
+
+The reference's dcp_dptx_connect distinguishes upstream RemotePort core from
+downstream DFP address: direct DPPHY=0, DPIN0=1, DPIN1=2. Port1's physical
+ATC/DPTX selector is1; this is not permission to substitute1 for the actual
+root DP-IN index or CM port number. Existing native dp_index derives the
+index from the real root switch's DP-IN order. The J293 DT supplies dcpext
+routes for both Type-C ports, phy/mux arrays and apple,typec-dptx-phys=<0 1>;
+only the owner's port1 is the present target. The prepared crossbar program
+and resource planner must consume these distinct values at their actual APIs.
+
+The old DCP README's claim that J293 has only one DCP was corrected: only the
+internal processor is currently published by SiliconForest. Physical dcpext
+exists; its T8103 IOMFB path is distinct from later-chip dcpext_scanout stubs.
+No route owner, external firmware boot, HPD, link training, EDID, connector or
+second output is established by this source review. DESK K1–K13 still waits
+for the real kernel output. The immediate hardware path remains I210 DHCP,
+then the attached dock keyboard, before activating the external pipeline.

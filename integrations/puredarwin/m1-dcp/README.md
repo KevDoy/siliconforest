@@ -90,7 +90,7 @@ Not built, with the reason J293 does not reach them (`kext/pd_dcp_linux.c`, part
 
 | File | Entry points stubbed | Why unreachable here |
 | --- | --- | --- |
-| `dcpext_scanout.c`, `dcpext_drm.c` | `dcpext_scanout_terminal/requested/invalidate/link_restored/register/fault` | external-display scanout; callers test `dcp->external` or are firmware 14.7 paths; J293 has one DCP, `apple,dcp`, internal |
+| `dcpext_scanout.c`, `dcpext_drm.c` | `dcpext_scanout_terminal/requested/invalidate/link_restored/register/fault` | later-chip external scanout; callers test `dcp->external` or are firmware 14.7 paths. The current published tree has only internal `apple,dcp`; J293 also has physical dcpext. Its T8103 external output uses the normal IOMFB path and still needs native topology, PHY/crossbar, DMA and tunnel ownership |
 | `j613_dcp_activate.c` | `apple_j613_25g83_coldplug`, `apple_t8122_25g83_board`, `apple_j613_25g83_clock_hz` | J613/T8122 with firmware 25G83 only |
 | `audio.c`, `av.c` | none | `CONFIG_DRM_APPLE_AUDIO` off |
 
