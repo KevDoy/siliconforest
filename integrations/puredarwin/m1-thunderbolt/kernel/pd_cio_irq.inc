@@ -59,3 +59,24 @@ extern "C" int pd_cio_nhi_irqs_resolve(int out[25])
     OSSafeReleaseNULL(ca);OSSafeReleaseNULL(sa);OSSafeReleaseNULL(node);OSSafeReleaseNULL(dart);
     IOLockUnlock(gLock);return ret;
 }
+/* Real transport records, never inferred from an IRQ registration marker.
+ * The normal engine increments taken in the primary and handled at actual
+ * dispatch; the private copy makes the latter increment atomic as well.
+ * This is a point-in-time observation, not an interrupt/work drain proof.
+ */
+extern "C" int pd_cio_mailbox_irq_snapshot(int rx,int tx,uint32_t out[8])
+{
+    if(!out || __atomic_load_n(&gInitState,__ATOMIC_ACQUIRE)!=2)return -EINVAL;
+    IOLockLock(gLock);Irq *records[2]={irqFor(rx),irqFor(tx)};int error=0;
+    if(!records[0] || !records[1] || records[0]==records[1] ||
+       records[0]->vector!=895 || records[1]->vector!=892)error=-ENODEV;
+    for(unsigned n=0;!error && n<2;++n){
+        auto q=records[n];
+        SInt64 taken=__atomic_load_n(&q->taken,__ATOMIC_RELAXED);
+        UInt64 handled=__atomic_load_n(&q->handled,__ATOMIC_RELAXED);
+        if(taken<0 || (UInt64)taken>UINT32_MAX || handled>UINT32_MAX || q->depth<0){error=-EOVERFLOW;break;}
+        out[n*4]=q->registered;out[n*4+1]=q->depth;
+        out[n*4+2]=(uint32_t)taken;out[n*4+3]=(uint32_t)handled;
+    }
+    IOLockUnlock(gLock);return error;
+}

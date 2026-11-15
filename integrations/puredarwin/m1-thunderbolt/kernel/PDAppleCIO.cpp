@@ -383,6 +383,30 @@ int PDAppleCIO::readSnapshot()
  setProperty("m3-live-state",rc.r32(0xa8),32);
  setProperty("nhi-interrupt-enable-live",nhi.r32(0xd0010),32);
  setProperty("nhi-interrupt-status-live",nhi.r32(0xd0000),32);
+ pd_cio_rtkit_status transport={};int transportRet=pd_cio_rtkit_snapshot(rtkit,&transport);
+ setProperty("rtkit-transport-error",(uint32_t)(transportRet<0?-transportRet:transportRet),32);
+ setProperty("rtkit-transport-valid",transportRet==0);
+ if(!transportRet){
+  setProperty("rtkit-protocol",transport.protocol,32);
+  setProperty("rtkit-ap-power",transport.ap_power,32);setProperty("rtkit-iop-power",transport.iop_power,32);
+  setProperty("rtkit-running",transport.running!=0);setProperty("rtkit-crashed",transport.crashed!=0);
+  setProperty("rtkit-shutting-down",transport.shutting_down!=0);
+  setProperty("rtkit-syslog-entries",transport.syslog_entries,32);
+  setProperty("rtkit-syslog-message-bytes",transport.syslog_message_bytes,32);
+  setProperty("rtkit-syslog-buffer-bytes",transport.syslog_buffer_bytes,32);
+  setProperty("rtkit-syslog-mapped",transport.syslog_mapped!=0);
+  setProperty("rtkit-syslog-ack-count",transport.syslog_ack_count,32);
+  setProperty("rtkit-syslog-ack-errors",transport.syslog_ack_errors,32);
+  setProperty("rtkit-syslog-first-ack-error",transport.syslog_first_ack_error,32);
+  setProperty("rtkit-ioreport-ack-count",transport.ioreport_ack_count,32);
+  setProperty("rtkit-ioreport-ack-errors",transport.ioreport_ack_errors,32);
+  setProperty("rtkit-ioreport-first-ack-error",transport.ioreport_first_ack_error,32);
+  setProperty("rtkit-mailbox-active",transport.mailbox_active!=0);
+  setProperty("rtkit-mailbox-a2i-control",transport.a2i_control,32);
+  setProperty("rtkit-mailbox-i2a-control",transport.i2a_control,32);
+  setProperty("rtkit-mailbox-irq-enable",transport.mailbox_irq_enable,32);
+  setProperty("rtkit-mailbox-irq-state",transport.mailbox_irq_state,sizeof(transport.mailbox_irq_state));
+ }
  auto req=request(PD_USBC_PHY_SNAPSHOT);int phyRet=phy(req);
  setProperty("phy-query-error",(uint64_t)phyRet,32);
  auto typec=getProvider()?getProvider()->getProvider():NULL;
@@ -397,6 +421,7 @@ int PDAppleCIO::readSnapshot()
  setProperty("cio-tuning-error",(uint32_t)tuneRet,32);
  setProperty("cio-tuning-valid",tuneRet==0);
  int ret=pd_cio_cm_snapshot(cm);
+ if(!ret && transportRet)ret=transportRet<0?-transportRet:transportRet;
  setProperty("link-query-error",(uint64_t)ret,32);
  return phyRet?phyRet:ret?ret:tuneRet?tuneRet:control==kIOReturnSuccess?0:EIO;
 }

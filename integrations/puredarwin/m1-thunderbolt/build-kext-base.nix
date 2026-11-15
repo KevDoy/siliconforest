@@ -39,9 +39,13 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     cat ${./kernel/pd_cio_pmgr.inc} >> "$dest/pd_soc.cpp"
     cp -R ${../m1-gpu-rtkit/src} "$dest/rtkit"
     chmod -R u+w "$dest/rtkit"
+    # Keep ACK contents, ordering and return values; count their actual
+    # results in this controller's own engine. Shared RTKit sources stay put.
+    python3 ${./tools/observe_rtkit.py} "$dest/rtkit/rtkit.c"
     # This controller owns 24 NHI lines + DART + its two mailbox lines.
     # Keep all other RTKit consumers' private engines unchanged.
     substituteInPlace "$dest/rtkit/PDRtkitPlatform.cpp" --replace-fail '#define MAX_IRQS  16' '#define MAX_IRQS  64'
+    substituteInPlace "$dest/rtkit/PDRtkitPlatform.cpp" --replace-fail 'q->handled++;' '__atomic_add_fetch(&q->handled,1,__ATOMIC_RELAXED);'
     cat ${./kernel/pd_cio_irq.inc} >> "$dest/rtkit/PDRtkitPlatform.cpp"
     ${pkgs.lib.optionalString connectionManager ''
       cm="$out/src/Kernel/Extensions/PDThunderboltCM"

@@ -7,7 +7,11 @@
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/io.h>
+#include <linux/string.h>
 #include <linux/soc/apple/rtkit.h>
+#include <linux/soc/apple/mailbox.h>
+#include "rtkit-internal.h"
 #include "pd_rtkit_compat.h"
 #include "pd_cio_rtkit.h"
 #include "pd_apple_nhi.h"
@@ -17,7 +21,63 @@ struct pd_cio_rtkit {
     void *sram;
     uint64_t phys;
     size_t span;
+    struct { uint32_t count,errors,first_error; } ack[2];
 };
+void pd_cio_rtkit_observe_ack(void *engine,unsigned endpoint,int result)
+{
+    struct apple_rtkit *rtk=engine;
+    if(!rtk || !rtk->cookie || (endpoint!=2 && endpoint!=4))return;
+    struct pd_cio_rtkit *s=rtk->cookie;
+    // Init can enable reception before returning its handle. Count only
+    // the published real engine, whose lifetime the native owner retains.
+    if(__atomic_load_n(&s->rtk,__ATOMIC_ACQUIRE)!=rtk)return;
+    unsigned n=endpoint==2?0:1;
+    __atomic_add_fetch(&s->ack[n].count,1,__ATOMIC_RELAXED);
+    if(result){
+        __atomic_add_fetch(&s->ack[n].errors,1,__ATOMIC_RELAXED);
+        uint32_t none=0;
+        __atomic_compare_exchange_n(&s->ack[n].first_error,&none,(uint32_t)result,
+                                   false,__ATOMIC_RELAXED,__ATOMIC_RELAXED);
+    }
+}
+int pd_cio_rtkit_snapshot(struct pd_cio_rtkit *s,struct pd_cio_rtkit_status *out)
+{
+    if(!s || !out)return -EINVAL;
+    struct apple_rtkit *rtk=__atomic_load_n(&s->rtk,__ATOMIC_ACQUIRE);
+    if(!rtk)return -ENODEV;
+    struct apple_mbox *mbox=READ_ONCE(rtk->mbox);
+    if(!mbox || !mbox->regs || READ_ONCE(mbox->removing) ||
+       !READ_ONCE(mbox->active))return -ENODEV;
+    struct pd_cio_rtkit_status v={0};
+    v.protocol=READ_ONCE(rtk->version);
+    v.ap_power=READ_ONCE(rtk->ap_power_state);v.iop_power=READ_ONCE(rtk->iop_power_state);
+    v.running=apple_rtkit_is_running(rtk);v.crashed=READ_ONCE(rtk->crashed);
+    v.shutting_down=READ_ONCE(rtk->shutting_down);
+    size_t entries=READ_ONCE(rtk->syslog_n_entries),bytes=READ_ONCE(rtk->syslog_msg_size);
+    size_t buffer=READ_ONCE(rtk->syslog_buffer.size);
+    if(entries>255 || bytes>255 || buffer>s->span)return -EOVERFLOW;
+    v.syslog_entries=entries;v.syslog_message_bytes=bytes;v.syslog_buffer_bytes=buffer;
+    v.syslog_mapped=READ_ONCE(rtk->syslog_buffer.is_mapped) &&
+        READ_ONCE(rtk->syslog_buffer.iomem)!=NULL;
+    v.syslog_ack_count=__atomic_load_n(&s->ack[0].count,__ATOMIC_RELAXED);
+    v.syslog_ack_errors=__atomic_load_n(&s->ack[0].errors,__ATOMIC_RELAXED);
+    v.syslog_first_ack_error=__atomic_load_n(&s->ack[0].first_error,__ATOMIC_RELAXED);
+    v.ioreport_ack_count=__atomic_load_n(&s->ack[1].count,__ATOMIC_RELAXED);
+    v.ioreport_ack_errors=__atomic_load_n(&s->ack[1].errors,__ATOMIC_RELAXED);
+    v.ioreport_first_ack_error=__atomic_load_n(&s->ack[1].first_error,__ATOMIC_RELAXED);
+    v.mailbox_active=1;
+    // ACIO1's verified iop,m3wrap-v2-acio binding uses this exact M3 layout
+    // (pinned mailbox.c), not ASC offsets. These control reads do not pop a
+    // FIFO. No SEND/RECV message, SRAM byte or IRQ ACK register is read.
+    v.a2i_control=readl(mbox->regs+0x50);v.i2a_control=readl(mbox->regs+0x80);
+    v.mailbox_irq_enable=readl(mbox->regs+0x48);
+    if(v.a2i_control==UINT32_MAX || v.i2a_control==UINT32_MAX ||
+       v.mailbox_irq_enable==UINT32_MAX)return -EIO;
+    int error=pd_cio_mailbox_irq_snapshot(mbox->irq_recv_not_empty,
+                                         mbox->irq_send_empty,v.mailbox_irq_state);
+    if(error)return error;
+    *out=v;return 0;
+}
 static int setup(void *cookie,struct apple_rtkit_shmem *bfr)
 {
     struct pd_cio_rtkit *s=cookie;
@@ -47,9 +107,11 @@ int pd_cio_rtkit_boot(struct pd_cio_rtkit *s)
     if(!s)return -EINVAL;
     pd_rtkit_enter();
     if(s->rtk)return -EBUSY;
+    memset(s->ack,0,sizeof(s->ack)); // Previous engine/work was actually joined.
     int ret=pd_apple_mbox_bind(s->dev,0,"/arm-io/acio-cpu1");
     if(ret)return ret;
-    s->rtk=apple_rtkit_init(s->dev,s,NULL,0,&ops);
+    struct apple_rtkit *rtk=apple_rtkit_init(s->dev,s,NULL,0,&ops);
+    __atomic_store_n(&s->rtk,rtk,__ATOMIC_RELEASE);
     if(IS_ERR(s->rtk)){ret=PTR_ERR(s->rtk);s->rtk=NULL;return ret;}
     /* Keep the handle even after failure: the caller must drain it before
      * changing power/PHY. Boot does not imply NHI/router readiness. */

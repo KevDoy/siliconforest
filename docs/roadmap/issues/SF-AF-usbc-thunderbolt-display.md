@@ -2164,3 +2164,36 @@ on Darwin. No separate hardware boot is justified for this currently uninvoked
 PCI path. The next link investigation first checks whether firmware-log or
 IOReport acknowledgments/mailbox transport are stalled; it will expose control
 metadata only, with no firmware-byte extraction or guessed PHY programming.
+
+### RTKit ACK and mailbox observation: source/SDK, target pending
+
+The installed firmware logs repeatedly stop after Phase2. The next observation
+tests whether the native RTKit transport itself is stalled, rather than
+assuming every missing firmware message describes a PHY failure. In CIO's
+private staged RTKit copy, two exact syslog/IOReport ACK sites now record the
+result after the existing real `apple_rtkit_send_message` call. Contents,
+ordering, ACK policy and retries are unchanged. Per-engine counters record
+attempts, failures and the first nonzero return; init messages preceding handle
+publication are excluded. No message contents or firmware bytes are captured.
+
+The existing startup/privileged snapshot now reports protocol, actual AP/IOP
+power/running flags, syslog ring geometry/mapping state, those ACK results,
+and actual mailbox IRQ registration/depth/taken/dispatch counters. IRQ counts
+are atomic; registration/depth are read under the existing lock. These are
+point-in-time facts, not handler completion or a drain acknowledgment. The
+native owner retains/serializes the live M3 throughout the read. Three ordinary
+M3 mailbox controls (A2I50/I2A80/IRQ_ENABLE48) are read through the actual bound
+transport mapping; SEND/RECV message and IRQ ACK registers are excluded.
+
+The transform verifies both exact source sites before changing the private
+copy, leaves each real send call present once and leaves shared RTKit sources
+unchanged. Ordinary, enumeration and MSI native SDKs and all six repository
+checks pass. Final observation omits an unsynchronized rearm-pending flag;
+its eight IRQ words are RX then TX, each registered/depth/taken/dispatched.
+No new timer, periodic worker or NHI transaction is introduced. This code is
+not installed yet; CIO23 remains the qualified non-AVE baseline and rollback.
+The next candidate also carries the previously SDK-built PCI scan settling
+delay, which is uninvoked without a peer, and excludes endpoint mapper/MSI/
+driver admission. A normal Linux installation visit will read the same three
+mailbox controls against its active authorized TS3, without extra boots or
+firmware extraction.
