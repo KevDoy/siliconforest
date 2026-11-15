@@ -27,12 +27,15 @@ def main():
     ap.add_argument('--build', action='store_true')
     ap.add_argument('--gpu-presentation', action='store_true')
     ap.add_argument('--gpu-dirty-frames', action='store_true')
+    ap.add_argument('--gpu-export-cache', action='store_true')
+    ap.add_argument('--gpu-coalesce-ticks', action='store_true')
+    ap.add_argument('--gpu-context-cleanup', action='store_true')
     ap.add_argument('--font-quality', action='store_true', help='private fontconfig and face-preserving CoreText')
     ap.add_argument('--provider-overrides', type=Path,
                     help='JSON map of provider names to retained, qualified Nix output directories')
     args = ap.parse_args()
-    if args.gpu_dirty_frames and not args.gpu_presentation:
-        raise ValueError('GPU frame reuse requires GPU presentation')
+    if (args.gpu_dirty_frames or args.gpu_export_cache or args.gpu_coalesce_ticks or args.gpu_context_cleanup) and not args.gpu_presentation:
+        raise ValueError('GPU caches require GPU presentation')
     release = PurePosixPath(args.release)
     if release.parent != PurePosixPath('/private/var/db/sffx') or not release.name.replace('-', '').isalnum():
         raise ValueError('Expected one new simple release directory under /private/var/db/sffx')
@@ -70,6 +73,10 @@ def main():
             surface='import ./surface-gpu.nix', quartz='import ./quartzcore.nix {gpuPresentation=true;}',
             windowserver='import ./windowserver-ui.nix',
             appkit='import ./appkit-ui.nix {menuGeometry=true;preciseScroll=true;gpuPresentation=true;pasteboardProvider=true;}')
+        if args.gpu_context_cleanup or args.gpu_coalesce_ticks:
+            recipes['quartz'] = ('import ./quartzcore.nix {gpuPresentation=true;releaseContextResources='
+                + str(args.gpu_context_cleanup).lower() + ';coalesceNotifications='
+                + str(args.gpu_coalesce_ticks).lower() + ';}')
     if args.font_quality:
         recipes.update(fonts='import ./fontconfig.nix {prefix=' + json.dumps(str(release / 'fonts')) + ';}',
             coretext='import ./coretext.nix', onyx='import ./onyx-font.nix')
@@ -90,6 +97,9 @@ def main():
                     installed_media=True, skip_unchanged_transactions=False, provider_overrides=overrides,
                     gpu_presentation=args.gpu_presentation, gpu_vector_compare=args.gpu_presentation,
                     gpu_cache_lookups=args.gpu_presentation, gpu_dirty_frames=args.gpu_dirty_frames,
+                    gpu_export_cache=args.gpu_export_cache,
+                    gpu_coalesce_ticks=args.gpu_coalesce_ticks,
+                    gpu_context_cleanup=args.gpu_context_cleanup,
                     private_fonts=args.font_quality, precise_scroll=args.gpu_presentation,
                     known_limits=['video NV12 upload remains; no end-to-end zero-copy claim',
                                   'this exact prefix requires launcher, URL and quality qualification',

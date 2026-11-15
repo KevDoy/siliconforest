@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import time
 
@@ -78,6 +79,8 @@ def main():
     ap.add_argument('--precise-scroll', action='store_true', help='paired private finger pixel/phase provider and native-UI DOM control')
     ap.add_argument('--benchmark', choices=['speedometer', 'motionmark', 'jetstream'])
     ap.add_argument('--measure-fixture', action='store_true')
+    ap.add_argument('--fixture-repetitions', type=int, default=1,
+                    help='one to three separately timed measurements in the same browser')
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
@@ -88,6 +91,11 @@ def main():
     ap.add_argument('--font-config', help='private process fontconfig file')
     ap.add_argument('--gpu-dirty-frames', action='store_true', help='experimental generation-based GPU frame reuse')
     ap.add_argument('--presentation-seat', action='store_true', help='admit/focus/wake the owned fixture before presentation timing')
+    ap.add_argument('--profile-target', choices=['parent', 'content'], default='parent')
+    ap.add_argument('--profile-delay', type=float, default=2)
+    ap.add_argument('--gpu-export-cache', action='store_true')
+    ap.add_argument('--gpu-coalesce-ticks', action='store_true', help='experimental60Hz GPU notification batching')
+    ap.add_argument('--scene-reference', action='store_true')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
@@ -95,17 +103,22 @@ def main():
         raise ValueError('Supply both private surface-session and surface-broker paths')
     if args.expect_appkit_prefix and not args.sample_path:
         raise ValueError('AppKit provider verification requires --sample-path')
+    if args.gpu_coalesce_ticks and not args.gpu_presentation:
+        raise ValueError('GPU notification batching requires --gpu-presentation')
     if (args.native_drag or args.clipboard_empty or args.precise_scroll) and not args.native_ui:
         raise ValueError('Drag/clipboard seat checks require --native-ui admission')
     if args.profile_fixture and (not args.measure_fixture or not args.sample_path):
         raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
-    if args.presentation_seat and not args.measure_fixture:
-        raise ValueError('Presentation seat admission requires --measure-fixture')
+    if not 1 <= args.fixture_repetitions <= 3 or (args.fixture_repetitions != 1 and
+            (not args.measure_fixture or args.profile_fixture)):
+        raise ValueError('Repeated fixture timing requires --measure-fixture without diagnostic profiling')
+    if not 0 <= args.profile_delay <= 6:
+        raise ValueError('Fixture profiling delay must be0..6seconds')
     args.run.mkdir(parents=True, exist_ok=False)
     profile = args.run / 'profile'
-    profile.mkdir()
+    profile.mkdir(mode=0o700)
     home = args.run / 'home'
-    home.mkdir()
+    home.mkdir(mode=0o700)
     prefs = {'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False,
              'browser.preonboarding.enabled': False, 'browser.startup.homepage_override.mstone': 'ignore',
              'startup.homepage_welcome_url': '', 'startup.homepage_welcome_url.additional': '',
@@ -144,7 +157,7 @@ def main():
         env['SFFX_GPU_PRESENT'] = '1'
     else:
         env.pop('SFFX_GPU_PRESENT', None)
-    for active, name in [(args.gpu_vector_compare, 'SFFX_GPU_VECTOR_COMPARE'), (args.gpu_cache_lookups, 'SFFX_GPU_CACHE_LOOKUPS'), (args.gpu_dirty_frames, 'SFFX_GPU_DIRTY_FRAMES')]:
+    for active, name in [(args.gpu_vector_compare, 'SFFX_GPU_VECTOR_COMPARE'), (args.gpu_cache_lookups, 'SFFX_GPU_CACHE_LOOKUPS'), (args.gpu_dirty_frames, 'SFFX_GPU_DIRTY_FRAMES'), (args.gpu_export_cache, 'SFFX_GPU_EXPORT_CACHE'), (args.gpu_coalesce_ticks, 'SFFX_GPU_COALESCE_TICKS')]:
         if active:
             env[name] = '1'
         else:
@@ -187,6 +200,8 @@ def main():
                   sandbox_disabled=args.no_sandbox, gpu_surfaces=args.gpu_surfaces, gpu_presentation=args.gpu_presentation,
                   gpu_vector_compare=args.gpu_vector_compare,gpu_cache_lookups=args.gpu_cache_lookups,
                   gpu_dirty_frames=args.gpu_dirty_frames, font_config=args.font_config,
+                  gpu_export_cache=args.gpu_export_cache,
+                  gpu_coalesce_ticks=args.gpu_coalesce_ticks,
                   synthetic_input=args.presentation_seat or args.scroll_fixture or bool(args.benchmark) or args.native_ui or args.panels, prefs=prefs,
                   diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
                   io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
@@ -194,6 +209,8 @@ def main():
                                     service=env.get('SFFX_IOSURFACE_SERVICE'))
     owned = {}
     start = time.monotonic()
+    wall_start = time.time()
+    result['launcher_wall_start_ms'] = wall_start * 1000
     early_captured = False
     gpu_sampled = False
     with (args.run / 'firefox.log').open('w') as log:
@@ -262,6 +279,9 @@ def main():
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current) if pid in current})
                                 result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned,
                                     result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix)
+                            if args.presentation_seat:
+                                from presentation_seat import admit
+                                result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json', fixture=args.measure_fixture)
                             def snapshot():
                                 current = process_identities()
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current)
@@ -275,12 +295,14 @@ def main():
                             if args.benchmark:
                                 from benchmark import measure
                                 client.socket.settimeout(max(1, min(90, deadline - time.monotonic())))
-                                result['benchmark'] = measure(client, args.benchmark, deadline, args.run / 'benchmark.json')
+                                result['benchmark'] = measure(client, args.benchmark, deadline, args.run / 'benchmark.json',
+                                    seat_activity=args.presentation_seat)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.browse_stability:
                                 from stability import measure
                                 client.socket.settimeout(max(1, min(25, deadline - time.monotonic())))
-                                result['stability'] = measure(client, args.run / 'stability.json', deadline, snapshot)
+                                result['stability'] = measure(client, args.run / 'stability.json', deadline, snapshot,
+                                    seat_activity=args.presentation_seat)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.jit_probe:
                                 from jit_probe import measure
@@ -324,26 +346,36 @@ def main():
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
-                                if args.presentation_seat:
-                                    from presentation_seat import admit
-                                    result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json')
                                 client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
                                 profiler = None
                                 if args.profile_fixture:
                                     import threading
                                     cancel_profile = threading.Event()
-                                    profile_result = dict(diagnostic_only=True, timing_qualification=False)
+                                    profile_result = dict(diagnostic_only=True, timing_qualification=False,
+                                                          target=args.profile_target, delay=args.profile_delay)
                                     target_pid = result['marionette']['capabilities']['moz:processID']
+                                    if args.profile_target == 'content':
+                                        client.command('Marionette:SetContext', {'value': 'chrome'})
+                                        target_pid = client.command('WebDriver:ExecuteScript', dict(script='''
+                                          const w=Services.wm.getMostRecentWindow("navigator:browser"),b=w.gBrowser.selectedBrowser;
+                                          for(const read of [()=>b.browsingContext.currentWindowGlobal.domProcess.osPid,
+                                              ()=>b.frameLoader.remoteTab.osPid,()=>b.browsingContext.currentWindowGlobal.osPid]){
+                                            try{const pid=read();if(Number.isInteger(pid)&&pid>0)return pid;}catch(e){}
+                                          }return null;''', args=[], newSandbox=False))
+                                    current = process_identities()
+                                    if target_pid not in descendants(p.pid, current):
+                                        raise RuntimeError('Profiler target is not in the owned browser family')
+                                    profile_result['pid'] = target_pid
                                     target_identity = process_identities().get(target_pid)
                                     def profile_fixture():
-                                        if cancel_profile.wait(2):
+                                        if cancel_profile.wait(args.profile_delay):
                                             return
                                         if target_identity is None or process_identities().get(target_pid) != target_identity:
-                                            profile_result['error'] = 'Owned parent identity changed'
+                                            profile_result['error'] = 'Owned profiler target identity changed'
                                             return
                                         try:
                                             sampled = subprocess.run([args.sample_path, str(target_pid), '3', '5', '-file',
-                                                str(args.run / 'fixture-parent-profile.txt')], capture_output=True, text=True, timeout=12)
+                                                str(args.run / ('fixture-' + args.profile_target + '-profile.txt'))], capture_output=True, text=True, timeout=12)
                                             profile_result.update(status=sampled.returncode, stderr=sampled.stderr)
                                         except subprocess.TimeoutExpired:
                                             profile_result['error'] = 'Sampler timeout'
@@ -358,7 +390,24 @@ def main():
                                         profiler.join(timeout=15)
                                         result['fixture_profile'] = profile_result
                                 result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                if args.fixture_repetitions > 1:
+                                    fields = ['fixture_measurement', 'fixture_cpu_before', 'fixture_cpu_after']
+                                    result['fixture_repetitions'] = [{key: result[key] for key in fields}]
+                                    for index in range(1, args.fixture_repetitions):
+                                        client.socket.settimeout(max(1, min(16, deadline-time.monotonic())))
+                                        entry = dict(fixture_cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()))
+                                        entry['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                        entry['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                        result['fixture_repetitions'].append(entry)
+                                        (args.run / 'fixture-repetitions.json').write_text(
+                                            json.dumps(result['fixture_repetitions'], indent=2)+'\n')
                                 deadline = min(deadline, time.monotonic() + 2)
+                            if args.scene_reference:
+                                from scene_reference import measure
+                                result['scene_reference'] = measure(client, args.run / 'scene-reference.json')
+                            if args.gpu_export_cache and args.expect_appkit_prefix:
+                                from cgl_stats import inspect
+                                result['cgl_export_cache'] = inspect(client, result['providers'], args.run / 'cgl-export-cache.json')
                             if args.measure_video:
                                 client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
                                 result['video_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
@@ -439,10 +488,18 @@ def main():
                 result['exit_after_cleanup'] = p.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 result['cleanup_timeout'] = True
+            if args.executable == 'firefox-sf':
+                logs = [path for path in (args.bundle.parent / 'logs').glob('firefox-*-%d.log' % p.pid)
+                        if path.stat().st_mtime >= wall_start - 1]
+                if len(logs) == 1:
+                    shutil.copy2(logs[0], args.run / 'launcher-runtime.log')
+                    result['daily_runtime_log'] = str(logs[0])
+                else:
+                    result['daily_runtime_log_error'] = 'Expected one log for this owned launcher PID'
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers']:
+            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]

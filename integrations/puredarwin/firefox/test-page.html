@@ -60,18 +60,22 @@ window.fxMeasureFrames = (duration=10000, scroll=false) => {
   if (frameToken) cancelAnimationFrame(frameToken);
   fxResult.frames=[];
   return new Promise(resolve => {
-    const stamps=[]; let wallStart;
+    const stamps=[], wallStamps=[]; let wallStart;
     function frame(timestamp) {
       stamps.push(timestamp);
-      if(stamps.length===1)wallStart=performance.now();
+      wallStamps.push(performance.now());
+      if(stamps.length===1)wallStart=wallStamps[0];
       const elapsed=timestamp-stamps[0];
       if (scroll) window.scrollTo(0,Math.max(0,Math.sin(elapsed/2000)*2000));
       if (stamps.length < 2 || elapsed < duration) { frameToken=requestAnimationFrame(frame); return; }
       const deltas=stamps.slice(1).map((v,i)=>v-stamps[i]), sorted=[...deltas].sort((a,b)=>a-b);
+      const wallDeltas=wallStamps.slice(1).map((v,i)=>v-wallStamps[i]), wallSorted=[...wallDeltas].sort((a,b)=>a-b);
       Object.assign(fxResult, {frames:deltas, median:sorted[Math.floor(sorted.length*.5)],
         p95:sorted[Math.floor(sorted.length*.95)], max:Math.max(...deltas),
         fps:1000*deltas.length/elapsed, wallFps:1000*deltas.length/(performance.now()-wallStart),
         wallStart,wallEnd:performance.now(),timeOrigin:performance.timeOrigin,
+        wallStamps,wallMedian:wallSorted[Math.floor(wallSorted.length*.5)],
+        wallP95:wallSorted[Math.floor(wallSorted.length*.95)],wallMax:Math.max(...wallDeltas),
         duration:elapsed, programmaticScroll:scroll});
       document.querySelector('#result').textContent=JSON.stringify(fxResult,null,2);
       document.title=`SF-FX WebGL=${fxResult.webgl} fps=${fxResult.fps.toFixed(2)} scale=${devicePixelRatio}`;

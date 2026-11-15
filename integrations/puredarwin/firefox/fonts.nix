@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Diagnostic registration experiment; daily packaging uses fontconfig.nix.
 # Unmodified Noto font, SIL OFL 1.1; pinned official source and license.
 { prefix ? "/private/var/db/sffx/fonts-v1" }:
 let

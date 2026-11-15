@@ -14,7 +14,7 @@ SITES = ['https://example.com/', 'https://en.wikipedia.org/wiki/Firefox',
          'https://www.kernel.org/', 'https://www.w3.org/', 'https://www.rfc-editor.org/rfc/rfc9110.html']
 
 
-def measure(client, output, deadline, owned_snapshot):
+def measure(client, output, deadline, owned_snapshot, seat_activity=False):
     start = time.monotonic()
     end = min(deadline - 10, start + 1800)
     result = dict(required_seconds=1800, sites=SITES, visits=[], synthetic_navigation=True,
@@ -63,6 +63,10 @@ def measure(client, output, deadline, owned_snapshot):
             row['load_seconds'] = time.monotonic() - before
             page = row.get('page', {})
             row['loaded'] = page.get('timeOrigin') != previous and page.get('readyState') == 'complete' and page.get('textLength', 0) > 0 and not page.get('documentURI', '').startswith('about:')
+            if seat_activity and row['loaded']:
+                from presentation_seat import admit
+                row['seat_activity'] = admit(client, output.with_name('stability-seat-%03d.json' % visit),
+                                            fixture=False, verify_renderer=visit % 10 == 0)
             while time.monotonic() < min(end, before + 18):
                 time.sleep(.5)
             result['elapsed'] = time.monotonic() - start

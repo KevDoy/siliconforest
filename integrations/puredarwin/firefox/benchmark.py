@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 
-def measure(client, kind, deadline, output):
+def measure(client, kind, deadline, output, seat_activity=False):
     client.command('Marionette:SetContext', {'value': 'content'})
     found = None
     names = {'speedometer': 'Speedometer3.1', 'motionmark': 'MotionMark1.3', 'jetstream': 'JetStream2.2'}
@@ -51,6 +51,8 @@ def measure(client, kind, deadline, output):
         progress:document.querySelector('#status')?.innerText.slice(0,200)||null,
         metrics:done?JetStream.resultsJSON():null};'''
     started = False
+    admission = None
+    next_activity = 0
     start = time.monotonic()
     while time.monotonic() < deadline - 8:
         state = client.command('WebDriver:ExecuteScript', {
@@ -59,6 +61,10 @@ def measure(client, kind, deadline, output):
         result['state'] = state
         output.write_text(json.dumps(result, indent=2) + '\n')
         if state.get('ready') and not started:
+            if seat_activity:
+                from presentation_seat import admit
+                admission = output.with_name('benchmark-seat.json')
+                result['seat_admission'] = admit(client, admission, fixture=False)
             geometry = client.command('WebDriver:ExecuteScript', {
                 'script': 'return {width:innerWidth,height:innerHeight,devicePixelRatio,visibility:document.visibilityState};',
                 'args': [], 'newSandbox': False})
@@ -71,6 +77,7 @@ def measure(client, kind, deadline, output):
             client.command('WebDriver:ExecuteScript', {
                 'script': action, 'args': [], 'newSandbox': False})
             started = True
+            next_activity = time.monotonic()+30
         elif started and state.get('done'):
             try:
                 score = float(str(state.get('score')).replace(',', ''))
@@ -84,6 +91,11 @@ def measure(client, kind, deadline, output):
             result['complete'] = True
             output.write_text(json.dumps(result, indent=2) + '\n')
             return result
+        if started and admission is not None and time.monotonic() >= next_activity:
+            from presentation_seat import pulse
+            pulses = result.setdefault('synthetic_pointer_wake_pulses', [])
+            pulses.append(pulse(admission, output.with_name('benchmark-pulse-%02d.json' % len(pulses))))
+            next_activity = time.monotonic()+30
         time.sleep(3)
     result['error'] = 'Stock benchmark did not complete before the owned run deadline'
     output.write_text(json.dumps(result, indent=2) + '\n')

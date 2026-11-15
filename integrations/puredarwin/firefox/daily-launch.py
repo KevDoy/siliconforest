@@ -32,7 +32,9 @@ def plan(root, args):
     env = os.environ.copy()
     for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
                         ('gpu_vector_compare', 'SFFX_GPU_VECTOR_COMPARE'), ('gpu_cache_lookups', 'SFFX_GPU_CACHE_LOOKUPS'),
-                        ('gpu_dirty_frames', 'SFFX_GPU_DIRTY_FRAMES'), ('precise_scroll', 'SFFX_PRECISE_SCROLL')]:
+                        ('gpu_dirty_frames', 'SFFX_GPU_DIRTY_FRAMES'), ('gpu_export_cache', 'SFFX_GPU_EXPORT_CACHE'),
+                        ('gpu_coalesce_ticks', 'SFFX_GPU_COALESCE_TICKS'),
+                        ('precise_scroll', 'SFFX_PRECISE_SCROLL')]:
         if manifest.get(field, False):
             env[name] = '1'
         else:
