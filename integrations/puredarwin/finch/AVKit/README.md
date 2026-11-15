@@ -100,3 +100,12 @@ M1 media-private-controls-v1 now matches the same-byte native property output
 exactly; quiet-to-half and half-to-full drawings change2916/2754 bitmap bytes.
 It adds the seventh reviewed QuickTime import, with no window, QuickTime launch
 or native pixel-style claim. The61 prior exports remain in the64-export image.
+
+# Additional capture-input value model
+
+`SFCaptureInputItem.m` implements the private data item imported by QuickTime,
+with measured title/flag/represented-value ownership and equality. It provides
+no capture or touch-bar service. See
+[the bounded reference audit](CAPTURE-ITEM-2026-11-15.md); the added import raises
+source coverage to8/18; its same-byte M1 comparison matches native. Existing player
+and transport code is unchanged; all64 old exports are retained.
