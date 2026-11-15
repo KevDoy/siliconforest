@@ -16,4 +16,8 @@ let
    ${a.pkgs.patch}/bin/patch --batch -p1 < ${./cocoa-patches/0211-diagnostic-headless-event-loop-state.patch}
   ''}
  '';
-in p.appkit.override {src="${src}/src/Frameworks/AppKit";}
+in (p.appkit.override {src="${src}/src/Frameworks/AppKit";}).overrideAttrs (old: {
+ postInstall = (old.postInstall or "") + ''
+  ln -sfn A $out/System/Library/Frameworks/AppKit.framework/Versions/C
+ '';
+})

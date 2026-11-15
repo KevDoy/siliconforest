@@ -2,7 +2,7 @@
 let
  a=import ../cocoa/arm64.nix;
  e=import ../finch/environment.nix;
- app=import ./appkit-menu.nix;
+ app=import ./appkit-menu.nix {};
 in e.pkgs.runCommand "sffx-window-menu-geometry-probe-arm64" {} ''
  ${e.cc} -O2 -g -fblocks -isysroot ${e.sdk} -I${e.libsystem}/usr/include \
   -I${a.base.libobjc}/usr/include -I${a.base.foundation}/usr/include -I${a.base.corefoundation}/include \

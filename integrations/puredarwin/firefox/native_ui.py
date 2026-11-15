@@ -13,7 +13,7 @@ import secrets
 import time
 
 
-def measure(client, output, deadline):
+def measure(client, output, deadline, clipboard_guard=None, native_drag=False, clipboard_empty=False, precise_scroll=False):
     result = {'synthetic_input': True, 'tests': []}
     inject = Path('/private/var/run/gpu-desktop/inject')
     if not inject.is_dir():
@@ -97,6 +97,12 @@ def measure(client, output, deadline):
     if not (width > 100 and height > 100 and 0 <= x < 2500 and 0 <= y < 1550):
         raise RuntimeError('Owned frame geometry out of bounds')
     result['admitted_frame'] = admitted[0]
+    owned_line = next(line for line in dump.splitlines() if marker in line and 'mapped=true' in line)
+    window_id = int(re.match(r'window (\d+) ', owned_line)[1])
+    result['admitted_window_id'] = window_id
+    from renderer_capture import capture as capture_renderer
+    result['admission_capture'] = capture_renderer(output.with_name('native-admission-renderer.ppm'))
+    save()
     tx, ty = x + width // 2, y + 10
     if tx > 2559 or ty > 1599:
         raise RuntimeError('Owned titlebar outside panel')
@@ -185,6 +191,47 @@ def measure(client, output, deadline):
         'return performance.getEntriesByType("navigation")[0]?.type;', 'args': [], 'newSandbox': False})
     check('Command-R', dict(state=actual, navigation_type=reload_type),
           actual['uri'] == before['uri'] and reload_type == 'reload')
+
+    client.command('Marionette:SetContext', {'value': 'content'})
+    client.command('WebDriver:ExecuteScript', dict(script='''window.__sffxContexts=0;
+      document.addEventListener("contextmenu",()=>window.__sffxContexts++);return true;''', args=[], newSandbox=False))
+    cx, cy = x + width // 2, y + height // 2
+    request('abs %d %d\nbuttons 2\nwait 50\nbuttons 0\nwait 250' %
+            (round(cx * 65535 / 2559), round(cy * 65535 / 1599)))
+    context_name = dumpname + '-context'
+    request('dump ' + context_name)
+    context_dump = (inject / (context_name + '.txt')).read_text()
+    output.with_name('context-menu-windows.txt').write_text(context_dump)
+    popups = [line for line in context_dump.splitlines()
+              if line.startswith('shell ') and 'mapped=true' in line and 'owner=Some(%d)' % window_id in line]
+    from renderer_capture import capture as capture_renderer
+    context_capture = capture_renderer(output.with_name('context-menu-renderer.ppm'))
+    stack = re.search(r'^stack \[(.*?)\]$', context_dump, re.MULTILINE)
+    top = [int(value) for value in re.findall(r'\d+', stack[1])] if stack else []
+    if not popups and (not top or top[-1] != window_id):
+        raise RuntimeError('Context menu lost the admitted window; refused Escape')
+    request('key 29 down\nkey 29 up\nwait 250')
+    client.command('Marionette:SetContext', {'value': 'content'})
+    contexts = client.command('WebDriver:ExecuteScript', dict(script='return window.__sffxContexts;', args=[], newSandbox=False))
+    check('native-context-menu', dict(content_events=contexts, owned_popups=popups, capture=context_capture),
+          contexts == 1 and bool(popups))
+
+    if precise_scroll:
+        from precise_scroll import measure as measure_precise_scroll
+        actual = measure_precise_scroll(client, request, admitted[0])
+        check('native-precise-pixel-scroll', actual, actual.get('complete'))
+    if native_drag:
+        from drag_drop import measure as measure_drag
+        actual = measure_drag(client, request, admitted[0])
+        check('native-drag-drop', actual, actual.get('complete'))
+    if clipboard_empty:
+        from clipboard_empty import measure as measure_clipboard_empty
+        actual = measure_clipboard_empty(client, chord)
+        check('native-clipboard-originally-empty', actual, actual.get('complete'))
+    if clipboard_guard:
+        from clipboard_probe import measure as measure_clipboard
+        actual = measure_clipboard(client, clipboard_guard, chord)
+        check('native-clipboard', actual, actual.get('complete'))
 
     if len(added_handles) == 1:
         client.command('Marionette:SetContext', {'value': 'content'})

@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: MIT
 # Private build only. Cocoa owner decides whether to merge/install proven patches.
+{ appkitSource ? null }:
 let
  a = import ../cocoa/arm64.nix;
  p = import ../cocoa/patched.nix;
+ base = if appkitSource == null then p.appkitSrc else builtins.path {path=appkitSource;name="sffx-selected-appkit-source";};
  src = a.pkgs.runCommand "sffx-appkit-menu-geometry-source" {} ''
    mkdir -p $out/src/Frameworks
-   cp -r ${p.appkitSrc} $out/src/Frameworks/AppKit
+   cp -r ${base} $out/src/Frameworks/AppKit
    chmod -R u+w $out
    cd $out
-   ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0201-appkit-headless-run-loop.patch}
-   ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0203-appkit-layer-context-window-scale.patch}
-   ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0204-appkit-replace-hosted-layer-root.patch}
    ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0206-window-class-content-geometry-counts-menu-strip.patch}
  '';
-in p.appkit.override { src = "${src}/src/Frameworks/AppKit"; }
+in (p.appkit.override { src = "${src}/src/Frameworks/AppKit"; }).overrideAttrs (old: {
+ postInstall = (old.postInstall or "") + ''
+  ln -sfn A $out/System/Library/Frameworks/AppKit.framework/Versions/C
+ '';
+})

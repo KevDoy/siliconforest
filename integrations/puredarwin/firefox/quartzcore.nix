@@ -14,6 +14,7 @@ let
   ''}
   ${a.pkgs.lib.optionalString gpuPresentation ''
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0208-layer-context-exportable-gpu-frame.patch}
+    ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0213-cache-gpu-frame-export-provider-lookups.patch}
   ''}
   ${a.pkgs.lib.optionalString skipUnchangedTransactions ''
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0205-layer-transactions-skip-unchanged-contents.patch}

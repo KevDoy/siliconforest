@@ -8,8 +8,15 @@ pre{white-space:pre-wrap;font-size:14px}
 </style>
 <h1>Firefox video measurement</h1>
 <video id="video" controls playsinline muted></video>
+<button id="fullscreen">Fullscreen video</button>
 <pre id="result"></pre>
 <script>
+document.querySelector('#fullscreen').onclick=async event=>{
+ window.fxFullscreenRequest={trusted:event.isTrusted};
+ try{const element=document.querySelector('#video');await element.requestFullscreen();await element.play();
+  window.fxFullscreenRequest.started=true;}
+ catch(error){window.fxFullscreenRequest.error=String(error);}
+};
 const video=document.querySelector('#video'), output=document.querySelector('#result');
 const parameters=new URLSearchParams(location.search);
 const source=parameters.get('src') || 'media/bbb-1080p-h264-10s.mp4';
@@ -36,7 +43,7 @@ function update(){
   }
   const latest=fxVideoResult.quality.at(-1);
   output.textContent=JSON.stringify({...fxVideoResult,presented:fxVideoResult.presented.length},null,2);
-  document.title=`SF-FX video t=${video.currentTime.toFixed(2)} frames=${latest?.total??0} dropped=${latest?.dropped??0} error=${video.error?.code??0}`;
+  document.title=window.fxTitleOverride||`SF-FX video t=${video.currentTime.toFixed(2)} frames=${latest?.total??0} dropped=${latest?.dropped??0} error=${video.error?.code??0}`;
 }
 for(const name of ['loadedmetadata','canplay','playing','waiting','stalled','ended','error'])
   video.addEventListener(name,()=>{fxVideoResult.events.push({name,wall:performance.now(),mediaTime:video.currentTime});update()});
@@ -55,6 +62,7 @@ window.fxMeasureVideo=async()=>{
   if(!video.getAttribute('src'))video.src=source;
   video.pause();video.currentTime=0;
   fxVideoResult.events=[];fxVideoResult.quality=[];fxVideoResult.presented=[];
+  delete fxVideoResult.playError;
   const initial=video.getVideoPlaybackQuality();
   fxVideoResult.initialQuality={total:initial.totalVideoFrames,dropped:initial.droppedVideoFrames,corrupted:initial.corruptedVideoFrames};
   fxVideoResult.measureStart=performance.now();
@@ -86,6 +94,6 @@ window.fxMeasureVideo=async()=>{
   } catch(error){fxVideoResult.pixelReadbackError=String(error);}
   update();return fxVideoResult;
 };
-if(parameters.get('autostart')!=='0')video.play().catch(error=>{fxVideoResult.playError=String(error);update()});
+if(parameters.get('autostart')==='1')video.play().catch(error=>{fxVideoResult.playError=String(error);update()});
 setInterval(update,1000);
 </script>

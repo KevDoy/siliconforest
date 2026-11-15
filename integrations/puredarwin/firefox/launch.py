@@ -75,7 +75,14 @@ def main():
                                     stdout=stream, stderr=subprocess.PIPE, timeout=60)
         if copied.returncode == 0:
             with tarfile.open(archive) as tar:
-                tar.extractall(out, filter='data')
+                # An isolated integration home deliberately has an absolute
+                # Applications symlink. Preserve its metadata as JSON, never
+                # recreate links or let them redirect host evidence extraction.
+                members = tar.getmembers()
+                links = [dict(name=m.name, target=m.linkname, kind='symlink' if m.issym() else 'hardlink')
+                         for m in members if m.issym() or m.islnk()]
+                (out / 'evidence-links.json').write_text(json.dumps(links, indent=2) + '\n')
+                tar.extractall(out, members=[m for m in members if not m.issym() and not m.islnk()], filter='data')
         else:
             (out / 'collection-error.log').write_bytes(copied.stderr)
     print(json.dumps(dict(run=args.run, output=str(out), runner_status=metadata.get('runner_status'))))

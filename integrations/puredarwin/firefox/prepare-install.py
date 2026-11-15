@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Prepare a reviewable Firefox runtime in a NEW private prefix.
+
+Default prints the plan. --build assembles a host tree; put.py performs the
+separate cold-verified transfer. Never writes system files, dock pins/defaults,
+or Firefox's original bundle. Runtime qualification follows transfer.
+"""
+import argparse
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
+import plistlib
+import re
+import shutil
+import subprocess
+
+REPO = Path(__file__).resolve().parents[3]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--release', required=True, help='new /private/var/db/sffx/<release> target')
+    ap.add_argument('--acquisition', type=Path, required=True, help='verified acquire.py output directory')
+    ap.add_argument('--output', type=Path, required=True, help='new ignored host staging directory')
+    ap.add_argument('--nix', default=str(Path.home() / '.nix-profile/bin/nix'))
+    ap.add_argument('--build', action='store_true')
+    ap.add_argument('--provider-overrides', type=Path,
+                    help='JSON map of provider names to retained, qualified Nix output directories')
+    args = ap.parse_args()
+    release = PurePosixPath(args.release)
+    if release.parent != PurePosixPath('/private/var/db/sffx') or not release.name.replace('-', '').isalnum():
+        raise ValueError('Expected one new simple release directory under /private/var/db/sffx')
+    acquisition = args.acquisition.resolve()
+    bundle = acquisition / 'unpacked/Firefox/Firefox.app'
+    info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+    version = info['CFBundleShortVersionString']
+    checksum_line = (acquisition / 'VERIFIED.sha512').read_text().split()
+    with (acquisition / checksum_line[1]).open('rb') as stream:
+        if hashlib.file_digest(stream, 'sha512').hexdigest() != checksum_line[0]:
+            raise RuntimeError('Acquired DMG changed')
+    sums = (acquisition / 'SHA512SUMS').read_text().splitlines()
+    published = [line.split(None, 1)[0] for line in sums
+                 if line.split(None, 1)[1].strip() == f'mac/en-US/Firefox {version}.dmg']
+    if published != [checksum_line[0]]:
+        raise RuntimeError('DMG does not match the retained Mozilla checksum')
+    original = json.loads((acquisition / 'bundle-sha256.json').read_text())
+    actual = {}
+    for path in sorted(bundle.rglob('*')):
+        if path.is_file() and not path.is_symlink():
+            with path.open('rb') as stream:
+                actual[str(path.relative_to(bundle))] = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if actual != original:
+        raise RuntimeError('Official Firefox bundle differs from the acquired pristine files')
+    recipes = {
+        'gl': 'import ./cgl.nix {prefix=' + json.dumps(str(release / 'gl')) + ';}',
+        'sandbox': 'import ./sandbox.nix {prefix=' + json.dumps(str(release / 'sandbox')) + ';coldAVDFirmware=true;}',
+        'appkit': 'import ./appkit.nix', 'onyx': 'import ./onyx.nix',
+        'quartz': 'import ./quartz-lifetime.nix', 'surface': 'import ./surface-session.nix',
+        'avfoundation': 'import ./avfoundation.nix', 'compat': 'import ./compat.nix {}',
+        'io': 'import ./io-policy.nix', 'open': 'import ./open-url.nix',
+    }
+    overrides = json.loads(args.provider_overrides.read_text()) if args.provider_overrides else {}
+    if not isinstance(overrides, dict) or set(overrides) - set(recipes):
+        raise ValueError('Provider overrides must name providers in the plan')
+    if set(overrides) & {'gl', 'sandbox'}:
+        raise ValueError('CGL and sandbox must be built for this exact target prefix')
+    for name, value in overrides.items():
+        if not isinstance(value, str) or not re.fullmatch(r'/nix/store/[a-z0-9]{32}-[^/]+', value):
+            raise ValueError('Expected a direct Nix output directory for ' + name)
+        if not Path(value).is_dir():
+            raise FileNotFoundError(value)
+    manifest = dict(version=version, target=str(release), official_bundle_files=len(actual),
+                    mozilla_sha512=checksum_line[0], recipes=recipes,
+                    state='candidate: requires qualification at this exact prefix',
+                    installed_media=True, skip_unchanged_transactions=False, provider_overrides=overrides,
+                    known_limits=['native-layer readback; no zero-copy',
+                                  'single-tab first paint', 'cold AVD sandbox mitigation native-qualified; Firefox cold first-open pending',
+                                  'physical audio/A-V/trackpad unverified',
+                                  'private bundle Command-W intercepted by desktop until catalogued',
+                                  'menu geometry0206 is excluded after browser startup stall',
+                                  'software H264/HEVC callback fix is separate experimental candidate',
+                                  'running-instance URL delivery unqualified'])
+    if not args.build:
+        print(json.dumps(manifest, indent=2))
+        return
+    ignored = REPO / 'private'
+    if not args.output.resolve().is_relative_to(ignored) and not args.output.resolve().is_relative_to(REPO / 'runs'):
+        raise ValueError('Staging output must be under ignored private/ or runs/')
+    args.output.mkdir(parents=True, exist_ok=False)
+    builds = {}
+    for name, expression in recipes.items():
+        if name in overrides:
+            source = Path(overrides[name])
+            (args.output / (name + '.build.log')).write_text('Retained provider: ' + str(source) + '\n')
+        else:
+            result = subprocess.run([args.nix, 'build', '--impure', '--no-link', '--cores', '4',
+                '--max-jobs', '1', '--print-out-paths', '--extra-experimental-features', 'nix-command flakes',
+                '--expr', expression], cwd=Path(__file__).resolve().parent, capture_output=True, text=True)
+            (args.output / (name + '.build.log')).write_text(result.stdout + result.stderr)
+            result.check_returncode()
+            source = Path(result.stdout.strip().splitlines()[-1])
+        builds[name] = str(source)
+        if name in ['appkit', 'onyx']:
+            shutil.copytree(source / 'System/Library/Frameworks', args.output / name / 'Frameworks', symlinks=True)
+        else:
+            shutil.copytree(source, args.output / name, symlinks=True)
+    # Firefox's unchanged load command uses C, while our AppKit provider uses A.
+    # Retained provider overrides need the alias too; otherwise dyld can silently
+    # select the installed framework and invalidate a supposedly private trial.
+    versions = args.output / 'appkit/Frameworks/AppKit.framework/Versions'
+    if not (versions / 'A/AppKit').is_file():
+        raise RuntimeError('Selected AppKit has no expected A implementation')
+    alias = versions / 'C'
+    if not alias.exists():
+        versions.chmod(versions.stat().st_mode | 0o200)
+        alias.symlink_to('A')
+    if alias.resolve() != (versions / 'A').resolve():
+        raise RuntimeError('Unexpected AppKit C implementation')
+    manifest['framework_aliases'] = {'AppKit.framework/Versions/C': 'A'}
+    shutil.copytree(bundle, args.output / 'original/Firefox.app', symlinks=True)
+    outer = args.output / 'Firefox.app/Contents'
+    (outer / 'MacOS').mkdir(parents=True)
+    (outer / 'Resources').mkdir()
+    shutil.copy2(Path(__file__).with_name('daily-launch.py'), outer / 'MacOS/firefox-sf')
+    (outer / 'MacOS/firefox-sf').chmod(0o755)
+    icon = info.get('CFBundleIconFile', 'firefox.icns')
+    if not icon.endswith('.icns'):
+        icon += '.icns'
+    if not (bundle / 'Contents/Resources' / icon).is_file():
+        raise RuntimeError('Official Firefox icon missing')
+    (outer / 'Resources' / icon).symlink_to('../../../original/Firefox.app/Contents/Resources/' + icon)
+    outer_info = {key: info[key] for key in ['CFBundleIdentifier', 'CFBundleName', 'CFBundleShortVersionString',
+                                          'CFBundleVersion', 'CFBundleURLTypes', 'CFBundleDocumentTypes'] if key in info}
+    outer_info.update(CFBundleExecutable='firefox-sf', CFBundlePackageType='APPL', CFBundleIconFile=icon)
+    (outer / 'Info.plist').write_bytes(plistlib.dumps(outer_info))
+    manifest['builds'] = builds
+    (args.output / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    desktop = Path(__file__).with_name('org.mozilla.firefox.desktop').read_text()
+    desktop = desktop.replace('TryExec=/Applications/Firefox.app/Contents/MacOS/firefox',
+                              'TryExec=' + str(release / 'Firefox.app/Contents/MacOS/firefox-sf'))
+    desktop = desktop.replace('Exec=/usr/bin/chonkstep-darwin-desktop --desktop-request application org.mozilla.firefox',
+                              'Exec=' + str(release / 'Firefox.app/Contents/MacOS/firefox-sf') + ' %U')
+    desktop = desktop.replace('Icon=/Applications/Firefox.app', 'Icon=' + str(release / 'original/Firefox.app'))
+    (args.output / 'org.mozilla.firefox.desktop').write_text(desktop)
+    shutil.copy2(Path(__file__).with_name('owner-install.py'), args.output / 'owner-install.py')
+    (args.output / 'OWNER-INSTALL.txt').write_text(
+        'Candidate only. Qualify this exact prefix before daily activation.\n'
+        'The original Mozilla bundle is unchanged; the outer launcher supplies private providers.\n'
+        'Review the concrete plan: python3 ' + str(release / 'owner-install.py') + ' --release ' + str(release) + '\n'
+        'After launcher/default-URL qualification, provide its qualification JSON and add --apply.\n'
+        'The work agent must not execute --apply against owner paths.\n'
+        'Owner-managed integration after qualification:\n'
+        '1. Add /Applications/Firefox.app pointing to ' + str(release / 'Firefox.app') + ' only if absent.\n'
+        '2. Add the generated desktop entry and append its id to the existing dock pins, preserving them.\n'
+        '3. Merge/qualify the open(1) HTTP(S) patch through TERM; choose org.mozilla.firefox for http/https.\n'
+        '4. Test first and running-instance open URLs; keep previous defaults/pins for rollback.\n'
+        'No installer action here changes any of these owner files.\n')
+    print(json.dumps(manifest, indent=2))
+
+
+if __name__ == '__main__':
+    main()

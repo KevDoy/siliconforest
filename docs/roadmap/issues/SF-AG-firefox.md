@@ -2,7 +2,35 @@
 
 Work in progress, 15 November 2026. The goal is the official, unmodified macOS
 Firefox on SiliconForest with hardware WebRender, AVD decode and responsive,
-correct presentation at the owner's 150% scale. M0 now has a qualified private-prefix baseline; M1–4 remain incomplete.
+correct presentation at the owner's 150% scale. M0 is qualified; actual GPU presentation, hardware decode, streaming and installer URL delivery are now observed. Rendering pace and several quality gaps still prevent a daily-use recommendation.
+
+## Current checkpoint (13:56 UTC)
+
+| Area | Latest real-M1 evidence | Remaining |
+|---|---|---|
+| Rendering | actualFirefoxGPU006 correct renderer capture, private AppKit in parent/GPU dyld lists; dma-buf600frames/base upload once11MB/0failures | first10s paired scroll11.53→39.79actualflips/s, p95160→50ms, familyCPU123.69→109.38%onecore; below60, repeats/optimization pending |
+| Native GPU | CGL3.2/4.1 ×2D/RECT4/4; asymmetric144×96 opaqueleft6912/6912identicalCPU eachphase, correct premultalpha and CPUfallback | fullbrowser video still uploads NV12; no end-to-end zero-copy claim |
+| Decode/stream | cold3codec300/0 and900AVDdone/noerrors; pairedSWexact; DASH002 publicclear1080pH264/AAC-LC375/0 in15.004s wall/14.974media, AVDdone+375 | acoustic output/lip sync; fullGPUvideo001 all3ended300/0+900AVDdone, but stale autoplay AbortError fails firstclip; corrected repeat pending |
+| Quality | ICCoff/on128/188exact; nativeOpen/Save39exactbytes; fullscreen251/0/native2560×1600/exit; nativecontextmenu+Escape; trustedfingerpixel37→DOMdeltaMode0/deltaY37/scrollTop100→137 | canvasemoji wrong, Devanagari absent; drag/clipboard harness correction; physical trackpad/momentum; private-bundle CmdW desktop classification |
+| Speed/stability | Speedometer8.39±.43; MotionMark589.14[566.42,613.13]; JetStream94.079one run;30minCPU-path99/99visits/0abnormalcontentexits | GPU-path repeat/stability; idle/startup spreads |
+| Integration | r4outerlauncher +realopen defaultURL creates unique HTTPS thirdtab in SAMEparentPID, intendedprivateAppKit parent/GPU verified; integration004PASS | finalartifact must include context-menu fix; owner pins/defaults untouched, no activation |
+
+Earlier GPU003/004, menu and installerr3 trials omitted AppKit's `Versions/C→A`
+alias. XUL imports `Versions/C`; actual GPU004 image lists prove system AppKit
+was selected. These are preserved failures, **not private-AppKit A/B evidence**.
+All private AppKit recipes now add the alias; cold transfer also verifies links.
+`provider_images.py` checks actual parent/GPU images. Its initial whitespace
+identity bug leaves005/006 automated failures; their separate raw image-list
+reanalysis verifies the intended private providers. Later provider checks pass.
+
+Contextmenu011 deliberately crashes on missing `-[GeckoNSMenu setAppearance:]`.
+Private0212 supplies retained appearance and submenu/popup inheritance;
+actualnative012 opens its owned popup and closes it with Escape. Its first
+native deallocation assertion is premature because associated getters
+retain/autorelease; a nested-pool correction is pending. Clipboard012 crashes
+in our ctypes bridge because its MIME NSString was not retained between
+command pools; this is a harness failure, not attributed to AppKit. An empty
+backend was observed before any copy and no existing clipboard data replaced.
 
 ## Observed on the real M1
 
@@ -305,23 +333,12 @@ export comparison finds no removed AppKit/QuartzCore/IOSurface exports.
 Corrected003/004 trials are queued after the stock benchmark; native controls
 are not substituted for Firefox qualification.
 
-The full GPU Firefox candidates003/004 load XUL but do not complete startup:
-the parent waits in `GPUProcessManager::EnsureGPUReady`, while the GPU helper
-spins in the Cocoa next-event loop. Symbols were matched to the official XUL
-UUID through Mozilla's symbol server. A matched0131 AppKit candidate also
-stalls with GPU presentation disabled; WindowServer-only and Quartz-only
-components reach automation. Component runs001–003 then intentionally crash
-because opening `about:support` calls the missing
-`+[AVCaptureDevice authorizationStatusForMediaType:]`. This is an identified
-API gap, not an unexplained graphics fault. A private category reports
-Restricted and asynchronously denies requests; native controls and corrected
-Firefox comparisons are pending. Installed capture absence remains honest.
-
-Public `streaming-dash-001` opens the versioned DASH-IF4.7.4 reference player,
-fetches the clear Envivio H264/AAC-LC MPD and segments, and obtains a ready
-MediaSource blob. The15-second playback command exceeds the inherited10-second
-diagnostic socket timeout. That run remains failed; the transport deadline is
-corrected for a repeat. It does not yet qualify streaming playback.
+Earlier full GPU Firefox003/004 startup stalls and publicDASH001 socket timeout
+remain recorded. The AppKit version-alias correction and successful publicDASH002
+repeat are described in the current checkpoint above. The missing AVFoundation
+authorization selector is fixed privately: Restricted status, one asynchronous
+NO, no fake capture devices; native asset/NV12 controls and Firefox support page
+pass, committed `7f5fdaa81`, handed to the media owner.
 
 ## Gaps and ownership
 
@@ -348,17 +365,17 @@ Zero-import dependencies still have to load unless weakly linked.
 | Foundation | 2 | NSSocketPort, NSXPCListener in installer/updater helpers; not silently stubbed |
 | Security | 8 | mostly installer/updater code-validity/digest imports; unsupported operations stay failures |
 | CGL desktop GL | private candidate passes | installed CGL crashes after its `/usr/lib/libEGL.1.dylib` load fails; private matching Asahi CGL passes both core-profile pixel checks |
-| Native layers to Wayland | unresolved | current NSView reads CALayerContext back to a CPU window bitmap; real composited subsurfaces requested from DESK5 |
-| GPU IOSurface/presentation | native candidate pixel-qualified; Firefox pending | WRITEBACK fileport backing/CGL alias+blit/private layer presenter; actual compositor framebuffer exact green/yellow+alpha at150%, zero CGL CPU transfer; default fallback remains |
-| Shared FreeType raster/cache | private0200 proven | eight-thread800-render reference pixel check passes; installed control aborts; merge requested TERM5 |
-| Headless AppKit run loop | private0201 proven | nil-display timer probe CPU drops; real GPU main sleeps; TERM5 review requested |
+| Native layers to Wayland | actual private GPU presenter observed | 0208/0209 +CGL/IOSurface/WS: actual renderer correct; first measured scroll40fps, opt-in only; CPU fallback retained |
+| GPU IOSurface/presentation | native pixels +actualFirefoxGPU observed | WRITEBACK fileport backing/CGL alias+blit/private layer presenter; actual compositor framebuffer exact green/yellow+alpha at150%, zero CGL CPU transfer; default fallback remains |
+| Shared FreeType raster/cache | proven/adopted byTERM7 | eight-thread800-render references pass; old installed control aborts;30minute browser run passes |
+| Headless AppKit run loop | proven/adopted byTERM7 | nil-display timer CPU drops; real GPU main waits; private builds must expose AppKit C alias |
 | AVD sandbox access | private narrow translation proven warm | explicit IOAccelerator grants exact /dev/pdavd read/write; unrelated service/device remain denied |
-| AVD cold firmware load | private bounded sandbox fix native-qualified | first cold old-policy open fails; candidate literal firmware READ_ALL succeeds, writes/unrelated devices remain denied; actual Firefox cold first-open pending |
-| AVD video to compositor | private3codec playback observed | originalAVclips visibly end; each300AVDjobs0errors; AAC3fixes proven, muted; SW/A-V/streaming/zero-copy pending |
+| AVD cold firmware load | private bounded sandbox fix native-qualified | first cold old-policy open fails; candidate literal firmware READ_ALL succeeds, writes/unrelated devices remain denied; actual Firefox cold first-open900done/0errors PASS |
+| AVD video to compositor | cold3codec +pairedSW +public1080pstream observed | eachlocal300/0/AVD300; unmutedHALclock recorded, streaming375/0; acoustic/pacing/fullzero-copy remain |
 | 150% layer target | private0202/0203 proven pixels | exact1024/2304/4096pixels at1/1.5/2x; installed1.5x512mismatches, browser013 all3pages visible |
 | Global IOSurface ID broker | private isolated control+browser pass | broker absent on disk; installed child lookup fails; private named broker shares2048bytes exactly, local-surface negative remains denied; browser014 defaultGPU WebGL visible, clean service removal |
 | GPU/font sandbox paths | private compiler v4 proven | narrow render-node/Mesa and font-service grants; actual GPU pixels + denied-write/unrelated controls pass,13 host cases |
-| Startup-cache throttle | workaround partial | Standard policy real system call forwards status, cache-ON support page visible; full startup/idle measurement pending |
+| Startup-cache throttle | actual DefaultIO/cacheON qualified | firstPaint3.260/2.748s, idle1/10tabs .99/1.51%onecore; repeated spread remains |
 | open HTTP(S) handling | private candidate4/4 pass | default/multiple/literal URL argv and legacy document controls; TERM5 asked to merge, no owner defaults changed |
 
 `firefox/compat.nix` selects the absent providers without selecting core,
@@ -498,10 +515,10 @@ first installer assembly; that assembly remains rejected.
 | Milestone | Missing evidence |
 |---|---|
 | 0 baseline | qualified private-prefix pass014: all3 visible with defaultGPU and WebGL |
-| 1 rendering | WebGL software pixel comparison; wall/presentation60fps scrolling/animation and CPU reduction; zero-copy native layers at150% (hardware WR+WebGL+checker observed) |
-| 2 media | cold hardware3codec and paired SW pixel/CPU A/B pass above; unmuted HAL/A-V clock measured; acoustic output/lip sync, native pacing/zero-copy and non-DRM streaming remain |
-| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); all3 benchmark numbers recorded above; actual Baseline/Ion observed; completed30-minute run recorded above |
-| 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
+| 1 rendering | actualGPU window/proven pixels/first paired CPU reduction observed; repeat and reach60fps (first39.79actualflips/s); WebGL SW presentation comparison |
+| 2 media | cold3codec/SW pixelCPU/1080p publicstream/HALclock observed; acoustic lip sync, native pacing/fullzero-copy, corrected GPU video harness repeat |
+| 3 quality | ICC/panels/contextmenu/pixelwheel/fullscreen/windows/download and all3benchmarks observed; font/canvasemoji, drag/clipboard, physical gestures, repeated startup/idle, GPU stability remain |
+| 4 integration | r4launcher/realrunning-instance URL delivery qualified; finalquality artifact and owner-managed dock/default activation remain |
 
 Initial Speedometer/MotionMark scores and the completed30-minute crash-free
 interval are recorded above. Audible audio/A-V and zero-copy remain unproven. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
@@ -515,4 +532,4 @@ unqualified. A matched-provider r4 assembly retains the exact AppKit0131,
 Onyx lock and Quartz lifetime builds used in successful browser controls;
 CGL and sandbox are rebuilt for its new prefix. `--provider-overrides` records
 these selections and refuses overriding the prefix-sensitive components.
-Native open/save and clipboard controls are prepared but not yet observed.
+Native Open/Save and fullscreen controls now pass. Clipboard/drag retries and context-menu-fixed final artifact remain; no owner activation.

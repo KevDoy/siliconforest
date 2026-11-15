@@ -6,6 +6,30 @@
 #include <dlfcn.h>
 #include <stdint.h>
 #include <CoreFoundation/CoreFoundation.h>
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
+
+// Equality needs no ordering. The optional NEON scan checks every byte while
+// avoiding the installed scalar memcmp hot path; no dirty-base assumption.
+static int sfGPUBaseEqual(const void *left,const void *right,size_t bytes){
+ const unsigned char *a=left,*b=right;size_t i=0;
+#ifdef __aarch64__
+ if(getenv("SFFX_GPU_VECTOR_COMPARE")){
+  uint8x16_t x0=vdupq_n_u8(0),x1=x0,x2=x0,x3=x0;
+  for(;bytes-i>=64;i+=64){
+   x0=vorrq_u8(x0,veorq_u8(vld1q_u8(a+i),vld1q_u8(b+i)));
+   x1=vorrq_u8(x1,veorq_u8(vld1q_u8(a+i+16),vld1q_u8(b+i+16)));
+   x2=vorrq_u8(x2,veorq_u8(vld1q_u8(a+i+32),vld1q_u8(b+i+32)));
+   x3=vorrq_u8(x3,veorq_u8(vld1q_u8(a+i+48),vld1q_u8(b+i+48)));
+  }
+  if(vmaxvq_u8(vorrq_u8(vorrq_u8(x0,x1),vorrq_u8(x2,x3))))return 0;
+  for(;i<bytes;i++)if(a[i]!=b[i])return 0;
+  return 1;
+ }
+#endif
+ return memcmp(left,right,bytes)==0;
+}
 
 typedef unsigned SFGLuint,SFGLenum;
 typedef int SFGLint,SFGLsizei;
@@ -155,7 +179,7 @@ static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void
    if(!cache)good=0;
    else{p->baseCache=cache;p->baseBytes=bytes;p->baseW=w;p->baseH=h;
     sfGPU.glTexImage2D(0x0de1,0,0x8058,w,h,0,0x80e1,0x1401,base);memcpy(cache,base,bytes);p->baseUploadBytes+=bytes;}
-  }else if(memcmp(p->baseCache,base,bytes)){
+  }else if(!sfGPUBaseEqual(p->baseCache,base,bytes)){
    sfGPU.glTexSubImage2D(0x0de1,0,0,0,w,h,0x80e1,0x1401,base);memcpy(p->baseCache,base,bytes);p->baseUploadBytes+=bytes;
   }
   sfGPUTextureParameters();

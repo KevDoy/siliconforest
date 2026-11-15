@@ -28,8 +28,11 @@ def main():
            '-o', 'HostKeyAlias=m1-siliconforest', '-o',
            'UserKnownHostsFile=' + str(Path.home() / '.ssh/known_hosts_m1_siliconforest'), 'root@10.1.1.211']
     records = {}
+    symlinks = {}
     for p in sorted(args.source.rglob('*')):
-        if p.is_file() and not p.is_symlink():
+        if p.is_symlink():
+            symlinks[str(p.relative_to(args.source))] = str(p.readlink())
+        elif p.is_file():
             with p.open('rb') as f:
                 records[str(p.relative_to(args.source))] = hashlib.file_digest(f, 'sha256').hexdigest()
     if not records:
@@ -45,16 +48,21 @@ def main():
 from pathlib import Path
 assert os.uname().sysname == 'Darwin'
 root=Path(sys.argv[1]); expected=json.load(sys.stdin); actual={}
-for name,want in expected.items():
+for name,want in expected['sha256'].items():
  with (root/name).open('rb') as f: got=hashlib.sha256(f.read()).hexdigest()
  if got!=want:raise RuntimeError('Hash mismatch: '+name)
  actual[name]=got
-receipt=dict(destination=str(root),cold_before_execution=True,sha256=actual)
+links={}
+for name,want in expected['symlinks'].items():
+ path=root/name
+ if not path.is_symlink() or os.readlink(path)!=want:raise RuntimeError('Symlink mismatch: '+name)
+ links[name]=want
+receipt=dict(destination=str(root),cold_before_execution=True,sha256=actual,symlinks=links)
 (root/'cold-verified.json').write_text(json.dumps(receipt,indent=2)+'\\n')
 print(json.dumps(receipt,indent=2))
 '''
     result = subprocess.run(ssh + ['python3 -c ' + shlex.quote(remote) + ' ' + shlex.quote(str(dest))],
-                            input=json.dumps(records), capture_output=True, text=True, check=True, timeout=60)
+                            input=json.dumps(dict(sha256=records,symlinks=symlinks)), capture_output=True, text=True, check=True, timeout=60)
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_text(result.stdout)
     print('Cold verified', len(records), 'files at', dest)

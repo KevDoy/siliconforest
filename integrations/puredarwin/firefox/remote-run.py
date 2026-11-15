@@ -32,6 +32,10 @@ def descendants(pid, identities):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--bundle', type=Path, required=True)
+    ap.add_argument('--executable', default='firefox', choices=['firefox','firefox-sf'])
+    ap.add_argument('--allow-remote', action='store_true', help='owned-profile release URL remoting qualification')
+    ap.add_argument('--integration-launcher', help='private release open(1) for isolated default URL delivery')
+    ap.add_argument('--integration-bundle', help='private outer Firefox.app for isolated LaunchServices registration')
     ap.add_argument('--run', type=Path, required=True)
     ap.add_argument('--seconds', type=int, default=40)
     ap.add_argument('--url', action='append', default=[])
@@ -39,6 +43,10 @@ def main():
     ap.add_argument('--library-path')
     ap.add_argument('--gpu-surfaces', action='store_true', help='experimental actualGPU IOSurface allocation')
     ap.add_argument('--gpu-presentation', action='store_true', help='experimental private whole-window GPU layers')
+    ap.add_argument('--gpu-vector-compare', action='store_true', help='diagnostic NEON equality scan of the real CPU base')
+    ap.add_argument('--gpu-cache-lookups', action='store_true', help='diagnostic one-time GPU frame export symbol lookup')
+    ap.add_argument('--frame-trace', action='store_true', help='private WindowServer actual compositor frame callback timestamps')
+    ap.add_argument('--event-trace', action='store_true', help='private AppKit bounded headless event-loop diagnostics')
     ap.add_argument('--software', action='store_true')
     ap.add_argument('--no-sandbox', action='store_true', help='diagnosis only; labelled in result')
     ap.add_argument('--insert-library', help='private diagnostic DSO (e.g. the real SBPL compiler)')
@@ -47,6 +55,7 @@ def main():
     ap.add_argument('--surface-session', help='private named-IOSurface-broker session wrapper')
     ap.add_argument('--surface-broker', help='private standalone iosurfaced; requires --surface-session')
     ap.add_argument('--capture-pages', action='store_true', help='capture each owned browser tab after diagnostics')
+    ap.add_argument('--capture-renderer', action='store_true', help='actual compositor framebuffer via existing inject capture')
     ap.add_argument('--page-load-strategy', choices=['normal', 'eager', 'none'], default='normal',
                     help='explicit WebDriver strategy; measurements still verify real page/media state')
     ap.add_argument('--quiet-trace', action='store_true', help='disable verbose media/GL/layer traces for timing runs')
@@ -56,21 +65,37 @@ def main():
     ap.add_argument('--browse-stability', action='store_true', help='announced30minute ordinary-site browsing with abnormal-content-exit observer')
     ap.add_argument('--jit-probe', action='store_true', help='actual Baseline/Ion frames from a separate Gecko profile')
     ap.add_argument('--streaming', action='store_true', help='owned public non-DRM YouTube playback')
+    ap.add_argument('--streaming-dash', action='store_true', help='official DASH-IF clear H264 MediaSource playback')
     ap.add_argument('--media-trace', action='store_true', help='decoder identity logs without GL/window traces')
     ap.add_argument('--quality', action='store_true', help='owned new/private windows and content download')
+    ap.add_argument('--panels', action='store_true', help='owned native open/save picker selection through synthetic seat input')
+    ap.add_argument('--render-quality', type=int, choices=[0, 2], help='controlled ICC off/on pixels and glyph raster evidence')
+    ap.add_argument('--video-fullscreen', action='store_true', help='owned trusted DOM video fullscreen and native frame controls')
     ap.add_argument('--native-ui', action='store_true', help='finite synthetic native seat/menu checks on the owned Firefox PID')
+    ap.add_argument('--clipboard-guard', help='RAM-only restore helper for native clipboard controls')
+    ap.add_argument('--native-drag', action='store_true', help='native-UI owned DOM drag/drop through the real seat')
+    ap.add_argument('--clipboard-empty', action='store_true', help='native copy/paste only after focused backend proves empty clipboard')
+    ap.add_argument('--precise-scroll', action='store_true', help='paired private finger pixel/phase provider and native-UI DOM control')
     ap.add_argument('--benchmark', choices=['speedometer', 'motionmark', 'jetstream'])
     ap.add_argument('--measure-fixture', action='store_true')
+    ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
+    ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
     if bool(args.surface_session) != bool(args.surface_broker):
         raise ValueError('Supply both private surface-session and surface-broker paths')
+    if args.expect_appkit_prefix and not args.sample_path:
+        raise ValueError('AppKit provider verification requires --sample-path')
+    if (args.native_drag or args.clipboard_empty or args.precise_scroll) and not args.native_ui:
+        raise ValueError('Drag/clipboard seat checks require --native-ui admission')
+    if args.profile_fixture and (not args.measure_fixture or not args.sample_path):
+        raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
     args.run.mkdir(parents=True, exist_ok=False)
     profile = args.run / 'profile'
     profile.mkdir()
@@ -96,10 +121,29 @@ def main():
                MOZ_LOG='PlatformDecoderModule:5,AppleMedia:5,DMABuf:4',
                PD_WS_TIMING='1', PD_CGL_TRACE='1', PD_SANDBOX_TRACE='1', PD_CA_TRACE='1',
                MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1')
+    if args.allow_remote:
+        env.pop('MOZ_NO_REMOTE', None)
     if args.gpu_surfaces:
         env['SFFX_IOSURFACE_GPU'] = '1'
+    else:
+        env.pop('SFFX_IOSURFACE_GPU', None)
     if args.gpu_presentation:
         env['SFFX_GPU_PRESENT'] = '1'
+    else:
+        env.pop('SFFX_GPU_PRESENT', None)
+    for active, name in [(args.gpu_vector_compare, 'SFFX_GPU_VECTOR_COMPARE'), (args.gpu_cache_lookups, 'SFFX_GPU_CACHE_LOOKUPS')]:
+        if active:
+            env[name] = '1'
+        else:
+            env.pop(name, None)
+    if args.frame_trace:
+        env['SFFX_FRAME_TRACE'] = '1'
+    if args.event_trace:
+        env['SFFX_EVENT_TRACE'] = '1'
+    if args.precise_scroll:
+        env.update(SFFX_PRECISE_SCROLL='1', SFFX_SCROLL_TRACE='1')
+    if args.native_drag:
+        env['PD_DRAG_TRACE'] = '1'
     if args.quiet_trace:
         for name in ['MOZ_LOG', 'PD_WS_TIMING', 'PD_CGL_TRACE', 'PD_SANDBOX_TRACE', 'PD_CA_TRACE']:
             env.pop(name, None)
@@ -124,10 +168,12 @@ def main():
     if args.no_sandbox:
         for kind in ['CONTENT', 'GPU', 'RDD', 'SOCKET_PROCESS', 'UTILITY', 'GMP']:
             env['MOZ_DISABLE_' + kind + '_SANDBOX'] = '1'
-    cmd = [str(args.bundle / 'Contents/MacOS/firefox'), '--no-remote', '--profile', str(profile),
+    cmd = [str(args.bundle / ('Contents/MacOS/' + args.executable))] + ([] if args.allow_remote else ['--no-remote']) + ['--profile', str(profile),
            '--marionette'] + (args.url or ['about:support'])
     result = dict(command=cmd, seconds=args.seconds, software_requested=args.software,
-                  sandbox_disabled=args.no_sandbox, gpu_surfaces=args.gpu_surfaces, gpu_presentation=args.gpu_presentation, synthetic_input=args.scroll_fixture or bool(args.benchmark) or args.native_ui, prefs=prefs,
+                  sandbox_disabled=args.no_sandbox, gpu_surfaces=args.gpu_surfaces, gpu_presentation=args.gpu_presentation,
+                  gpu_vector_compare=args.gpu_vector_compare,gpu_cache_lookups=args.gpu_cache_lookups,
+                  synthetic_input=args.scroll_fixture or bool(args.benchmark) or args.native_ui or args.panels, prefs=prefs,
                   diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
                   io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
@@ -172,7 +218,8 @@ def main():
                         if pid not in current_ids or current_ids[pid][1] != owned[pid]:
                             continue
                         command = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True).stdout
-                        browser_command = str(args.bundle / 'Contents/MacOS/firefox')
+                        browser_command = str((args.bundle.parent / 'original/Firefox.app/Contents/MacOS/firefox')
+                                              if args.executable == 'firefox-sf' else args.bundle / 'Contents/MacOS/firefox')
                         is_parent = args.sample_parent and command.startswith(browser_command)
                         if pid != p.pid and (is_parent or 'gpu-helper.app/Contents/MacOS/Firefox GPU Helper' in command):
                             sample = subprocess.run([args.sample_path, str(pid), '2', '20', '-file',
@@ -195,6 +242,12 @@ def main():
                             client.socket.settimeout(max(1, min(10, deadline - time.monotonic())))
                             (args.run / 'support.json').write_text(json.dumps(client.support(), indent=2) + '\n')
                             (args.run / 'runtime.json').write_text(json.dumps(client.runtime(), indent=2) + '\n')
+                            if args.expect_appkit_prefix:
+                                from provider_images import inspect
+                                current = process_identities()
+                                owned.update({pid: current[pid][1] for pid in descendants(p.pid, current) if pid in current})
+                                result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned,
+                                    result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix)
                             def snapshot():
                                 current = process_identities()
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current)
@@ -220,24 +273,75 @@ def main():
                                 client.socket.settimeout(max(1, min(30, deadline - time.monotonic())))
                                 result['jit_probe'] = measure(client, args.run / 'jit-probe.json')
                                 deadline = min(deadline, time.monotonic() + 2)
+                            if args.integration_launcher:
+                                from integration_probe import measure
+                                client.socket.settimeout(35)
+                                result['integration'] = measure(client, args.run / 'integration.json', args.integration_launcher, args.integration_bundle, home)
+                                deadline = min(deadline, time.monotonic() + 2)
                             if args.streaming:
                                 from streaming import measure
                                 client.socket.settimeout(max(1, min(50, deadline - time.monotonic())))
                                 result['streaming'] = measure(client, args.run / 'streaming.json', deadline)
                                 deadline = min(deadline, time.monotonic() + 2)
+                            if args.streaming_dash:
+                                from streaming_dash import measure
+                                client.socket.settimeout(max(1, min(40, deadline - time.monotonic())))
+                                result['streaming_dash'] = measure(client, args.run / 'streaming-dash.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
                             if args.quality:
                                 from quality import measure
                                 result['quality'] = measure(client, args.run / 'quality.json', deadline)
                                 deadline = min(deadline, time.monotonic() + 2)
+                            if args.panels:
+                                from panels import measure
+                                result['panels'] = measure(client, args.run / 'panels.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.render_quality is not None:
+                                from render_quality import measure
+                                result['render_quality'] = measure(client, args.run / 'render-quality.json', args.render_quality)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.video_fullscreen:
+                                from fullscreen import measure
+                                result['video_fullscreen'] = measure(client, args.run / 'fullscreen.json', deadline)
+                                deadline = min(deadline, time.monotonic() + 2)
                             if args.native_ui:
                                 from native_ui import measure
-                                result['native_ui'] = measure(client, args.run / 'native-ui.json', deadline)
+                                result['native_ui'] = measure(client, args.run / 'native-ui.json', deadline,
+                                    args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
                                 client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
+                                profiler = None
+                                if args.profile_fixture:
+                                    import threading
+                                    cancel_profile = threading.Event()
+                                    profile_result = dict(diagnostic_only=True, timing_qualification=False)
+                                    target_pid = result['marionette']['capabilities']['moz:processID']
+                                    target_identity = process_identities().get(target_pid)
+                                    def profile_fixture():
+                                        if cancel_profile.wait(2):
+                                            return
+                                        if target_identity is None or process_identities().get(target_pid) != target_identity:
+                                            profile_result['error'] = 'Owned parent identity changed'
+                                            return
+                                        try:
+                                            sampled = subprocess.run([args.sample_path, str(target_pid), '3', '5', '-file',
+                                                str(args.run / 'fixture-parent-profile.txt')], capture_output=True, text=True, timeout=12)
+                                            profile_result.update(status=sampled.returncode, stderr=sampled.stderr)
+                                        except subprocess.TimeoutExpired:
+                                            profile_result['error'] = 'Sampler timeout'
+                                    profiler = threading.Thread(target=profile_fixture)
+                                    profiler.start()
                                 result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
-                                result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                try:
+                                    result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                finally:
+                                    if profiler:
+                                        cancel_profile.set()
+                                        profiler.join(timeout=15)
+                                        result['fixture_profile'] = profile_result
                                 result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_video:
                                 client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
                                 result['video_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
@@ -255,6 +359,7 @@ def main():
                                     entry['video'] = client.measure_video(handle)
                                     entry['avd_after'] = counters()
                                     entry['cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                deadline = min(deadline, time.monotonic() + 2)
                         except Exception as error:
                             result['marionette_error'] = str(error)
                             automation_failed = True
@@ -271,6 +376,10 @@ def main():
                                     captured = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture', str(shot)],
                                         capture_output=True, text=True, timeout=15, env=env)
                                     result.setdefault('page_captures', []).append(dict(url=url, status=captured.returncode, path=str(shot)))
+                                    if args.capture_renderer or args.gpu_presentation:
+                                        from renderer_capture import capture as capture_renderer
+                                        result.setdefault('renderer_page_captures', []).append(dict(url=url,
+                                            **capture_renderer(args.run / ('page-%d-renderer.ppm' % index))))
                                 pages = client.pages(capture_page if args.capture_pages else None)
                                 (args.run / 'pages.json').write_text(json.dumps(pages, indent=2) + '\n')
                             except Exception as error:
@@ -285,6 +394,9 @@ def main():
                 capture = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture', str(shot)],
                                          capture_output=True, text=True, timeout=15, env=env)
                 result['capture'] = dict(status=capture.returncode, stdout=capture.stdout, stderr=capture.stderr)
+                if args.capture_renderer or args.gpu_presentation:
+                    from renderer_capture import capture as capture_renderer
+                    result['renderer_capture'] = capture_renderer(args.run / 'screen-renderer.ppm')
         except BaseException as error:
             automation_failed = True
             result['interruption'] = repr(error)
@@ -313,7 +425,7 @@ def main():
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming']:
+            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]
