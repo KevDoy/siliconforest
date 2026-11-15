@@ -27,9 +27,16 @@ def plan(root, args):
         elif arg.startswith('--profile='):
             args[index] = '--profile=' + str(Path(arg.partition('=')[2]).expanduser().resolve())
     manifest = json.loads((root / 'release.json').read_text())
+    diagnostic = manifest.get('diagnostics', {})
+    if diagnostic:
+        allowed = {'PD_WS_TRACE','PD_WS_TIMING','PD_CA_TRACE','PD_SANDBOX_TRACE','MOZ_REMOTE_ALLOW_SYSTEM_ACCESS'}
+        if set(diagnostic.get('environment',{}))-allowed or diagnostic.get('args',[]) not in [[],['--marionette']]:
+            raise ValueError('Unsupported temporary installation diagnostics')
+        args = diagnostic.get('args',[]) + args
     if str(root) != manifest['target']:
         raise RuntimeError('Runtime moved: rebuild its CGL/sandbox paths for the new prefix')
     env = os.environ.copy()
+    env.update(diagnostic.get('environment',{}))
     for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
                         ('gpu_vector_compare', 'SFFX_GPU_VECTOR_COMPARE'), ('gpu_cache_lookups', 'SFFX_GPU_CACHE_LOOKUPS'),
                         ('gpu_dirty_frames', 'SFFX_GPU_DIRTY_FRAMES'), ('gpu_export_cache', 'SFFX_GPU_EXPORT_CACHE'),
@@ -58,16 +65,28 @@ def plan(root, args):
     for name in list(env):
         if name.startswith('MOZ_DISABLE_') and name.endswith('_SANDBOX'):
             raise RuntimeError('Refusing inherited disabled sandbox: ' + name)
+    original = Path(manifest.get('original_bundle', str(root / 'original/Firefox.app')))
     command = [str(root / 'surface/bin/surface-session'), str(root / 'surface/bin/iosurfaced'),
-               str(root / 'original/Firefox.app/Contents/MacOS/firefox')]
+               str(original / 'Contents/MacOS/firefox')]
     if selected_profile(args) is None:
-        command += ['--profile', str(root / 'profile')]
+        command += ['--profile', str(default_profile(root, manifest))]
     command += args
     return command, env
 
 
+def default_profile(root, manifest):
+    if manifest.get('system_layout'):
+        return Path.home() / 'Library/Application Support/Firefox/Profiles/siliconforest'
+    return root / 'profile'
+
+
 def main():
     root = Path(__file__).resolve().parents[3]
+    config = Path(__file__).with_name('system-runtime.json')
+    if config.exists():
+        root = Path(json.loads(config.read_text())['target'])
+        if root.parent != Path('/usr/local/lib/siliconforest/firefox') or root.is_symlink():
+            raise RuntimeError('Unexpected installed runtime path')
     arguments = sys.argv[1:]
     dry = arguments[:1] == ['--sf-plan']
     command, env = plan(root, arguments[1:] if dry else arguments)
@@ -77,21 +96,29 @@ def main():
         return
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Runtime requires SiliconForest')
-    profile = selected_profile(arguments) or root / 'profile'
-    profile.mkdir(mode=0o700, exist_ok=True)
+    manifest = json.loads((root / 'release.json').read_text())
+    profile = selected_profile(arguments) or default_profile(root, manifest)
+    profile.mkdir(mode=0o700, parents=True, exist_ok=True)
     preferences = {'browser.shell.checkDefaultBrowser': False, 'app.update.auto': False,
                    'webgl.disable-angle': True, 'browser.tabs.inTitlebar': 0}
+    legacy = ''.join('user_pref(%s,%s);\n' % (json.dumps(k),json.dumps(v)) for k,v in preferences.items())
+    preferences.update({'browser.aboutwelcome.enabled': False, 'browser.preonboarding.enabled': False,
+                        'browser.startup.homepage_override.mstone': 'ignore',
+                        'startup.homepage_welcome_url': '', 'startup.homepage_welcome_url.additional': '',
+                        'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False})
     settings = profile / 'user.js'
-    if not settings.exists():
+    # Upgrade only the byte-exact four-setting file this installer generated.
+    # An existing owner-edited user.js remains untouched.
+    if not settings.exists() or (manifest.get('system_layout') and settings.read_text() == legacy):
         settings.write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v))
                                    for k, v in preferences.items()))
-    logs = root / 'logs'
-    logs.mkdir(mode=0o700, exist_ok=True)
+    logs = (Path.home() / 'Library/Logs/SiliconForest/Firefox') if manifest.get('system_layout') else root / 'logs'
+    logs.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(logs / ('firefox-%d-%d.log' % (time.time(), os.getpid())), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.dup2(fd, 1)
     os.dup2(fd, 2)
     os.close(fd)
-    os.chdir(root / 'original/Firefox.app/Contents/MacOS')
+    os.chdir(Path(manifest.get('original_bundle', str(root / 'original/Firefox.app'))) / 'Contents/MacOS')
     os.execve(command[0], command, env)
 
 

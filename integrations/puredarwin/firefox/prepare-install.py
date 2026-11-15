@@ -25,6 +25,7 @@ def main():
     ap.add_argument('--output', type=Path, required=True, help='new ignored host staging directory')
     ap.add_argument('--nix', default=str(Path.home() / '.nix-profile/bin/nix'))
     ap.add_argument('--build', action='store_true')
+    ap.add_argument('--system-layout', action='store_true', help='prepare a new versioned system runtime and /Applications bundle')
     ap.add_argument('--gpu-presentation', action='store_true')
     ap.add_argument('--gpu-dirty-frames', action='store_true')
     ap.add_argument('--gpu-export-cache', action='store_true')
@@ -37,8 +38,9 @@ def main():
     if (args.gpu_dirty_frames or args.gpu_export_cache or args.gpu_coalesce_ticks or args.gpu_context_cleanup) and not args.gpu_presentation:
         raise ValueError('GPU caches require GPU presentation')
     release = PurePosixPath(args.release)
-    if release.parent != PurePosixPath('/private/var/db/sffx') or not release.name.replace('-', '').isalnum():
-        raise ValueError('Expected one new simple release directory under /private/var/db/sffx')
+    parent = '/usr/local/lib/siliconforest/firefox' if args.system_layout else '/private/var/db/sffx'
+    if release.parent != PurePosixPath(parent) or not release.name.replace('-', '').isalnum():
+        raise ValueError('Expected one new simple release directory under ' + parent)
     acquisition = args.acquisition.resolve()
     bundle = acquisition / 'unpacked/Firefox/Firefox.app'
     info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
@@ -92,6 +94,7 @@ def main():
         if not Path(value).is_dir():
             raise FileNotFoundError(value)
     manifest = dict(version=version, target=str(release), official_bundle_files=len(actual),
+                    system_layout=args.system_layout,
                     mozilla_sha512=checksum_line[0], recipes=recipes,
                     state='candidate: requires qualification at this exact prefix',
                     installed_media=True, skip_unchanged_transactions=False, provider_overrides=overrides,
@@ -160,16 +163,28 @@ def main():
                                           'CFBundleVersion', 'CFBundleURLTypes', 'CFBundleDocumentTypes'] if key in info}
     outer_info.update(CFBundleExecutable='firefox-sf', CFBundlePackageType='APPL', CFBundleIconFile=icon)
     (outer / 'Info.plist').write_bytes(plistlib.dumps(outer_info))
+    if args.system_layout:
+        manifest['original_bundle'] = '/Applications/Firefox.app/Contents/Resources/Mozilla.app'
+        (outer / 'Resources' / icon).unlink()
+        (outer / 'Resources' / icon).symlink_to('Mozilla.app/Contents/Resources/' + icon)
+        (outer / 'MacOS/system-runtime.json').write_text(json.dumps(dict(target=str(release))) + '\n')
     manifest['builds'] = builds
     (args.output / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
     desktop = Path(__file__).with_name('org.mozilla.firefox.desktop').read_text()
-    desktop = desktop.replace('TryExec=/Applications/Firefox.app/Contents/MacOS/firefox',
+    if args.system_layout:
+        desktop = desktop.replace('TryExec=/Applications/Firefox.app/Contents/MacOS/firefox',
+                                  'TryExec=/Applications/Firefox.app/Contents/MacOS/firefox-sf')
+    else:
+        desktop = desktop.replace('TryExec=/Applications/Firefox.app/Contents/MacOS/firefox',
                               'TryExec=' + str(release / 'Firefox.app/Contents/MacOS/firefox-sf'))
-    desktop = desktop.replace('Exec=/usr/bin/chonkstep-darwin-desktop --desktop-request application org.mozilla.firefox',
+        desktop = desktop.replace('Exec=/usr/bin/chonkstep-darwin-desktop --desktop-request application org.mozilla.firefox',
                               'Exec=' + str(release / 'Firefox.app/Contents/MacOS/firefox-sf') + ' %U')
-    desktop = desktop.replace('Icon=/Applications/Firefox.app', 'Icon=' + str(release / 'original/Firefox.app'))
+        desktop = desktop.replace('Icon=/Applications/Firefox.app', 'Icon=' + str(release / 'original/Firefox.app'))
     (args.output / 'org.mozilla.firefox.desktop').write_text(desktop)
     shutil.copy2(Path(__file__).with_name('owner-install.py'), args.output / 'owner-install.py')
+    if args.system_layout:
+        for name in ['install-system.py', 'uninstall.py']:
+            shutil.copy2(Path(__file__).with_name(name), args.output / name)
     (args.output / 'OWNER-INSTALL.txt').write_text(
         'Candidate only. Qualify this exact prefix before daily activation.\n'
         'The original Mozilla bundle is unchanged; the outer launcher supplies private providers.\n'
@@ -182,6 +197,15 @@ def main():
         '3. Merge/qualify the open(1) HTTP(S) patch through TERM; choose org.mozilla.firefox for http/https.\n'
         '4. Test first and running-instance open URLs; keep previous defaults/pins for rollback.\n'
         'No installer action here changes any of these owner files.\n')
+    if args.system_layout:
+        (args.output/'OWNER-INSTALL.txt').write_text(
+            'System-layout installation, explicit owner authorization required.\n'
+            'After put.py cold-verifies a NEW staging path, hold gui.lock and run:\n'
+            'python3 <staging>/install-system.py --source <staging> --apply\n'
+            'Then qualify compositor application launch, visible browsing and same-parent URL routing.\n'
+            'Uninstall after quitting Firefox (profiles and logs are preserved):\n'
+            'python3 '+str(release)+'/uninstall.py --runtime '+str(release)+' --apply\n'
+            'Canonical shared framework and open(1) adoption remain coordinated with their owners.\n')
     print(json.dumps(manifest, indent=2))
 
 

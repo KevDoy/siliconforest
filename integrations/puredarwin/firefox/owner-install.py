@@ -3,8 +3,8 @@
 """Prepare or apply the owner's reviewed Firefox integration.
 
 Default prints a concrete plan. --apply requires a qualification record for
-this exact private release. The Firefox work agent must not apply this to owner
-paths: its assignment permits staging only. Isolated-prefix controls are safe.
+this exact private release. For an authorized owner system installation use
+install-system.py, which copies the pristine payload into /Applications.
 The Cocoa owner separately owns installing the open(1) HTTP(S) patch.
 """
 import argparse
