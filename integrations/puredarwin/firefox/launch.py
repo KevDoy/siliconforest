@@ -72,9 +72,9 @@ def main():
             (out / 'avd-after.log').write_text(r.stdout + r.stderr)
         (out / 'launch-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
         # Preserve evidence on nonzero launcher exit too. Prefix is owned and fixed.
-        archive = out / 'target-evidence.tar'
+        archive = out / 'target-evidence.tar.gz'
         with archive.open('wb') as stream:
-            copied = subprocess.run(ssh + [shlex.join(['tar', '-C', remote, '-cf', '-', '.'])],
+            copied = subprocess.run(ssh + [shlex.join(['tar', '-C', remote, '-czf', '-', '.'])],
                                     stdout=stream, stderr=subprocess.PIPE, timeout=60)
         if copied.returncode == 0:
             with tarfile.open(archive) as tar:
