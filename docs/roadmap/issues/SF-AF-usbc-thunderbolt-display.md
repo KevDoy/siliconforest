@@ -2645,3 +2645,32 @@ registration yet) and native raw-HID select/FIONREAD readiness. The latter
 would let DESK replace250Hz idle HID polling after real select tests and a
 consumer change; it establishes no idle-regression fix. Neither enters the
 next dock collection.
+
+
+### 2026-11-15 18:25Z: real I210 driver and checked bus mastering reached
+
+CIO33/source `04794e6a2`, capsule
+`c201fe77abaa0284303660b4f75e03b0d75868ecc1613d0921d441ce643802e2`,
+booted without a panic and repeated real TS3 authorization/12-function
+inventory/MSI setup. The corrected native aperture types produced BAR0
+PCI00100000, BAR3 PCI00180000 and actual BAR0 memory descriptor
+CPU600100000/size80000. The existing descriptor passed checked translation;
+resource-error0. This confirms the source/host-test aperture diagnosis.
+
+The actual IOMapper bound, the native MSI route armed, checked BME admission
+returned error0 for only I210 and its three real ancestor bridges, and the
+FreeBSD PDFBSDem driver attached. All four USB controllers remain blocked.
+A real IOEthernetInterface is present under the actual driver, but has
+IOInterfaceState0 and no BSD Name. The runner failed this requirement at
+18:23:00Z BEFORE interface-up, link/DHCP or quiet60. No Ethernet packet or
+actual MSI delivery is qualified. Normal rollback restored non-AVE CIO29
+at18:25:35Z; UART reaped before release18:25:36Z.
+
+Source explains the next missing step: PDFBSDEthernet publishes its interface
+but issues no IONetworkStack registration request. This system's Wi-Fi
+driver explicitly sends RegisterInterfaceAll because InterfaceNamer is absent.
+A userland helper is being prepared to verify unique actual I210 identity,
+BME admission and Ethernet child, then send the same normal registration
+request and require a real non-Wi-Fi BSD name. It chooses no fixed unit and
+sets no interface-up/address/route/resolver/DHCP state. The next trial can
+reuse the exact non-AVE CIO33 capsule, without another collection build.
