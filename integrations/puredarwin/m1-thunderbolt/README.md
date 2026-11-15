@@ -325,3 +325,19 @@ in the bounded snapshot when a remote exists. The model/route allowlist's
 host tests prove only metadata matching; the SDK build is not an authorized
 dock. No user-facing request or native backend is installed yet. Endpoint
 DMA remains outside this API.
+
+
+Linux populates/clocks PCIe-C only from its deferred post-activation worker.
+The native coldInit API therefore also requires the actual activated-tunnel
+proof and, like linkStart, must run outside the CM domain lock after its
+post callback returns. The pre callback reserves ownership/prerequisites
+without PCIe-C MMIO. This prevents a future caller from interpreting
+"cold-init before reset release" as permission to touch a gated controller
+before its real tunnel exists. The adapter remains uninstalled/unwired.
+
+`build-pci-inventory.nix` builds a read-only native inventory CLI. It follows
+actual IOPCIDevice ancestry to PDCIOPCIHost, prints only public BDF/vendor/
+device/class values and counts the four xHCI controllers and I210. Exit0
+requires that entire registry target set; absent/partial sets return2 and
+incomplete queries return1. It never reads config space or proves Ethernet,
+USB, DMA or authorization. Native execution is qualified separately.

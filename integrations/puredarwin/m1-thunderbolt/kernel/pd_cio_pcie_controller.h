@@ -14,7 +14,9 @@
 /* Unwired native controller backend: no matching personality, DART access,
  * endpoint publication, MSI or DMA. The future CM adapter must own the actual
  * ACIO/PHY lease and supply real power and activated-tunnel proofs. Never run
- * linkStart while holding the CM domain lock: its config traffic must run.
+ * coldInit or linkStart while holding the CM domain lock: its config traffic
+ * must run. BOTH require a real activated-tunnel proof, after the CM's
+ * post-activation callback has returned, matching Linux child population.
  * Any attempted hardware programming pins ownership/mappings until reboot;
  * revoke blocks new accesses but supplies NO hardware or child drain proof.
  */

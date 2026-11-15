@@ -15,8 +15,9 @@ struct pd_tb_nhi_config {
  int (*irq_request)(int,int (*)(void *),void *,const char *);
  void (*irq_enable)(int);
  void (*irq_free)(int);
- /* Optional all-or-none native PCIe backend. prepare must establish real
-  * ownership/clock/reset facts; activated queues bounded link/enumeration
+ /* Optional all-or-none native PCIe backend. prepare reserves ownership
+  * and prerequisites WITHOUT PCIe-C MMIO. activated queues cold-init/link
+  * and enumeration only after both real tunnel adapters are enabled,
   * OUTSIDE the domain lock; deactivate joins real children/DMA before
   * releasing ownership. Callback success is not itself PCI/link evidence.
   * Uninstalled callbacks refuse activation/authorization. */

@@ -68,7 +68,7 @@ int PDCIOPCIController::coldInit()
 {
  if(!lock || ml_at_interrupt_context())return EINVAL;
  IOLockLock(lock);int ret;
- if(!live())ret=ENODEV;
+ if(!live() || !tunnelProof(context))ret=ENODEV;
  else if(touched)ret=EBUSY;
  else{
   touched=true;ret=pd_pciec_cold_init(&io);if(ret)poisoned=true;else cold=true;

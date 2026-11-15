@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 10:52Z)
+## Current target and observed state (owner change; updated 11:07Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,7 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO14, source `7eee763ea`, capsule `064c9d569efe…`,
+**Observed in Darwin:** non-AVE CIO15, source `723377da3`, capsule `424b033d72b8…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -24,7 +24,7 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at10:51:13Z. An explicit late snapshot also reports state7/remote0;
+lock release at11:04:52Z. An explicit late snapshot also reports state7/remote0;
 UID65534 was denied without incrementing the query count, while root completed
 one request and advanced it1->2. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
@@ -1473,3 +1473,38 @@ peers are refused. Authorization/event publication occurs only after real
 CM success. The bounded snapshot can report actual remote authorization.
 The host allowlist test is metadata evidence only; no dock has been authorized
 on Darwin. These source changes are excluded from the frozen CIO15 candidate.
+
+The actual native apciec1 DT capture also confirms all33 available root/port
+tuning records match the published native constants; the ten OE-fabric
+records come from the pinned public DTS and match active Linux. Raw data
+remains private. Linux runs cold-init from its deferred post-activation
+worker, so both native coldInit and linkStart now require real activated-
+tunnel proof outside the CM domain lock. The pre hook reserves prerequisites
+without PCIe-C MMIO; no native backend is installed yet.
+
+A native read-only PCI inventory CLI now SDK-builds for stage(a). It follows
+actual IOPCIDevice ancestry to PDCIOPCIHost and prints only public PCI IDs/BDFs.
+Acceptance requires all four xHCI controllers and the I210; root-only/partial
+inventories fail acceptance. No native invocation or PCI hardware evidence
+is claimed until it is run on the M1.
+
+### CIO15 observed: cold AON hypothesis did not train the link
+
+At11:04:51Z the actual CIO15 kernel passed NHI/PHY/calibration, root versus
+unprivileged query and standard desktop/Wi-Fi checks; UART was reaped at
+11:04:52Z. The exact guarded AON normalization completed48->16 with error0.
+All23 expanded PHY/MAC/BIST/PLL registers match active Linux, as do the
+five sampled PIPE registers. Both physical lanes remain enabled/unlocked
+but UNPLUGGED/state7, remote0. Thus this cold AON change alone did not fix
+training; bit5's function remains unknown. No dock router/authorization,
+PCI, Ethernet, USB or DP has been observed on Darwin. The installed
+collection has57 modules, no AVE module or pdave argument, and unchanged605
+boot arguments. AVE remains paused.
+
+The real native PCI inventory CLI ran on CIO15 and returned2 with
+functions0/xhci0/i2100, correctly failing the stage(a) registry acceptance.
+That negative execution qualifies the tool's empty-domain path only.
+The positive four-controller/I210 path remains unobserved. No further reboot
+will interrupt the announced Firefox30-minute stability slot; source/host
+work proceeds on combined Type-C control/NHI lane diagnostics and endpoint
+DMA preparation.
