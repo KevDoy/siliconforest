@@ -93,7 +93,7 @@ int PDUSBDart::prepare()
     int ret = ENXIO;
     if (poisoned) { IOLockUnlock(lock); return EIO; }
     if (PAGE_SIZE != PD_DART_PAGE) { IOLockUnlock(lock); return EINVAL; }
-    if (!regs[0].va) {
+    if (!regs[0].va || !regs[1].va) {
         if (pd_pmgr_enable_node("/arm-io/dart-usb1", -1, 0, true) ||
             !regs[0].mapNode("/arm-io/dart-usb1", 0) ||
             !regs[1].mapNode("/arm-io/dart-usb1", 1)) {
