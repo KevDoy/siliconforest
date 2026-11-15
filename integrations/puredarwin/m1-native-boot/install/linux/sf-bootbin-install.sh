@@ -38,19 +38,6 @@ NAMES="boot.bin kernel.bin"
 if [ "$WHAT" = --show ]; then
   mount -t vfat -o ro "$DEV" "$MNT"; ls -la "$MNT" "$MNT/sf" 2>/dev/null || true; sha256sum "$MNT"/sf/* 2>/dev/null || true; exit 0
 fi
-if [ "$WHAT" = --rollback ]; then
-  mount -t vfat -o rw,noatime "$DEV" "$MNT"
-  [ -f "$MNT/sf/boot.bin.old" ] || [ -f "$MNT/sf/kernel.bin.old" ] || { echo "no previous file" >&2; exit 2; }
-  for n in $NAMES; do
-    [ -f "$MNT/sf/$n.old" ] || continue               # a file without a previous one stays
-    [ ! -f "$MNT/sf/$n" ] || mv "$MNT/sf/$n" "$MNT/sf/$n.new"
-    mv "$MNT/sf/$n.old" "$MNT/sf/$n"; [ ! -f "$MNT/sf/$n.new" ] || mv "$MNT/sf/$n.new" "$MNT/sf/$n.old"
-  done
-  sync -f "$MNT"; ls -la "$MNT/sf"; sha256sum "$MNT"/sf/*; echo "SFBOOT rolled back"; exit 0
-fi
-[ -f "$WHAT" ] && [ -f "$KERNEL" ] || { echo "two files are needed: <boot.bin> <kernel.bin>" >&2; exit 2; }
-# boot.bin: the installed stage 2 and nothing else, small enough for the stage 1 that is in the stub.
-# kernel.bin: the records with their checksums, configuration + kernel, built for the root on this disk.
 ROOT=$(blkid -L SiliconForest || true); [ -b "$ROOT" ] || refuse "no partition labelled SiliconForest on this machine"
 check() { python3 -B - "$1" "$2" "$(blkid -s UUID -o value "$ROOT")" "${3:-0}" <<'PY'
 import struct, sys, zlib
@@ -86,6 +73,28 @@ print('SFBOOT files ok: boot.bin %d bytes (span %d of %d), kernel.bin %d bytes%s
     len(boot), span, STAGE1, len(kernel), ' BENCH SESSION' if is_bench else '', root[:4]))
 PY
 }
+# Rollback validates the complete resulting pair before the first rename.
+# The installed boot partition can still carry the original oversized boot.bin.old.
+if [ "$WHAT" = --rollback ]; then
+  mount -t vfat -o ro "$DEV" "$MNT"
+  [ -f "$MNT/sf/boot.bin.old" ] || [ -f "$MNT/sf/kernel.bin.old" ] || { echo "no previous file" >&2; exit 2; }
+  RB_BOOT="$MNT/sf/boot.bin"; [ ! -f "$RB_BOOT.old" ] || RB_BOOT="$RB_BOOT.old"
+  RB_KERNEL="$MNT/sf/kernel.bin"; [ ! -f "$RB_KERNEL.old" ] || RB_KERNEL="$RB_KERNEL.old"
+  check "$RB_BOOT" "$RB_KERNEL" || refuse "rollback pair is not bootable; restore a verified kit through the normal install path"
+  umount "$MNT"
+  mount -t vfat -o rw,noatime "$DEV" "$MNT"
+  for n in $NAMES; do
+    [ -f "$MNT/sf/$n.old" ] || continue               # a file without a previous one stays
+    [ ! -f "$MNT/sf/$n" ] || mv "$MNT/sf/$n" "$MNT/sf/$n.new"
+    mv "$MNT/sf/$n.old" "$MNT/sf/$n"; [ ! -f "$MNT/sf/$n.new" ] || mv "$MNT/sf/$n.new" "$MNT/sf/$n.old"
+  done
+  sync -f "$MNT"; ls -la "$MNT/sf"; sha256sum "$MNT"/sf/*; echo "SFBOOT rolled back"; exit 0
+fi
+# Normal install.
+[ -f "$WHAT" ] && [ -f "$KERNEL" ] || { echo "two files are needed: <boot.bin> <kernel.bin>" >&2; exit 2; }
+# boot.bin: the installed stage 2 and nothing else, small enough for the stage 1 that is in the stub.
+# kernel.bin: the records with their checksums, configuration + kernel, built for the root on this disk.
+
 check "$WHAT" "$KERNEL" "${SF_BENCH:-0}" || refuse "the files are not a SiliconForest boot image and kernel for this machine"
 mount -t vfat -o rw,noatime "$DEV" "$MNT"
 mkdir -p "$MNT/sf"

@@ -275,11 +275,21 @@ or that would not fit in stage 1's footprint; and a `kernel.bin` that is not con
 kernel with good checksums for that root, or whose session ends by itself (the bench's
 `kernel-bench.bin`, accepted only with `SF_BENCH=1` and never kept as a previous file). A file
 that is already there byte for byte is left alone. It keeps each replaced file as `sf/<name>.old`;
-`--rollback` swaps back every file that has one; `--show` lists what is there. Stage 1 never
+`--rollback` validates the resulting boot/kernel pair on a read-only mount before swapping
+back every file that has a previous one; `--show` lists what is there. Stage 1 never
 changes. **Prove new files on the bench first** (below): from RAM with `DR_BOOTBIN=`
 (`boot-bench.bin`), or the installed chain itself with `SF_BENCH=1` + `DR_STAGE1_GO=`.
-`sf/boot.bin.old` on the installed machine is the first kit's 14.4 MB file: stage 1 refuses
-it, so a `--rollback` to it stops safely and does not start anything.
+`sf/boot.bin.old` on the installed machine is the first kit's 14.4 MB file (confirmed again
+by SF-AF's tc01 cycle): stage 1 refuses it. The updated script refuses that rollback before
+renaming anything. **Restore a verified kit through the normal two-file install command**
+instead: its current-size `boot.bin` is left alone, and its known-good `kernel.bin` is
+installed with the usual copy/compare/previous-file handling. Older copies of the script
+did not validate rollback and would restore the unbootable first image.
+
+Host regression: `python3 test_rollback.py -v` (scratch files and recorded mount calls;
+no real device access). The old script fails four refusal cases, the updated script passes
+all seven, including valid-pair and kernel-only rollback. This does not establish a real
+hardware rollback; tc01 booted successfully and did not need one.
 
 ## Uninstall
 
