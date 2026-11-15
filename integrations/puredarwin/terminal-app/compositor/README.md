@@ -34,6 +34,8 @@ the desktop menu ...").
 | 21 | `wm-darwin-tiles-above-pinch.patch` | DESK6: minimised windows' tiles above the windows (a window over the bottom left hid them and took their clicks); pinches to the client under the pointer (`zwp_pointer_gestures_v1`; inject `pinch`; the trackpad ring's version 2 with pinch events, asked of the kernel) | `desk6-next-003`, `desk6-daily-003` (built, not installed) |
 | 22 | `wm-darwin-precise-wait.patch` | DESK6: the last 3 ms before a commit waited for in the time-constraint (real-time) scheduling class (`mach_wait_until`), inject `precise on|off` | `desk6-next-004`, `desk6-daily-004` |
 | 23 | `wm-darwin-external-wallpaper-dock-units.patch` | DESK6: the wallpaper fitted to an external output (scaled to cover, GL and CPU renderers); the dock places its surfaces in panel pixels on SiliconForest (a dragged tile, its "Remove" label, a tile's name and the instrument panels sat at 3/4 of the pointer's position); the real-time wait of 22 off by default (measured: no fewer missed blanks; `CHONKSTEP_DARWIN_PRECISE_WAIT=1` turns it on) | `desk6-next-005`, `desk6-daily-005`, `desk6-dock-005` |
+| 24 | `wm-darwin-pointer-set-virtual-seat.patch` | DESK7, 15 November (`docs/roadmap/issues/SF-Z-desktop-night.md`, "One pointer, never fighting the owner, never stalling"): one SiliconForest pointer set (`cursors.rs`, `cursors/*.svg` from `integrations/puredarwin/desktop/cursors/make_cursors.py`, `cursor_set.rs`) for the desk's pointer, the frame's resize edges, `wp_cursor_shape_v1` (new) and recognised client images (libwayland-cursor's built-ins and the set's Xcursor theme, `--write-cursor-theme`); the test instrument's own virtual pointer (`seat virtual|owner`, `target`; keys to the window it pressed in) and the owner's activity (`owner.rs`, `$XDG_RUNTIME_DIR/owner-input`; synthetic input reaches clients only while he is active, waits while he holds, is let go when his input comes; timing steps refused); the pointer speed setting; loop/reader/pointer-gap instrumentation (`WMLOOP`, `WMSTALL`, reader timing, pointer-only misses); minimised tiles under the windows again (the owner) | `desk7-next-002`, `desk7-daily-002` (first as 001) |
+| 25 | `wm-darwin-cursor-thread.patch` | DESK7: the cursor thread (`cursor_thread.rs`, `pointer.rs`, `glrender.rs KmsCore`): the owner's pointer position kept by the input thread, the pointer's plane moved at every refresh by a thread of its own in the time-constraint class, sharing the display with the loop under one lock (it moves the drawn image while a new shape waits; stale motions dropped); the input thread in the time-constraint class by default; owner-seat records dropped while the owner is active; inject `cursorthread`, `inputrt`, `mainprio`, `theme`; synthetic presses deduplicated and let go at the end of a request; leftover applications of a compositor that ended (`WMORPHAN`: notice, dock handle, restart/quit; app ids kept in `$XDG_RUNTIME_DIR/app-ids`); `WMPACING` per GPU client; `wp_presentation` | `desk7-next-008`, `desk7-daily-008` (003-007 on the way) |
 
 Builds:
 ```sh
@@ -95,6 +97,13 @@ fresh copy of `desk-src` gives the build sources of `desk2-next-008` and `desk2-
 Every build host-tested first (`runs/m1-desktop-010/desk2-tests/cargo-test-*-007.txt`: wm-darwin lib
 134/134, wayland_shm 12/13 and wayland_scale 3/4 with the two failures of the base, the other crates all
 passing). The dock is built from the same source (`../../desktop/tools/build_dock.sh`).
+
+### 15 November (DESK7)
+Source: `runs/m1-desktop-010/desk7-src` (`desk6-src` at `053fa15` + patches 24-25, a local git with tags `desk7-base`,
+`desk7-001` .. `desk7-008`). Patch 24 applied to a fresh copy of `desk6-src` gives the build source of
+`desk7-next/daily-002` exactly, 24+25 that of `desk7-next/daily-008` (`diff -r`, `runs/m1-desktop-010/desk7-patchcheck`).
+Host tests in `runs/m1-desktop-010/desk7-tests/`. The pointer set's SVGs in the build source are the generator's output
+(`diff -r` against `integrations/puredarwin/desktop/cursors/svg`).
 
 ### 15 November (DESK6)
 Source: `runs/m1-desktop-010/desk6-src` (`desk5-src` at `a260986` + patches 20-22, a local git with tags `desk6-001` ..

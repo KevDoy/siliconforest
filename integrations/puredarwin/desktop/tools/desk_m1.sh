@@ -13,6 +13,8 @@
 #                                          has none yet; it starts with the next compositor start (sf-session)
 #   desk_m1.sh dock-defaults [tag]         the session's pins set to the default set (the file of before kept as
 #                                          dock.before-<tag>); the running dock reloads them at once
+#   desk_m1.sh cursors                     the pointer set as an Xcursor theme in /usr/share/icons/default, written by
+#                                          the installed .next itself (DESK7); `cursors-remove` takes it away
 #   desk_m1.sh relaunch next|daily         the session starts its compositor again (sf-session of 14 November,
 #                                          night, or later): every window ends. Take runs/m1-coord/gui.lock first.
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
@@ -46,6 +48,13 @@ case "${1:-}" in
     "${SF[@]}" "S=/private/var/db/desktop-state/chonkstep/dock; [ -e \$S ] && [ ! -e \$S.before-${2:-desk} ] && cp -p \$S \$S.before-${2:-desk};
       XDG_STATE_HOME=/private/var/db/desktop-state XDG_RUNTIME_DIR=/private/var/run/gpu-desktop WAYLAND_DISPLAY=wayland-0 /usr/bin/chonkstep-dock --defaults; cat \$S"
     echo "$(date -u +%FT%TZ) DESK dock pins set to the default set (dock-defaults)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt";;
+  cursors)
+    "${SF[@]}" '[ -e /usr/share/icons/default ] && { echo "/usr/share/icons/default exists: not touched"; exit 2; }
+      mkdir -p /usr/share/icons && /usr/bin/chonkstep-darwin-desktop.next --write-cursor-theme /usr/share/icons/default.desk-new &&
+      mv /usr/share/icons/default.desk-new /usr/share/icons/default && ls /usr/share/icons/default/cursors | wc -l'
+    echo "$(date -u +%FT%TZ) DESK pointer set installed as the Xcursor theme /usr/share/icons/default" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt";;
+  cursors-remove)
+    "${SF[@]}" 'rm -rf /usr/share/icons/default; ls /usr/share/icons';;
   relaunch)
     case "$2" in next) word=relaunch-next;; daily) word=relaunch;; *) echo "next|daily" >&2; exit 2;; esac
     "${SF[@]}" "grep -q relaunch-next /usr/libexec/sf-session || { echo 'the running session has no relaunch: reboot-next'; exit 1; }
@@ -64,5 +73,5 @@ case "${1:-}" in
     for i in $(seq 1 60); do "${SF[@]}" true 2>/dev/null && break; sleep 9; done
     for i in $(seq 1 30); do "${SF[@]}" 'pgrep -x chonkstep-darwin-desktop.next > /dev/null && [ -d /private/var/run/gpu-desktop/inject ]' && break; sleep 5; done
     state;;
-  *) sed -n 3,19p "$0"; exit 2;;
+  *) sed -n 3,21p "$0"; exit 2;;
 esac

@@ -1080,3 +1080,233 @@ chonk-dock 214/214 (+2 ignored). Every installed build was host-tested first.
 
 ### Taken from Finch (DESK6)
 Nothing.
+
+## One pointer, never fighting the owner, never stalling (DESK7, 15 November)
+
+**Truthfulness.** Everything observed here used synthetic input (the inject module: `seat owner` streams for the
+latency method of DESK5, the new virtual pointer for clicks and keys), except where the owner's own trackpad use
+is named: he used the M1 by hand from 21:13 to 21:24:30Z, and the compositor's counters of that window are quoted
+as his (2018 real pointer records). Captures blend the pointer in where its plane is: what the panel itself shows
+of the pointer is the owner's to see (checklist). Latencies: from a motion's read (or injection into the input
+queue) to the flip-complete event of the frame that shows it; scan-out after the flip not included. The disk and
+memory loads of the brief were not run: the permission system refused them (a 2.5 GB `dd` to the M1's disk and 3 GB
+of memory pressure); nothing was done around that refusal.
+
+### 1. "There are two mouse cursors ... a triangle ... and a black arrow"
+**Cause.** The white triangle was the desk's own arrow (`scale::arrow`, a 12x18 triangle); the black arrow is
+AppKit's: with no Xcursor theme installed, WindowServer's `cursorLookup` falls back to libwayland-cursor's built-in
+X11 images (`left_ptr` 10x16, drawn at buffer scale 1 and stretched to 150 %) and uploads them with
+`wl_pointer.set_cursor`.
+**Change (patch 24).** One SiliconForest pointer set: 34 shapes (every `wp_cursor_shape_v1` shape: arrow, I-beam
+and vertical I-beam, pointing/open/closed hand, the double and edge resize arrows, column/row resize, move,
+all-scroll, crosshair, cell, wait, progress, zoom in/out, copy, alias, not-allowed, no-drop, help, context menu),
+our own drawings: black with a white outline (hands white with a black outline), vector source
+`integrations/puredarwin/desktop/cursors/make_cursors.py` (+ `svg/`, README), rendered by the compositor
+(`cursors.rs`, tiny-skia) at the display's scale, 24 px at 100 %, 36 at 150 %, 48 at 200 %, the hotspot on a pixel
+corner. Used for: the desk's pointer (desktop, native clients that set none, the dock), the frame's resize edges
+and corners (wm-core's `set_frame_cursor` was ignored before; a grab keeps the shape it began with), a client's
+hide giving way, a missing or refused image; `wp_cursor_shape_v1` (new global) draws a named shape from the set;
+a client image that is one of libwayland-cursor's built-in images (13, by the hash of their pixels) or one of the
+set's own Xcursor theme images is recognised and the set's shape is drawn instead, crisp; only an image the desk
+does not know is shown as the client drew it (`WMCURSOR ... recognised` / `not a known one`, once per image).
+The set is also installed as the Xcursor theme `/usr/share/icons/default` (written on the M1 by the installed
+binary: `chonkstep-darwin-desktop --write-cursor-theme`, `desk_m1.sh cursors`): every NSCursor AppKit looks up by
+name now loads the set (col-resize, hand2, zoom ... which the built-in images lack), and the desk draws it crisp.
+Themes change nothing of the pointer.
+**Host tests.** `cursors.rs`: every drawing read and drawn at every scale step, nothing cut at the edge; the arrow's
+tip on the hotspot pixel at 100/125/150/200 % (the pixel at the hotspot is the tip's, the one before it holds no
+black, the body black, the outline white); every protocol shape and Xcursor name resolves; the theme images and
+libwayland's built-in left_ptr and xterm (pixel maps from its cursor-data.h) are recognised, a custom image is not;
+an Xcursor file has every size with its hotspot. Wire test `one_pointer_family_over_the_desk_clients_named_shapes_
+and_libwayland_images` (the set's arrow over the desk and a window, the built-in left_ptr uploaded -> the set's
+arrow, `set_shape(Text)` and `ColResize` -> the set's, a custom 4x4 image as drawn, the resize corner -> nwse).
+Contact sheets of the set at 100/150/200 % from the compositor's renderer: `runs/m1-desktop-010/desk7-tests/shots/
+cursor-set-{100,150,200}.png` (hotspot pixel marked red).
+**Observed on the M1** (desk7-002, the owner's 150 %, synthetic `seat owner` motion, captures zoomed):
+the set's arrow over the desktop, a desk terminal, Terminal.app's window, Activity Monitor's table and the dock;
+a window's right frame edge -> the set's ew-resize (frame cursor); Activity Monitor's column divider -> AppKit asks
+resizeLeftRight, finds the theme's image, the desk recognises it (`... (the SiliconForest theme) is the set's
+"ew-resize"`); AM's search field -> the set's I-beam (`... is the set's "text"`); AppKit's arrow -> the set's arrow
+(`... is the set's "default"`). Hotspot: the pixel at the commanded position (2099,1449 and 2199,1299) is the
+tip's (159 grey: the black tip covers half of it), white outline left and above, black body below
+(`c1-*.png`, `s2-*.png`). **Not achieved:** Terminal.app's text area shows the arrow, not an I-beam: Terminal.app
+sends no cursor request there on this AppKit (nothing arrives at the desk; asked of TERM8); Firefox link -> hand not
+tested (Firefox was not mine to start: FX's process had no window after my relaunch).
+**Asked of AppKit** (TERM8, `runs/m1-coord/requests-for-TERM5.md`, "From DESK7"): bind `wp_cursor_shape_manager_v1`
+and send NSCursor's standard cursors (and the private ones apps use) as shapes; only custom images keep uploading.
+
+### 2a. "I was fighting for mouse control" - the test instrument's own pointer
+**Cause.** Inject events entered the input thread's queue as the device's records do, so injected absolute
+positions moved the owner's one pointer, and injected keys went to his focused window.
+**Change (patch 24).** The inject module drives a pointer of its own by default (`seat virtual`; `input.rs`
+`VirtualPointer`): its own place and buttons, swapped in while one of its events is delivered, never drawn, never
+moving the owner's pointer or its plane; a client's cursor set for it is not shown. Its keys go to the window it
+last pressed in (or `target <window>`), lent the keyboard focus until the owner's next key or the end of the
+request. The owner's activity: every record of the device counts (`owner.rs`); within 10 s of one he is *active*,
+and then synthetic events reach client surfaces only (no desk binding, no raise or focus, no frame drag, no
+switcher, no Space swipe, no popup of his dismissed), wait while he holds a key or a button (at most 5 s), and let
+go of what they hold when his input comes (a synthetic modifier is released before his key arrives; a synthetic
+press is released before his motion). `stall`, `fail`, `latch`, `margin`, `cursorplane`, `precise`, `inputrt`,
+`cursorthread`, `mainprio`, `theme` and `seat owner` are refused while he is active. The state for every agent's
+tools: `/private/var/run/gpu-desktop/owner-input` (`active=0|1`, `last_real_input_unix_ms`, counts; rewritten at
+once on a change and every second while he is active). `seat owner` is the old path (latency measurements). The
+`done` line now ends with the owner's state. Told in `runs/m1-coord/log.txt` and requests-for-TERM5.md; CODEX-TB's
+and TERM8's guards read the file since 21:15Z.
+**Host tests** (wayland_shm, real clients): `synthetic_input_never_moves_the_owners_pointer_or_takes_his_keys` (his
+pointer stays where his record put it while the instrument clicks into another client's window; that window gets
+the click, his window keeps the focus; the synthetic keys reach the clicked window and none his; his key goes to
+his window; a synthetic Control held when he types is let go first - his key arrives without it; synthetic keys
+wait while he holds Shift and follow when he lets go; a synthetic press is let go when his pointer moves). owner.rs
+tests (the file). **Observed on the M1** (desk7-002): visible pointer put at 2199,1299 with `seat owner`, then a
+synthetic click and 18 keys into a desk terminal at 772,437 on the virtual pointer: the visible pointer exactly where
+it was (captures `s2-a`, `s2-b`), the text in the terminal. The owner's own sessions with agents
+testing on the virtual seat: 21:13-21:24Z no synthetic event arrived while he was active (`synthetic_while_active=0`);
+22:08-22:16Z TERM8's random-input pass was running when he came: 40 synthetic events reached client surfaces only while he
+was active and 8 held synthetic keys/presses were let go when his input came (`synthetic_interrupted=8`); TERM8's pass then
+stopped itself at his input (its log). His pointer was never moved by them.
+**Fault of mine, fixed in patch 25 (desk7-003):** my first run sent malformed key lines that left a synthetic 'e' held; the next
+press made that desk terminal exit (it ends on a second press of a held key). Synthetic presses of a key already held
+(and releases of one not held) are now dropped, and keys a request leaves held are let go at its end.
+
+### Minimised windows' tiles under the windows again (the owner, via the coordinator)
+"Minimized windows should not render over windows." DESK6 had put the tiles above the windows; they are desk
+surfaces under the windows again (`chonk-shell miniwindows.rs`), one picture tile, no badge. A covered tile's window
+comes back through its application's dock tile (foreign-toplevel activate) or Command-Tab: both end in wm-core's
+activation, which deminiaturizes. Host test `a_minimised_tile_lies_under_the_windows_and_an_activation_brings_the_
+window_back` (fails on DESK6's source: `basecheck-tiles-above-old.txt`). Not exercised on the M1.
+
+### 2c. The pointer's speed
+The curve is the trackpad driver's (kernel, `m1-trackpad-child/multitouch/m1tp_mt.c`: libinput's touchpad profile at
+speed 0, gain 200 %), computed from the controller's clock, not from when a report is read: its host test gives the
+same travel with +-2 ms arrival jitter (2431 counts either way), so a late read under load cannot change it. Its
+numbers (host test): 10 mm/s -> 21 panel px per mm (419 px for 20 mm), 100 mm/s -> 21 px/mm, 400 mm/s -> 66 px/mm;
+at 150 % that is 14 and 44 points per mm; two-finger scrolling is one wheel step per 3.6 mm, ten logical units a step
+at the desk. Whether that matches macOS's default tracking speed is for the owner's hand. A plain factor on top, not
+time dependent: `CHONKSTEP_DARWIN_POINTER_SPEED=<25..400>` (percent) in the session, or the file
+`/private/var/db/desktop-state/chonkstep/pointer-speed` (one number, read again within a second of a change;
+`WMPOINTER speed N%`). Default 100 (as before).
+
+### 2b. "Moving the mouse around was laggy and stuttering" - the pointer under load
+**What it was, measured.** Instrumentation added first (patch 24): the loop's turns timed by part (`WMLOOP`, `WMSTALL`
+for a turn over 8 ms), how long the pointer's records waited in the queue for the loop, the spacing of commits moving
+the pointer, the input thread's poll lateness and the trackpad's record spacing, pointer-only misses apart.
+- The owner's own trackpad use (21:13-21:27Z, desk7-002, the loop moving the plane, TERM8's tests running on the virtual
+  seat): 2018 records; his pointer motion -> flip oldest p50 <=21 / p90 <=33 / p99 <=54 / max 110.7 ms; records waited
+  for the loop p99 20.7, max 68.3 ms; 536 loop turns over 16 ms and 61 over 33 ms in 13 minutes. That is his stutter.
+- Causes found: the pointer's plane moved only when the loop got round to it, and the loop was held by a client's
+  commits (12-22 ms, `clients=` - a terminal flood, a dock), a repaint (up to 99-133 ms with eight busy cores), the
+  desk's own theme change (90-180 ms), captures; with eight `yes` the loop woke up to 17 ms late at user-interactive QoS
+  (`pthread` priority stays 31: QoS does not lift it above the busy cores) and the input thread polled up to 9.3 ms late.
+- The trackpad's own delivery is not a cause (his use, 2018 then 9693 records): one record per 1 ms poll in 99 % (4 and
+  80 polls with two), spacing mostly 5-13 ms (8 ms reports), 0 sequence gaps, 0 lost; written to CODEX-TB, no request.
+**Change (patch 25).** The cursor thread: the input thread applies every record of the owner's device (and `seat owner`
+records) to the shared pointer position (`pointer.rs`; the loop uses the same position for its clients); a thread of its
+own (`pdcursor`, time-constraint class, `cursor_thread.rs`, `glrender.rs KmsCore`) wakes `lead` before each blank
+(learned, 2.6-3 ms) and commits the plane's move when nothing is in flight - the loop's frame, when it made its moment,
+carries the newest position itself; a frame late for its blank no longer holds the pointer (the thread moves it on that
+blank, the frame follows). The display is shared under one lock held only for commits and event reads. The thread moves
+the image that is drawn while the loop draws a new shape (the position never waits for a shape); a place within the
+plane's size of the right/bottom edge (a new shift inside the buffer) is left to the loop. Off during a window drag (the
+window and pointer move together, as DESK5 made them) and with several outputs. The input thread is in the
+time-constraint class by default (polls never more than 0.25 ms late under eight busy cores; `CHONKSTEP_DARWIN_INPUT_RT=0`
+returns to QoS). Off switches: `CHONKSTEP_DARWIN_CURSOR_THREAD=0`, inject `cursorthread off`. A fixed priority for the
+loop (`mainprio on`) was tried: no gain measured, not used.
+**Measured on the M1** (desk7-007, synthetic `seat owner` streams: absolute records every 8 ms from a thread into the
+input queue, 10 s per phase; "-old" = the same build with the cursor thread off and the input thread at QoS, i.e. as before
+DESK7; latency = from the record's read to the flip-complete event of the frame showing it; scan-out not included):
+
+| load (10 s, a motion every 8 ms) | pointer moved by | oldest motion per frame p50 / p90 / p99 / max (ms) | newest p50 / p90 / p99 / max (ms) | max gap between flips moving the pointer (ms) | pointer-only commits that missed their blank | frames | the loop's worst turn (ms, part) |
+|---|---|---|---|---|---|---|---|
+| idle | cursor thread | 15.4 / 18.7 / 19.5 / 33.5 | 6.7 / 9.6 / 10.5 / 12.8 | 33.4 | 0 of 566 | 574 | 15.4 (clients=15.2 input=0.1) |
+| idle-old | loop (as before) | 15.4 / 18.5 / 19.3 / 29.7 | 6.7 / 9.8 / 11.2 / 23.0 | 97.4 | 1 of 561 | 574 | 13.1 (clients=12.9 input=0.1) |
+| yes8 | cursor thread | 15.1 / 18.5 / 19.2 / 35.2 | 6.6 / 9.8 / 11.6 / 15.7 | 33.3 | 0 of 563 | 575 | 1.7 (repaint=1.7) |
+| yes8-old | loop (as before) | 16.3 / 20.3 / 29.2 / 35.9 | 7.3 / 12.0 / 17.9 / 22.4 | 33.4 | 3 of 559 | 573 | 13.4 (commit_first=13.4) |
+| vkcube | cursor thread | 16.0 / 19.3 / 21.9 / 33.2 | 7.1 / 10.5 / 12.5 / 15.4 | 33.3 | 0 of 4 | 573 | 7.7 (repaint=7.6) |
+| vkcube-old | loop (as before) | 15.8 / 19.1 / 22.4 / 35.8 | 6.8 / 9.9 / 12.0 / 22.2 | 32.6 | 0 of 0 | 573 | 4.3 (repaint=4.3) |
+| flood | cursor thread | 15.3 / 18.9 / 22.0 / 35.8 | 6.9 / 9.9 / 12.2 / 13.6 | 33.4 | 0 of 290 | 573 | 10.2 (repaint=10.1) |
+| flood-old | loop (as before) | 16.6 / 19.4 / 35.8 / 39.0 | 7.1 / 10.1 / 12.3 / 30.5 | 33.5 | 0 of 240 | 538 | 10.3 (repaint=10.2) |
+| theme | cursor thread | 15.2 / 18.5 / 20.6 / 30.5 | 6.6 / 9.9 / 11.5 / 16.2 | 33.3 | 0 of 554 | 574 | 194.0 (input=0.1 inject=179.6 repaint=14.2) |
+| theme-old | loop (as before) | 15.8 / 19.2 / 36.3 / 152.3 | 7.0 / 10.4 / 13.8 / 121.2 | 136.2 | 2 of 534 | 555 | 117.1 (inject=116.9) |
+| stop | cursor thread | 15.6 / 18.8 / 19.8 / 48.6 | 6.9 / 10.3 / 11.4 / 25.3 | 33.4 | 2 of 553 | 573 | 4.0 (repaint=3.9) |
+
+Run to run: the same matrix on desk7-004 (`m1/l3.txt`) gave the thread p99 19.5-27.3 ms everywhere and the loop p99 35.9 (flood),
+38.6 (an Activity Monitor column drag on the virtual pointer: thread 27.3) and 39.0 / max 123.5 (theme). Before any DESK7
+change (desk7-002, `m1/l1.txt`): idle 16.2 / 19.5 / 31.5 / 46.8, eight `yes` 19.1 / 24.4 / 32.6 / 40.5 (6 of 543 pointer-only
+misses), the same with the input thread real-time 19.4 / 25.9 / 39.2 / 388.4 (a 99 ms repaint), a terminal flood 17.5 / 29.4 /
+35.9 / 58.7. **Target check** (pointer on the next blank, p99 <= 2 frames, no multi-frame stall, no pointer-only miss):
+p99 <= 22 ms (1.3 frames) under every load measured with the thread; the largest gap between flips moving the pointer 33.4 ms
+(one refresh without a move, never two); pointer-only misses 0 in every phase but the SIGSTOPped terminal (2 of 553). The
+first motion of a phase can be older (max 33-49 ms). Not measured: Firefox scrolling, YouTube and tab switching as loads (the
+only Firefox windows were FX's tests and the owner's; I did not drive them), memory pressure and disk I/O (the
+permission system refused my `dd` of 2.5 GB to the M1's disk and 3 GB of memory pressure; nothing was done around it).
+**The owner's own use with the thread** (desk7-004, 22:08-22:16Z, 9693 real records, TERM8's tests and FX's Firefox running):
+`WMCURSORTHREAD` 10 s windows oldest p50 16.3-19.3, p90 21.6-32.8, p99 34.5-99 ms; the larger values include a fault fixed since
+(a motion left unshown during a window drag was timed when the next began: desk7-005) and the shape changes (desk7-006). His
+feel of desk7-007 is for his hand (checklist). Raw: `runs/m1-desktop-010/desk7-tests/m1/l*.txt`, `owner-window*-stats.txt`.
+**Fault of mine, fixed in desk7-007:** at 22:35Z the owner came while my phase's 10 s `seat owner` stream ran; the instrument
+stopped at once but the stream already handed to its thread went on moving his pointer until it ended (at most 10 s). Owner-seat
+records are now dropped while he is active (by the loop, and by the shared position itself).
+
+### Firefox, the compositor's side (the coordinator's queue, partly)
+1. **Pacing.** `WMPACING` (patch 25) traces every GPU client from commit to the flip that shows it. Firefox (FX's runs, 10 s
+windows): 580 commits, 326 shown, 255 replaced before any frame showed them, commit interval p50 9.7 ms; 475 / 333 / 142, p50
+16.6 ms. Commits come in pairs about 10 ms apart (one at 0 ms after our flip, when frame callbacks go out, one 8-10 ms later),
+then nothing for ~25 ms: two clocks (the callbacks and CVDisplayLink's own 60 Hz timer, FX's finding). No frame waited for a
+fence. The desk shows the newest buffer per refresh, so one of each pair is lost. Done: `wp_presentation` (feedback with the
+flip's CLOCK_MONOTONIC time, the refresh, the sequence; discarded for a buffer replaced unseen). Asked of AppKit (TERM8 +
+CODEX-FX, requests-for-TERM5.md): drive CVDisplayLink/display from frame callbacks or presentation feedback. Not done: a
+FIFO of one in the desk (each committed buffer shown for a refresh) and fifo/commit-timing protocols.
+2. **Window lifecycle.** A relaunch of the compositor left AppKit applications running without a window (my own relaunches
+did it to the owner's Terminal, Activity Monitor and Firefox at 22:32Z). Now (patch 25, desk7-007/008): every AppKit process
+still serving its app-menu socket that is not a client of this compositor is a leftover (`WMORPHAN`); the desk shows a notice
+("Still running without a window after the desktop restarted: ... Click its dock tile to bring it back, or right-click it >
+Quit."), the dock gets a running handle for each (its dot); activating the tile restarts it (its menu's Quit, SIGTERM at 5 s,
+SIGKILL at 12 s, then opened again); the dock's or the switcher's Quit ends it. A client's application id is kept in
+`$XDG_RUNTIME_DIR/app-ids/<pid>` for the next compositor (desk7-008), so a leftover is named as its dock tile is. Observed on
+the M1 (desk7-007): `WMORPHAN ... ["com.apple.Terminal(6502)", "Activity Monitor(6553)", "Activity Monitor(15282)"]` (named by
+bundle: the app-id record came with 008). **Not exercised**: the restart and Quit of a leftover (the only leftovers were the
+owner's processes, which FXQA's list forbids anyone to signal); the windowless reopen of a connected app is DESK5's, unchanged.
+3. Not done: `wl_subcompositor`, clipboard persistence, pinch end to end (the inject `pinch` step and the compositor's routing
+exist since DESK6; AppKit's magnify is TERM8's).
+4. Not done: direct scan-out of a full-screen client buffer.
+Claimed in runs/m1-coord/firefox-defects.md: none by name (OWNER-STUTTER and OWNER-WINDOWLESS list DESK7 already; the results
+above are for FXQA's ranking).
+
+### 3. DESK6's leftovers
+- **Interactive resize**: not measured this round (the virtual pointer makes it possible: `m1/resize7.sh` presses on a frame
+  edge and drags with the instrument's pointer; not run, the M1's slots went to 2b).
+- Per-output client buffer scale, mirroring's rendering, freeing an unplugged head's buffers: not done.
+
+### Host tests (`runs/m1-desktop-010/desk7-tests/`)
+wm-darwin lib 167/167 (the set, hotspots, recognition, Xcursor files, owner file, pointer speed, shared pointer, cursor thread
+bookkeeping, pacing trace); wayland_shm 22/23 (+ the base's autopilot failure: its expected menu rows) with the new
+`synthetic_input_never_moves_the_owners_pointer_or_takes_his_keys`, `one_pointer_family_over_the_desk_clients_named_shapes_and_
+libwayland_images`, `a_minimised_tile_lies_under_the_windows_and_an_activation_brings_the_window_back`; wayland_scale 3/4 (the
+base's failure), wayland_dmabuf 5/5, wayland_theme 3/3, wayland_outputs 2/2; chonk-shell 303/303. Every installed build was
+host-tested first. The cursor thread itself has no host test (it needs the DCP); it was judged on the M1 only.
+
+### On the disk and how to go back
+- `/usr/bin/chonkstep-darwin-desktop.next` = desk7-next-008 `b712ee2331cb…` (inject), `/usr/bin/chonkstep-darwin-desktop` =
+  desk7-daily-008 `07b73af99ef6…` (hashes on the M1 right after the copy, 23:20Z); files of before: `.before-desk7` (DESK6's 005
+  pair), `.before-desk7-<N>` = the build that was there when desk7-<N> was installed (002, 003, 004, 006, 007 on the way).
+  `.safe` unchanged (`b1104b75…`). New: `/usr/share/icons/default` (the pointer set as an Xcursor theme; `desk_m1.sh
+  cursors-remove` takes it away), `/private/var/run/gpu-desktop/owner-input` and `app-ids/` (runtime, made by the
+  compositor). Theme, wallpaper, scale and pins untouched (the theme phases set nothing persistent and put them back).
+  My scripts in `/private/var/db/desk7/` were removed.
+- Revert: `ln -f <path>.before-desk7 <path>.back && mv -f <path>.back <path>` for both compositor names, then `desk_m1.sh
+  relaunch next`; the pointer set alone: `CHONKSTEP_DARWIN_CURSOR_THREAD=0` turns the thread off, `desk_m1.sh cursors-remove`
+  the theme.
+- Source: patches 24-25 in `integrations/puredarwin/terminal-app/compositor/` (README); the set's source in
+  `integrations/puredarwin/desktop/cursors/`.
+
+### For the owner, at the M1 (real keys and fingers)
+1. Move the pointer over the desk, a terminal, Terminal.app, Activity Monitor, Firefox and the dock, and onto window edges:
+   one black arrow with a white outline everywhere, resize arrows at the edges, the I-beam in text fields; sharp, no box.
+2. Move it in circles while a terminal floods (`seq 1 9999999`) or Firefox scrolls: it should not stutter or jump.
+3. While an agent tests (log.txt), use the trackpad: your pointer must stay yours; your keys go only to your window.
+4. If the speed feels off: `echo 80 > /private/var/db/desktop-state/chonkstep/pointer-speed` (25-400; 100 = as now).
+5. Minimise a window and cover its tile with another window: the tile stays under it; Command-Tab or the app's dock tile
+   brings it back. After a desktop restart, a notice names apps left without a window; their dock tile brings them back.
+
+### Taken from Finch (DESK7)
+Nothing.
