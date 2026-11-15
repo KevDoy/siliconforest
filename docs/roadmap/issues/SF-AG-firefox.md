@@ -83,7 +83,7 @@ different glyphs. Private patch0200 serializes face access and the global glyph
 cache. Three controlled eight-thread cache-miss runs render800 references each,
 zero pixel-hash differences,0.107455–0.109128 seconds; installed control aborts
 SIGABRT134 after the sequential references. The earlier warm-cache fixture did
-not reproduce the bug. Browser30-minute stability is still untested.
+not reproduce the bug. The later stability001 run completes30minutes as recorded below.
 
 The default GPU helper originally spent48.41CPU seconds in50wall seconds; all81
 main-thread samples were in NSApplication's headless nextEvent loop. Private
@@ -254,18 +254,36 @@ window, then downloads53 exact UTF-8 bytes through a content Blob/link and the
 browser download stack. SHA256 is
 `c247e9ae1688056bdd65ed475bb5f7306e097c46dd3f018484fe22def17ce40b`.
 Quality001 inspected a newly created zero-byte file before completion and fails;
-the corrected check waits for the expected byte count. The required30-minute
-ordinary-site run is in progress; no completed stability claim is made yet.
+the corrected check waits for the expected byte count.
+
+`stability-001` completes1800.45seconds of synthetic ordinary-site browsing:
+99/99 visits reach a new loaded document across ten sites,95 normal content
+shutdowns,0 abnormal and0 unclassified shutdowns, the same GPU helper and a
+live browser parent throughout. Crash observer records and process identities
+are retained. This run uses the qualified CPU native-layer presentation path,
+0207 lifetime fix and default sandboxes/cache; experimental GPU export is off.
 
 The first GPU CGL trial traps in IOSurface's shared-header atomic counter on a
-write-combined GEM mapping. A candidate uses the documented Asahi WRITEBACK
-allocation flag while preserving shared atomics; it is built but not yet
-qualified. A later repeated CPU-control child blocks opening the render node;
-its PID/start-time-owned family is cleaned, with one pending-kill child left
-for the already scheduled kernel reboot. Both failures remain evidence. New
-opt-in framebuffer export and whole-window GPU presentation candidates build,
-but are excluded from the stability run and daily installer until native pixel,
-alpha, reuse and fallback controls qualify them.
+write-combined GEM mapping. The WRITEBACK allocation fix preserves atomics and
+now passes a real cross-exec CGL3.2/2D test:1024 exact GL and CPU-mapped pixels,
+no CGL CPU transfer bytes. A repeated earlier CPU child blocked in render-node
+open; its owned family was cleaned, with one pending-kill child reaped by the
+already scheduled kernel reboot. Both failures remain evidence.
+
+Private whole-window GPU presentation accepts four external dma-buf frames with
+one base upload and zero CGL CPU upload/readback bytes, but the initial CPU-reconstructed screenshot endpoint
+shows a transparent window. Source inspection establishes that capture_one
+uses render_for_capture, whose CPU renderer skips external GPU buffers; those
+PNGs do not establish the actual GL display output. CPU fallback matches its control exactly.
+Verification-only pixel samples establish correct green/yellow and opaque alpha
+in the source framebuffer, exported layer, final framebuffer and raw exported
+BO memory (144×96, stride576, offset16384). Those samples are diagnostics, not
+transport. The existing inject capture command reads the actual GL framebuffer and
+is the next qualification path. An isolated GLES3 cross-exec sampler with the
+same dimensions/stride/offset passes both13824-pixel green/blue revisions.
+The candidate is
+excluded from Firefox qualification and the daily installer. No end-to-end
+zero-copy claim is made.
 
 ## Gaps and ownership
 
@@ -297,7 +315,7 @@ Zero-import dependencies still have to load unless weakly linked.
 | Shared FreeType raster/cache | private0200 proven | eight-thread800-render reference pixel check passes; installed control aborts; merge requested TERM5 |
 | Headless AppKit run loop | private0201 proven | nil-display timer probe CPU drops; real GPU main sleeps; TERM5 review requested |
 | AVD sandbox access | private narrow translation proven warm | explicit IOAccelerator grants exact /dev/pdavd read/write; unrelated service/device remain denied |
-| AVD cold firmware load | kernel owner requested | driver firmware read inherits caller sandbox, EPERM masked as ENOENT; root prewarm makes identical sandbox open pass |
+| AVD cold firmware load | private bounded sandbox fix native-qualified | first cold old-policy open fails; candidate literal firmware READ_ALL succeeds, writes/unrelated devices remain denied; actual Firefox cold first-open pending |
 | AVD video to compositor | private3codec playback observed | originalAVclips visibly end; each300AVDjobs0errors; AAC3fixes proven, muted; SW/A-V/streaming/zero-copy pending |
 | 150% layer target | private0202/0203 proven pixels | exact1024/2304/4096pixels at1/1.5/2x; installed1.5x512mismatches, browser013 all3pages visible |
 | Global IOSurface ID broker | private isolated control+browser pass | broker absent on disk; installed child lookup fails; private named broker shares2048bytes exactly, local-surface negative remains denied; browser014 defaultGPU WebGL visible, clean service removal |
@@ -383,6 +401,17 @@ reported its firmware read had failed with EPERM. No firmware was acquired,
 copied or modified. This dependency is reported to the kernel owner, and a
 prewarm is diagnostic rather than a cold-start fix.
 
+The optional cold-firmware translation subsequently passes an actual first-cold
+native test after recovery to CIO15: old policy AVD open returns ENOENT with
+firmware error1, then candidate opens fd3/status0 and the driver reaches READY
+with opens1. Wrong-service control denies AVD and firmware. The candidate adds
+READ_ALL only for the one firmware literal when the profile explicitly and
+unconditionally allows IOAccelerator. Firmware writes and unrelated /dev/zero
+remain EPERM; /dev/null stays allowed. No firmware bytes are read back or copied,
+no prewarm is used, and no AVE operation occurs. Thirteen host SBPL cases pass.
+The installer now includes this native-qualified mitigation; a Firefox cold
+first-open on a future already scheduled boot remains separate evidence.
+
 `open-url.nix` privately builds the patch to the Terminal owner's open(1).
 `url-test.py` uses an isolated HOME, LaunchServices defaults and a windowless
 argv recorder. All four checks pass on the M1: HTTPS default routing, multiple
@@ -431,11 +460,11 @@ first installer assembly; that assembly remains rejected.
 | 0 baseline | qualified private-prefix pass014: all3 visible with defaultGPU and WebGL |
 | 1 rendering | WebGL software pixel comparison; wall/presentation60fps scrolling/animation and CPU reduction; zero-copy native layers at150% (hardware WR+WebGL+checker observed) |
 | 2 media | hardware3codec visible pass above; CPU/pixel SW A/B, audible output and A/V clock, native pacing/zero-copy and non-DRM streaming remain |
-| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JetStream (Speedometer/MotionMark and actual Baseline/Ion observed above); 30-minute crash-free browsing |
+| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JetStream (Speedometer/MotionMark and actual Baseline/Ion observed above); completed30-minute run recorded above |
 | 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
 
-Initial Speedometer/MotionMark scores are recorded above. No30-minute crash-free
-interval, audible audio/A-V or zero-copy claim is made. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
+Initial Speedometer/MotionMark scores and the completed30-minute crash-free
+interval are recorded above. Audible audio/A-V and zero-copy remain unproven. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
 panel sharpness/colours at 150%, physical trackpad feel and shortcuts, and
 audible output/lip sync. Logs, synthetic input and renderer captures cannot
 establish those physical observations.

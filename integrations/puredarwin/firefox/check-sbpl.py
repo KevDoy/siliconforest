@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """Check permission narrowing in a host-built private SBPL compiler, not kernel enforcement."""
+import argparse
 import ctypes
 import json
 import struct
 import sys
 
-lib = ctypes.CDLL(sys.argv[1])
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument('library')
+ap.add_argument('--cold-avd-firmware', action='store_true')
+args = ap.parse_args()
+lib = ctypes.CDLL(args.library)
 compile = lib.sbpl_compile
 compile.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_char_p,
                     ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t),
@@ -60,7 +65,11 @@ for name, source, expected in cases:
     if graphics:
         assert set(graphics) == {(3, 0, 2, '/usr/local/lib/mesa-asahi'),
                                  (3, 0, 1, '/dev/dri'), (7, 0, 3, '^/dev/dri/renderD[0-9]+$')}
-    report.append(dict(name=name, passed=True, avd_grants=grants, graphics_grants=graphics))
+    firmware = [r for r in emitted if r[3] == '/Library/Firmware/apple/avd-fw-v2-t0.bin']
+    assert bool(firmware) == (expected and args.cold_avd_firmware), (name, firmware)
+    if firmware:
+        assert firmware == [(3, 0, 1, '/Library/Firmware/apple/avd-fw-v2-t0.bin')], firmware
+    report.append(dict(name=name, passed=True, avd_grants=grants, graphics_grants=graphics, firmware_read_grants=firmware))
 font_paths = {'/etc/fonts', '/private/etc/fonts', '/usr/share/fonts',
               '/System/Library/Fonts', '/var/cache/fontconfig', '/private/var/cache/fontconfig'}
 font_cases = [

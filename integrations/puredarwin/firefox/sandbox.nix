@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Private interposition of only sandbox_init APIs, never a libSystem replacement.
 # Reuse the exact compiler and permission translation proven by SF-U in QEMU.
-{ prefix ? "/private/var/db/sffx/sandbox-v4" }:
+{ prefix ? "/private/var/db/sffx/sandbox-v4", coldAVDFirmware ? false }:
 let
   a = import ../cocoa/arm64.nix;
   inherit (a) pkgs pd;
@@ -27,7 +27,7 @@ in pkgs.stdenv.mkDerivation {
     ./sandbox-patches/0001-explicit-accelerator-device-permission.patch
     ./sandbox-patches/0002-explicit-font-server-read-permission.patch
     ./sandbox-patches/0003-explicit-accelerator-render-node-permission.patch
-  ];
+  ] ++ pkgs.lib.optional coldAVDFirmware ./sandbox-patches/0004-cold-avd-firmware-read-for-explicit-accelerator.patch;
   dontConfigure = true;
   buildPhase = ''
     CC=${tc}/bin/${triple}-clang

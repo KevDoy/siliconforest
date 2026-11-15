@@ -46,7 +46,7 @@
      if (s)
          s->localValues = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
      return s;
-@@ -159,6 +173,117 @@
+@@ -159,6 +173,119 @@
  static size_t roundPage(size_t n) {
      return (n + vm_page_size - 1) & ~(size_t)(vm_page_size - 1);
  }
@@ -80,7 +80,9 @@
 +    drmIoctl(fd,DRM_IOCTL_GEM_CLOSE,&close);
 +}
 +static int gpuBufferFD(size_t size) {
-+    struct {uint64_t size;uint32_t flags,vm_id,handle,pad;} create={.size=size};
++    // drm_asahi_gem_flags.DRM_ASAHI_GEM_WRITEBACK (bit0): shared header
++    // contains atomic counters; write-combined mappings do not support exclusives.
++    struct {uint64_t size;uint32_t flags,vm_id,handle,pad;} create={.size=size,.flags=1};
 +    int result=-1;
 +    pthread_mutex_lock(&gpuLock);
 +    int render=gpuRenderLocked();
