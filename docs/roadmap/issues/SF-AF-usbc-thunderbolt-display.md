@@ -1334,3 +1334,24 @@ guard, with masks/expected values kept private for comparison. Differences
 may be consequences of firmware training and must not be blindly written
 back. Native SDK/collection, ATC host suites and repository checks pass;
 this extension is not installed yet. No timer or mode/rate write is added.
+
+
+### CIO12 diagnostic failure and guarded restoration (10:06Z)
+
+CIO12 booted with NHI/RTKit ready, no quarantine and the desktop running,
+but both new calibration observations returned ENOENT2. The record-capture
+qualification failed before the manual read. No panic occurred. The guard
+restored qualified non-AVE CIO11 at10:06:38Z and reaped its UART reader at
+10:06:39Z. The failed diagnostic remains a failure; no native calibration
+record comparison has been obtained. Linux successfully captured261
+register-list observations and the corresponding private expected masks.
+
+Source audit finds the readback rejected a present zero-byte common group,
+which the existing mapping/application contract permits. The correction
+shares this presence/empty/lane validation between the real native adapter
+and an ASan/UBSan regression test. Missing properties and empty lane tuning
+remain failures. Group-specific failure metadata and empty-group reporting
+will identify the actual table on the retry; the first failing table was
+not instrumented, so it is not yet claimed as confirmed. Corrected native
+SDK/collection, focused ATC tests and all six required checks pass; the retry
+is not installed. No PHY configuration, rate or timer change is made.

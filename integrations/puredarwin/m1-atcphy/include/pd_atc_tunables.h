@@ -20,6 +20,17 @@ static inline int pd_atc_tunable_validate(const void *raw, size_t bytes, size_t 
     }
     return 0;
 }
+/* Observation plans distinguish a missing property from a present empty
+ * common group. The existing common apply path accepts the latter; lane
+ * calibration requires nonempty data. Keep this contract shared with the
+ * native readback adapter so an empty optional table is not ENOENT. */
+static inline int pd_atc_tunable_observation_validate(int present,const void *raw,
+                                                      size_t bytes,size_t span,
+                                                      int allow_empty)
+{
+    if(!present || (!allow_empty && !bytes))return ENOENT;
+    return pd_atc_tunable_validate(raw,bytes,span);
+}
 /* Caller validates the entire group before applying any member. A masked
  * value cannot change unrelated bits, even if firmware has set bits outside
  * its mask. Callback addresses are offsets relative to the selected window. */

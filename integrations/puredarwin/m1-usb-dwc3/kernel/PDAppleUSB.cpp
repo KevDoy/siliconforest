@@ -251,28 +251,39 @@ int PDAppleUSB::snapshotCalibration(bool beforeACIO)
         if(addresses->getLength()/8>=512)return EOVERFLOW;
         uint32_t pair[]={window,offset};return addresses->appendBytes(pair,sizeof(pair))?0:ENOMEM;
     };
-    auto addGroup=[&](OSData *data,unsigned span,unsigned base,unsigned window)->int {
-        if(!data || !data->getLength())return ENOENT;
-        const auto raw=(const uint8_t *)data->getBytesNoCopy();
-        int ret=pd_atc_tunable_validate(raw,data->getLength(),span);if(ret)return ret;
+    auto addGroup=[&](OSData *data,unsigned span,unsigned base,unsigned window,bool allowEmpty)->int {
+        const auto raw=data?(const uint8_t *)data->getBytesNoCopy():NULL;
+        int ret=pd_atc_tunable_observation_validate(data!=NULL,raw,data?data->getLength():0,span,allowEmpty);
+        if(ret)return ret;
         for(unsigned n=0;n<data->getLength();n+=12){
             ret=addAddress(window,base+(pd_atc_le32(raw+n)&0xffffff));if(ret)return ret;
         }
         return 0;
     };
-    int ret=0;
+    int ret=0;uint32_t emptyGroups=0;
+    const char *groupError=beforeACIO?"phy-pre-acio-calibration-group-error":"phy-calibration-group-error";
+    setProperty(groupError,"none");
     for(unsigned i=0;!ret && i<10;++i){
         if(!common[i] && groups[i].optional)continue;
-        ret=addGroup(common[i],0x4000,groups[i].base,i==0?1:0);
+        // map()/applyCommon() accept a present empty common group; retain
+        // that exact contract. Lane tuning still requires nonempty data.
+        if(common[i] && !common[i]->getLength()){
+            ++emptyGroups;setProperty("phy-calibration-empty-group",groups[i].name);
+        }
+        ret=addGroup(common[i],0x4000,groups[i].base,i==0?1:0,true);
+        if(ret)setProperty(groupError,groups[i].name);
     }
+    setProperty("phy-calibration-empty-groups",emptyGroups,32);
     static const struct {const char *name;unsigned base;} lanes[]={
         {"tunable_CIO_LN0_AUSPMA_TX_TOP",0xc000},{"tunable_CIO_LN0_AUSPMA_RX_TOP",0x9000},
         {"tunable_CIO_LN0_AUSPMA_RX_SHM",0xb000},{"tunable_CIO_LN0_AUSPMA_RX_EQ",0xa000},
         {"tunable_CIO_LN1_AUSPMA_TX_TOP",0x13000},{"tunable_CIO_LN1_AUSPMA_RX_TOP",0x10000},
         {"tunable_CIO_LN1_AUSPMA_RX_SHM",0x12000},{"tunable_CIO_LN1_AUSPMA_RX_EQ",0x11000}
     };
-    for(unsigned i=0;!ret && i<sizeof(lanes)/sizeof(lanes[0]);++i)
-        ret=addGroup(laneData?OSDynamicCast(OSData,laneData->getObject(lanes[i].name)):NULL,0x1000,lanes[i].base,0);
+    for(unsigned i=0;!ret && i<sizeof(lanes)/sizeof(lanes[0]);++i){
+        ret=addGroup(laneData?OSDynamicCast(OSData,laneData->getObject(lanes[i].name)):NULL,0x1000,lanes[i].base,0,false);
+        if(ret)setProperty(groupError,lanes[i].name);
+    }
     static const uint32_t analog[]={0x2a38,0x2aa4,0xa04,0x2a20,0x222c,0x22a4,0x2220};
     for(unsigned i=0;!ret && i<sizeof(analog)/sizeof(analog[0]);++i)ret=addAddress(0,analog[i]);
     // Complete validation/capacity proof before the first calibration read.
