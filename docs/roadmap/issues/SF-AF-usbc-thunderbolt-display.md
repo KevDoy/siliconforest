@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 12:05Z)
+## Current target and observed state (owner change; updated 12:23Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,8 +15,8 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO16B, the identical CIO16 image, source
-`2614eb5d7`, capsule `9b9baa004c1b…`,
+**Observed in Darwin:** non-AVE CIO17, source `83786dc6e`, capsule
+`fcf8f72d697e…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -25,11 +25,13 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at12:03:55Z. An explicit late snapshot also reports state7/remote0;
+lock release at12:20:29Z. An explicit late snapshot also reports state7/remote0;
 UID65534 was denied without incrementing the query count, while root completed
 one request and advanced it1->2; the post-idle query advanced it to3. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
-or `pdave` argument.
+or `pdave` argument. CIO17 also acknowledges one real CD3217 EVENT1 word,
+with zero errors and EVENT1 cleared; the mask stays unchanged. Both lanes
+remain7/remote0, so acknowledgement alone did not establish the link.
 
 **CIO16 failed qualification:** the same non-AVE diagnostic image reached
 healthy NHI/RTKit/Type-C/PHY startup, but the standard desktop and inject
@@ -1679,3 +1681,56 @@ frozen acknowledgement-only CIO17 and has no M1 mask-write/link evidence.
 This startup step does not implement live controller-reset recovery or the
 consumer teardown/revalidation that such a reset needs. Those remain required
 before claiming the complete Type-C/hotplug lifecycle.
+
+### CIO17 observed: event acknowledgement works, link still down
+
+CIO17/source83786dc6e/capsulefcf8f72d697e… qualified at12:20:27Z, UART
+stopped/reaped at12:20:29Z before lock release. The standard .next desktop,
+inject directory, Wi-Fi, RTKit/NHI, shared PHY and root/UID65534 snapshot checks
+pass. The actual Type-C acknowledgement count is1, errors0, uncertainty false,
+EVENT1 reads zero and MASK1 is unchanged. Both lanes are still7/remote0. This
+qualifies the native clear-event path and disproves acknowledgement alone as
+the link fix. No dock router/auth/PCI/Ethernet/USB/DP observation is added.
+The installed57module collection has no AVE; actual boot arguments have no
+pdave. CIO18's startup-mask-only change is announced for12:25Z or later, with
+qualified CIO17 rollback. Other56 UUIDs/605arguments/boot.bin are fixed.
+
+The parallel quiet61s measurement reports nonidle kernel2.13797% of one CPU,
+aggregate host98.29896% idle, SPIHID0.34219%, and18 NHI interrupts (9TX0/9RX0
+including diagnostic traffic at the boundary; other22 unchanged). Warm50M
+integer runs83.677–83.767ms and100k syscalls14.692ms match prior measurements.
+The actual five-thread compositor uses3.48451% of one CPU: Shm dropping thread
+2.10937%, main0.93908%, pdhid-reader0.43311%, agx-bo-cache0.00296%, disk worker0.
+Actual TASK_POWER_INFO rates are interrupt428.197/s, platform-idle363.869/s,
+timer bins115.393/s and206.918/s. The observer uses real SDK MIG/task ports,
+checks the compositor PID and reads all13 thread/time samples; it sends no
+input or signal. The named HID reader is not consuming a core. The cleanup
+thread is the compositor's largest observed CPU consumer; this still does
+not explain the reported1.5–2x AppKit slowdown. Findings were recorded for
+DESK in the coordination answers/log; no desktop code or policy was changed.
+
+### First-enumeration source prerequisites: isolated USB profile and DART blocker
+
+An audit of the actual frozen bundles confirms RavynXHCIPort retains Generic
+XHCI/IOPCIDevice matching class0c0330 alongside PDAppleUSB's native Type-C
+personality. A new explicit build profile removes that PCI personality from
+a copied USB bundle. Native build verification confirms only Generic XHCI is
+removed; the five other personalities, top-level metadata and Mach-O bytes
+are identical. It changes no installed bundle or default build and adds no
+tunnel-compatibility/DMA flag. This is a first-enumeration profile ingredient,
+not evidence of a safe complete collection or endpoint admission.
+
+The unwired PCIe controller also gains blockEndpointDMA(), intended after real
+activated-tunnel/RUN/link and before publishing the enumeration bridge. It
+requires the actual DART DT node to have no bound clients, checks fixed bank
+521008000/size, and rechecks physical power/RUN/link before every DART access.
+An explicit register whitelist excludes PARAMS0/4. The actual helper checks
+unlocked configuration/idle command, disables and verifies all64 TCRs before
+clearing/verifying all256 TTBR words at0x400, selects both32-bit stream banks,
+invalidates and requires bounded completion, then verifies all TCRs remain
+zero. It never enables translation/bypass/global gates/IRQs or clears faults.
+Any failed attempted operation poisons the retained owner; it proves no child,
+IRQ/work or backing-memory drain. All712 modeled I/O failures plus lock,
+readback and100us busy bounds pass sanitizers; the native CM SDK and six checks
+pass. This code is not wired/installed and is excluded from CIO17/CIO18.
+No PCIe-C DART register has been touched on Darwin by this preparation.

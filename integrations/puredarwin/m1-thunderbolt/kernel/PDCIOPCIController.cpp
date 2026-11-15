@@ -113,10 +113,54 @@ int PDCIOPCIController::revoke()
  if(!lock || ml_at_interrupt_context())return EINVAL;
  IOLockLock(lock);admitted=false;int ret=touched?EBUSY:0;IOLockUnlock(lock);return ret;
 }
+bool PDCIOPCIController::endpointAccess()
+{
+ if(!live() || !linked || !tunnelProof(context) || !endpointDart.va)return false;
+ ordered();uint32_t run=windows[PD_PCIEC_PORT].r32(0x804);
+ uint32_t link=windows[PD_PCIEC_PORT].r32(0x208);ordered();
+ return run!=UINT32_MAX && link!=UINT32_MAX && (run&1) && (link&1);
+}
+static bool dartWord(uint32_t off)
+{
+ return !(off&3) && ((off>=0x100 && off<0x200) || (off>=0x400 && off<0x800));
+}
+int PDCIOPCIController::dartRead(void *p,uint32_t off,uint32_t *value)
+{
+ auto s=(PDCIOPCIController *)p;
+ if(!value || !(dartWord(off) || off==0x20 || off==0x60))return EINVAL;
+ if(!s->endpointAccess())return ENODEV;
+ ordered();*value=s->endpointDart.r32(off);ordered();return 0;
+}
+int PDCIOPCIController::dartWrite(void *p,uint32_t off,uint32_t value)
+{
+ auto s=(PDCIOPCIController *)p;
+ if(!(dartWord(off) || off==0x20 || off==0x34 || off==0x38))return EINVAL;
+ if(!s->endpointAccess())return ENODEV;
+ ordered();s->endpointDart.w32(off,value);ordered();return 0;
+}
+int PDCIOPCIController::blockEndpointDMA()
+{
+ if(!lock || ml_at_interrupt_context())return EINVAL;
+ IOLockLock(lock);int ret=ENODEV;
+ if(live() && linked && tunnelProof(context)){
+  auto node=IORegistryEntry::fromPath("/arm-io/dart-apciec1",gIODTPlane);
+  auto clients=node?node->getChildIterator(gIOServicePlane):NULL;
+  bool unbound=node && clients && !clients->getNextObject();
+  OSSafeReleaseNULL(clients);OSSafeReleaseNULL(node);
+  if(!unbound)ret=EBUSY;
+  else if((!endpointDart.va && !endpointDart.mapNode("/arm-io/dart-apciec1",0)) ||
+          endpointDart.phys!=0x521008000ULL || endpointDart.len<0x800)ret=ENODEV;
+  else{
+   pd_pciec_dart_block_io access={this,dartRead,dartWrite,delay};
+   ret=pd_pciec_dart_block(&access);if(ret)poisoned=true;
+  }
+ }
+ IOLockUnlock(lock);return ret;
+}
 void PDCIOPCIController::free()
 {
  if(touched){IOLog("PDCIOPCIController: retaining programmed controller ownership until reboot\n");return;}
- for(auto &window:windows)window.unmap();powerGate.unmap();
+ for(auto &window:windows)window.unmap();powerGate.unmap();endpointDart.unmap();
  if(lock){IOLockFree(lock);lock=NULL;}
  OSSafeReleaseNULL(owner);OSObject::free();
 }
