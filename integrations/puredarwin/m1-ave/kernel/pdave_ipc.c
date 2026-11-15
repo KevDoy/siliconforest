@@ -125,3 +125,63 @@ int pdave_ipc_handshake(struct pdave_ipc *p) {
  }
  return fail(p,ETIMEDOUT);
 }
+static int send_raw(struct pdave_ipc *p,unsigned channel,uint64_t fw,uint32_t bytes,uint32_t flags) {
+ if(!p||p->phase!=PDAVE_IPC_READY||channel>=AVE_CH_MAX||!(p->bound&(1u<<channel)))return ENODEV;
+ struct ave_ring *r=&p->ring[channel];
+ if(r->type&2)return EINVAL;
+ if(r->wr<0)return EAGAIN;
+ unsigned char *slot=r->slots+(size_t)r->wr*AVE_BOOT_SLOT_SIZE;
+ ave_boot_put_le64(slot+8,bytes);ave_boot_put_le64(slot+16,flags);
+ p->ops.barrier(p->ops.context);
+ /* Aligned 64-bit phase publication, not the host selftest's byte stores.
+  * The caller's coherent DMA mapping and device barrier remain essential. */
+ __atomic_store_n((uint64_t *)slot,fw|((uint64_t)r->type^1),__ATOMIC_RELEASE);
+ int32_t rd=r->rd,w=r->wr;
+ if(rd<0){r->rd=w;rd=w;}
+ w=w==(int32_t)r->nslots-1?0:w+1;r->wr=rd==w?-1:w;r->nsend++;
+ p->ops.barrier(p->ops.context);
+ int e=p->ops.write(p->ops.context,DOORBELL,1u<<p->doorbell[channel]);
+ return e?fail(p,e):0;
+}
+int pdave_ipc_send(struct pdave_ipc *p,unsigned channel,uint64_t iova,uint32_t bytes,uint32_t flags) {
+ if(!p||p->phase!=PDAVE_IPC_READY)return ENODEV;
+ if(channel==AVE_CH_IO_T2H)return EINVAL; /* credits only through checked ack */
+ uint64_t fw=0;
+ if(iova) {
+  if(iova<p->iova||iova-p->iova>=p->bytes||bytes>p->bytes-(iova-p->iova))return EINVAL;
+  fw=p->fw_base+(iova-p->iova);if(fw&3)return EINVAL;
+ }
+ return send_raw(p,channel,fw,bytes,flags);
+}
+int pdave_ipc_receive(struct pdave_ipc *p,unsigned channel,struct pdave_ipc_message *m) {
+ if(!p||!m||p->phase!=PDAVE_IPC_READY||channel>=AVE_CH_MAX||!(p->bound&(1u<<channel)))return ENODEV;
+ if(channel==AVE_CH_IO_T2H&&p->reply_pending)return EBUSY;
+ struct ave_ring *r=&p->ring[channel];
+ if(!(r->type&2)&&r->rd<0)return EAGAIN;
+ unsigned index=r->rd<0?0:(unsigned)r->rd;
+ unsigned char *slot=r->slots+(size_t)index*AVE_BOOT_SLOT_SIZE;
+ uint64_t word=__atomic_load_n((uint64_t *)slot,__ATOMIC_ACQUIRE);
+ if((word&1)!=(r->type&1))return EAGAIN;
+ p->ops.barrier(p->ops.context);
+ m->firmware=word&~3ULL;m->bytes=(uint32_t)ave_boot_get_le64(slot+8);m->flags=(uint32_t)ave_boot_get_le64(slot+16);
+ m->payload=m->firmware?pdave_ipc_from_fw(p,m->firmware,m->bytes?m->bytes:1):NULL;
+ if(m->firmware&&!m->payload)return fail(p,EPROTO);
+ if(r->type&2) {
+  __atomic_store_n((uint64_t *)slot,(uint64_t)r->type^1,__ATOMIC_RELEASE);
+  p->ops.barrier(p->ops.context);r->rd=index+1==r->nslots?0:(int32_t)index+1;
+ } else {
+  int32_t w=r->wr;if(w<0){r->wr=(int32_t)index;w=(int32_t)index;}
+  int32_t next=index+1==r->nslots?0:(int32_t)index+1;r->rd=w==next?-1:next;
+ }
+ r->nrecv++;
+ if(channel==AVE_CH_IO_T2H){p->pending_reply=*m;p->reply_pending=1;}
+ return 0;
+}
+int pdave_ipc_ack(struct pdave_ipc *p,unsigned channel,const struct pdave_ipc_message *m) {
+ if(!p||!m||channel!=AVE_CH_IO_T2H||!p->reply_pending||
+    m->firmware!=p->pending_reply.firmware||m->payload!=p->pending_reply.payload||
+    m->bytes!=p->pending_reply.bytes||m->flags!=p->pending_reply.flags)return EINVAL;
+ int e=send_raw(p,channel,m->firmware,m->bytes,0);
+ if(!e)p->reply_pending=0;
+ return e;
+}

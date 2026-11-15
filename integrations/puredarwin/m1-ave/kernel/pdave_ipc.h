@@ -16,6 +16,7 @@ struct pdave_ipc_ops {
  void (*barrier)(void *); /* real coherent DMA + device ordering */
 };
 enum pdave_ipc_phase {PDAVE_IPC_IDLE,PDAVE_IPC_CONFIGURED,PDAVE_IPC_READY,PDAVE_IPC_FAILED};
+struct pdave_ipc_message {uint64_t firmware;void *payload;uint32_t bytes,flags;};
 struct pdave_ipc {
  struct pdave_ipc_ops ops;
  unsigned char *cpu;
@@ -24,6 +25,8 @@ struct pdave_ipc {
  enum pdave_ipc_phase phase;
  struct ave_ring ring[AVE_CH_MAX];
  uint32_t bound,doorbell[AVE_CH_MAX];
+ struct pdave_ipc_message pending_reply;
+ unsigned reply_pending;
 };
 /* DMA must already be exclusive, coherent, mapped and 16KiB aligned. Only
  * validated cold-reserved preload is accepted; validation cannot prove that
@@ -35,4 +38,9 @@ int pdave_ipc_configure(struct pdave_ipc *);
  * nothing here frees DMA while a core might still reference it. */
 int pdave_ipc_handshake(struct pdave_ipc *);
 void *pdave_ipc_from_fw(struct pdave_ipc *,uint64_t,size_t);
+/* Post-handshake rings. Caller copies a completion before returning its
+ * credit with ack; receiving alone does not let firmware reuse its buffer. */
+int pdave_ipc_send(struct pdave_ipc *,unsigned channel,uint64_t payload_iova,uint32_t bytes,uint32_t flags);
+int pdave_ipc_receive(struct pdave_ipc *,unsigned channel,struct pdave_ipc_message *);
+int pdave_ipc_ack(struct pdave_ipc *,unsigned channel,const struct pdave_ipc_message *);
 #endif

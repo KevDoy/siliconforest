@@ -20,3 +20,5 @@ done
 "$work/ipc-test"
 "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$here/include" -I"$here/kernel" "$here/kernel/pdave_preload.c" "$here/kernel/pdave_ipc.c" "$here/host-test/ipc_test.c" -o "$work/transport-test"
 "$work/transport-test"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$here/include" "$here/kernel/pdave_preload.c" "$here/kernel/pdave_dapf.c" "$here/host-test/dapf_test.c" -o "$work/dapf-test"
+"$work/dapf-test"

@@ -8,6 +8,7 @@
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IOService.h>
+#include <libkern/c++/OSString.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/arm64/boot.h>
 #include <miscfs/devfs/devfs.h>
@@ -52,22 +53,25 @@ static bool number(IORegistryEntry *node,const char *key,void *out,size_t size) 
  memcpy(out,d->getBytesNoCopy(),size);return true;
 }
 static bool text(IORegistryEntry *node,const char *key,char *out,size_t size) {
- const OSData *d=property(node,key);if(!d||!d->getLength()||d->getLength()>size)return false;
- const char *s=(const char *)d->getBytesNoCopy();size_t n=strnlen(s,d->getLength());
- if(n==d->getLength())return false;
- for(size_t i=0;i<n;i++)if((unsigned char)s[i]<32||(unsigned char)s[i]>126)return false;
- memcpy(out,s,n);out[n]=0;return true;
+ if(!node)return false;
+ const OSObject *value=node->getProperty(key);
+ const OSString *string=OSDynamicCast(OSString,value);
+ if(string)return pdave_copy_metadata_text(string->getCStringNoCopy(),string->getLength(),out,size)==0;
+ const OSData *data=OSDynamicCast(OSData,value);
+ return data&&pdave_copy_metadata_text(data->getBytesNoCopy(),data->getLength(),out,size)==0;
 }
 static int inventory() {
  IORegistryEntry *chosen=IORegistryEntry::fromPath("/chosen",gIODTPlane);
  IORegistryEntry *ave=IORegistryEntry::fromPath("/arm-io/ave",gIODTPlane);
  uint64_t dram=0;uint32_t preloaded=0;Segment segment[2];
- bool valid=number(chosen,"chip-id",&gInfo.soc,4)&&gInfo.soc==0x8103 &&
-  text(chosen,"firmware-version",gInfo.iboot,sizeof(gInfo.iboot))&&
-  number(chosen,"dram-base",&dram,8)&&number(ave,"pre-loaded",&preloaded,4)&&preloaded==1&&
-  number(ave,"segment-ranges",segment,sizeof(segment));
+ const char *rejected=nullptr;
+ if(!number(chosen,"chip-id",&gInfo.soc,4)||gInfo.soc!=0x8103)rejected="chosen.chip-id";
+ else if(!text(chosen,"firmware-version",gInfo.iboot,sizeof(gInfo.iboot)))rejected="chosen.firmware-version";
+ else if(!number(chosen,"dram-base",&dram,8))rejected="chosen.dram-base";
+ else if(!number(ave,"pre-loaded",&preloaded,4)||preloaded!=1)rejected="ave.pre-loaded";
+ else if(!number(ave,"segment-ranges",segment,sizeof(segment)))rejected="ave.segment-ranges";
  OSSafeReleaseNULL(chosen);OSSafeReleaseNULL(ave);
- if(!valid)return ENODEV;
+ if(rejected){LOG("metadata rejected at %s (before TEXT mapping)",rejected);return ENODEV;}
  gInfo.flags|=PDAVE_INFO_PRELOADED;gInfo.segments=2;
  const boot_args *boot=(const boot_args *)PE_state.bootArgs;
  if(!boot||!dram||dram>=boot->physBase)return EINVAL;

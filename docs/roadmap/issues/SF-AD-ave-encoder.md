@@ -1,10 +1,57 @@
 # SF-AD — AVE encoder source-port study
 
-**Source port in progress, 15 November 2026. Diagnostic PDAppleAVE kext SDK build and private Acis extraction are complete;
-offline collection preflight now reproduces the installed base exactly but
-rejects the additive diagnostic for segment overlap. No kernel install, AVE
-device access or hardware encoding has been performed.**
+**Paused by owner on 2026-11-15. Source and private inputs are preserved.
+No further AVE builds, boots, probes or extraction are authorized.**
 The first target is T8103/J293; preserve the working PDAppleAVD decoder and audio.
+
+## Paused 2026-11-15
+
+The first hardware INFO attempt used CODEX-TB's additive CIO07AVE collection
+and the immutable v7 diagnostic. It booted without a panic and retained NHI
+startup, but INFO failed at 09:00:28Z: `abi=1 bytes=192 flags=0 caps=0
+soc=0x8103 segments=0 error=19` (ENODEV). Returned TEXT/DATA sizes and flags
+were zero; iBoot, firmware and RTKit identity strings were empty. Thus the
+probe accepted no firmware segments. This does **not** establish absent or
+incompatible firmware: metadata validation failed before TEXT was mapped.
+Previously observed live ADT still had pre-loaded=1, TEXT0xcc000/flags3,
+DATA0x128000/flags0. The diagnostic rejected the padded256-byte chosen
+firmware-version property before looking for its NUL at offset16. A bounded
+metadata fix and stage diagnostics were SDK-built as v11 but never booted.
+The detached ring/DAPF work was host-tested and SDK-compiled separately; it
+was not linked into the v11 live diagnostic and has never touched hardware.
+
+Actual AppleAVE2FW/RTKit tags, exact preloaded ABI/table compatibility and full
+cold DATA preservation were not established. Stage1/2 heap placement supplies
+partial allocator-exclusion evidence only. No DATA mapping/copy, AVE power,
+reset, MMIO, DART/DAPF programming, mailbox start or hardware encoding occurred.
+VideoToolbox's working OpenH264 software compression is independent of AVE.
+
+Existing ignored private inputs are retained at `private/ave/kernel-source-v1/`
+(bounded IPSW ZIP ranges, BuildManifest and kernelcache),
+`private/ave/acis-13.5-v1.bin` (504-byte extracted DPE table), and
+`private/ave/live-adt-metadata-v1.json` through `live-adt-metadata-v4.json`
+(read-only metadata, not firmware dumps). Source/build/input/output hashes stay
+only in `private/ave/ledger.json`, `kernel-source-v1/acquisition-ledger.jsonl`,
+`metadata-ledger.jsonl` and `toolchain-ledger.jsonl`; extraction stdout/stderr
+remain alongside them. No firmware image or RAM dump was acquired, and no
+extracted table was transferred or installed. Existing build/boot receipts
+remain under ignored `runs/sffinch/`; nothing is deleted.
+
+CODEX-TB restored known-good non-AVE CIO07 at09:03:02Z and reaped its UART
+reader at09:03:03Z. Its subsequent CIO08 comparison explicitly omits AVE.
+All prior inclusion/probe requests are withdrawn in coordination log and
+requests-for-CODEX-TB.md; the kernel owner must retain a non-AVE collection
+with no pdave boot argument. No AVE boot or probe is queued by this stream.
+
+Only after an explicit owner resume, the next step would be review the already
+built bounded metadata fix and arrange a fresh INFO-only slot on the kernel
+owner's then-current known-good base. Establish actual TEXT identity and
+complete cold DATA preservation before selecting ABI/table or implementing
+live power/DMA/session integration. The30-frame hardware PSNR/fps/CPU milestone,
+VT hardware compression and compositor recording hookup remain unimplemented.
+
+The sections below retain the source study and pre-pause history; their future
+work and reproduction commands are not authorization to resume.
 
 Owner decision on 15 November authorizes extracting the Acis DPE table from a
 macOS kernel image. Inputs and extracted bytes stay under git-ignored
@@ -216,7 +263,7 @@ do not report AVE hardware support before the30-frame/PSNR milestone.
 
 ## Diagnostic collection capacity, 15 November
 
-The current CIO03 collection and packed kernel.bin were independently reproduced
+The earlier CIO03 collection and packed kernel.bin were independently reproduced
 byte for byte from its frozen derivation inputs. Adding only the stripped INFO
 kext fails the unchanged overlap checker: the added module pushes prelink info
 into kernel TEXT. The first unstripped attempt and stripped retry remain failed
@@ -224,3 +271,8 @@ receipts. No boot was reserved and no target changed. CODEX-TB has the exact
 layout finding and diagnostic artifact for its next capacity-qualified current
 collection. Do not drop unrelated modules or boot a collection rejected by this
 gate to obtain a version string.
+
+CIO07 later passed the additive capacity gate with all57 original module UUIDs
+unchanged and only PDAppleAVE added. CODEX-TB performed that first INFO boot,
+then restored non-AVE CIO07 as recorded in the pause section. The earlier CIO03
+capacity failures remain preserved; they are not the final hardware result.

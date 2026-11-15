@@ -21,6 +21,13 @@ static int wr(void *ctx,uint32_t off,uint32_t value) {
 static void put32(unsigned char *p,uint32_t n){for(int i=0;i<4;i++)p[i]=(unsigned char)(n>>(8*i));}
 int main(void) {
  _Static_assert(sizeof(struct pdave_info)==192,"INFO layout");
+ char metadata[48];char padded[256]={0};memcpy(padded,"iBoot-8422.141.2",16);
+ assert(!pdave_copy_metadata_text(padded,sizeof padded,metadata,sizeof metadata));
+ assert(!strcmp(metadata,"iBoot-8422.141.2"));
+ assert(!pdave_copy_metadata_text("version",7,metadata,sizeof metadata)&&!strcmp(metadata,"version"));
+ assert(pdave_copy_metadata_text("bad\x01",4,metadata,sizeof metadata)==EINVAL);
+ memset(padded,'x',sizeof padded);assert(pdave_copy_metadata_text(padded,sizeof padded,metadata,sizeof metadata)==EINVAL);
+ assert(pdave_copy_metadata_text("",1,metadata,sizeof metadata)==EINVAL);
  const char image[]="noise AppleAVE2FW-6070.11.1.release noise RTKit-2062.141.1.release end";
  char version[48];
  assert(!pdave_find_identity(image,sizeof image,"AppleAVE2FW-",version,sizeof version));

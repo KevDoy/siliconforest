@@ -12,7 +12,7 @@ struct peer {
  int fault;
  uint32_t host[4];
 };
-enum {BAD_MSG1=1,BAD_FW_BASE,BAD_LAST_DESC,BAD_CLIENT,NO_MESSAGE,NO_READY,WRITE_FAULT};
+enum {BAD_MSG1=1,BAD_FW_BASE,BAD_LAST_DESC,BAD_CLIENT,NO_MESSAGE,NO_READY,WRITE_FAULT,POSTED_DOORBELL_FAULT};
 static void descriptors(struct peer *p) {
  const struct ave_boot_abi *a=ave_boot_abi_get(AVE_ABI_MACOS_13_5);
  memset(p->ipc->cpu,0xab,a->msg1_chsz);
@@ -42,6 +42,7 @@ static int write_reg(void *context,uint32_t reg,uint32_t value) {
  if(p->fault==WRITE_FAULT)return EIO;
  if(reg==0x10){assert(value==1&&!p->acked);p->acked=1;return 0;}
  if(reg==0x0c){
+  if(p->ipc->phase==PDAVE_IPC_READY){assert(value==2||value==8);return 0;}
   assert(value==1);p->doorbells++;
   if(p->doorbells==1){assert(p->host[0]==0x1000000&&p->host[1]==0&&p->host[2]==0x700000&&p->host[3]==0);}
   else {assert(p->host[0]==0x80009bc0&&p->host[1]==0&&p->host[2]==0&&p->host[3]==0);descriptors(p);}
@@ -56,7 +57,7 @@ int main(void) {
   .segment={{0x100000,0,0x100000,0xcc000,3},{0x300000,0xcc000,0x400000,0x128000,0}},
   .iboot="iBoot-8422.141.2",.firmware="AppleAVE2FW-6070.11.1",.rtkit="RTKit-2062.141.1"};
  unsigned char *memory=aligned_alloc(0x4000,0x700000);assert(memory);
- for(int fault=0;fault<=WRITE_FAULT;fault++) {
+ for(int fault=0;fault<=POSTED_DOORBELL_FAULT;fault++) {
   struct pdave_ipc ipc;struct peer peer={.ipc=&ipc,.fault=fault};
   const struct pdave_ipc_ops ops={&peer,read_reg,write_reg,delay,barrier};
   struct pdave_preload absent=preload;absent.cold_reserved=0;
@@ -69,6 +70,13 @@ int main(void) {
   if(fault==WRITE_FAULT){assert(result==EIO&&ipc.phase==PDAVE_IPC_FAILED);continue;}
   assert(!result&&peer.host[0]==AVE_BOOT_MAGIC&&peer.host[1]==0&&peer.host[2]==13);
   result=pdave_ipc_handshake(&ipc);
+  if(fault==POSTED_DOORBELL_FAULT) {
+   assert(!result);peer.fault=WRITE_FAULT;
+   assert(pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+0x30000,128,0)==EIO);
+   assert(ipc.phase==PDAVE_IPC_FAILED);
+   assert(pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+0x30000,128,0)==ENODEV);
+   continue;
+  }
   if(!fault) {
    assert(!result&&ipc.phase==PDAVE_IPC_READY&&ipc.bound==0xfe&&ipc.client_bytes==0xb0000);
    assert(ipc.ring[AVE_CH_IO].nslots==32&&ipc.ring[AVE_CH_TERMINAL].nslots==512);
@@ -79,6 +87,40 @@ int main(void) {
    assert(!pdave_ipc_from_fw(&ipc,ipc.fw_base+ipc.bytes,1));
    assert(!pdave_ipc_from_fw(&ipc,ipc.fw_base+ipc.bytes-1,2));
    assert(!pdave_ipc_from_fw(&ipc,ipc.fw_base,SIZE_MAX));
+   struct ave_ring firmware;
+   ave_ring_init(&firmware,ipc.ring[AVE_CH_IO].slots,32,0);
+   for(unsigned i=0;i<32;i++)assert(!pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+0x30000+4*i,128,i));
+   assert(pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+0x30000,128,0)==EAGAIN);
+   assert(pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+ipc.bytes-4,8,0)==EINVAL);
+   assert(pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+1,8,0)==EINVAL);
+   for(unsigned i=0;i<32;i++) {
+    uint64_t payload;uint32_t bytes,flags;
+    assert(!ave_ring_recv(&firmware,&payload,&bytes,&flags));
+    assert(payload==ipc.fw_base+0x30000+4*i&&bytes==128&&flags==i);
+    assert(!ave_ring_send(&firmware,payload,bytes,0));
+    struct pdave_ipc_message message;
+    assert(!pdave_ipc_receive(&ipc,AVE_CH_IO,&message));
+    assert(message.payload==memory+0x30000+4*i&&message.bytes==128);
+   }
+   struct pdave_ipc_message message;
+   assert(pdave_ipc_receive(&ipc,AVE_CH_IO,&message)==EAGAIN);
+   assert(!pdave_ipc_send(&ipc,AVE_CH_IO,ipc.iova+0x30000,128,0));
+   ave_ring_init(&firmware,ipc.ring[AVE_CH_IO_T2H].slots,32,1);
+   assert(!ave_ring_send(&firmware,ipc.fw_base+0x40000,64,5));
+   assert(!pdave_ipc_receive(&ipc,AVE_CH_IO_T2H,&message));
+   assert(message.payload==memory+0x40000&&message.bytes==64&&message.flags==5);
+   uint64_t payload;uint32_t bytes,flags;
+   assert(ave_ring_recv(&firmware,&payload,&bytes,&flags)); /* no early credit */
+   struct pdave_ipc_message later;
+   assert(pdave_ipc_receive(&ipc,AVE_CH_IO_T2H,&later)==EBUSY);
+   struct pdave_ipc_message forged=message;forged.bytes++;
+   assert(pdave_ipc_ack(&ipc,AVE_CH_IO_T2H,&forged)==EINVAL);
+   assert(pdave_ipc_ack(&ipc,AVE_CH_IO,&message)==EINVAL);
+   assert(!pdave_ipc_ack(&ipc,AVE_CH_IO_T2H,&message));
+   assert(pdave_ipc_ack(&ipc,AVE_CH_IO_T2H,&message)==EINVAL);
+   assert(!ave_ring_recv(&firmware,&payload,&bytes,&flags)&&bytes==64&&flags==0);
+   assert(!ave_ring_send(&firmware,ipc.fw_base+ipc.bytes-4,8,0));
+   assert(pdave_ipc_receive(&ipc,AVE_CH_IO_T2H,&message)==EPROTO&&ipc.phase==PDAVE_IPC_FAILED);
   } else {
    assert(result==(fault==NO_MESSAGE||fault==NO_READY?ETIMEDOUT:EPROTO));
    assert(ipc.phase==PDAVE_IPC_FAILED&&pdave_ipc_handshake(&ipc)==EINVAL);

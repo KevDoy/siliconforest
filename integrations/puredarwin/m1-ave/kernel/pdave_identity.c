@@ -7,6 +7,19 @@
 #include <errno.h>
 #include <string.h>
 #endif
+int pdave_copy_metadata_text(const void *bytes,size_t size,char *out,size_t capacity) {
+ const unsigned char *p=bytes;
+ if(!out||!capacity)return EINVAL;
+ out[0]=0;
+ if(!p||!size||size>4096)return EINVAL;
+ size_t n=0;
+ while(n<size&&p[n]) {
+  if(n>=capacity-1||p[n]<32||p[n]>126)return EINVAL;
+  n++;
+ }
+ if(!n)return EINVAL;
+ memcpy(out,p,n);out[n]=0;return 0;
+}
 int pdave_find_identity(const void *bytes,size_t size,const char *prefix,char *out,size_t capacity) {
  const unsigned char *p=bytes;
  if(!p||!prefix||!out||!capacity)return EINVAL;

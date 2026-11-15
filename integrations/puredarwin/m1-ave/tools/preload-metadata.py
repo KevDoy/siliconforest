@@ -16,6 +16,10 @@ def property_names(kit, entry):
     cf.CFDictionaryGetKeysAndValues.argtypes=[C.c_void_p,C.c_void_p,C.c_void_p]
     cf.CFStringGetCString.argtypes=[C.c_void_p,C.c_void_p,C.c_long,C.c_uint32];cf.CFStringGetCString.restype=C.c_bool
     cf.CFRelease.argtypes=[C.c_void_p]
+    cf.CFGetTypeID.argtypes=[C.c_void_p];cf.CFGetTypeID.restype=C.c_ulong
+    cf.CFDataGetTypeID.restype=cf.CFStringGetTypeID.restype=cf.CFNumberGetTypeID.restype=C.c_ulong
+    cf.CFDataGetLength.argtypes=[C.c_void_p];cf.CFDataGetLength.restype=C.c_long
+    cf.CFStringGetLength.argtypes=[C.c_void_p];cf.CFStringGetLength.restype=C.c_long
     dictionary=C.c_void_p();result=kit.IORegistryEntryCreateCFProperties(entry,C.byref(dictionary),None,0)
     if result or not dictionary.value:return {'status':result,'available':False}
     try:
@@ -23,11 +27,19 @@ def property_names(kit, entry):
         if count<0 or count>512:raise ValueError('Property count exceeds metadata bound')
         keys=(C.c_void_p*count)();values=(C.c_void_p*count)()
         cf.CFDictionaryGetKeysAndValues(dictionary,keys,values)
-        names=[]
-        for key in keys:
+        names=[];types={}
+        selected={'firmware-version','dram-base','chip-id','pre-loaded','segment-ranges','segment-names'}
+        for i,key in enumerate(keys):
             name=C.create_string_buffer(256)
-            if cf.CFStringGetCString(key,name,len(name),0x08000100):names.append(name.value.decode('ascii'))
-        return {'status':0,'available':True,'names':sorted(names)}
+            if cf.CFStringGetCString(key,name,len(name),0x08000100):
+                label=name.value.decode('ascii');names.append(label)
+                if label in selected:
+                    kind=cf.CFGetTypeID(values[i]);entry={'kind':'other','type_id':kind}
+                    if kind==cf.CFDataGetTypeID():entry={'kind':'data','bytes':cf.CFDataGetLength(values[i])}
+                    elif kind==cf.CFStringGetTypeID():entry={'kind':'string','characters':cf.CFStringGetLength(values[i])}
+                    elif kind==cf.CFNumberGetTypeID():entry={'kind':'number'}
+                    types[label]=entry
+        return {'status':0,'available':True,'names':sorted(names),'selected_types':types}
     finally:cf.CFRelease(dictionary)
 
 

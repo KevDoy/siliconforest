@@ -1,8 +1,18 @@
-# PDAppleAVE source port, in progress
+# PDAppleAVE source port — paused 2026-11-15
 
-The Linux/Nix builder owns source compilation; CODEX-TB owns the installed
-kernel base and boot slots. Diagnostic AVE kext SDK compilation passes; no kernel collection was built
-or installed and no hardware encode has run. See SF-AD and `runs/m1-coord/requests-for-CODEX-TB.md`.
+Owner paused all AVE encoder work. Do not build/include/boot/probe this driver,
+query its firmware or extract further inputs until explicitly resumed. Existing
+source, artifacts and ignored private inputs are preserved. CODEX-TB restored
+non-AVE CIO07 after the first diagnostic; subsequent CIO08 omits AVE. All older
+inclusion requests are withdrawn. See [SF-AD](../../../docs/roadmap/issues/SF-AD-ave-encoder.md)
+for exact first-probe values, private paths and the conditional resume step.
+
+The first INFO boot had no panic but returned ENODEV19, flags0/caps0,
+soc0x8103/segments0 and empty identities, before TEXT mapping. A padded metadata
+property guard was fixed and SDK-built as v11, not booted. No encoder hardware
+was started. Detached transport/DAPF helpers compile as a separate SDK OBJECT
+target, not into the live diagnostic. The commands below document reproducibility
+for a future authorized resume, not work to run while paused.
 
 `kernel/upstream` contains unchanged GPL command/ADT parsers from the pinned
 upstream in NOTICE. `pdave_preload.c` rejects unknown firmware identities,
@@ -72,8 +82,17 @@ descriptors, address bounds, register failure and finite timeouts. It SDK
 compiles but is deliberately NOT called by the diagnostic service: real cold
 preload, power, DART/DAPF and coherent memory ownership are still prerequisites.
 
-Remaining port: early reservation handoff, encoding ioctls,
+`pdave_dapf.c` ports T8103's sixteen-slot filter programming through non-posted
+32/64-bit callbacks, retaining upstream r4/start/end/r0 order and readback.
+It accepts live segment addresses, verifies the known ADT window, rejects a
+locked filter or missing stopped/cold-reserved preconditions, and propagates
+I/O faults without releasing resources. It emits no firmware/DPE dumps and is
+also detached from the diagnostic. Synthetic write-order/width and fault
+tests pass; these do not prove actual power, stopped-core or filter state.
+
+Remaining port (paused): early reservation handoff, encoding ioctls,
 PMGR/DART/DAPF, actual scratch-register/ring IPC (not RTKit messaging), H264 IPPP
-session/teardown, VideoToolbox compression with software fallback. First hardware
+session/teardown and VideoToolbox hardware compression. The independent
+OpenH264 software fallback is already installed and qualified. First hardware
 milestone is30x1280x720 test-pattern frames, ffmpeg decode, PSNR>=40dB, then
 fps/CPU comparison. Source/host checks do not establish any of those results.
