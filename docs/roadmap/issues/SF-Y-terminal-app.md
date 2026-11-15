@@ -326,6 +326,20 @@ two Command-= (852 <-> 872); full screen (2560x1600 throughout, 242x69 -> 242x34
 screen gave back 719); no grey box in any (`shots/sp2*-split.png`, `-end.png`). The first split of a fresh window
 also moves it down the screen when it starts near the top (seen once, `sp30`); not chased.
 
+### Visual check after every install (from 15 November, ~09:30Z)
+0130's string-layout cache drew from freed layouts after a few minutes (SF-AA, "Regression"); the checks before that
+install were crash gates and timings of fresh launches and did not look at pixels late in a session. Every install
+since is preceded and followed by `runs/sf-term6/visgate.sh` on my own instances (Activity Monitor after refreshes, its
+five tabs, scrolled, a column widened, the inspector; Terminal's window, a new tab, the Shell menu, Preferences) for the
+build before and the new one in the same hold, compared side by side (`visdiff.py`) and looked at. A test prefix has
+no AppKit resources: its radio buttons and check boxes have no images (Preferences differs by that alone). Terminal
+after 0130-0132 and the Foundation install: identical to the build before in all four views.
+
+### Not done this round (TERM6)
+Item 5 (prompt marks, the title-bar menu's invoke, multi-line labels, Preferences readable at 150 %) was not worked on:
+the owner's Activity Monitor findings came first. Terminal's figures with 0130 (SF-AA): launch 300-424 ms, echo 4-9
+ms, `seq 1 300000` 0.98-1.04 s, a wheel step 14-23 ms (14-16 before).
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default
