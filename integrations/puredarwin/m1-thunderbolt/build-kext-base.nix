@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Native ACIO1 firmware stage. No NHI/domain/PCI enumeration is implied.
-{ connectionManager ? false, pciEnumeration ? false, endpointMapper ? false }:
+{ connectionManager ? false, pciEnumeration ? false, endpointMapper ? false, pciMSI ? false }:
 assert !pciEnumeration || connectionManager;
 assert !endpointMapper || pciEnumeration;
+assert !pciMSI || (pciEnumeration && endpointMapper);
 let
   lkpi=import ../m1-rust-kext/lkpi;
   inherit (import ../m1-rust-kext/pins.nix) pkgs;
@@ -23,6 +24,9 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     ${pkgs.lib.optionalString pciEnumeration ''
       chmod u+w "$dest/CMakeLists.txt"
       printf '\ntarget_sources(PDAppleCIO.kext PRIVATE PDCIOPCIEnumeration.cpp)\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_PCIE_ENUMERATION=1)\n' >> "$dest/CMakeLists.txt"
+    ''}
+    ${pkgs.lib.optionalString pciMSI ''
+      printf '\ntarget_sources(PDAppleCIO.kext PRIVATE PDCIOPCIMSIController.cpp)\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_PCI_MSI=1)\nset_source_files_properties(PDCIOPCIMSIController.cpp PDCIOPCIHost.cpp PROPERTIES COMPILE_DEFINITIONS KERNEL_PRIVATE=1)\n' >> "$dest/CMakeLists.txt"
     ''}
     cp ${./include}/* "$dest/"
     cp ${./src}/pd_apple_nhi.c ${./src}/pd_cio_tunables.c ${./src}/pd_pciec_config.c ${./src}/pd_pciec_port.c ${./src}/pd_pciec_tunables.c "$dest/"

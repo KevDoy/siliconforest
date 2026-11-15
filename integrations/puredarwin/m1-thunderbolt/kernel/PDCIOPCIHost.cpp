@@ -13,6 +13,9 @@ OSDefineMetaClassAndStructors(PDCIOPCIHost,IOPCIBridge)
 bool PDCIOPCIHost::initForEnumeration(IOService *owner,void *ctx,bool (*proof)(void *))
 {
     leaseOwner=NULL;powerContext=NULL;powerProof=NULL;accessLock=NULL;
+#if PD_CIO_PCI_MSI
+    msi=NULL;interruptAdmitted=0;
+#endif
     view={0x10000000,0,127,false};startAttempted=false;stopped=true;
     if(!owner || !ctx || !proof || !IOPCIBridge::init())return false;
     accessLock=IOLockAlloc();if(!accessLock)return false;
@@ -38,6 +41,21 @@ bool PDCIOPCIHost::start(IOService *provider)
     IOPCIAddressSpace root={};UInt32 vendor=configRead32(root,0),classCode=configRead32(root,8);
     if(vendor==UINT32_MAX || !(vendor&0xffff) || (vendor&0xffff)==0xffff ||
        ((classCode>>16)&0xffff)!=0x0604){blockConfiguration();return false;}
+#if PD_CIO_PCI_MSI
+    // The pinned T8103 sequence programs 32 per-port MSI vectors, base0.
+    // Derive and verify the actual hardware configuration before exposing
+    // any PCI child or resolving an endpoint's interrupt properties.
+    UInt32 msiConfig=port.r32(0x124),msiBase=port.r32(0x128),msiAddress=port.r32(0x168),dtBase=0;
+    if(msiConfig!=0x51 || msiBase || msiAddress!=0xfffff000 ||
+       !pd_adt_u32("/arm-io/apciec1","msi-vector-offset",0,&dtBase) || dtBase!=818){
+        blockConfiguration();return false;
+    }
+    __atomic_store_n(&interruptAdmitted,1,__ATOMIC_RELEASE);
+    msi=OSTypeAlloc(PDCIOPCIMSIController);
+    if(!msi || !msi->initForPort(this,this,interruptPower,dtBase,32,msiAddress)){
+        blockConfiguration();return false;
+    }
+#endif
     setProperty("PDCIOPCIEnumerationOnly",true);setProperty("PDCIOPCIDMAAdmitted",false);
     startAttempted=true;stopped=false;
     bool ok=IOPCIBridge::start(provider);
@@ -46,12 +64,45 @@ bool PDCIOPCIHost::start(IOService *provider)
 }
 IOReturn PDCIOPCIHost::blockConfiguration()
 {
+#if PD_CIO_PCI_MSI
+    __atomic_store_n(&interruptAdmitted,0,__ATOMIC_RELEASE);
+    if(msi)msi->revoke(); // Gate only, never a parent-IRQ drain ACK.
+#endif
     if(ml_at_interrupt_context())return kIOReturnNotPermitted;
     if(!accessLock)return kIOReturnNotReady;
     // Joins actual in-flight config accesses. Later calls cannot reach either
     // the borrowed power context or the controller mappings after revocation.
     IOLockLock(accessLock);view.admitted=false;IOLockUnlock(accessLock);return kIOReturnSuccess;
 }
+#if PD_CIO_PCI_MSI
+bool PDCIOPCIHost::interruptPower(void *context)
+{
+    auto s=(PDCIOPCIHost *)context;
+    // IRQ-safe predicates only; the retained owner/context cannot be freed
+    // while any registered AIC parent can call us. No PCI config or locks.
+    return __atomic_load_n(&s->interruptAdmitted,__ATOMIC_ACQUIRE) &&
+        s->physicalPower() && s->powerProof && s->powerProof(s->powerContext);
+}
+IOReturn PDCIOPCIHost::callPlatformFunction(const OSSymbol *name,bool wait,
+ void *p1,void *p2,void *p3,void *p4)
+{
+    if(name==gIOPlatformGetMessagedInterruptControllerKey){
+        if(p2)*(IOPCIMessagedInterruptController **)p2=NULL;
+        if(!p2 || !msi || !msi->ready())return kIOReturnNotReady;
+        *(IOPCIMessagedInterruptController **)p2=msi;return kIOReturnSuccess;
+    }
+    if(name==gIOPlatformGetMessagedInterruptAddressKey){
+        if(p2 || !msi || (uintptr_t)p3>UINT32_MAX)return kIOReturnUnsupported;
+        return msi->messageForDevice((IOService *)p1,(UInt32)(uintptr_t)p3,(UInt32 *)p4);
+    }
+    if(name && name->isEqualTo("PDCIOPCIMSIRouteReady")){
+        if(p2 || p3 || p4 || !msi || ml_at_interrupt_context())return kIOReturnBadArgument;
+        return msi->routeReady(OSDynamicCast(IOPCIDevice,(IOService *)p1))?
+            kIOReturnSuccess:kIOReturnNotReady;
+    }
+    return IOPCIBridge::callPlatformFunction(name,wait,p1,p2,p3,p4);
+}
+#endif
 bool PDCIOPCIHost::physicalPower()
 {
     if(!powerGate.va)return false;
@@ -124,6 +175,9 @@ void PDCIOPCIHost::free()
         IOLog("PDCIOPCIHost: retaining controller mappings after incomplete stop\n");return;
     }
     config.unmap();port.unmap();powerGate.unmap();
+#if PD_CIO_PCI_MSI
+    OSSafeReleaseNULL(msi);
+#endif
     if(accessLock){IOLockFree(accessLock);accessLock=NULL;}
     OSSafeReleaseNULL(leaseOwner);IOPCIBridge::free();
 }

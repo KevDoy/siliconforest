@@ -1976,3 +1976,40 @@ bonded/configured, no reset or initialization-disable request and no training
 in progress. Differences will be interpreted against source, not forced blindly.
 The prospective image includes the separate PCIe-C host power guard and excludes
 the endpoint mapper. CIO21 remains the installed non-AVE rollback baseline.
+
+### Native I210 MSI transport: separate SDK variant, not installed
+
+`build-pci-msi-kext.nix` now builds a concrete
+`PDCIOPCIMSIController`, using the frozen IOPCIFamily's actual
+`IOPCIMessagedInterruptController` ABI. The native bridge supplies that object
+through the family's standard platform functions before publishing children.
+It verifies the actual PCIe-C MSI configuration, device-tree vector base818,
+32 AIC vectors and the programmed doorbell. The real family allocator creates
+the interrupt indexes marked PCIMessaged that fbsdkpi requires. Admission is
+limited to one MSI for an actual I210 below this native host; no fabricated
+indexes or successful interrupt stubs are used. The family prefers MSI when
+the I210 has that capability, so this path does not map an MSI-X table.
+
+Parent AIC interrupts dispatch the real family handler. The frozen AIC masks
+on event read without recording a hard-disable flag; a software event on a
+workloop therefore joins/re-registers the actual parent before rearming, as
+the existing RTKit transport does. This is interrupt-driven, with no timer.
+An explicit mapper query checks the actual retained SID0 translation root,
+TCR/global gate, fault status and live power/tunnel ownership before interrupt
+registration. A separate factual query checks an actual registered/enabled/
+armed route. Neither query grants bus mastering or proves endpoint DMA.
+
+The final MSI SDK, ordinary SDK and enumeration SDK all cross-build. Actual
+Mach-O symbols prove that both concrete mapper and MSI classes occur only in
+the explicit variant, and its required MSI-family imports are supplied by the
+frozen IOPCIFamily binary. All six repository checks pass (274 Python tests,
+77 C test groups, six detected mutations). An initially mistyped enumeration
+build filename failed before building anything; the correct target passed.
+The first MSI SDK compiled; the second includes the AIC rearm correction.
+
+This variant has no endpoint personality or CM mapper factory and is absent
+from CIO22. Every bus-master request remains blocked. Partial parent setup,
+revocation or ambiguous ownership retains the real objects until reboot;
+nonblocking revocation is explicitly not an IRQ/work/endpoint drain. No MSI
+interrupt, I210 DMA, Ethernet link/DHCP or cable teardown has been observed on
+Darwin. Those remain hardware milestones after dock router/link discovery.

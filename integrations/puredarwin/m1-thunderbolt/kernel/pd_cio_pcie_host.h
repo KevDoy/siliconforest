@@ -10,11 +10,15 @@
 #include <IOKit/pci/IOPCIBridge.h>
 #include "pd_soc.h"
 #include "pd_pciec_config.h"
+#if PD_CIO_PCI_MSI
+#include "pd_cio_pci_msi.h"
+#endif
 /* Enumeration-only native adapter, wired only in the explicit CM profile.
  * The caller must activate the real tunnel, cold-init/start PCIe-C, retain
  * its actual power/PHY ownership and omit PCI endpoint personalities before
  * starting this object. A registry marker alone is NOT binding/DMA proof.
- * No endpoint mapper, MSI or endpoint-driver admission is supplied here.
+ * Default profile supplies no endpoint mapper, MSI or driver admission.
+ * Explicit SDK-only MSI variant still strips every bus-master request.
  * All config calls are thread-context only. Block configuration before
  * power/link teardown; failed start/stop retains ownership until real child
  * teardown and final object release. No DMA drain is inferred by this API.
@@ -28,6 +32,11 @@ class PDCIOPCIHost : public IOPCIBridge {
     PDMmio config,port,powerGate;
     pd_pciec_config_view view;
     bool startAttempted,stopped;
+#if PD_CIO_PCI_MSI
+    PDCIOPCIMSIController *msi;
+    UInt32 interruptAdmitted;
+    static bool interruptPower(void *);
+#endif
     bool physicalPower(); // Always-on PMGR proof before any PCIe-C access.
     volatile uint8_t *address(IOPCIAddressSpace,UInt8,unsigned);
     UInt32 readConfig(IOPCIAddressSpace,UInt8,unsigned);
@@ -37,6 +46,9 @@ public:
     bool start(IOService *) override;
     void stop(IOService *) override;
     void free() override;
+#if PD_CIO_PCI_MSI
+    IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
+#endif
     IOReturn blockConfiguration();
     bool configure(IOService *) override;
     IODeviceMemory *ioDeviceMemory() override;

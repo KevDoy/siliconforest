@@ -132,6 +132,29 @@ bool PDCIOPCIDartMapper::initHardware(IOService *provider)
  if(unpin)release();return !error;
 }
 uint64_t PDCIOPCIDartMapper::getPageSize() const{return pciPage;}
+IOReturn PDCIOPCIDartMapper::callPlatformFunction(const OSSymbol *name,bool wait,
+ void *p1,void *p2,void *p3,void *p4)
+{
+ if(!name || !name->isEqualTo("PDCIOPCIDMAReady"))
+  return IOMapper::callPlatformFunction(name,wait,p1,p2,p3,p4);
+ if(p1!=endpoint || p2 || p3 || p4 || ml_at_interrupt_context() || !lock || !controller)
+  return kIOReturnBadArgument;
+ IOLockLock(lock);IOLockLock(controller->lock);
+ bool ok=ready && live();
+ if(ok){
+  uint32_t tcr=0,root=0,gate=0;
+  int error=pd_pciec_dart_sid0_check(&io);
+  if(!error)error=read(this,0x100,&tcr);
+  if(!error)error=read(this,0x400,&root);
+  if(!error)error=read(this,0xfc,&gate);
+  ok=!error && tableCount && tcr==(1u<<7) && (gate&1) &&
+   root==((1u<<31)|(uint32_t)(tables[0].physical>>12));
+  if(!ok)poison();
+ }
+ IOLockUnlock(controller->lock);IOLockUnlock(lock);
+ // Translation ownership/readback only. Not an endpoint DMA/drain ACK.
+ return ok?kIOReturnSuccess:kIOReturnNotReady;
+}
 IOReturn PDCIOPCIDartMapper::iovmMapMemory(IOMemoryDescriptor *memory,uint64_t offset,
  uint64_t length,uint32_t options,const IODMAMapSpecification *spec,IODMACommand *command,
  const IODMAMapPageList *,uint64_t *address,uint64_t *mappedLength)

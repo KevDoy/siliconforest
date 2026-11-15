@@ -49,6 +49,7 @@ public:
  IOReturn iovmUnmapMemory(IOMemoryDescriptor *,IODMACommand *,uint64_t,uint64_t) override;
  IOReturn iovmInsert(uint32_t,uint64_t,uint64_t,uint64_t,uint64_t) override;
  uint64_t mapToPhysicalAddress(uint64_t) override;
+ IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
  void stop(IOService *) override;
  void free() override;
 };
