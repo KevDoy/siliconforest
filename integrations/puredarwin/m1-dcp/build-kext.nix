@@ -12,7 +12,7 @@ let
   k = ./kext;
   staged = pkgs.runCommand "puredarwin-dcp-source" { nativeBuildInputs = [ pkgs.patch ]; } ''
     mkdir -p $out/pin $out/pininc $out/include
-    cp ${k}/CMakeLists.txt ${k}/Info.plist ${k}/glue.c ${k}/pd_dcp_linux.c ${k}/pd_dcp_mmap.c ${k}/pd_dcp_prime.c ${k}/pd_dcp_drm72.c ${k}/PDDcpHost.cpp ${k}/pd_dcp_backlight.c ${k}/PDDcpSysctl.cpp $out/
+    cp ${k}/CMakeLists.txt ${k}/Info.plist ${k}/glue.c ${k}/pd_dcp_linux.c ${k}/pd_dcp_mmap.c ${k}/pd_dcp_prime.c ${k}/pd_dcp_drm72.c ${k}/PDDcpHost.cpp ${k}/pd_dcp_backlight.c ${k}/pd_dcp_hotplug.c ${k}/PDDcpSysctl.cpp $out/
     cp ${./include/pd_dcp_compat.h} $out/include/pd_dcp_compat.h
     cp -r ${driver} $out/driver; chmod -R u+w $out/driver
     for p in ${./patches}/*.patch; do patch -d $out/driver -p1 -F0 --no-backup-if-mismatch < $p; done

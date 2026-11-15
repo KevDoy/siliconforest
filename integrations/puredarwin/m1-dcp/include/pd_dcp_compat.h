@@ -7,6 +7,9 @@
 #ifndef PD_DCP_COMPAT_H
 #define PD_DCP_COMPAT_H
 
+struct drm_connector;
+void pd_dcp_note_hotplug(struct drm_connector *connector);
+
 /* Linux 7.2 renamed struct drm_atomic_state to struct drm_atomic_commit; same object */
 #define drm_atomic_commit drm_atomic_state
 

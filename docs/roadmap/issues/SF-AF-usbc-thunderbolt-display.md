@@ -411,3 +411,35 @@ These newer RTKit/DCP changes are not part of USB04 and establish no M3
 boot, external DCP, trained link or scanout. DESK4's K1-K12 interface request
 has been read and answered; actual connector evidence must precede its
 second scanout integration request.
+
+### USB04 captured boot, 2026-11-15 03:34Z
+
+The frozen USB04 capsule `03d39b8176db0069c397e2d9f979a087f853b25626c4aadec408148c26f7febf`
+was installed after PERF finished and TERM6 released its hold; the log was
+re-read inside gui.lock before the cycle. Linux normal installer and one-time
+boot were used, with UART active before the new kernel's first boot. It
+returned to SiliconForest and .next/inject by 03:34:02Z. The owned reader
+was stopped/reaped at 03:34:03Z before lock release. UART records the Darwin
+banner and no panic(cpu) report. The pre-existing read-only fsck findings
+match the documented 21:06Z remnants (inode 65144, blocks 636291–636295,
+group 17 and total free-count delta 3); no filesystem repair was performed.
+
+PDAppleUSB is registered/matched and reports `super-speed-capable=Yes`.
+The unchanged TS3-only cable remains deferred, host-active No, removal-blocked
+No; Type-C sampler 61 samples and zero errors at capture. This proves new
+bundle loading/deferred behavior only. No ATC USB host initialization,
+controller DMA, enumeration/HID/storage/DHCP/ten cycles, NHI/tunnels or
+external output has been observed. The separate RTKit/hotplug source after
+this collection build is not installed by USB04.
+
+### Darwin hotplug observer source, 2026-11-15 03:37Z
+
+The DCP hotplug worker now queues a dedicated native cache refresh after
+real upstream notifications, including route removal. It refreshes modes,
+then publishes cached connector status/name/preferred mode and a monotonic
+read-only `kern.pd_dcp.hotplug_seq`; `kern.pd_dcp.connectors` serves the
+snapshot. Sysctl reads hold only a short metadata mutex. No event, EDID or
+connector is fabricated. DRM ioctl latency remains subject to DRM locks
+and must be measured on hardware; no 50 ms guarantee is claimed. The
+complete DCP bundle SDK-builds; this code is not in installed USB04. Native
+hotplug/connector/scanout evidence remains outstanding.

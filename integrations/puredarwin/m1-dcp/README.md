@@ -232,3 +232,23 @@ Nodes are chosen by DRM driver name `apple` (`/dev/dri/card*`), never by number.
 Tests: `tools/bl_boot.sh <name> <collection> supervisor/darwin-dcp-backlight-test.in` (DL52) and
 `... supervisor/darwin-dcp-sleep-test.in` (DL53; `dcp-flip-test --dpms-cycles N`). Boots bl02
 and bl03.
+
+### Darwin connector hotplug notification (SF-AF source)
+
+`pd_dcp_hotplug.c` observes Linux DCP's real hotplug notification, including
+route removal. Its dedicated worker refreshes connector modes under the
+same DRM lock used by the driver's relink path, then captures status/name/
+preferred mode and increments `kern.pd_dcp.hotplug_seq`. The read-only
+`kern.pd_dcp.connectors` exposes that cached text. Sysctl reads take only
+the brief cache mutex; they do no detection, firmware call or modeset.
+The sequence advances after the DRM mode/status cache and text are visible.
+No fake connector, EDID or hotplug is introduced.
+
+The aggregate T8103 DRM card is retained for the lifetime of this kext's
+native platform copy, keeping queued work valid across cable loss. The
+queue uses its own thread to keep an EDID/AUX wait off the RTKit and system
+workqueue threads. DRM ioctls still use DRM locks: the requested ~50 ms
+GetConnector/GetConnectorCurrent latency needs live measurement. DESK4
+can poll the sequence and request the cached DRM view after it changes.
+SDK compilation passes; USB04 does not include this newer DCP source and
+no live external connector/notification or output is claimed.
