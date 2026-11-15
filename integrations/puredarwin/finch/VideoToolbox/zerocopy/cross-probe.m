@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <dlfcn.h>
 extern char **environ;
 extern int _NSGetExecutablePath(char *,uint32_t *);
 /* Public ABI declarations missing from our minimal IOSurface header. */
@@ -49,6 +50,23 @@ static int reap(pid_t child,int *status,double timeout){
  while(now()<until){pid_t result=waitpid(child,status,WNOHANG);if(result==child)return 1;if(result<0&&errno!=EINTR)return 0;usleep(5000);}return 0;
 }
 static void closeFD(int *fd){if(*fd>=0){close(*fd);*fd=-1;}}
+/* This opt-in checks the FX provider's concrete backing hooks in BOTH
+ * processes. It does not establish pixel aliasing or GPU completion. */
+static int checkRequiredGPUBacking(IOSurfaceRef surface,const char *role){
+ const char *required=getenv("SF_CROSS_REQUIRE_GPU");
+ if(!required||strcmp(required,"1"))return 0;
+ int (*copyFD)(IOSurfaceRef)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUCopyFD");
+ size_t (*getOffset)(IOSurfaceRef)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUGetOffset");
+ if(!copyFD||!getOffset){
+  fprintf(stderr,"CROSS_GPU_UNSUPPORTED role=%s copy-fd-symbol=%d offset-symbol=%d\n",role,copyFD!=NULL,getOffset!=NULL);return 77;
+ }
+ int fd=copyFD(surface);size_t offset=getOffset(surface);
+ int valid=fd>=0&&fcntl(fd,F_GETFD)>=0;
+ int closed=fd>=0?close(fd)==0:0;
+ printf("CROSS_GPU_BACKING role=%s gpu-fd-valid=%d data-offset=%zu temporary-fd-closed=%d required-offset=16384\n",role,valid,offset,closed);
+ if(!valid||!closed||offset!=16384){fprintf(stderr,"CROSS_GPU_UNSUPPORTED role=%s actual GPU backing requirement failed\n",role);return 77;}
+ return 0;
+}
 /* Normalize away from the fixed consumer descriptors3/4. dup2 actions then
  * cannot accidentally close their own final descriptors through pipe aliases. */
 static int makePipe(int ends[2]){
@@ -72,6 +90,7 @@ static int consumer(const char *argument,int exitWithoutRelease){
  surface=IOSurfaceLookup((uint32_t)value);
  if(!surface){fprintf(stderr,"CROSS_LEASE_UNSUPPORTED global IOSurfaceLookup refused\n");sendByte(3,'U');result=77;goto done;}
  if(IOSurfaceGetID(surface)!=(uint32_t)value){fprintf(stderr,"CROSS_LEASE_FAIL lookup identity\n");sendByte(3,'E');goto done;}
+ if(checkRequiredGPUBacking(surface,"consumer")){sendByte(3,'G');result=77;goto done;}
  IOSurfaceIncrementUseCount(surface);incremented=1;
  int32_t count=IOSurfaceGetUseCount(surface);
  printf("CROSS_CHILD held-usecount=%d\n",count);
@@ -103,6 +122,7 @@ static int producer(int predicateOnly,int consumerExit){
  number(properties,kIOSurfaceWidth,4);number(properties,kIOSurfaceHeight,4);number(properties,kIOSurfaceBytesPerRow,16);number(properties,kIOSurfaceBytesPerElement,4);number(properties,kIOSurfacePixelFormat,0x42475241);
  CFDictionarySetValue(properties,kIOSurfaceIsGlobal,kCFBooleanTrue);surface=IOSurfaceCreate(properties);CFRelease(properties);properties=NULL;
  REQUIRE(surface,"source-owned global surface");REQUIRE(IOSurfaceGetID(surface)!=0,"surface ID");
+ if(checkRequiredGPUBacking(surface,"producer")){result=77;goto cleanup;}
  REQUIRE(IOSurfaceGetUseCount(surface)==0&&!IOSurfaceIsInUse(surface),"initial surface usecount0 and not in use");
  frame=av_frame_alloc();REQUIRE(frame,"frame");bytes=calloc(1,64);REQUIRE(bytes,"tracked frame payload");
  frame->buf[0]=av_buffer_create(bytes,64,freeBytes,NULL,0);REQUIRE(frame->buf[0],"frame AVBuffer");frame->data[0]=bytes;bytes=NULL;
@@ -121,6 +141,7 @@ static int producer(int predicateOnly,int consumerExit){
  closeFD(&held[1]);closeFD(&release[0]);
  char response=0;REQUIRE(receiveByte(held[0],&response,5),"consumer handshake timeout");
  if(response=='U'){result=77;fprintf(stderr,"CROSS_LEASE_UNSUPPORTED consumer cannot look up live producer surface\n");goto cleanup;}
+ if(response=='G'){result=77;fprintf(stderr,"CROSS_GPU_UNSUPPORTED consumer actual GPU backing requirement failed\n");goto cleanup;}
  REQUIRE(response=='H',"consumer successfully looked up and counted the live surface");
  int32_t beforeRelease=IOSurfaceGetUseCount(surface);
  printf("CROSS_PARENT after-H observed-usecount=%d is-in-use=%d AVBuffer-free=%u\n",beforeRelease,IOSurfaceIsInUse(surface),freeCount());

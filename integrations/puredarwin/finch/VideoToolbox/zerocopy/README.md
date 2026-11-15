@@ -99,3 +99,14 @@ its wall time is not a no-copy playback benchmark. It builds on Linux but
 has not run against actual kernel-import support. Use only a reviewed private
 VT/CV/FX IOSurface cohort, SF_VT_ZERO_COPY=require, and an authorized kernel
 owner's import-capable trial. No success may be inferred from the build.
+
+`qualify-capture.py` requires independent visible NV12 framemd5/PTS, the
+fixture movie SHA, an actual successful capture client, strict import-capability
+and zero-copy counters, the held-frame check, and before/after kernel statistics
+with matching job/completion deltas and no faults/quarantine. Missing counters,
+old-kernel stats, CPU copies, empty runs or wrong pictures cannot qualify.
+The inherited CLI client is restricted here to time bases with numerator1.
+Use the private producer, not the default decoder preserved by the separate
+QuickTime query wrapper. The six host policy tests use explicitly synthetic
+receipts and prove only classifier behavior; no hardware event is inferred.
+Actual shared-capture results and browser1080p60 still require owner trials.
