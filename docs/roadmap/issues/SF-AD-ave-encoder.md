@@ -1,8 +1,9 @@
 # SF-AD — AVE encoder source-port study
 
 **Source port in progress, 15 November 2026. Diagnostic PDAppleAVE kext SDK build and private Acis extraction are complete;
-no kernel collection build/install, AVE device access or hardware encoding has
-been performed.**
+offline collection preflight now reproduces the installed base exactly but
+rejects the additive diagnostic for segment overlap. No kernel install, AVE
+device access or hardware encoding has been performed.**
 The first target is T8103/J293; preserve the working PDAppleAVD decoder and audio.
 
 Owner decision on 15 November authorizes extracting the Acis DPE table from a
@@ -212,3 +213,14 @@ extractor, then the source port and CODEX-TB integration request. The owner has
 resolved the permission question; actual ABI/table compatibility and cold DATA
 reservation remain technical prerequisites. Keep software encoding available;
 do not report AVE hardware support before the30-frame/PSNR milestone.
+
+## Diagnostic collection capacity, 15 November
+
+The current CIO03 collection and packed kernel.bin were independently reproduced
+byte for byte from its frozen derivation inputs. Adding only the stripped INFO
+kext fails the unchanged overlap checker: the added module pushes prelink info
+into kernel TEXT. The first unstripped attempt and stripped retry remain failed
+receipts. No boot was reserved and no target changed. CODEX-TB has the exact
+layout finding and diagnostic artifact for its next capacity-qualified current
+collection. Do not drop unrelated modules or boot a collection rejected by this
+gate to obtain a version string.

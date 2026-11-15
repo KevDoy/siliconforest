@@ -160,3 +160,30 @@ not claim acoustic output, general live graph mutation or precise pause/resume.
 
 VLC/IINA acquisition and source-only AVKit/networking work continue separately;
 a player launch returning zero is not playback evidence.
+
+## Further staged media and networking (15 November, 08:12Z)
+
+AVKit's whole Finch view/player model is staged, with same-byte native/M1 value
+checks and a fresh functional rerun. It covers2/18 QuickTime AVKit imports and
+none of the7 private MediaToolbox functions; this Finch player lacks the H264/
+audio backend. No installed replacement or rendered-player claim.
+
+FoundationNetworking's isolated SF-prefixed whole Finch implementation passes
+strict example.com HTTPS, missing-CA rejection and native-matched cookie/cache
+checks on M1. The canonical archive builds; TERM6 has the exact integration
+proposal. Foundation is not installed by this stream. WebSocket/proxy/background
+behavior remains source-compiled, unqualified.
+
+VideoToolbox compression is staged with OpenH264 and the retained PDAppleAVD
+decoder. All83 prior exports remain,168total. M1 software encodes30 ordered720p
+frames at3.43fps; ffmpeg decodes all30 with58.873634dB PSNR against our pattern.
+The same Linux-built API probe completes on native M5; its hardware query is
+unsupported and does not prove native software selection. No AVE hardware
+encode or new VideoToolbox installation has occurred. See SF-AD for the
+preloaded-firmware-only hardware backend and private DPE extraction.
+
+VLC is the smaller verified third-party target. The Linux-built original entry
+now reaches its plugins; the latest failure reports real QuartzCore/AppKit/VT
+imports and ends SIGSEGV. Exact grouped gaps and failed runtime receipts remain
+in players/GAPS.md and runs/sffinch. TERM6 has the GUI dependencies; no player
+window, decoding/audio or capture claim follows from open-a returning zero.
