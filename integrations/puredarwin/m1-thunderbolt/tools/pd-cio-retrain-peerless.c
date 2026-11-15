@@ -27,6 +27,10 @@ int main(int argc,char **argv)
  io_service_t service=IOServiceGetMatchingService(kIOMasterPortDefault,IOServiceMatching("PDAppleCIO"));
  if(!service){fprintf(stderr,"no native PDAppleCIO service\n");return 1;}
  uint32_t before=0,after=0;int had=count(service,&before);
+ if(!had || (exhausted && before!=1)){
+  fprintf(stderr,"retrain counter unavailable or retry budget not yet consumed\n");
+  IOObjectRelease(service);return 1;
+ }
  kern_return_t ret=IORegistryEntrySetCFProperty(service,CFSTR("pd-cio-retrain-peerless"),kCFBooleanTrue);
  int has=count(service,&after);IOObjectRelease(service);
  printf("Peerless port1 retrain request: uid=%u result=0x%08x count=%u->%u; restart is not remote discovery or PCI evidence\n",(unsigned)geteuid(),ret,before,after);
