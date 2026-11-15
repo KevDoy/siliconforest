@@ -28,6 +28,37 @@ device(void)
 	return pd_avd_device_create("apple,t8103-avd", host_code, host_mbox, host_ctrl, g_fw, sizeof(g_fw));
 }
 
+/* Model capture replacement, not a real GPU/DMA test. Exercise a late
+ * invalid entry before commit, verify all old addresses survive refusal, then
+ * transfer ownership and let normal decoding/destruction use the new set. */
+static int import_capture_test(struct pd_avd_session *session,unsigned count,size_t bytes)
+{
+    void *cpu[PDAVD_MAX_BUFFERS]={0},*cookies[PDAVD_MAX_BUFFERS]={0},*old[PDAVD_MAX_BUFFERS]={0};
+    void *before[PDAVD_MAX_BUFFERS]={0};
+    uint64_t iova[PDAVD_MAX_BUFFERS]={0};
+    for(unsigned i=0;i<count;i++) {
+        size_t length=0;void *cookie=NULL;
+        if(pd_avd_session_buffer(session,i,&before[i],&length,&cookie)||length!=bytes)return -1;
+        cpu[i]=pd_avd_os_dma_alloc(bytes,&iova[i],&cookies[i]);
+        if(!cpu[i])return -1;
+    }
+    void *last=cpu[count-1];cpu[count-1]=NULL;
+    if(pd_avd_session_import(session,count,cpu,iova,cookies,old)!=-EINVAL)return -1;
+    for(unsigned i=0;i<count;i++) {
+        size_t length=0;void *address=NULL,*cookie=NULL;
+        if(pd_avd_session_buffer(session,i,&address,&length,&cookie)||address!=before[i]||old[i])return -1;
+    }
+    cpu[count-1]=last;
+    if(pd_avd_session_import(session,count,cpu,iova,cookies,old))return -1;
+    for(unsigned i=0;i<count;i++) {
+        size_t length=0;void *address=NULL,*cookie=NULL;
+        if(pd_avd_session_buffer(session,i,&address,&length,&cookie)||address!=cpu[i]||cookie!=cookies[i])return -1;
+        pd_avd_os_dma_free(old[i]);
+    }
+    if(pd_avd_session_import(session,count,cpu,iova,cookies,old)!=-EBUSY)return -1;
+    return 0;
+}
+
 static int
 replay(const char *path, const char *logpath)
 {
@@ -59,6 +90,8 @@ replay(const char *path, const char *logpath)
 				    r.create.format_ctrl.id, r.format_ctrl, r.create.format_ctrl.size, &formats[c]);
 			if (ret == 0)
 				ret = pd_avd_session_alloc(sessions[c], r.create.buffers);
+            if (ret==0 && getenv("AVD_HOST_IMPORT"))
+                ret=import_capture_test(sessions[c],r.create.buffers,formats[c].sizeimage);
 			if (ret != 0) {
 				fprintf(stderr, "create failed: %d\n", ret);
 				return 1;
@@ -89,6 +122,13 @@ replay(const char *path, const char *logpath)
 			if (ret == 0)
 				ret = pd_avd_session_decode(s, r.decode.size, r.decode.dst, r.decode.timestamp, r.decode.flags,
 				    &status);
+            if(ret==0) {
+                void *empty[PDAVD_MAX_BUFFERS]={0};uint64_t zero[PDAVD_MAX_BUFFERS]={0};
+                /* No import may enter after any successful decode/HOLD. */
+                unsigned count=0;void *address,*cookie;size_t length;
+                while(count<PDAVD_MAX_BUFFERS && !pd_avd_session_buffer(s,count,&address,&length,&cookie))count++;
+                if(pd_avd_session_import(s,count,empty,zero,empty,empty)!=-EBUSY)return 1;
+            }
 			if (log)
 				fprintf(log, "result %d status %x\n", ret, status);
 			if (ret != 0) {

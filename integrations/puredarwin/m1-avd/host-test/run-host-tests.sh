@@ -30,6 +30,14 @@ same "$HERE/kernel/shim/media/v4l2-h264.h" include/media/v4l2-h264.h
 same "$HERE/kernel/shim/media/v4l2-vp9.h" include/media/v4l2-vp9.h
 same "$HERE/include/pdavd/v4l2-controls.h" include/uapi/linux/v4l2-controls.h
 echo "AVDHOST linux commit $(git -C "$LINUX" rev-parse --short HEAD)"
+# Resolve explicit recording arguments before the build changes directory.
+# Missing explicit inputs are failures, never a vacuous ALL PASS.
+records=()
+for record in "$@"; do
+  [ -f "$record" ] || { echo "AVDHOST FAIL missing recording $record"; exit 1; }
+  records+=("$(realpath -- "$record")")
+done
+set -- "${records[@]}"
 CC=${CC:-clang}
 cd "$HERE/kernel"
 for f in pd_avd_core.c linux/avd-hw.c linux/avd-h264.c linux/avd-hevc.c linux/avd-vp9.c linux/v4l2-h264.c linux/v4l2-vp9.c; do
@@ -41,8 +49,10 @@ $CC -std=gnu11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefin
   -o "$W/avd_host" host-test/avd_host.c host-test/host_os.c "$W"/*.o
 echo "AVDHOST built"
 [ $# -gt 0 ] || set -- "$ROOT"/runs/avd/rec/*.pdaj
+seen=0
 for r in "$@"; do
   [ -f "$r" ] || { echo "AVDHOST no recording $r"; continue; }
+  seen=$((seen+1))
   n=$(basename "$r" .pdaj)
   if "$W/avd_host" "$r" "$W/$n.1" > "$W/$n.out" 2> "$W/$n.err" && "$W/avd_host" "$r" "$W/$n.2" > /dev/null 2>&1 && cmp -s "$W/$n.1" "$W/$n.2"; then
     echo "AVDHOST PASS $(cut -d: -f2- "$W/$n.out" | sed "s|^|$n:|") words $(grep -c '^vp' "$W/$n.1") sha256 $(sha256sum "$W/$n.1" | cut -c1-16)"
@@ -50,4 +60,5 @@ for r in "$@"; do
     echo "AVDHOST FAIL $n"; tail -5 "$W/$n.err"; fail=1
   fi
 done
+[ $seen -gt 0 ] || { echo "AVDHOST BUILT_NO_RECORDINGS: no decode replay was tested"; exit 0; }
 [ $fail = 0 ] && echo "AVDHOST ALL PASS" || { echo "AVDHOST FAILED"; exit 1; }

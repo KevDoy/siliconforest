@@ -38,6 +38,8 @@
 #define PDAVD_CAP_H264 (1u << 1)
 #define PDAVD_CAP_VP9  (1u << 2)
 #define PDAVD_CAP_AV1  (1u << 3)
+/* Optional ABI1 extension: atomic user capture-buffer import before MAP/decode. */
+#define PDAVD_CAP_EXTERNAL_BUFFERS (1u << 16)
 
 #define PDAVD_MAX_BUFFERS 32
 #define PDAVD_MAX_CTRLS   8
@@ -95,6 +97,22 @@ struct pdavd_decode {
 	struct pdavd_ctrl ctrls[PDAVD_MAX_CTRLS];
 };
 
+/* Import the complete capture set. Addresses belong to the calling task and
+ * must be writable, 16KiB-aligned mappings retained until context destruction.
+ * size includes the driver's private decoded tail, rounded to16KiB. This is
+ * an optional ioctl: unsupported kernels return ENOTTY, never a fake import. */
+struct pdavd_import_buffer {
+    uint64_t address;
+    uint64_t size;
+};
+struct pdavd_import {
+    uint32_t ctx;
+    uint32_t count;
+    uint32_t flags;       /* must be0 */
+    uint32_t reserved;    /* must be0 */
+    struct pdavd_import_buffer buffers[PDAVD_MAX_BUFFERS];
+};
+
 struct pdavd_destroy {
 	uint32_t ctx;
 };
@@ -104,5 +122,6 @@ struct pdavd_destroy {
 #define PDAVD_IOC_MAP     _IOWR('V', 3, struct pdavd_map)
 #define PDAVD_IOC_DECODE  _IOWR('V', 4, struct pdavd_decode)
 #define PDAVD_IOC_DESTROY _IOW('V', 5, struct pdavd_destroy)
+#define PDAVD_IOC_IMPORT  _IOW('V', 6, struct pdavd_import)
 
 #endif

@@ -46,6 +46,10 @@ int  pdavd_create(pdavd_dev *dev, struct pdavd_create *create);
 int  pdavd_map(pdavd_dev *dev, uint32_t ctx, uint32_t index, const uint8_t **address, size_t *size);
 /* `meta` may be NULL; it should be given with the last (non-HOLD) call of a picture. */
 int  pdavd_decode(pdavd_dev *dev, struct pdavd_decode *decode, const struct pdavd_meta *meta);
+/* Optional atomic import. Caller mappings live until DESTROY. Recording mode
+ * refuses ENOTSUP; older kernels refuse ENOTTY. Query the optional cap first. */
+int  pdavd_import_buffers(pdavd_dev *dev, uint32_t ctx,
+                         const struct pdavd_import_buffer *buffers, uint32_t count);
 int  pdavd_destroy(pdavd_dev *dev, uint32_t ctx);
 
 /* ---- recordings ----------------------------------------------------------------------- */

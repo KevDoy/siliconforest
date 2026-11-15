@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
 #include <pdavd/pdavd.h>
+#include <pdavd/pdavd_import_validate.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -260,4 +261,20 @@ pdavd_destroy(pdavd_dev *dev, uint32_t ctx)
 		return 0;
 	}
 	return ioctl(dev->fd, PDAVD_IOC_DESTROY, &destroy);
+}
+
+/* ABI1 optional extension. Never pretend a recording is a GPU import. */
+int pdavd_import_buffers(pdavd_dev *dev, uint32_t ctx,
+                        const struct pdavd_import_buffer *buffers, uint32_t count)
+{
+    struct pdavd_import req = { .ctx = ctx, .count = count };
+    if (!dev || !buffers || !count || count > PDAVD_MAX_BUFFERS) {
+        errno = EINVAL;
+        return -1;
+    }
+    memcpy(req.buffers, buffers, count * sizeof(*buffers));
+    int error = pdavd_import_validate(&req, count, 1);
+    if (error) { errno = error; return -1; }
+    if (dev->fd < 0) { errno = ENOTSUP; return -1; }
+    return ioctl(dev->fd, PDAVD_IOC_IMPORT, &req);
 }

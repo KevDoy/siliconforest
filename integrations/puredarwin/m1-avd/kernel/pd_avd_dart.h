@@ -12,6 +12,7 @@
 
 #include "pd_soc.h"
 #include <IOKit/IOBufferMemoryDescriptor.h>
+#include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IOLocks.h>
 
 #define PD_AVD_DART_BASE   0x04000000ULL
@@ -48,7 +49,11 @@ struct PDAvdDart {
 	 * NULL when memory or address space ran out.
 	 */
 	IOBufferMemoryDescriptor *alloc(size_t bytes, uint64_t *iova);
-	void free(IOBufferMemoryDescriptor *md, uint64_t iova, size_t bytes);
+    /* Already-prepared memory, ownership stays with caller on failure. Success
+     * maps unused IOVA; free() then completes/releases the supplied descriptor. */
+    int mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iova);
+    bool aliasesMapped(const uint64_t *sortedPages, size_t count);
+    void free(IOMemoryDescriptor *md, uint64_t iova, size_t bytes);
 	/* Logs and clears a pending fault; returns the raw error register (0: none). */
 	uint32_t check(const char *why);
 };

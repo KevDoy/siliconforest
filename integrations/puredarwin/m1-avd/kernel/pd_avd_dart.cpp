@@ -12,6 +12,7 @@
  * by way of ../../m1-sound/kernel/pd_dart_fixed.cpp.
  */
 #include "pd_avd_dart.h"
+#include "../include/pdavd/pdavd_import_pages.h"
 
 #include <IOKit/IOLib.h>
 #include <sys/errno.h>
@@ -145,16 +146,37 @@ PDAvdDart::attach(const char *path, uint32_t stream)
 IOBufferMemoryDescriptor *
 PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 {
-	uint32_t need = (uint32_t)((bytes + PAGE_16K - 1) >> PAGE_SHIFT_16K);
+    if (!bytes || bytes > PD_AVD_DART_SPAN) return NULL;
+    IOBufferMemoryDescriptor *md=dmaMemory((bytes+PAGE_16K-1)&~(PAGE_16K-1),false);
+    if (!md) return NULL;
+    if (mapMemory(md,bytes,iovaOut)) {md->complete();md->release();return NULL;}
+    return md;
+}
+
+bool PDAvdDart::aliasesMapped(const uint64_t *sortedPages,size_t count)
+{
+    bool found=false;
+    IOLockLock(lock);
+    for (unsigned t=0;t<PD_AVD_DART_L2S&&!found;t++) if (l2[t])
+        for (unsigned p=0;p<PTES;p++) {
+            uint64_t entry=l2[t][p];
+            if ((entry&APPLE_DART_PTE_VALID) &&
+                pdavd_pages_contains(sortedPages,count,entry&APPLE_DART1_PADDR_MASK)) {found=true;break;}
+        }
+    IOLockUnlock(lock);
+    return found;
+}
+
+int
+PDAvdDart::mapMemory(IOMemoryDescriptor *md, size_t bytes, uint64_t *iovaOut)
+{
+    if (!md || !iovaOut || !bytes || bytes > PD_AVD_DART_SPAN) return EINVAL;
+    uint32_t need = (uint32_t)((bytes + PAGE_16K - 1) >> PAGE_SHIFT_16K);
+    if (md->getLength() < ((IOByteCount)need << PAGE_SHIFT_16K)) return EINVAL;
 	uint32_t start = 0, run = 0;
-	IOBufferMemoryDescriptor *md;
 	bool found = false;
 
-	if (!attached || need == 0 || need > pages)
-		return NULL;
-	md = dmaMemory((size_t)need << PAGE_SHIFT_16K, false);
-	if (md == NULL)
-		return NULL;
+    if (!attached || need == 0 || need > pages) return ENXIO;
 
 	IOLockLock(lock);
 	/* first fit from the hint, then from the start */
@@ -178,16 +200,15 @@ PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 	}
 	if (!found) {
 		IOLockUnlock(lock);
-		md->complete();
-		md->release();
 		DLOG("no address space for %u pages (%llu KiB mapped)", need, mappedBytes / 1024);
-		return NULL;
+		return ENOMEM;
 	}
 	for (uint32_t i = 0; i < need; i++) {
 		uint32_t p = start + i;
 		uint64_t iova = PD_AVD_DART_BASE + ((uint64_t)p << PAGE_SHIFT_16K);
 		uint32_t t = (uint32_t)((iova - PD_AVD_DART_BASE) / L2_SPAN);
-		uint64_t pa = md->getPhysicalSegment((IOByteCount)i << PAGE_SHIFT_16K, NULL, kIOMemoryMapperNone);
+		IOByteCount segmentBytes=0;
+        uint64_t pa = md->getPhysicalSegment((IOByteCount)i << PAGE_SHIFT_16K, &segmentBytes, kIOMemoryMapperNone);
 
 		if (l2[t] == NULL) {
 			l2MD[t] = dmaMemory(PAGE_16K, true);
@@ -197,7 +218,7 @@ PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 				l1[iova / L2_SPAN] = (l2pa & APPLE_DART1_PADDR_MASK) | APPLE_DART_PTE_VALID;
 			}
 		}
-		if (l2[t] == NULL || pa == 0 || (pa & (PAGE_16K - 1)) || (pa & ~APPLE_DART1_PADDR_MASK)) {
+		if (l2[t] == NULL || segmentBytes < PAGE_16K || pa == 0 || (pa & (PAGE_16K - 1)) || (pa & ~APPLE_DART1_PADDR_MASK)) {
 			DLOG("page %u of a %u page buffer: table %p, physical address 0x%llx", i, need, l2[t], pa);
 			/* undo what was entered */
 			for (uint32_t j = 0; j < i; j++) {
@@ -208,9 +229,7 @@ PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 			__asm__ volatile("dsb sy" ::: "memory");
 			invalidate(regs, 1u << sid);
 			IOLockUnlock(lock);
-			md->complete();
-			md->release();
-			return NULL;
+			return ENOMEM;
 		}
 		l2[t][(iova & (L2_SPAN - 1)) >> PAGE_SHIFT_16K] =
 		    (pa & APPLE_DART1_PADDR_MASK) | APPLE_DART1_PTE_PROT_SP_DIS | APPLE_DART_PTE_VALID;
@@ -226,11 +245,11 @@ PDAvdDart::alloc(size_t bytes, uint64_t *iovaOut)
 		peakBytes = mappedBytes;
 	IOLockUnlock(lock);
 	*iovaOut = PD_AVD_DART_BASE + ((uint64_t)start << PAGE_SHIFT_16K);
-	return md;
+	return 0;
 }
 
 void
-PDAvdDart::free(IOBufferMemoryDescriptor *md, uint64_t iova, size_t bytes)
+PDAvdDart::free(IOMemoryDescriptor *md, uint64_t iova, size_t bytes)
 {
 	uint32_t need = (uint32_t)((bytes + PAGE_16K - 1) >> PAGE_SHIFT_16K);
 	uint32_t start = (uint32_t)((iova - PD_AVD_DART_BASE) >> PAGE_SHIFT_16K);

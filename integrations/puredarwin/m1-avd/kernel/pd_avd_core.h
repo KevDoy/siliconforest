@@ -40,6 +40,11 @@ int  pd_avd_session_set_format(struct pd_avd_session *s, uint32_t codec, uint32_
 int  pd_avd_session_alloc(struct pd_avd_session *s, unsigned count);
 /* Kernel address, size and OS cookie of decoded buffer `index`. */
 int  pd_avd_session_buffer(struct pd_avd_session *s, unsigned index, void **vaddr, size_t *size, void **cookie);
+/* Atomic capture-set replacement BEFORE any decode, including HOLD. Caller
+ * supplies prepared/mapped OS allocations; on success ownership transfers to
+ * the session and old cookies are returned for release. Failure changes none. */
+int pd_avd_session_import(struct pd_avd_session *s, unsigned count,
+    void *const *cpu, const uint64_t *iova, void *const *cookies, void **old_cookies);
 /* Stores one control (copied). */
 int  pd_avd_session_set_ctrl(struct pd_avd_session *s, uint32_t id, const void *data, size_t size);
 /* Room for `size` bytes of coded data for the next decode; the caller fills it. */

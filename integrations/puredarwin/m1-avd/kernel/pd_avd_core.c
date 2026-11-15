@@ -464,6 +464,7 @@ struct pd_avd_session {
 	struct avd_buf capmem[PDAVD_MAX_BUFFERS];
 	unsigned int ncap;
 	bool started;
+	bool submitted, imported;
 	struct avd_buf coded;        /* the coded ("OUTPUT") buffer, mapped for the decoder as videobuf2's is */
 	size_t ctrl_cap[PD_AVD_MAX_CTRLS];
 };
@@ -1021,6 +1022,39 @@ int pd_avd_session_buffer(struct pd_avd_session *s, unsigned index, void **vaddr
 	return *cookie ? 0 : -EINVAL;
 }
 
+int pd_avd_session_import(struct pd_avd_session *s, unsigned count,
+    void *const *cpu, const uint64_t *iova, void *const *cookies, void **old_cookies)
+{
+    unsigned slots[PDAVD_MAX_BUFFERS];
+    if (!s || !count || count != s->ncap || count > PDAVD_MAX_BUFFERS ||
+        !cpu || !iova || !cookies || !old_cookies)
+        return -EINVAL;
+    if (s->submitted || s->imported) return -EBUSY;
+    /* Complete preflight: no allocation or possible failure after mutation. */
+    for (unsigned i=0;i<count;i++) {
+        if (!cpu[i] || !cookies[i] || !iova[i] || (iova[i]&16383)) return -EINVAL;
+        for (unsigned j=0;j<i;j++)
+            if (cpu[i]==cpu[j] || iova[i]==iova[j] || cookies[i]==cookies[j]) return -EINVAL;
+        unsigned slot;
+        for (slot=0;slot<PD_AVD_MAX_ALLOCS;slot++) {
+            if (pd_allocs[slot].cpu==cpu[i]) return -EINVAL;
+        }
+        /* Re-find the old record rather than rely on an uninitialized slot. */
+        for (slot=0;slot<PD_AVD_MAX_ALLOCS;slot++)
+            if (pd_allocs[slot].cpu==s->capmem[i].cpu) break;
+        if (slot==PD_AVD_MAX_ALLOCS || !pd_allocs[slot].cookie) return -EINVAL;
+        slots[i]=slot;
+    }
+    for (unsigned i=0;i<count;i++) {
+        old_cookies[i]=pd_allocs[slots[i]].cookie;
+        pd_allocs[slots[i]].cpu=cpu[i];pd_allocs[slots[i]].cookie=cookies[i];
+        s->capmem[i].cpu=cpu[i];s->capmem[i].addr=iova[i];
+        s->capvb[i]->pd_vaddr=cpu[i];s->capvb[i]->pd_dma=iova[i];
+    }
+    s->imported=true;
+    return 0;
+}
+
 void *pd_avd_session_coded(struct pd_avd_session *s, size_t size)
 {
 	if (size == 0 || size > (64u << 20))
@@ -1075,6 +1109,7 @@ int pd_avd_session_decode(struct pd_avd_session *s, size_t coded_size, unsigned 
 	if (!dev->booted)
 		return -ENODEV;
 
+	s->submitted = true; /* freezes capture backing even for a HOLD slice */
 	/* the source buffer of this run */
 	memset(&s->src, 0, sizeof(s->src));
 	s->src.vb2_buf.timestamp = timestamp;

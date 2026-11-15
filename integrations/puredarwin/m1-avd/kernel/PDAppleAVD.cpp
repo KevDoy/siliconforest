@@ -50,6 +50,8 @@
 #include <sys/vnode.h>
 
 #include "pd_avd_core.h"
+#include "../include/pdavd/pdavd_import_validate.h"
+#include "../include/pdavd/pdavd_import_pages.h"
 #include "pd_avd_dart.h"
 #include "pd_soc.h"
 
@@ -84,10 +86,13 @@ struct Context {
 	pid_t                  owner;
 	uint32_t               buffers;
 	IOMemoryMap           *maps[PDAVD_MAX_BUFFERS];
+    bool submitted, imported;
 };
 
 struct DmaCookie {
-	IOBufferMemoryDescriptor *md;
+	IOMemoryDescriptor *md;
+    IOMemoryMap *kernelMap;
+    bool prepared;
 	uint64_t                  iova;
 	size_t                    bytes;
 };
@@ -229,14 +234,16 @@ pd_avd_os_dma_alloc(size_t bytes, uint64_t *iova, void **cookie)
 	if (c == NULL)
 		return NULL;
 	c->bytes = bytes;
-	c->md = gDart.alloc(bytes, &c->iova);
+    c->kernelMap=NULL;c->prepared=true;
+    IOBufferMemoryDescriptor *memory=gDart.alloc(bytes, &c->iova);
+	c->md = memory;
 	if (c->md == NULL) {
 		IOFree(c, sizeof(DmaCookie));
 		return NULL;
 	}
 	*iova = c->iova;
 	*cookie = c;
-	return c->md->getBytesNoCopy();
+	return memory->getBytesNoCopy();
 }
 
 extern "C" void
@@ -246,7 +253,11 @@ pd_avd_os_dma_free(void *cookie)
 
 	if (c == NULL)
 		return;
-	gDart.free(c->md, c->iova, c->bytes);
+    if (c->kernelMap) {c->kernelMap->unmap();c->kernelMap->release();}
+    if (c->md) {
+        if (c->iova) gDart.free(c->md,c->iova,c->bytes);
+        else {if(c->prepared)c->md->complete();c->md->release();}
+    }
 	IOFree(c, sizeof(DmaCookie));
 }
 
@@ -587,6 +598,71 @@ do_map(struct pdavd_map *req)
 	return 0;
 }
 
+/* All capture backing is prepared before any session mutation. Both virtual
+ * overlaps and physical aliases (including existing AVD-private pages) refuse.
+ * gLock excludes decoder jobs throughout this transaction. */
+static int do_import(struct pdavd_import *req)
+{
+    Context *c=context_of(req->ctx);
+    DmaCookie *next[PDAVD_MAX_BUFFERS]={};
+    void *cpu[PDAVD_MAX_BUFFERS]={},*cookies[PDAVD_MAX_BUFFERS]={},*old[PDAVD_MAX_BUFFERS]={};
+    uint64_t iova[PDAVD_MAX_BUFFERS]={};
+    uint64_t *physical=NULL;
+    size_t pageCount=0,needed=0,at=0;
+    int error=EINVAL;
+    if (!c || c->owner!=proc_selfpid()) return EINVAL;
+    if (c->submitted || c->imported) return EBUSY;
+    for(unsigned i=0;i<c->buffers;i++) if(c->maps[i]) return EBUSY;
+    error=pdavd_import_validate(req,c->buffers,c->format.sizeimage);
+    if(error)return error;
+    needed=((size_t)c->format.sizeimage+16383)&~(size_t)16383;
+    pageCount=(needed/16384)*req->count;
+    if(pageCount>PD_AVD_DART_SPAN/16384)return ENOMEM;
+    physical=(uint64_t*)IOMalloc(pageCount*sizeof(uint64_t));
+    if(!physical)return ENOMEM;
+    error=ENOMEM;
+    for(unsigned i=0;i<req->count;i++) {
+        next[i]=(DmaCookie*)IOMalloc(sizeof(DmaCookie));
+        if(!next[i])goto done;
+        bzero(next[i],sizeof(DmaCookie));next[i]->bytes=c->format.sizeimage;
+        /* InOut requires a writable current-task memory reference, unlike Out
+         * (see IOGeneralMemoryDescriptor::memoryReferenceProt/wireVirtual). */
+        next[i]->md=IOMemoryDescriptor::withAddressRange(req->buffers[i].address,
+            needed,kIODirectionInOut,current_task());
+        if(!next[i]->md)goto done;
+        if(next[i]->md->prepare(kIODirectionInOut)!=kIOReturnSuccess){error=EFAULT;goto done;}
+        next[i]->prepared=true;
+        next[i]->kernelMap=next[i]->md->createMappingInTask(kernel_task,0,kIOMapAnywhere);
+        if(!next[i]->kernelMap){error=EFAULT;goto done;}
+        cpu[i]=(void*)(uintptr_t)next[i]->kernelMap->getAddress();
+        for(size_t offset=0;offset<needed;offset+=16384) {
+            IOByteCount length=0;
+            uint64_t pa=next[i]->md->getPhysicalSegment(offset,&length,kIOMemoryMapperNone);
+            if(!pa || (pa&16383) || length<16384 || (pa&~UINT64_C(0x0000000ffffff000))){error=EINVAL;goto done;}
+            physical[at++]=pa;
+        }
+    }
+    if(!pdavd_pages_unique(physical,pageCount)||gDart.aliasesMapped(physical,pageCount)) {
+        error=EINVAL;goto done;
+    }
+    for(unsigned i=0;i<req->count;i++) {
+        /* One-time initialization matches the old zeroed capture allocation.
+         * No frame contents are copied by this import operation. */
+        bzero(cpu[i],needed);
+        error=gDart.mapMemory(next[i]->md,needed,&next[i]->iova);
+        if(error)goto done;
+        iova[i]=next[i]->iova;cookies[i]=next[i];
+    }
+    error=-pd_avd_session_import(c->session,req->count,cpu,iova,cookies,old);
+    if(error)goto done;
+    c->imported=true;
+    for(unsigned i=0;i<req->count;i++) {next[i]=NULL;pd_avd_os_dma_free(old[i]);}
+ done:
+    for(unsigned i=0;i<req->count;i++) if(next[i])pd_avd_os_dma_free(next[i]);
+    IOFree(physical,pageCount*sizeof(uint64_t));
+    return error;
+}
+
 static int
 do_decode(struct pdavd_decode *req)
 {
@@ -614,6 +690,7 @@ do_decode(struct pdavd_decode *req)
 	err = copyin((user_addr_t)req->data, coded, req->size);
 	if (err != 0)
 		return err;
+	c->submitted = true;
 	t0 = pd_avd_os_now_us();
 	ret = pd_avd_session_decode(c->session, req->size, req->dst, req->timestamp, req->flags, &req->status);
 	req->decode_us = pd_avd_os_now_us() - t0;
@@ -663,7 +740,7 @@ pd_avd_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag, __
 		struct pdavd_info *info = (struct pdavd_info *)data;
 		bzero(info, sizeof(*info));
 		info->abi = PDAVD_ABI_VERSION;
-		info->caps = pd_avd_device_caps(gDev);
+		info->caps = pd_avd_device_caps(gDev) | PDAVD_CAP_EXTERNAL_BUFFERS;
 		info->booted = contexts_in_use() != 0;
 		info->contexts = contexts_in_use();
 		strlcpy(info->firmware, gFirmwareText, sizeof(info->firmware));
@@ -673,6 +750,9 @@ pd_avd_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int flag, __
 	case PDAVD_IOC_CREATE:
 		err = do_create((struct pdavd_create *)data);
 		break;
+	case PDAVD_IOC_IMPORT:
+        err=do_import((struct pdavd_import*)data);
+        break;
 	case PDAVD_IOC_MAP:
 		err = do_map((struct pdavd_map *)data);
 		break;
