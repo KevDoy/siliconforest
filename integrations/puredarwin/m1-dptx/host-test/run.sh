@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+here=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/include" -c "$here/src/pd_dcpext_plan.c" -o "$tmp/plan.o"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/plan.cpp" "$tmp/plan.o" -o "$tmp/plan"
+"$tmp/plan"

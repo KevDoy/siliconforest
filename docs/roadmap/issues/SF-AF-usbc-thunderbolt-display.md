@@ -266,3 +266,56 @@ cable state, no USB2/USB3/DP flags, 3,217 samples and zero errors. The source
 host lifecycle deliberately defers that state; dock USB requires NHI/PCIe
 tunneling. Direct USB devices remain requested from the owner. Work proceeds
 on the Thunderbolt and external-display source/host paths without waiting.
+
+### USB02 first boot and packaging failure, 2026-11-15 02:44Z
+
+USB02 capsule `b43f3cb93fe86b6e14d2da2f0a3296dc93b8c1bc8c1f635849f3b9c30c1d9b37`
+from KC `/nix/store/9k2xml5v9xzyn9jw94p2p0hplzzl80ki-puredarwin-kc-arm64-0.1`
+booted under gui.lock/bench after Linux installation. UART captured the Darwin
+banner and no panic marker. The updated Type-C snapshot/USB-role source runs
+on M1 and reports the same TS3-only state, USB role none, 62 samples/0 errors.
+The xHCI/PDAppleUSB bundle **failed to load**: its new versioned dependency
+on PDAppleTypeC could not be satisfied because that observer is not declared
+a versioned library. No ATC/DWC3/DART operation ran from the host service.
+The reader was explicitly reaped before releasing gui.lock (02:43:58Z).
+
+`638e824ef` removes that unnecessary dependency: the host uses IOService
+properties and links no Type-C class symbols. USB03 collection/kit and 11 kit
+checks pass; the hardware retry is pending DESK4's announced session/reboot
+window and its explicit request to wait for its done line. `b3d366f26` also
+fixes the synthetic nub's name/resource overrides before any host attachment:
+its parent is PDAppleUSB, so IOPlatformDevice must not cast that parent to
+IOPlatformExpert. The rollback baseline remains the verified tc01 kit;
+the default boot remains Linux. Nothing was pushed.
+
+### External-display / Thunderbolt source backends, 2026-11-15 02:59Z
+
+`m1-atcphy` now carries directly extracted T8103 DP AUX, four DP link-rate
+PLL/lane programs and the distinct Thunderbolt DP pixel-clock program,
+with original SPDX/copyright and a reproducible extraction tool. Native
+callbacks replace register access/delay; the caller must hold the PHY lock
+and already own a powered/calibrated mode. Failed tunnel-clock APB shutdown
+retains ownership and refuses retuning. Host ASan/UBSan covers rates/PMA
+masks, repeated-rate behavior, shared-PLL refusal and command/lock/stop
+failures. The DP programs SDK-compile; none has trained a link on M1.
+
+`m1-thunderbolt` retains upstream DP-IN state/token/provider code and its 35
+tests byte for byte (128,371 assertions through a host fixture adapter,
+not Linux KUnit/hardware execution). Its SDK objects additionally port Apple
+NHI ring budgets/layout/PDF, atomic VALID/E2E setup, descriptor encoding,
+RTKit SRAM bounds, the M1's single-budget HPD/INACTIVE_ACK handshake and
+ACIO startup/unwind order. Native platform/RTKit/DART/control-channel/CM and
+PCIe-C bindings remain missing; there is no attached Thunderbolt driver.
+Register-model cases cover failed disables and every startup/teardown step.
+
+`m1-dptx` validates external dcpext/dispext register resources, mailbox IRQs,
+carve-outs 73/74, firmware compatibility and the port-1 routing plan; its
+223 missing/truncated-property cases and overflow/ABI refusals pass. It has
+no MMIO or synthetic-tree publication yet. T8103 uses the already compiled
+normal IOMFB pipeline, rather than the later-chip `dcpext_scanout` path.
+Two integration gaps were confirmed in the existing DCP adapter: it binds
+only the first display `iommus` entry, and its DMA free paths disregard TLB
+invalidate failure. A second output requires shared framebuffer IOVAs in
+both display DARTs and retained backing on failed unmap/flush, along with
+real PHY/crossbar/Type-C providers and the external RTKit mailbox binding.
+No HPD/training/EDID/mode/second-output or TS3 tunnel success is claimed.
