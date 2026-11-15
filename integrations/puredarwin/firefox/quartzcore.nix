@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Private backing-pixel render target; wrapper identity follows terminal-app.
+{ skipUnchangedTransactions ? false }:
 let
  a = import ../cocoa/arm64.nix;
  src = a.pkgs.runCommand "sffx-quartz-backing-scale-source" {} ''
@@ -8,6 +9,9 @@ let
   chmod -R u+w $out
   cd $out
   ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0202-layer-context-backing-pixel-scale.patch}
+  ${a.pkgs.lib.optionalString skipUnchangedTransactions ''
+    ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0205-layer-transactions-skip-unchanged-contents.patch}
+  ''}
  '';
 
  q = a.pd.quartzcore-msm-arm64.override { src = "${src}/src/Frameworks/QuartzCore"; };

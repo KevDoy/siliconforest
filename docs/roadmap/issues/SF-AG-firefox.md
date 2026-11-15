@@ -2,7 +2,7 @@
 
 Work in progress, 15 November 2026. The goal is the official, unmodified macOS
 Firefox on SiliconForest with hardware WebRender, AVD decode and responsive,
-correct presentation at the owner's 150% scale. No milestone is complete yet.
+correct presentation at the owner's 150% scale. M0 now has a qualified private-prefix baseline; M1–4 remain incomplete.
 
 ## Observed on the real M1
 
@@ -52,27 +52,118 @@ application-binary modification. A private interposer reuses SF-U's compiler
 and still calls Sandbox.kext; its enforcement is now observed: invalid input rejects, a valid profile applies
 through Sandbox.kext, a forbidden owned file returns EPERM, and /dev/null opens.
 
-Subsequent private runs show a Firefox window at 150% and execute the local
-fixture (its title reports a measured 27.30fps in the traced software run), but
-the captured page area is blank and toolbar text is corrupt. This is **not** a
-baseline page pass. Parent crashes were caught externally in FreeType's smooth
-glyph raster through Onyx2D/CoreText. The trace shows several simultaneous calls
-with the same face and different glyphs. Private patch0200 serializes that face
-access and the global glyph cache. A controlled eight-thread cache-miss fixture
-renders 800 runs with zero differences from sequential reference pixel hashes
-in 0.108095 seconds; the installed-framework control aborts with SIGABRT134.
-The earlier warm-cache fixture passed both and did not reproduce the bug.
-No performance conclusion follows from single samples; repeated timing and
-browser stability remain pending. TERM5 has the proven patch and evidence.
+Private runs010/011 visibly load **HTTPS example.com over Wi-Fi** and execute
+our local fixture. Run012 visibly paints **about:support**, with disk startup
+cache enabled and a process-local Standard I/O workaround. Its automation
+handshake deadline failed before the late successful reply; the harness now
+waits longer and does not send commands after an incomplete handshake. Earlier
+local/video captures include a blank content area and soft toolbar text.
+Run013 then visibly captures all3 required pages with hardwareWR in the parent,
+cacheON/default I/O mapping and sandboxes enabled. That qualified M0 baseline
+disables the GPU helper, which also disables WebGL; M1 remains incomplete.
+The unmodified bundle has not changed. Run014 restores the default GPU helper and
+WebGL **with visible correct triangle output**, by providing the missing
+IOSurface broker under a new private service name. All3 required pages are
+captured. Foreground rAF wall rate59.998fps over10.017s, median16.66/p9516.68ms;
+this is browser callback timing, not a compositor presentation-clock proof.
 
-The default GPU helper survives but spins (48.41 CPU seconds in a 50-second
-bound). An external sample puts all 81 main-thread samples in NSApplication's
-nextEventMatchingMask loop: the denied display connection leaves `_display=nil`,
-so the existing call neither waits nor processes the helper's Cocoa run loop.
-Private AppKit patch0201 adds the same run-loop processing used by NSDisplay
-for this headless case. It is built only, awaiting execution. Hardware rendering
-with the GPU process disabled reaches CGL IOSurface texture/write-back activity,
-but that log is not about:support or correct presentation evidence.
+Run011's structured about:support reports **WebRender**, WebGL1 and WebGL2
+**Mesa -- Apple M1 (G13G B1)**. The local WebGL triangle links, has GL error0 and
+pixel hash `e4bc0ce1`. It uses native CGL (`webgl.disable-angle=true`) and the
+real sandbox compiler v4. A foreground10s rAF measurement records median16.66ms,
+p9516.68ms and60fps in browser timestamps. Presentation/wall-clock pacing is
+not yet established. Across the browser process family that interval used
+13.78CPU seconds /11.059wall seconds (**124.6% of one core**), mostly in the
+parent. This is an animation measurement, not idle CPU. CPU native-layer
+readback and the point-resolution target remain speed/150% quality gaps.
+
+Parent crashes were caught externally in FreeType smooth glyph raster through
+Onyx2D/CoreText. The trace shows simultaneous calls with the same face and
+different glyphs. Private patch0200 serializes face access and the global glyph
+cache. Three controlled eight-thread cache-miss runs render800 references each,
+zero pixel-hash differences,0.107455–0.109128 seconds; installed control aborts
+SIGABRT134 after the sequential references. The earlier warm-cache fixture did
+not reproduce the bug. Browser30-minute stability is still untested.
+
+The default GPU helper originally spent48.41CPU seconds in50wall seconds; all81
+main-thread samples were in NSApplication's headless nextEvent loop. Private
+AppKit0201 makes its nil-display branch process/wait on NSRunLoop. In a bounded
+0.25wall-second timer probe, control consumes0.249821CPU seconds and candidate
+0.005544; **both fire the timer**, so this does not prove universal timer starvation.
+Run009's GPU main thread samples all wait in Mach messages. Its parent is then
+blocked on Mozilla's startup-cache writer mutex. A32-write71KB I/O probe repeats
+normal0.0058–0.00594s versus thread throttle0.6088–1.2075s; process-local Standard
+mapping0.045–0.0919s. Run011 instead uses an explicitly labelled missing-cache-
+parent diagnostic; run012 uses real cache+Standard. No kernel/core files changed.
+
+Run011's Media capability list includes H264/HEVC/VP9 HWDEC after diagnostic
+root AVD prewarm. The first H264 movie submits6 real jobs but AAC setup aborts
+before presentation. This failure is preserved. A transparent ASBD/provider trace
+then proves FormatList success replaces valid48kHz/stereo defaults with zeros.
+Float32 without Packed and an incomplete-FormatList error restore converter
+creation; decoding still fails because ESDS is passed as raw ASC. A bounded
+DecoderSpecificInfo extractor fixes that third failure. All three fixes were first proven in a
+private installed-family AudioToolbox variant, then adopted by the media owner
+in commit `b796bf971` and installed with its AUHAL correction at09:33Z.
+`audio-toolbox.nix` now imports that owner recipe without applying duplicate patches.
+The host parser passes valid/raw/ESDS/truncation/bad-length and20,000 bounded
+fuzz cases under ASan/UBSan. That host result is separate from target playback.
+
+**Run video-hw-001 visibly plays all3 original1080p30 clips with their audio
+tracks, muted**, using the unchanged release, defaultGPU process, hardwareWR,
+real sandboxes, startup cache, private broker and AAC candidatev3:
+
+| Clip | End time | Browser total / dropped | AVD jobs / done delta | 64x36 final video pixels hash |
+|---|---:|---:|---:|---|
+| H264 + AAC | 10.000s | 300 / 0 | 300 / 300 | 9b80c9e3 |
+| HEVC + AAC | 10.000s | 300 / 0 | 300 / 300 | 1a2fdd8 |
+| VP9 + Opus | 10.008s | 301 / 1 | 300 / 300 | 4eaeadfe |
+
+All driver error/timeout/reset/DART counters remain0. Each capture visibly shows
+the expected bunny frame, and the JS video readback has6912nonblack colour
+channels out of6912. Each clip records250rVFC callbacks over10seconds with
+median40.04ms and p95 approximately50ms, while presentedFrames advances2→301.
+Thus decoded300frames/zero browser drops is **not** a compositor pacing pass.
+The deferred-source software control004 completes VP9 with300/0 and the same
+final pixel hash, without increasing AVD counters. H264 and HEVC instead stall
+at currentTime0/0frames for the14s playback deadline, no media error and no AVD
+work. Their initial preloaded-source runs fail the automation handshake; those
+failures are preserved. A possible cause is the software VT display-order queue
+withholding the first callback while Firefox waits before submitting packet2.
+A private paired FFmpeg/VT decode-order candidate is built, not yet qualified.
+Audible output, A/V sync,
+non-DRM streaming and zero-copy are still unproven. Earlier single-video-tab
+runs remain blank; multi-tab switching exposes the content correctly. A
+private NSView hosted-root replacement0204 fixes an independent native
+green→blue layer replacement control, but **does not fix Firefox first paint**.
+The old native control retains green; the candidate paints exact blue on the M1.
+
+Static75s runs with1 and10 tabs verify actual tab counts, using sandboxes/cache
+and the GPU helper. In late33.42/33.86s idle windows, summed browser-family CPU
+is0.33/0.51s (**0.99/1.51% of one core**). Summed RSS is2319.86/3487.86MiB
+(2.27/3.41GiB); shared pages are counted in multiple processes, so this is not
+physical footprint. Browser-reported process→firstPaint is3.260/2.748s; this is
+not panel latency. Baseline/Ion and baseline/optimizing Wasm prefs are true;
+actual tier execution and stock benchmark scores remain unproven.
+
+A paused-video parent sample spends41/78 samples in layer dispatch/draw,
+including GPU readback and CPU image blending. Optional QuartzCore0205 skips
+bare commits whose layer contents and IOSurface seeds have not changed. Native
+M1 controls:40 empty transactions cause40 delegate calls on the old provider,
+zero on the candidate; a changed surface and a changed property each still
+cause one. All1/1.5/2x exact checker tests pass. It is **off by default** in the
+recipe; browser performance and concurrent-mutation qualification remain open.
+
+The private AVFoundation augmentation preserves the media owner's current
+asset implementation and adds the four missing speech/display classes from
+pinned PureDarwin source (original dual MPL-2.0/BSD-2-Clause notice/source
+retained in the output). M1 probev2: current provider reads2 tracks/10.000000s
+and displays1024/1024 exact NV12 red pixels on Apple M1; legacy control reads
+0 tracks/NaN and displays0/1024 pixels. Speech truthfully reports no voices.
+Probev1's own wrapper install-name load failure remains failed evidence; only
+our probe was relinked to the canonical framework name and rehashed forv2.
+No Firefox binary was changed. Browser qualification with this provider and
+canonical AudioToolbox is next; no installed AVFoundation changed.
 
 ## Gaps and ownership
 
@@ -92,7 +183,7 @@ Zero-import dependencies still have to load unless weakly linked.
 | ServiceManagement | 2 | absent; privileged updater operation remains unsupported |
 | Vision | 2 | absent; existing SF-U provider, no OCR claim |
 | libcups | 29 | absent; existing SF-U provider, no printing claim |
-| AVFoundation | 4 | installed facade lacks AVSpeechSynthesisVoice, AVSpeechUtterance, AVSpeechSynthesizer, AVSampleBufferDisplayLayer; request to media owner CODEX |
+| AVFoundation | 4 | four classes absent; private current-provider wrapper preserves2tracks/10s asset and1024/1024 NV12 GPU pixels, media owner merge requested |
 | CoreFoundation | 1 | CFBundleIsArchitectureLoadable; lazy XUL import, request to TERM5 |
 | CoreGraphics | 1 | CGPDFDocumentCreateWithURL; lazy XUL import, request to TERM5 |
 | ApplicationServices | 2 | PMPrintSettingsSetValue, PMWorkflowSubmitPDFWithSettings; lazy XUL imports, request to TERM5 |
@@ -102,10 +193,14 @@ Zero-import dependencies still have to load unless weakly linked.
 | Native layers to Wayland | unresolved | current NSView reads CALayerContext back to a CPU window bitmap; real composited subsurfaces requested from DESK5 |
 | GPU IOSurface backing | unresolved | existing CGLTexImageIOSurface2D uploads CPU memory and writes it back; cross-process dma-buf storage not implemented |
 | Shared FreeType raster/cache | private0200 proven | eight-thread800-render reference pixel check passes; installed control aborts; merge requested TERM5 |
-| Headless AppKit run loop | private0201 built only | sampled GPU-helper busy loop; private run-loop fallback awaiting target test |
+| Headless AppKit run loop | private0201 proven | nil-display timer probe CPU drops; real GPU main sleeps; TERM5 review requested |
 | AVD sandbox access | private narrow translation proven warm | explicit IOAccelerator grants exact /dev/pdavd read/write; unrelated service/device remain denied |
 | AVD cold firmware load | kernel owner requested | driver firmware read inherits caller sandbox, EPERM masked as ENOENT; root prewarm makes identical sandbox open pass |
-| AVD video to compositor | unresolved | Firefox decoding, NV12 presentation and A/V sync untested |
+| AVD video to compositor | private3codec playback observed | originalAVclips visibly end; each300AVDjobs0errors; AAC3fixes proven, muted; SW/A-V/streaming/zero-copy pending |
+| 150% layer target | private0202/0203 proven pixels | exact1024/2304/4096pixels at1/1.5/2x; installed1.5x512mismatches, browser013 all3pages visible |
+| Global IOSurface ID broker | private isolated control+browser pass | broker absent on disk; installed child lookup fails; private named broker shares2048bytes exactly, local-surface negative remains denied; browser014 defaultGPU WebGL visible, clean service removal |
+| GPU/font sandbox paths | private compiler v4 proven | narrow render-node/Mesa and font-service grants; actual GPU pixels + denied-write/unrelated controls pass,13 host cases |
+| Startup-cache throttle | workaround partial | Standard policy real system call forwards status, cache-ON support page visible; full startup/idle measurement pending |
 | open HTTP(S) handling | private candidate4/4 pass | default/multiple/literal URL argv and legacy document controls; TERM5 asked to merge, no owner defaults changed |
 
 `firefox/compat.nix` selects the absent providers without selecting core,
@@ -142,7 +237,7 @@ Run `remote-run.py` on the target under that workstation lock, with a new run
 directory, the pristine staged bundle and the intended private framework paths.
 Its test profile suppresses onboarding without accepting terms for the owner.
 
-## GPU path: CGL observed, Firefox rendering still unproven
+## GPU path: hardware WebRender observed, presentation incomplete
 
 Mozilla's release source
 [GLContextProviderCGL.mm](https://hg.mozilla.org/releases/mozilla-release/file/FIREFOX_160_0_RELEASE/gfx/gl/GLContextProviderCGL.mm)
@@ -162,8 +257,8 @@ is disabled by default in this private candidate; explicit requests still work.
 framebuffer pixels in 3.2 and 4.1 contexts. At 07:06Z on the M1, one request
 per profile, the private candidate returned `Apple M1 (G13G B1)`, OpenGL 4.6
 Core Profile, framebuffer complete, **256/256 pixels identical** and GL error
-zero for both. This proves those CGL rendering requests on hardware, not
-Firefox WebRender, native-layer presentation, throughput or frame pacing.
+zero for both. This proves those CGL rendering requests on hardware. Run011 separately proves
+hardware WebRender/WebGL; native-layer zero-copy and frame pacing remain open.
 The installed-framework control exited 139 after its EGL load failed. The guarded private v2 also returned a clean CGL error for a deliberately absent EGL
 library, then repeated both hardware pixel checks successfully. The failed
 installed control remains a failure.
@@ -174,8 +269,10 @@ installed control remains a failure.
 using SF-U's existing compiler and the real Sandbox.kext enforcement syscall.
 It does not replace libSystem or disable Firefox's sandboxes. Its new translation
 maps only an unconditional explicit IOAccelerator connection allow to literal
-`/dev/pdavd` data read/write; the seven host compiler cases cover denial,
-unrelated service/operation, unfiltered and compound/unchecked forms.
+`/dev/pdavd`, renderD device data read/write and read-only Mesa DSOs. Explicit
+font-server lookup allows only font/config/cache reads. Thirteen host cases and
+real-M1 deny-default controls cover denial, unrelated services/devices, wrong
+operations, primary GPU nodes, driver/font writes and unchecked compound forms.
 `avd-sandbox-probe` applies a real deny-default policy on target: after root
 prewarm its positive case opens AVD, the wrong-service case gets EPERM, an
 unrelated device remains denied and the allowed /dev/null control opens.
@@ -196,14 +293,14 @@ pinned application. This routing result does not establish Firefox integration.
 
 | Milestone | Missing evidence |
 |---|---|
-| 0 baseline | correct window contents; about:support, local fixture and HTTPS over Wi-Fi |
-| 1 rendering | hardware WebRender in about:support; WebGL comparison; 60fps scrolling/animation and CPU; zero-copy native layers at 150% (private CGL hardware pixels now pass) |
-| 2 media | H.264/HEVC/VP9 playback through VT and AVD, driver counters, drops, CPU A/B, audio and A/V clock; non-DRM streaming |
-| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; startup/RSS/idle CPU; JIT, Speedometer/MotionMark/JetStream; 30-minute crash-free browsing |
+| 0 baseline | qualified private-prefix pass014: all3 visible with defaultGPU and WebGL |
+| 1 rendering | WebGL software pixel comparison; wall/presentation60fps scrolling/animation and CPU reduction; zero-copy native layers at150% (hardware WR+WebGL+checker observed) |
+| 2 media | hardware3codec visible pass above; CPU/pixel SW A/B, audible output and A/V clock, native pacing/zero-copy and non-DRM streaming remain |
+| 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JIT, Speedometer/MotionMark/JetStream; 30-minute crash-free browsing |
 | 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
 
-No benchmark scores, crash-free interval, hardware decode or zero-copy claim
-is made. DRM/Widevine/EME is outside this assignment. Owner verification remains:
+No benchmark scores,30-minute crash-free interval, audible audio/A-V or zero-copy
+claim is made. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
 panel sharpness/colours at 150%, physical trackpad feel and shortcuts, and
 audible output/lip sync. Logs, synthetic input and renderer captures cannot
 establish those physical observations.

@@ -24,11 +24,47 @@
 -(void)setBackingScale:(CGFloat)value;
 -(void)render;
 -(CGImageRef)createImage;
+-(void)setDelegate:(id)delegate;
+@end
+@interface CATransaction : NSObject
++(void)begin;
++(void)commit;
+@end
+@interface FXLayerDelegate : NSObject { @public unsigned requests; }
+@end
+@implementation FXLayerDelegate
+-(void)layerContextNeedsDisplay:(id)context { requests++; }
 @end
 extern IOSurfaceRef IOSurfaceCreate(CFDictionaryRef);
 extern void *IOSurfaceGetBaseAddress(IOSurfaceRef);
 extern size_t IOSurfaceGetBytesPerRow(IOSurfaceRef);
+extern int IOSurfaceLock(IOSurfaceRef,unsigned,uint32_t *);
+extern int IOSurfaceUnlock(IOSurfaceRef,unsigned,uint32_t *);
 extern const unsigned char *glGetString(unsigned);
+static void pump(double seconds){
+ NSDate *end=[NSDate dateWithTimeIntervalSinceNow:seconds];
+ while([end timeIntervalSinceNow]>0)
+  [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:end];
+}
+static int transactionCheck(CALayerContext *context,CALayer *root,IOSurfaceRef surface){
+ FXLayerDelegate *delegate=[[[FXLayerDelegate alloc] init] autorelease];
+ [context setDelegate:delegate];[context render];pump(.03);delegate->requests=0;
+ for(int i=0;i<40;i++){[CATransaction begin];[CATransaction commit];pump(.002);}
+ unsigned empty=delegate->requests;delegate->requests=0;
+ IOSurfaceLock(surface,0,NULL);
+ unsigned char *bytes=IOSurfaceGetBaseAddress(surface);
+ bytes[0]^=255;bytes[1]^=255;bytes[2]^=255;
+ IOSurfaceUnlock(surface,0,NULL);
+ [CATransaction begin];[CATransaction commit];pump(.02);
+ unsigned changed=delegate->requests;
+ [context render];pump(.02);delegate->requests=0;
+ CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGFloat rgba[]={0,0,1,1};
+ CGColorRef color=CGColorCreate(space,rgba);root.backgroundColor=color;
+ CGColorRelease(color);CGColorSpaceRelease(space);pump(.02);
+ unsigned property=delegate->requests;[context setDelegate:nil];
+ printf("FXTRANSACTION empty=%u changed_surface=%u changed_property=%u\n",empty,changed,property);
+ return empty==0&&changed>0&&property>0;
+}
 int main(int argc,char **argv) { @autoreleasepool {
     CGFloat scale=argc>1?atof(argv[1]):1;
     if(!(scale>0)||scale>4)return 2;
@@ -84,6 +120,7 @@ int main(int argc,char **argv) { @autoreleasepool {
     const char *renderer=(const char *)glGetString(0x1f01);
     unsigned mismatches=phase0<phase1?phase0:phase1;
     printf("FXLAYER renderer=%s native_pixels=%zu output=%d scale=%g green=%u white=%u black=%u other=%u pattern_mismatches=%u\n",renderer?renderer:"null",CGImageGetWidth(image),side,scale,goodgreen,white,black,other,mismatches);
+    int transactions=argc>2&&!strcmp(argv[2],"transactions")?transactionCheck(context,root,surface):1;
     CGContextRelease(output);free(storage);CGImageRelease(image);[context release];CFRelease(surface);
-    return goodgreen==(unsigned)(half*side) && white==(unsigned)(half*side/2) && black==(unsigned)(half*side/2) && other==0 && mismatches==0 && renderer && strstr(renderer,"Apple M1")?0:1;
+    return goodgreen==(unsigned)(half*side) && white==(unsigned)(half*side/2) && black==(unsigned)(half*side/2) && other==0 && mismatches==0 && renderer && strstr(renderer,"Apple M1") && transactions?0:1;
 } }
