@@ -1285,3 +1285,15 @@ exactly once. This will distinguish a later trained link from the early
 startup state without ongoing polling. Native driver/tool/collection builds,
 zero overlaps and all six repository checks pass; only CIO UUID changes
 against CIO10, other56 fixed. Hardware qualification is pending.
+
+
+The pinned PCIe-C DART probe explicitly skips parameter-register reads because
+those reads can raise asynchronous SError during tunnel activation. Native
+code must use the fixed T8020 USB4 topology (16KiB pages, IAS32/OAS36,
+64 streams, TTBR+0x400, no bypass), the mapped register extent and ordered
+nonposted access with completion barriers. The NHI's safe parameter reads
+must never be copied onto this separate controller. The 64-stream global
+reset also writes enable+0xfc and +0x100, the latter overlapping the TCR0
+address in this register layout; its actual active Linux state needs to be
+compared before adapting the bank-reset helper. No PCIe-C parameter probe or
+DART write has been performed by this stream.
