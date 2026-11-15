@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# A staged dependency candidate for the whole vImage port; never replace root.
+# Whole provider, with a private ICC checksum and separately qualified installs.
 let
   e = import ../environment.nix;
   inherit (e) pkgs p finch libsystem sdk cc ld;
@@ -11,7 +11,7 @@ let
 in pkgs.stdenv.mkDerivation {
   name = "siliconforest-finch-ColorSync-arm64";
   src = finch;
-  patches = [ ./patches/0001-pd-runtime-layout.patch ];
+  patches = [ ./patches/0001-pd-runtime-layout.patch ./patches/0002-private-profile-md5.patch ];
   nativeBuildInputs = [ pkgs.python3 ];
   dontConfigure = true;
   buildPhase = ''
@@ -20,6 +20,8 @@ in pkgs.stdenv.mkDerivation {
     cp -r ${skcms}/. backend/
     cp -r ${./include} headers
     chmod -R u+w headers
+    cp ${../../m1-avd/user/pd_md5.h} headers/pd_md5.h
+    cp ${./SFProfileMD5.h} headers/SFProfileMD5.h
     CF="-isysroot ${sdk} -mmacosx-version-min=26.5 -O2 -fblocks -D_DARWIN_C_SOURCE -I$PWD/headers -I$PWD/backend -I${libsystem}/usr/include -I${p.coreFoundation-arm64}/include"
     for s in userland/ColorSync/ColorSync*.c; do
       ${cc} $CF -DSF_COLORSYNC_PREPROCESS -E -P "$s" -o objects/$(basename "$s" .c).i
