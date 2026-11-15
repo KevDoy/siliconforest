@@ -135,6 +135,121 @@ SPDX notice kept in the file that carries it:
 | Maximize, click to the first full-size frame | 218 / 137 ms | 219 ms | |
 | Scroll with the wheel | a frame every 50 ms | not re-measured (the inject instrument has no wheel event) | |
 
+## Performance: optimised core libraries (15 November, night; PERF)
+PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
+Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default
+recipe (`ninja -t compdb`) and the disassembly agree:
+
+| Component | Before | Now (installed) |
+|---|---|---|
+| libmalloc, libc (stdio, stdlib, locale, string), libplatform, pthread, libdispatch, libxpc, corecrypto/CommonCrypto (`-DDEBUG`), libresolv, syslog, libsystem_trace: all inside `/usr/lib/libSystem.B.dylib` | -O0 -g, assertions on (no NDEBUG), `-fno-stack-protector` in libmalloc/libsystem_kernel | -O2 -g -fno-strict-aliasing, otherwise the same flags (build type still Debug, so -DDEBUG and the assertions are as before) |
+| libplatform's string functions (arm64 uses the generic C, not assembly) | -O0; memset went through memset_pattern4, which called memmove for every 4 bytes | -O2 with -fno-builtin; memset/bzero/memset_pattern4/8/16 with 8-byte stores |
+| libsystem_kernel | -O0 -g -momit-leaf-frame-pointer (mostly .s syscall stubs) | -O2, same flags |
+| `/usr/lib/dyld` | -O0 -g NDEBUG -fptrauth-calls | -O2 -g; libobjc's forced load follows DYLD_LIBRARY_PATH |
+| `/usr/lib/system/libdyld.dylib` | -O0 -g NDEBUG | unchanged (not replaced tonight) |
+| libc++, libc++abi, libunwind | -Os NDEBUG | unchanged |
+| `/usr/lib/libobjc.A.dylib` (PureDarwin's) | -Os -DNDEBUG, no -g; getenv("PD_POOL_TRACE") at every autorelease and every pool-pop release | -Os as before; PD_POOL_TRACE read once at _objc_init |
+| libCoreFoundation | -O2 since COCOA4 | unchanged |
+
+Apple builds these projects Release (-Os); that is from Apple's published projects, not from a file in this tree.
+Frame pointers stay (arm64 Darwin keeps them; sf-prof walks them), symbols and the debug map stay (`-g`).
+
+Recipes: `libsystem-default/build-libsystem-opt.nix` (the default recipe's source and patches, plus
+`patches/string-functions-no-builtin.patch`, `patches/platform-memset-wide-stores.patch`,
+`patches/dyld-libobjc-search-paths.patch`); `terminal-app/build-libsystem.nix` gives it (SF_LIBSYSTEM=debug: the
+build of before); `terminal-app/build-libobjc.nix` (`patches/objc-pool-trace-read-once.patch`, in the tree;
+SF_LIBOBJC=old leaves it out). The RAM root and the QEMU images still stage the default -O0 recipe (`libsystem-default/DEFAULT.txt`).
+
+What could only work at -O0, and what was done about it:
+- the C string functions (memmove, memset, memset_pattern*, strlen, ... in libplatform and libc's `string/`) could be
+  compiled into calls to themselves once loops are recognised as library idioms: `-fno-builtin` for those sources.
+  Checked on the binary: no new call cycles between functions (a script over both disassemblies), libSystem's exports
+  and imports identical (2679 / 71).
+- type punning in the FreeBSD libc, libxpc and PureDarwin's additions: `-fno-strict-aliasing` for the whole build,
+  as for CoreFoundation.
+- the PAC-lowering assumptions in dyld (`dyld-arm64e-keys-off.patch` signs a volatile probe value): unaffected;
+  the kernel lowers whatever PAC forms -O2 emits.
+- not changed, deliberately: NDEBUG/DEBUG (removing assertions is a separate step), libdyld.dylib (another core file,
+  little in hot paths), libobjc's -Os (Apple's choice; objc_msgSend is assembly).
+- libmalloc's configuration (`src/platform.h`): PureDarwin disables the nano allocator on arm64 (CONFIG_NANOZONE only
+  for x86_64; nanov2 is a stub, `pd_nanov2_fallback.c`) and the medium allocator on arm64; tiny/small magazines
+  follow the CPU count (8 on the M1). Not changed tonight: nano v2 needs Apple's OS-variant machinery and nano v1 a
+  fixed region (0x600000000000) inside this kernel's user address space, neither established here.
+
+PureDarwin's dyld loads `/usr/lib/libobjc.A.dylib` into every program itself with DYLD_LIBRARY_PATH switched off, so
+no libobjc could be tried from a test directory (and the guarded installer could not prove one): the optimised dyld
+lets that load follow DYLD_LIBRARY_PATH (`sf-dyld-probe` proves it).
+
+### Rehearsals and installs
+| Step | Result |
+|---|---|
+| QEMU pf1: libSystem 5d88cf7d (-O2 alone), dyld kept | FAILED, failed=1: the one failing check was sf-dyld-probe, which I had made every rehearsal require while this one kept the old dyld (45 other verdicts ok). Not installed |
+| QEMU pf2 | the guest never got its command (sat at the prompt 10 min); stopped, nothing judged |
+| QEMU pf2b: libSystem a715a1e2 (-O2 + memset) and dyld be18e963 | replaced as on the M1, COMPAT_VERDICT failed=0, QDDESK_PASS; fresh boot pf2b-2: failed=0, QDDESK_PASS |
+| M1, 01:57Z: libSystem a715a1e2 | SFLIB 3 installed (ba8013eb is `/usr/lib/libSystem.B.dylib.old6`); new SSH connection ok; `sf_compat_push.sh check` 18/18; sf-claude-check as before |
+| M1, 02:03Z: dyld be18e963 | SFDYLD 3 installed (472fd9a3 is `/usr/lib/dyld.old2`); new SSH ok; check 18/18; sf-claude-check as before; Terminal (Preferences twice, a new tab running zsh and brew) and Activity Monitor open (`runs/perf/shots/ia-sheet.png`) |
+| QEMU pf3: libobjc 2eca1460 on the root pf2b left | FAILED, failed=1: that root carried the guest's one-shot marker (`/etc/compat-second-boot`), so nothing was replaced and sf-objc-probe met the old libobjc; my setup. Second boot stopped |
+| QEMU pf3b: the same on a copy of that root without the marker (debugfs) | libobjc replaced through DYLD_LIBRARY_PATH, failed=0, QDDESK_PASS; fresh boot pf3b-2: failed=0, QDDESK_PASS |
+| M1, 02:59Z: libobjc 2eca1460 | SFLIB 3 installed (PureDarwin's 6fe8dd67 is `/usr/lib/libobjc.A.dylib.old`); new SSH ok; check 18/18 before and after; sf-claude-check as before; window checks again (`runs/perf/shots/ib-sheet.png`) |
+
+Revert: `ln /usr/lib/dyld.old2 /usr/lib/dyld.back && mv -f /usr/lib/dyld.back /usr/lib/dyld`, then
+`ln /usr/lib/libSystem.B.dylib.old6 /usr/lib/libSystem.B.dylib.back && mv -f /usr/lib/libSystem.B.dylib.back /usr/lib/libSystem.B.dylib`
+(dyld first: the old dyld runs either libSystem); libobjc: `ln /usr/lib/libobjc.A.dylib.old /usr/lib/libobjc.A.dylib.back &&
+mv -f /usr/lib/libobjc.A.dylib.back /usr/lib/libobjc.A.dylib`. Test files: `/private/var/db/sfperf` (remove).
+
+### Measured on the M1 (before = PureDarwin's -O0 files as installed until 01:57Z)
+| Measure (M1, synthetic input where any) | Before | After (libSystem + dyld installed) | + new libobjc (test prefix) |
+|---|---|---|---|
+| Activity Monitor CPU at the 5 s refresh, 10 min, no input, with Terminal x2 beside it | 9.69 % (60 s windows 8.8-10.2) | 3.57 % (3.4-3.7) | 3.46 % (3.3-3.5) |
+| Activity Monitor RSS over the same 10 min | 75.3 -> 75.3 MB | 65.0 -> 67.3 MB | 64.7 -> 67.2 MB |
+| Terminal CPU, idle, same run | 0.81 % (0.7-0.9) | 0.27 % | 0.27 % |
+| Terminal RSS, same run | 59.8 -> 60.4 MB | 54.7 -> 55.3 MB | 52.4 -> 52.9 MB |
+| Launch, exec to first WindowServer commit: Terminal / Activity Monitor | 563-679 ms (6) / 1004-1231 ms (3) | 307-350 ms (6) / 499-513 ms (3) | 323-353 ms (3) / 481-525 ms (3) |
+| RSS at that first commit: Terminal / Activity Monitor | 59.8-59.9 / 65.5-65.6 MB | 52.2-54.8 / 59.7 MB | 52.2-52.3 / 59.7-59.8 MB |
+| `seq 1 300000` typed into Terminal (zsh `time`) | 2.83-2.86 s (3) | 1.08-1.10 s (3) | - |
+| Typing echo, key to commit (`sf-latency.py inject`) | 4-8 ms (6) | 2-4 ms (6) | - |
+| `zsh -i -c exit` / `brew --version` (median of 5) | 259 / 198 ms | 190 / 89 ms | - |
+| `python3 -c pass` / a JSON + sort script / `node -e 0` | 108 / 433 / 410 ms | 66 / 301 / 154 ms | - |
+| `ls -lR /usr` / `seq 1 300000 \| wc -l` / `seq 1 200000 \| sort -r` | 1248 / 506 / 706 ms | 142 / 137 / 387 ms | - |
+| start of /bin/echo (200 runs x 3) | 13.9-15.3 ms (old dyld, new libSystem) | 8.8-10.7 ms | - |
+| RSS of a trivial Objective-C program (`sf-rss`) | 3456 KB | 2992 KB | 3008 KB |
+
+Micro-benchmarks (`probe/sf-bench.c`, best of 3 x 5 rounds, ns per operation; run-to-run spread under 10 %):
+
+| | Before | After | + new libobjc |
+|---|---|---|---|
+| malloc+free 16 B / 256 B / 4 KB / 64 KB | 401 / 833 / 380 / 1566 | 72 / 119 / 73 / 957 | same |
+| 1000 mixed small blocks, per block / calloc 128 B / realloc 16 B -> 1 KB | 2477 / 1273 / 5868 | 326 / 78 / 764 | same |
+| pthread_mutex lock+unlock / os_unfair_lock | 156 / 57 | 25 / 21 | same |
+| memcpy 4 KB / memcpy 1 MB / memset 4 KB / strlen 256 B | 10760 / 3190259 / 22710 / 159 | 140 / 68205 / 126 / 36 | same |
+| snprintf / getenv (absent) | 4438 / 396 | 365 / 82 | same |
+| dispatch_sync / dispatch_async round trip / dispatch_once | 207 / 21804 / 0.5 | 25 / 18318 / 0.5 | same |
+| objc_msgSend / retain+release / NSObject new+release | 5.4 / 28.1 / 604 | 5.4 / 28.1 / 102 | same |
+| autorelease pool with 10 objects, push to pop | 7833 | 2015 | 401 |
+
+Before = PureDarwin's -O0 libSystem and dyld while they were installed (23:55Z-01:52Z), after = the installed optimised
+files (02:05Z-02:28Z); the 10-minute rows run AM, AM, Terminal, Terminal side by side with no input. The "+ new
+libobjc" column was measured from a test prefix before its install. Activity Monitor's RSS was flat before and grew
+2.3 MB in the 10 minutes after (both instances alike): not attributed. retain+release (28 ns) and dispatch's thread
+round trip did not move: not looked into.
+Two later 10-minute runs with all three files installed (03:06Z, 03:17Z) are not comparable with the rows above: by
+then TERM5's AppKit/libWindowServer/Onyx2D (02:46Z) and DESK4's compositor 003 (03:09Z, relaunched inside the first
+run) were new, and a click reached Activity Monitor in the second (it ended: SIGTRAP in CFArrayGetValueAtIndex under
+-[NSTableView mouseDown:], report on the M1). Activity Monitor used 4.8 % and 6.2 % there (60 s windows 3.2-8.0), and
+its RSS jumped once by about 17 MB (at the compositor relaunch in the first run, after 30-60 s in the second) and then
+stayed flat. Activity Monitor crash reports tonight: 01:20Z (before these installs), 02:34Z (objc_msgSend under the
+constraint layout), 03:15Z (SIGBUS in Onyx2D's span writer, another agent's instance), 03:18Z (the one above): all in
+AppKit/Onyx2D paths, not attributed; written up for TERM5.
+
+Tools: `probe/sf-bench.c` (micro-benchmarks, `sf-bench [rounds]`), `runs/perf/perf-launch.py` / `perf-cli.py` /
+`measure.sh` (not committed: exec to first commit, command-line programs, 10-minute RSS/CPU), sf-prof.
+What is left in Activity Monitor and Terminal is in AppKit/Foundation/WindowServer and went to TERM5
+(`runs/m1-coord/requests-for-TERM5.md`, "PERF"): the constraint solver and text drawing at every refresh (AM's main
+thread, 93 % waiting, sf-prof), `-[NSMutableIndexSet shiftIndexesStartingAtIndex:by:]` and `-[NSMenu update]` under a
+flood. Measured from a test prefix (DYLD_LIBRARY_PATH), Activity Monitor's RSS was 5-11 MB higher with the new
+libSystem (heap in use identical); installed, it is 8-10 MB lower. The rise came only with the test prefix; its
+cause was not established.
+
 ## Owner's hands-on round, Terminal (night of 14/15 November; TERM5)
 The owner used Terminal and Activity Monitor by hand on the panel at 150 % and reported; each finding was reproduced
 here with synthetic input through the inject module, measured in the window's own buffer (inject `dump`, and
