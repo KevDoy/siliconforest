@@ -9,5 +9,6 @@ in base.overrideAttrs (old: {
   cp -R ${old.src} "$out"
   chmod -R u+w "$out"
   python3 ${./tools/prepare_ethernet_admission.py} "$out"
+  python3 ${./tools/prepare_ethernet_coherent_dma.py} "$out"
  '';
 })

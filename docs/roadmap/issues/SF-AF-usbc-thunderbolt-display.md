@@ -2824,3 +2824,48 @@ the opt-in profile requires exactly one correct FL1100/tunnel match and
 refuses broad, duplicate, wrong-ID or extra personalities. All six repository
 checks pass. No collection selects this pair; CIO36 remains frozen with only
 the interrupt-context health fix, and real Ethernet qualification comes first.
+
+### CIO36: actual 1 Gb/s link; DHCP still fails, 2026-11-15
+
+The atomic-health kernel survived interface-up without CIO35's mutex panic.
+Native status observed en1 UP/running, active link, and IORegistry reported
+IOLinkSpeed1000000000. This is real negotiated link evidence, not throughput.
+The DHCP client made four initial BPF writes that returned EPERM, then
+accepted DISCOVER writes on attempts5/6, but received no OFFER/lease. Counters
+reported zero packets and2048 output bytes; they do not establish completed
+hardware transmission. Captured stdout and stderr were concatenated, so their
+file order must not be mistaken for chronology. No IPv4 was applied.
+
+Qualified non-AVE CIO29 was restored19:34:52Z and UART reaped19:34:53Z. This
+time the actual .next process, socket and inject directory were all checked.
+The earlier idle/AppKit report remains unresolved; the DHCP failure prevented
+the queued quiet60 measurement. No USB/display/hotplug success is inferred.
+
+### I210 coherent rings and DMA copy ordering — native build, rerun pending
+
+Source inspection found that bus_dmamem_alloc marks coherent ring maps
+BUFFER_PROHIBITED. The compatibility sync function returned before native
+mapper synchronisation for those and BUFFER_NONE maps, while the dedicated
+adapter had copied their contents into separate owned backing. CPU/device
+therefore did not share the coherent ring object. A second defect published
+the old Haiku bounce bytes to native backing before the CPU->Haiku copy.
+
+The private Ethernet staging fix rounds native contiguous allocations to
+whole16KiB owned pages and maps the exact retained allocator IOBuffer object
+for eligible coherent memory. The real IOMapper/IODMACommand remains required;
+there is no physical-address DMA fallback. Unowned packet fragments keep
+distinct owned bounces. Every map retains its actual backing, including after
+caller release, and ambiguous completion/clear still pins it. Coherent maps
+now forward native sync calls; bounced writes publish CPU->Haiku->native in
+that order. Cumulative direct/bounce map counters report successful mapping
+setup only, never packet/DMA completion.
+
+Executing the actual old sync functions reproduces four FAIL results (native
+sync skipped twice, stale second-stage copy twice). These failures remain in
+the receipt. Corrected functions and the exact retained whole-page lookup
+pass ASan/UBSan host cases. Native SDK3nr6p1v95bbgiqv1z1c5p4i0lskqq3h8 and
+all six fresh repository checks pass; only pd_fbsd_os.cpp and bus_dma.cpp
+differ in the native compatibility sources. Initial transformation/fixture
+and diagnostic-counter compilation failures are retained and corrected. The
+next trial keeps frozen CIO36 and replaces only the private Ethernet bundle;
+no hardware packet fix or completed DHCP milestone is claimed yet.
