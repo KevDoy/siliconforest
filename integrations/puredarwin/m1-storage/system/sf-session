@@ -8,8 +8,16 @@
 # by its own launchd job, which joins the networks the system remembers), and when the session
 # ends the machine is restarted or switched off by the system's own command:
 #   the desktop menu's Session > Restart or Shut Down leave `restart` or `poweroff` in
-#   $XDG_RUNTIME_DIR/session-end-request; anything else (the session's time is up, the
-#   compositor ended by itself) restarts. /bin/reboot and /bin/shutdown are system/sf-command.
+#   $XDG_RUNTIME_DIR/session-end-request, and only such a request ends the session (and the boot).
+#   A compositor that ends by itself (an error, a crash, a signal) is started again: the same build
+#   once, then the installed daily build, then /usr/bin/chonkstep-darwin-desktop.safe (from the
+#   third end in a row, with a growing pause), with a notice on the screen and a line in
+#   /var/log/desktop-session.log; the tail of its output is kept in /var/log/desktop-exits/. Every
+#   window of the session ends with the compositor (they are its Wayland clients): that is the cost.
+#   A build that ran 10 minutes starts the count afresh. Bench boots (sfsession_seconds or sfbench)
+#   keep the old rule: the end of the compositor is the end of the boot (only a compositor that
+#   ends with an error within 20 s is replaced once by .safe). /bin/reboot and /bin/shutdown are
+#   system/sf-command.
 # Boot arguments it reads:
 #   sfsession_seconds=<11..limit>  the session's length; bench boots give it. Without it (an installed
 #                                  system) the session does not end by itself: it gets the longest time the
@@ -39,9 +47,12 @@ arg() { sysctl -n kern.bootargs 2>/dev/null | tr ' ' '\n' | sed -n "s/^$1=//p" |
 limit=14400
 if grep -a -q 'seconds 11\.\.3153600000 ' /usr/bin/chonkstep-darwin-desktop 2>/dev/null && grep -a -q 'HOME=/var/root' /usr/bin/chonk-terminal-darwin 2>/dev/null; then limit=3153600000; fi
 seconds=$(arg sfsession_seconds)
+# a bench boot (a length or a bench given): the session ends with its compositor, as before
+timed=; [ -n "$seconds" ] && timed=1
 case "$seconds" in ''|*[!0-9]*|0*) seconds=$limit;; esac
 [ "$seconds" -ge 11 ] && [ "$seconds" -le "$limit" ] || seconds=$limit
 bench=$(arg sfbench); B=/private/var/db/sf-bench
+[ -n "$bench" ] && timed=1
 case "$bench" in ''|*[!a-z0-9]*) bench=;; esac
 [ -n "$bench" ] && [ -r "$B/prelude.in" ] && [ -r "$B/end.in" ] || bench=
 auto=$(arg sfbench_auto); case "$auto" in *[!a-z,]*) auto=;; esac
@@ -159,11 +170,50 @@ dock() {
 # The session can start its compositor again without a restart of the machine: root leaves
 # `relaunch` (the installed build) or `relaunch-next` (/usr/bin/chonkstep-darwin-desktop.next) in
 # $XDG_RUNTIME_DIR/session-end-request and ends the compositor (SIGTERM). Every window ends with it.
-# Anything else in the file (restart, poweroff, nothing) ends the session as before.
+# `restart` or `poweroff` end the session; nothing (or anything else) is an unexpected end: below.
+# ---- policy: what follows an end of the compositor (host-tested: desktop/tests/test_sf_session.sh)
+# In: request (the session-end-request file), rc, ran (seconds), desktop, failures, timed, D.
+# Out: request (relaunch-auto when the session starts one by itself), request_was, next, failures, pause.
+decide_after_end() {
+    request_was=$request; next=$desktop; pause=0
+    case "$request" in
+        relaunch|relaunch-next|relaunch-safe|restart|reboot|poweroff|shutdown) return 0;;
+    esac
+    if [ -n "$timed" ]; then
+        # A bench boot: a compositor that does not come up (it ended by itself, with an error,
+        # within 20 seconds) is replaced once by the kept good build; anything else ends it.
+        if [ -z "$request" ] && [ "$rc" != 0 ] && [ "$ran" -lt 20 ] && [ -x "$D.safe" ] && [ "$desktop" != "$D.safe" ]; then
+            request=relaunch-safe
+        fi
+        return 0
+    fi
+    # Nobody asked for an end: the compositor failed (the 00:53Z drop of 15 November ended the
+    # session this way after 34 minutes, and the machine restarted). Start one again.
+    [ "$ran" -ge 600 ] && failures=0
+    failures=$((failures + 1))
+    if [ "$failures" -ge 2 ]; then
+        if [ "$failures" -eq 2 ] && [ "$desktop" != "$D" ] && [ -x "$D" ]; then next=$D
+        elif [ -x "$D.safe" ]; then next=$D.safe
+        else next=$D; fi
+    fi
+    [ -x "$next" ] || next=$D
+    if [ "$failures" -ge 3 ]; then pause=$(( (failures - 2) * 5 )); [ "$pause" -le 60 ] || pause=60; fi
+    request=relaunch-auto
+}
+# ---- policy end
 launch=1
-# The compositor's lines also go to /var/log/desktop-session.log (the one of the boot before is
-# desktop-session.log.old).
-[ -f /var/log/desktop-session.log ] && mv -f /var/log/desktop-session.log /var/log/desktop-session.log.old
+# Unexpected ends in a row (each after less than 10 minutes of running): 1 = the same build again,
+# 2 = the daily build (or .safe when that was the daily one), 3 and more = .safe after a pause.
+failures=0
+D=/usr/bin/chonkstep-darwin-desktop
+L=/var/log/desktop-session.log
+say() { printf '%s\n' "$*"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$L"; }
+# The compositor's lines also go to /var/log/desktop-session.log; the ones of the three boots
+# before are desktop-session.log.old, .old2, .old3 (a reboot used to leave only one).
+[ -f "$L.old2" ] && mv -f "$L.old2" "$L.old3"
+[ -f "$L.old" ] && mv -f "$L.old" "$L.old2"
+[ -f "$L" ] && mv -f "$L" "$L.old"
+unset CHONKSTEP_DARWIN_START_NOTICE
 while :; do
     started=$(date +%s)
     printf 'GPUDESK_DESKTOP_START renderer=auto seconds=%s start=%s desktop=%s inject=%s launch=%s\n' "$seconds" "$started" "$desktop" "${CHONKSTEP_DARWIN_INJECT_DIR:-no}" "$launch"
@@ -175,18 +225,27 @@ while :; do
     } | grep --line-buffered -v 'chonkstep-gl: step:' | tee -a /var/log/desktop-session.log
     printf 'GPUDESK_DESKTOP_RC=%s end=%s\n' "$(cat "$runtime/desktop.rc" 2>/dev/null || echo unknown)" "$(date +%s)"
     request=$(cat "$runtime/session-end-request" 2>/dev/null)
-    # A compositor that does not come up (it ended by itself, with an error, within 20 seconds and
-    # nobody asked for an end) is replaced once by the kept good build, instead of ending the
-    # session (which restarts the machine): /usr/bin/chonkstep-darwin-desktop.safe.
     rc=$(cat "$runtime/desktop.rc" 2>/dev/null || echo 1)
-    if [ -z "$request" ] && [ "$rc" != 0 ] && [ $(( $(date +%s) - started )) -lt 20 ] && [ -x /usr/bin/chonkstep-darwin-desktop.safe ] && [ "$desktop" != /usr/bin/chonkstep-darwin-desktop.safe ]; then
+    ran=$(( $(date +%s) - started ))
+    unset CHONKSTEP_DARWIN_START_NOTICE
+    decide_after_end
+    if [ "$request" = relaunch-auto ]; then
+        say "SF_SESSION unexpected end $failures of $desktop (rc=$rc after ${ran}s, request '${request_was:-none}'): starting $next; the session's windows ended with it"
+        # the tail of its output, kept beyond the next boots (the newest 20)
+        mkdir -p /var/log/desktop-exits
+        tail -n 400 "$L" > "/var/log/desktop-exits/$(date -u +%Y%m%dT%H%M%SZ)-launch$launch-rc$rc.log" 2>/dev/null
+        ls -1t /var/log/desktop-exits/*.log 2>/dev/null | sed -n '21,$p' | while read -r old; do rm -f "$old"; done
+        if [ "$pause" -gt 0 ]; then say "SF_SESSION waiting ${pause}s before starting $next again"; sleep "$pause"; fi
+        CHONKSTEP_DARWIN_START_NOTICE="The desktop restarted after an error; its windows were closed"
+        export CHONKSTEP_DARWIN_START_NOTICE
+    elif [ "$request" = relaunch-safe ] && [ -z "$request_was" ]; then
         printf 'SF_SESSION %s ended at once (rc=%s): the kept build instead\n' "$desktop" "$rc"
-        request=relaunch-safe
     fi
     case "$request" in
-        relaunch) desktop=/usr/bin/chonkstep-darwin-desktop;;
-        relaunch-next) desktop=/usr/bin/chonkstep-darwin-desktop.next; [ -x "$desktop" ] || desktop=/usr/bin/chonkstep-darwin-desktop;;
+        relaunch) desktop=/usr/bin/chonkstep-darwin-desktop; failures=0;;
+        relaunch-next) desktop=/usr/bin/chonkstep-darwin-desktop.next; [ -x "$desktop" ] || desktop=/usr/bin/chonkstep-darwin-desktop; failures=0;;
         relaunch-safe) desktop=/usr/bin/chonkstep-darwin-desktop.safe;;
+        relaunch-auto) desktop=$next;;
         *) break;;
     esac
     launch=$((launch + 1))
@@ -208,7 +267,7 @@ if [ -n "$bench" ]; then
     printf 'SF_SESSION the bench end script could not be run; restarting\n'
 fi
 case "$request" in
-    poweroff) /bin/shutdown -h now; printf 'SF_SESSION the power-off was refused (rc=%s); restarting instead\n' "$?";;
+    poweroff|shutdown) /bin/shutdown -h now; printf 'SF_SESSION the power-off was refused (rc=%s); restarting instead\n' "$?";;
 esac
 [ "$mark" = 1 ] && { SF_HALT_MARKER=PD_BENCH_REBOOT; export SF_HALT_MARKER; }
 exec /bin/reboot
