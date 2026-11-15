@@ -127,7 +127,7 @@ install-stage)
     cp -n $CS/test/* $IN/core/test/ 2>/dev/null || true
     cp -a --reflink=auto $CS/new/. $IN/core/new/; chmod -R u+w $IN/core/new
   fi
-  # libobjc: only when the tree has it (SF_LIBOBJC=new, ../build-macos-apps-root.nix)
+  # libobjc: when the tree has it (../build-macos-apps-root.nix; SF_LIBOBJC=old leaves it out)
   [ -e $R/usr/lib/libobjc.A.dylib ] && CORE="$CORE usr/lib/libobjc.A.dylib"
   for f in $CORE; do
     leaf=$(basename $f); cp $R/$f $IN/core/replace/$leaf.new

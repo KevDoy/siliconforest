@@ -4,8 +4,8 @@
 # docs/roadmap/issues/SF-Y-terminal-app.md): one tree rooted at /, every file from a recipe.
 #
 #   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix (optimised; SF_LIBSYSTEM=debug: -O0)
-#   usr/lib/libobjc.A.dylib                      ./build-libobjc.nix (only with SF_LIBOBJC=new: PD_POOL_TRACE
-#                                                read once; without it the root keeps its own libobjc)
+#   usr/lib/libobjc.A.dylib                      ./build-libobjc.nix (PD_POOL_TRACE read once; SF_LIBOBJC=old:
+#                                                not in the tree, the root keeps PureDarwin's)
 #   usr/lib/libFoundation.dylib                  ./build-foundation.nix
 #   usr/lib/libCoreFoundation.dylib              ./build-corefoundation.nix (-O2; CFAutorelease autoreleases)
 #   usr/lib/swift/*.dylib                        ./build-swift-runtime.nix
@@ -41,7 +41,7 @@ let
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   libsystem = import ./build-libsystem.nix;
   optimised = builtins.getEnv "SF_LIBSYSTEM" != "debug";
-  libobjc = if builtins.getEnv "SF_LIBOBJC" == "new" then import ./build-libobjc.nix else null;
+  libobjc = if builtins.getEnv "SF_LIBOBJC" == "old" then null else import ./build-libobjc.nix;
   foundation = import ./build-foundation.nix;
   corefoundation = import ./build-corefoundation.nix { };
   swift = import ./build-swift-runtime.nix;

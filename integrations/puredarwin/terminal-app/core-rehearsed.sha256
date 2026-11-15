@@ -23,3 +23,4 @@ a660d7509392f2175eee967b6add4741e783213aa64ca16dc81faa2366d7  /System/Library/Fr
 a8aea7dcd9eda393aa319b556d5bd961fa676c7af4eda29b1fe0607fe65c06e6  /usr/lib/libFoundation.dylib c4c, c4c-2 2026-11-14
 a715a1e295ab8298733b34da59f1ad4f83c6915b15a3b539fb8784680f1eeb81  /usr/lib/libSystem.B.dylib pf2b, pf2b-2 2026-11-15
 be18e96306738e0798dee0923d76f68ed0461925230071fb64c11dff2c8b0021  /usr/lib/dyld pf2b, pf2b-2 2026-11-15
+2eca14600e7f4724107efdfa6df9cd557a3aa5fb097fd9a9caad75e95ed36c24  /usr/lib/libobjc.A.dylib pf3b, pf3b-2 2026-11-15
