@@ -19,3 +19,13 @@ The patch to RavynXHCIPort retains the upstream MIT license and
 Copyright (C) 2026 ravynOS Project. All rights reserved.
 The linked Apple DMA backend remains GPL-2.0 as described above.
 The new lifetime and IOVA search helpers and patch generator are MIT.
+
+pd_dwc3_host.c/.h and PDAppleUSB.cpp port the T8103 host subset of Linux
+core.c and dwc3-apple.c, selecting GPL-2.0:
+  Copyright (C) 2010-2011 Texas Instruments Incorporated
+  Authors: Felipe Balbi and Sebastian Andrzej Siewior
+  Copyright (C) The Asahi Linux Contributors
+  Apple glue based on dwc3-qcom.c:
+    Copyright (c) 2018, The Linux Foundation. All rights reserved.
+  and dwc3-of-simple.c: Copyright (c) 2015 Texas Instruments Incorporated.
+The ATC and m1n1 notices are appended by build-host.nix.

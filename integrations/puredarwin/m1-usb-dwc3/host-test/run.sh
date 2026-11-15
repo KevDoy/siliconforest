@@ -7,3 +7,6 @@ trap 'rm -rf "$tmp"' EXIT
 ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -pthread \
     -I "$here/../kernel" "$here/lifetime.cpp" -o "$tmp/lifetime"
 "$tmp/lifetime"
+${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/../kernel" -c "$here/../kernel/pd_dwc3_host.c" -o "$tmp/dwc3.o"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../kernel" "$here/dwc3.cpp" "$tmp/dwc3.o" -o "$tmp/dwc3"
+"$tmp/dwc3"

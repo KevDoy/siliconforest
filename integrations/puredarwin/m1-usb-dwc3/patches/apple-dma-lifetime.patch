@@ -66,7 +66,7 @@
 +{
 +    if (provider->callPlatformFunction("PDAppleUSBDart", false, &fAppleDart, NULL, NULL, NULL)
 +        != kIOReturnSuccess || !fAppleDart) return false;
-+    fBARMap = provider->mapDeviceMemoryWithIndex(0);
++    fBARMap = provider->mapDeviceMemoryWithIndex(0, kIOMapInhibitCache);
 +    if (!fBARMap || fBARMap->getLength() < 0x10000) return false;
 +    volatile UInt32 *core = (volatile UInt32 *)fBARMap->getVirtualAddress();
 +    if ((core[0xc120 / 4] & 0xffff0000) != 0x33310000 ||
@@ -112,7 +112,7 @@
          strcmp(provider->getName(), kTegraXHCIName) != 0)
          return NULL;
      if (score) *score += 1000;
-@@ -596,6 +639,10 @@
+@@ -596,15 +639,19 @@
  
  bool RavynXHCIPort::start(IOService *provider)
  {
@@ -122,7 +122,17 @@
 +    if (!fRemovalLock) return false;
      fPCI = OSDynamicCast(IOPCIDevice, provider);
      fProvider = provider;
++    fProvider->retain();
      fDMAMask = fPCI ? 0xFFFFFFFFFFFFFFFFULL : 0xFFFFFFFFULL;
+     fNonCoherent = (fPCI == NULL);
+     gXHCIUseIOLog = gXHCIUseIOLog || fNonCoherent;
+     if (!fPCI) XHCI_Log("start on %s", provider->getName());
+     if (!super::start(provider)) return false;
+ 
+-    fProvider->retain();
+     if (fPCI) {
+         fPCI->setMemoryEnable(true);
+         fPCI->setBusMasterEnable(true);
 @@ -645,6 +692,8 @@
          fBARMap = mapUsableBAR(fPCI, kIOPCIConfigBaseAddress0);
          if (!fBARMap) mapBARFromAssignedAddresses(fPCI, &fBARDesc, &fBARMap);

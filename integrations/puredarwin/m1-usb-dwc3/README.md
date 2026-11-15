@@ -40,7 +40,36 @@ search against 4,194,304 independent fragmentation/alignment expectations.
 `make -C ../m1-dcp-dart test` covers the referenced page tables. These tests
 and SDK compilation do not establish MMIO, cache coherency or hotplug on M1.
 
-Still required: T8103 ATC/PIPE/reset and DWC3 lifecycle integration, collection
-build and real direct USB enumeration/HID/read-only storage/DHCP, then ten
-hotplug cycles. SuperSpeed lane calibration follows USB2. See SF-AF for the
+Hardware validation still requires direct USB enumeration/HID/read-only
+storage/DHCP, then ten hotplug cycles. SuperSpeed lane calibration follows
+USB2. See SF-AF for the
 verified baseline and shared-M1 install/recovery rules.
+
+`build-host.nix` adds the actual port-1 `PDAppleUSB` lifecycle personality to
+this bundle; `build-kc.nix` replaces the original xHCI bundle in an isolated
+collection and includes the Type-C snapshot provider. Boot arguments are
+`pdtypec=1 pdusbhost=1`. The daily collection is unchanged. Source and ARM64
+collection build are complete; this host collection is not installed yet.
+
+The lifecycle consumes copied `port-state` snapshots. Failed I2C samples
+preserve the session. It powers/configures only a direct host cable with no
+DP/TBT/USB4 flag; the TS3-only state remains deferred. It resolves and checks
+all port-1 windows, validates tunables before writes, establishes stopped
+controller ownership, parks/reset/powers the PHY, prepares DART, initializes
+DWC3, selects USB2 host after core reset and publishes the xHCI nub. Removal
+requires the child's drain and synchronous termination before PHY shutdown.
+A failed attachment that still owns DMA also blocks shutdown and retry.
+DART faults stop further sessions. Domains/tables live for the kernel.
+
+The DWC3 host-only port checks the DWC_usb31 identity and capability, clears
+PHY suspend during initialization, performs bounded device-half soft reset
+when needed, applies the global-control/2.00a clock-gating workaround and
+Apple CIO settings, disables gadget event DMA, then sets host role/suspend.
+Clock timing defaults are retained as in the T8103 Linux DT, which supplies
+no reference/suspend clock overrides. Host tests cover all role/power-option
+combinations, reset ordering, invalid identities and timeout refusal.
+
+Remaining hardware work starts with a captured first boot and direct USB2
+attachment, followed by enumeration, HID, read-only storage, DHCP and ten
+hotplug cycles. Common tunable/MMIO correctness, DART DMA/cache behavior and
+IOKit removal are not proved by register models or SDK compilation.

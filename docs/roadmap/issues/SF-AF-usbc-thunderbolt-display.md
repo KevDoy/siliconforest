@@ -234,3 +234,35 @@ fragmentation/alignment cases. The ARM64 SDK bundle builds; six repository
 checks pass. This source is **not installed** and no xHCI DMA, enumeration,
 HID, storage mount, DHCP or ten-cycle USB hotplug has been observed. ATC/DWC3
 parent lifecycle integration is the next step; this is not milestone 1 done.
+
+### ATC USB2 and DWC3 lifecycle source, 2026-11-15 02:35Z
+
+The experimental `m1-usb-dwc3/build-kc.nix` now builds the complete host
+bundle plus the Type-C snapshot provider, replacing the original xHCI
+bundle once. The collection passed its segment overlap check (zero pairs).
+`pdtypec=1 pdusbhost=1` enables the port-1 USB2 lifecycle; the daily kernel
+recipe is unchanged. This collection is not installed at this checkpoint.
+
+The `m1-atcphy` port has external reset/clamp, dummy PIPE parking with
+acknowledged live handoff, USB2/common power and status polling, T8103
+post-tunable setup, lanes-OFF/orientation routing and shutdown. Its kernel
+adapter validates the complete ADT common tunable group and actual register
+layout before PHY writes, reads port-1 fuse fields, applies the original
+common-a/AXI2AF/common-b order, prepares paired DART while DWC3 is reset,
+initializes DWC_usb31 and publishes the prepared xHCI nub. USB2 HOST is
+selected after core reset, as required by the current Linux Apple glue.
+DWC3 identity/capability and reset timeouts are checked; gadget event DMA
+is disabled. Removal refuses PHY reset until xHCI drain and synchronous
+termination finish, including the failed-attachment DMA case.
+
+Host ASan/UBSan checks cover 100 USB2 power/orientation cycles, failed PIPE
+acknowledgement, power/tunable failures, 16,384 compact-record cases and
+DWC3 core/reset/role ordering. These are register models, not hardware
+observations. SuperSpeed, DP/Thunderbolt PHY modes and actual USB device
+behavior remain unfinished.
+
+At 02:32Z a read-only M1 sample still reported the dock's Thunderbolt-only
+cable state, no USB2/USB3/DP flags, 3,217 samples and zero errors. The source
+host lifecycle deliberately defers that state; dock USB requires NHI/PCIe
+tunneling. Direct USB devices remain requested from the owner. Work proceeds
+on the Thunderbolt and external-display source/host paths without waiting.

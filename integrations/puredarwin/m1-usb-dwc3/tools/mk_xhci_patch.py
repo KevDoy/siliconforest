@@ -82,7 +82,7 @@ bool RavynXHCIPort::startApple(IOService *provider)
 {
     if (provider->callPlatformFunction("PDAppleUSBDart", false, &fAppleDart, NULL, NULL, NULL)
         != kIOReturnSuccess || !fAppleDart) return false;
-    fBARMap = provider->mapDeviceMemoryWithIndex(0);
+    fBARMap = provider->mapDeviceMemoryWithIndex(0, kIOMapInhibitCache);
     if (!fBARMap || fBARMap->getLength() < 0x10000) return false;
     volatile UInt32 *core = (volatile UInt32 *)fBARMap->getVirtualAddress();
     if ((core[0xc120 / 4] & 0xffff0000) != 0x33310000 ||
@@ -115,6 +115,8 @@ bool RavynXHCIPort::startWorker(thread_continue_t entry)
     s = replace(s, '    } else if (isCompatible(provider, kDWC3Compatible)) {', '''    } else if (strcmp(provider->getName(), "pd,apple-dwc3-host") == 0) {
         if (!startApple(provider)) return false;
     } else if (isCompatible(provider, kDWC3Compatible)) {''')
+    s = replace(s, '    fProvider = provider;', '    fProvider = provider;\n    fProvider->retain();')
+    s = replace(s, '    fProvider->retain();\n    if (fPCI)', '    if (fPCI)')
     # Controller may begin fetching DMA immediately when DCBAAP/CRCR/ERST are written.
     s = replace(s, '    if (!setupDCBAA()', '    fDmaLive = true;\n    if (!setupDCBAA()')
     s = replace(s, '    registerService();\n\n    fHotplugRunning', '    fHotplugRunning')
