@@ -119,7 +119,7 @@ def main():
         report = json.loads(r.stdout)
         (a.packet/'regressions.json').write_text(json.dumps(report, indent=2)+'\n')
         for row in report['programs']:
-            if row['name'].startswith('vt-'):
+            if row['name'] in ('vt-h264', 'vt-hevc'):
                 codec = row['name'][3:]
                 if (decoded(row['stdout']) != decoded(baseline['vt-'+codec+'-hardware']['stdout']) or
                         not re.search(r'VT_SUMMARY samples 300 pictures 300 errors 0 hardware 1\b', row['stdout'])):

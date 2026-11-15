@@ -41,14 +41,68 @@ route=['VTSessionSetProperty','VTSessionCopyProperty','VTSessionCopySupportedPro
 for name in route:s=re.sub(r'\b'+name+r'\b','SFFinch'+name,s)
 p.write_text(s)
 p=root/'VideoToolbox.c';s=p.read_text()
-# No deinterlacer is implemented: a newly loadable client must receive the
-# real unsupported error rather than an ignored processing request.
+# Third-party clients such as VLC use the public string literals, whereas the
+# retained PD constants use their C names. Accept both without changing old ABI.
+require = '    require = dictionary_true(specification, kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder);'
+assert s.count(require)==1
+s=s.replace(require,require[:-1]+\
+ '\n        || dictionary_true(specification, CFSTR("RequireHardwareAcceleratedVideoDecoder"));')
+flag = '    flag = specification ? CFDictionaryGetValue(specification, kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder) : NULL;'
+assert s.count(flag)==1
+s=s.replace(flag,flag+'\n    if (!flag && specification) flag = CFDictionaryGetValue(specification, CFSTR("EnableHardwareAcceleratedVideoDecoder"));')
+# Native literal Require=true + Enable=false refuses creation (-12906), even
+# on a machine with a decoder. Preserve the old PD-key conflict behavior;
+# only the newly supported literal-key configuration gets this native rule.
+s=s.replace(flag,'''    if (dictionary_true(specification, CFSTR("RequireHardwareAcceleratedVideoDecoder"))) {
+        CFTypeRef nativeEnable = CFDictionaryGetValue(specification, CFSTR("EnableHardwareAcceleratedVideoDecoder"));
+        if (nativeEnable && CFGetTypeID(nativeEnable) == CFBooleanGetTypeID() && !CFBooleanGetValue(nativeEnable))
+            return kVTCouldNotFindVideoDecoderErr;
+    }
+'''+flag)
+# A deinterlacing identity is valid only for a proven progressive SPS.
+# Unknown/interlaced input and unknown requested modes still fail explicitly.
+s='#include "SFSPS.h"\n'+s
 anchor='    *sessionOut = NULL;\n'
 assert s.count(anchor)==1
-s=s.replace(anchor,anchor+'''    if (specification && (CFDictionaryContainsKey(specification, CFSTR("FieldMode")) ||
-                          CFDictionaryContainsKey(specification, CFSTR("DeinterlaceMode"))))
-        return kVTPropertyNotSupportedErr;
+s=s.replace(anchor,anchor+'''    Boolean sfProgressiveDeinterlace = false;
+    if (specification && (CFDictionaryContainsKey(specification, CFSTR("FieldMode")) ||
+                          CFDictionaryContainsKey(specification, CFSTR("DeinterlaceMode")))) {
+        CFTypeRef field = CFDictionaryGetValue(specification, CFSTR("FieldMode"));
+        CFTypeRef mode = CFDictionaryGetValue(specification, CFSTR("DeinterlaceMode"));
+        const uint8_t *sps = NULL; size_t bytes = 0, count = 0;
+        if ((field && !CFEqual(field, CFSTR("DeinterlaceFields"))) ||
+            (mode && !CFEqual(mode, CFSTR("Temporal"))) ||
+            CMFormatDescriptionGetMediaSubType(format) != kCMVideoCodecType_H264 ||
+            CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, 0, &sps, &bytes, &count, NULL) ||
+            count < 2 || count > 64 ||
+            !sf_vt_h264_progressive(sps, bytes))
+            return kVTPropertyNotSupportedErr;
+        // Every SPS in the format must prove frame-only coding, not just the
+        // first one: a stream may switch between multiple parameter sets.
+        for (size_t i = 1; i < count; ++i) {
+            if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, i, &sps, &bytes, NULL, NULL) ||
+                !sps || !bytes ||
+                ((sps[0] & 31) != 8 && !sf_vt_h264_progressive(sps, bytes)))
+                return kVTPropertyNotSupportedErr;
+        }
+        sfProgressiveDeinterlace = true;
+    }
 ''')
+# Reject a later interlaced picture as well: no delayed codec reconfiguration
+# can silently turn the progressive identity into unimplemented processing.
+assert s.count('    Boolean timing;')==1
+s=s.replace('    Boolean timing;', '    Boolean timing;\n    Boolean progressiveDeinterlace;')
+assert s.count('    s->format = (CMVideoFormatDescriptionRef)CFRetain(format);')==1
+s=s.replace('    s->format = (CMVideoFormatDescriptionRef)CFRetain(format);',
+            '    s->progressiveDeinterlace = sfProgressiveDeinterlace;\n    s->format = (CMVideoFormatDescriptionRef)CFRetain(format);')
+assert s.count('        image = make_image(s, frame);')==1
+s=s.replace('        image = make_image(s, frame);', '''        if (s->progressiveDeinterlace && (frame->flags & AV_FRAME_FLAG_INTERLACED)) {
+            if (s->callback.decompressionOutputCallback && info)
+                s->callback.decompressionOutputCallback(s->callback.decompressionOutputRefCon, info->refCon,
+                    kVTPropertyNotSupportedErr, 0, NULL, info->pts, info->duration);
+            return;
+        }
+        image = make_image(s, frame);''')
 for name in route:s=re.sub(r'\b'+name+r'\b','SFDecoder'+name,s)
 for name in ['VTCompressionSessionCreate','VTCompressionSessionEncodeFrame','VTCompressionSessionCompleteFrames','VTCompressionSessionInvalidate']:
  s=re.sub(r'\b'+name+r'\b','SFUnsupported'+name,s)

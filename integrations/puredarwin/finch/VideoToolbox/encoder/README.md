@@ -55,3 +55,36 @@ derivation input (provider.json). Source and generated video are ours.
 
 Installed evidence: runs/sffinch/install-VideoToolbox-v2/{qualified,regressions}.json;
 vt-encoder-stage-v3/qualification.json, m5-vt-keys-v1-reference.json.
+
+VLC progressive-field update (2026-11-15): VLC's decoder requests
+Temporal/DeinterlaceFields even for ordinary progressive H264. SFSPS.h
+classifies bounded SPS data. Only frame-only coding permits an identity;
+unknown modes, unknown/interlaced SPS and formats with an unproven parameter
+set fail. All SPS must qualify (maximum64 total parameter sets), and a later
+interlaced software AVFrame reports an error. No deinterlacer is fabricated.
+
+Host ASan/UBSan includes progressive/interlaced/short/null cases and50k bounded
+fuzz inputs. Actual vendor VLC headless used its videotoolbox module for two
+60-frame H264 runs: PDAppleAVD completed120 jobs, zero errors/timeouts/DART
+faults, all contexts released; HAL consumed103424 frames in the open-a run.
+This proves hardware work, not GUI presentation or unique VLC statistics.
+Four300-frame H264/HEVC hardware/software runs then matched all1200 baseline
+PTS, dimensions and MD5 values. Six M1 option cases pass: progressive identity,
+interlaced/unknown rejection, software selection, require hardware and
+contradictory native flags. Export audit retains172/172 symbols.
+
+Existing exported key strings remain unchanged. Additional native literal
+Require/Enable keys match the same Linux-built M5 observations, including
+Require=true plus Enable=false returning-12906. Native software/progressive
+sessions reject the hardware-use query with-12900; the reference probe records
+that as unknown, never hardware=false. The required-hardware native case
+reports hardware=true. The M1 strict probe requires a supported hardware-use
+query. No AVE action is involved.
+
+Evidence: runs/sffinch/vlc-player-hardware-v2,
+vt-progressive-regressions-v1/qualification.json,
+vlc-compat-stage-v5/candidate.json, m5-vt-options-v2-results.json.
+The separate canonical update packet is install-VideoToolbox-progressive-v1;
+its qualified.json, when present, records the cold one-framework installation
+and consumer results. The earlier installed receipt above refers to the prior
+software-compression provider, which rejected every deinterlacing request.
