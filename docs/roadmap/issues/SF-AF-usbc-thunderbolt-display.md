@@ -1,11 +1,11 @@
 # SF-AF: USB-C, Thunderbolt and external display on J293
 
-Owner: CODEX-TB. Survey started 15 November 2026. **No USB enumeration,
-external display or Thunderbolt operation has been established on SiliconForest.**
+Owner: CODEX-TB. Survey started 15 November 2026. **No dock PCI/USB enumeration or external display has been established
+on SiliconForest; the ACIO M3 firmware stage is now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 07:11Z)
+## Current target and observed state (owner change; updated 07:34Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,12 +15,13 @@ its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
 **Observed in Darwin:** port-1 Type-C APP/status reads and TBT-only cable
-flags; USB04 is restored with internal desktop/Wi-Fi intact. CIO01 failed
-preflight; CIO02 reached M3 SYSLOG reception, then panicked in an unaligned
-I/O-memory copy. RTKit-ready completion has not been observed. **Not observed:** NHI
+flags; CIO03D is installed with internal desktop/Wi-Fi intact. CIO01 failed
+preflight; CIO02 panicked in an unaligned SRAM I/O copy. The corrected CIO03D
+now reports RTKit ready, M3 state 0x01000000, NHI HOP_COUNT 12, IRQ enable 0,
+shared PHY owned, and no errors/quarantine. NHI DMA/domain remains inactive. **Not observed:** NHI
 up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
 enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
-The 30 CM/library/native/devres/NHI objects, PHY/calibration, DART, crossbar and
+The 31 CM/library/native/devres/NHI/PM objects, PHY/calibration, DART, crossbar and
 external-display work below are source/host/SDK evidence, not those hardware
 acceptance results. DESK5's second-output userland half is built; K1–K13
 remain the kernel contract, including per-CRTC flip IDs and external overlay.
@@ -912,3 +913,48 @@ clearing addresses, joins IRQ and worker before retirement, and quarantines
 all mappings on failure. Domain removal owns its release; no second put is
 issued. Native IORegistry/PM provider and combined kext linkage remain work
 in progress; these compiled bridge objects are not an installed NHI or dock.
+
+
+### CIO03D observed firmware-ready; next native CM build (07:34Z)
+
+The unchanged CIO03 capsule was finally installed in CIO03D. Normal Linux
+transition/upload/install succeeded without preinstall UART routing; capture
+started after the install checkpoint. This supports avoiding the earlier
+routing loop but does not prove its role in the refused/unreachable attempts.
+The owner now separately authorizes removal of Linux SSH lock-outs at the
+next normal visit, with no extra reboot; findings/changes will be in SF-R.
+
+At 07:26:09 the M1 reports RTKit ready, firmware state 0x01000000, twelve NHI
+rings and interrupt-enable zero, with stage error zero, no quarantine and
+owned TBT PHY. The event-driven snapshot consumer made 62 checks for 61
+Type-C samples. Standard desktop/Wi-Fi/inject are present; the owned UART
+reader was stopped before releasing locks. This is actual M3 firmware-stage
+success and hardware qualification of the SRAM-copy correction. It is not
+NHI DMA, host/dock-router enumeration, authorization or a tunnel.
+
+A 60-second read-only probe gives printed non-idle kernel-thread deltas of
+2.70% of one core and aggregate CPU idle 97.83%. The dominant 2.08% worker
+is symbolicated against unchanged module UUIDs as PDAppleNVMeRW's timed
+lock sleep, the same worker identified in k2/USB04. Warm fixed work remains
+83.7 ms and 100k syscalls 14.5 ms. The printed-thread threshold omits tiny
+individual deltas; this is not a precise all-thread task CPU total. Load
+average still around 1.1; the original AppKit timing regression is not claimed
+resolved, and NVMe gates/fences were not changed.
+
+The next source target links native IORegistry publication/final release,
+actual runtime OS sysctls, native AIC/DART fault handling, and coherent DMA
+callbacks into PDAppleCIO. Its cable-held power policy tracks usage/disable
+state and records autosuspend hints without reporting hardware suspend.
+The production policy passes failed-XDomain cleanup, 10,000 balanced router
+sequences, suspend refusal, under/overflow and wake-policy host tests.
+Raw ADT DROM bytes are copied at runtime into a private OF cache to bypass
+LinuxKPI's numeric endian restoration; no DROM or identity is shipped.
+
+The larger collection first exceeded the existing KC reservation. Only this
+CM variant now dead-strips unreachable functions, with every BSD linker-set
+member explicitly protected. Binary comparison retains all 29 SYSINIT and 11
+SYSUNINIT targets in order, seven C++ initializers and the native metaclasses.
+The collection fits its original address range and passes the overlap check;
+boot.bin is unchanged. Generic compatibility UUID constants are privately
+namespaced to avoid a duplicate symbol. The firmware-only build interface
+is retained. Native CM is an explicit pdcio_cm=1 opt-in and has not run on M1.

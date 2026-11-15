@@ -46,7 +46,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
   installPhase = ''
     mkdir -p "$out/objects"
     find build-nix/src/Kernel/Extensions/PDThunderboltCM/CMakeFiles/PDThunderboltCM.dir -name '*.o' -exec cp {} "$out/objects/" \;
-    expected=${if full then "30" else "14"}
+    expected=${if full then "31" else "15"}
     test "$(find "$out/objects" -name '*.o' | wc -l)" -eq "$expected"
     ${if full then "test -f \"$out/objects/domain.c.o\"" else "test ! -f \"$out/objects/domain.c.o\""}
     mkdir -p "$out/nix-support"

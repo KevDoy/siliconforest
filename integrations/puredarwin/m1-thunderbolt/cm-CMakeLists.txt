@@ -13,8 +13,11 @@ set(lkpiopt "SHELL:-include ${FBSDKPI_DIR}/pd/fbsd-extra/pd_lkpi_pre.h"
     ${drmopts} -Werror=implicit-function-declaration)
 # Object-target validation includes the same private LinuxKPI devres unit a
 # future kext's layer will compile once, not a second parallel devres runtime.
-set(sources "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_device.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_registry.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_dma.c"
-    "${FBSDKPI_DIR}/freebsd/linuxkpi/common/src/linux_devres.c")
+set(sources "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_device.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_registry.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_dma.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_pm.c"
+)
+if(NOT PD_TB_CM_EMBEDDED)
+    list(APPEND sources "${FBSDKPI_DIR}/freebsd/linuxkpi/common/src/linux_devres.c")
+endif()
 set(cmcore cap clx ctl dma_port lc path property tmu tunnel usb4)
 if(PD_TB_CM_FULL)
     list(APPEND sources "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_nhi.c")
@@ -29,5 +32,5 @@ foreach(f ${cmcore})
 endforeach()
 _fbsdkpi_objects(PDThunderboltCM SOURCES ${sources}
     INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/driver" "${CMAKE_CURRENT_SOURCE_DIR}/pininc" ${lkpiinc}
-    DEFINITIONS at_least=static CONFIG_USB4=1 FBSD_DRIVER=1 _XOPEN_SOURCE ${drmdefs} KBUILD_MODNAME="thunderbolt" LINUXKPI_PARAM_PREFIX=thunderbolt_
+    DEFINITIONS guid_null=pd_tb_guid_null uuid_null=pd_tb_uuid_null at_least=static CONFIG_USB4=1 FBSD_DRIVER=1 _XOPEN_SOURCE ${drmdefs} KBUILD_MODNAME="thunderbolt" LINUXKPI_PARAM_PREFIX=thunderbolt_
     OPTIONS ${lkpiopt} "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_cm_compat.h" -Os -Wno-everything -Werror=implicit-function-declaration)

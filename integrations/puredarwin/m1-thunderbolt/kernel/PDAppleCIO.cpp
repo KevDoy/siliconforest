@@ -5,6 +5,10 @@
  * Firmware-ready is distinct from NHI/domain/PCI readiness.
  */
 #include "pd_soc.h"
+#ifdef PD_CIO_CM
+#include "pd_cio_cm.h"
+#include "pd_cd321x.h"
+#endif
 #include "pd_cio_rtkit.h"
 #include "pd_cio_tunables.h"
 #include "pd_usbc_phy_lease.h"
@@ -36,6 +40,12 @@ class PDAppleCIO: public IOService {
  uint64_t drainToken,revokeToken;
  uint32_t accepting,drained;
  bool power,rtkitTouched,firmwareReady,quarantined,stopping;
+#ifdef PD_CIO_CM
+ PDCIOCM *cm;
+ uint32_t cmLive;
+ static bool cmPowered(void *);
+ int startCM();
+#endif
  int mapResources();
  int preparePCIe();
  int deassertReset();
@@ -195,6 +205,12 @@ int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
    // NHI/domain attachment is a separate, still absent stage. No ring/DART
    // is programmed and no PCI device is published by this firmware stage.
    setProperty("nhi-ready",false);
+#ifdef PD_CIO_CM
+   if(pd_rtkit_platform_bootarg("pdcio_cm",0)==1){
+    __atomic_store_n(&cmLive,1,__ATOMIC_RELEASE);
+    ret=startCM();if(ret)return ret;
+   }
+#endif
    return 0;
   }
   IODelay(100);
@@ -203,6 +219,10 @@ int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
 }
 int PDAppleCIO::stopFirmware()
 {
+#ifdef PD_CIO_CM
+ if(cm){int ret=pd_cio_cm_stop(cm);if(ret)return ret;}
+ __atomic_store_n(&cmLive,0,__ATOMIC_RELEASE);setProperty("nhi-ready",false);
+#endif
  firmwareReady=false;setProperty("rtkit-ready",false);
  if(rtkitTouched){
   int ret=pd_cio_rtkit_stop(rtkit);if(ret)return ret<0?-ret:ret;
@@ -296,3 +316,30 @@ void PDAppleCIO::free()
  OSSafeReleaseNULL(tunableData);OSSafeReleaseNULL(cpuEntry);
  rc.unmap();nhi.unmap();pdf.unmap();adapter.unmap();sram.unmap();reset.unmap();IOService::free();
 }
+
+#ifdef PD_CIO_CM
+bool PDAppleCIO::cmPowered(void *ctx)
+{
+ auto s=(PDAppleCIO *)ctx;
+ if(!__atomic_load_n(&s->cmLive,__ATOMIC_ACQUIRE))return false;
+ // Actual ATC-CIO, AON-CIO and AUSB-CIO power states, plus NHI accessibility.
+ const unsigned gates[]={0x458,0x460,0x468};
+ for(unsigned off:gates)if((s->reset.r32(off)&0xf0)!=0xf0)return false;
+ return (s->nhi.r32(0)&0x3ff)==12;
+}
+int PDAppleCIO::startCM()
+{
+ auto typec=getProvider()?getProvider()->getProvider():NULL;
+ OSObject *value=typec?typec->copyProperty("port-state"):NULL;
+ auto data=OSDynamicCast(OSData,value);pd_cd321x_cable_snapshot snapshot={};uint32_t cable=0;
+ int ret=data?pd_cd321x_snapshot_decode(data->getBytesNoCopy(),data->getLength(),&snapshot):ENODEV;
+ if(!ret)ret=pd_cd321x_tbt_cable_info(&snapshot,&cable);
+ OSSafeReleaseNULL(value);if(ret)return ret;
+ // USB4 EUDO support is a separate stage. Never guess a TBT cable word.
+ if(!cm)cm=pd_cio_cm_create(this,this,cmPowered);
+ if(!cm)return EIO;
+ ret=pd_cio_cm_start(cm,(void *)nhi.va,(void *)pdf.va,cable);
+ setProperty("nhi-cable-info",cable,32);setProperty("nhi-ready",ret==0);
+ return ret;
+}
+#endif

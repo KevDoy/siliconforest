@@ -17,3 +17,14 @@ add_fbsdkpi_driver(PDAppleCIO CLASS PDAppleCIO
  XNU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/PDAppleCIO.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/pd_cio_dart.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/pd_soc.cpp" "${RTKIT}/PDRtkitPlatform.cpp")
 target_include_directories(PDAppleCIO.kext PRIVATE "${RTKIT}" "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# Optional actual native CM linkage. Its private devres implementation already
+# belongs to this driver's layer; do not link a second parallel copy.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../PDThunderboltCM/CMakeLists.txt")
+ set(PD_TB_CM_FULL ON)
+ set(PD_TB_CM_EMBEDDED ON)
+ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../PDThunderboltCM" "${CMAKE_CURRENT_BINARY_DIR}/cm")
+ target_sources(PDAppleCIO.kext PRIVATE $<TARGET_OBJECTS:PDThunderboltCM> "${CMAKE_CURRENT_SOURCE_DIR}/PDCIOCM.cpp")
+ target_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_CM=1)
+ target_link_options(PDAppleCIO.kext PRIVATE "LINKER:-dead_strip")
+endif()

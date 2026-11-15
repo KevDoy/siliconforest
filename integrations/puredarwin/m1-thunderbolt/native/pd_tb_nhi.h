@@ -3,6 +3,7 @@
 #define PD_TB_NHI_H
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 /* Native owner supplies mapped, powered ACIO1 resources and resolved AIC
  * handles. This interface does not map registers or acquire a PHY lease.
  * All resources/context must remain valid until reboot, including on errors.
@@ -18,6 +19,8 @@ struct pd_tb_nhi_config {
 #ifdef __cplusplus
 extern "C" {
 #endif
+int pd_tb_nhi_device_create(void *dt_entry,const void *raw_drom,size_t length,void **device);
+int pd_tb_nhi_bus_init(void);
 int pd_tb_nhi_create(const struct pd_tb_nhi_config *,void **);
 int pd_tb_nhi_start(void *,uint32_t cable_info);
 /* Failure retains context, DMA and controller ownership. No timeout-free

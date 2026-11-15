@@ -2,8 +2,9 @@
 
 `build-objects.nix` compiles the NHI/ACIO/DP-IN backend with the ARM64 SDK.
 It is **objects only**, not a loaded driver, NHI, connection manager or
-working tunnel. CIO02 reached native M3 SYSLOG reception and panicked in an SRAM I/O copy;
-the diagnosed correction is built, with target retry pending. NHI has not run.
+working tunnel. CIO02 panicked in an SRAM I/O copy. Corrected CIO03D is observed on M1
+with RTKit ready, M3 state 0x01000000 and twelve inactive NHI rings. The
+NHI ring engine/software manager has not run.
 The owner-attached TS3 Plus remains a Thunderbolt-only Type-C cable flag in
 Darwin; its USB/PCIe/Ethernet/display are not enumerated there.
 
@@ -222,3 +223,18 @@ is explicitly unsupported until host providers are bound. The private staged
 ring engine verifies VALID/IRQ readback before address clearing and joins
 IRQ/work before DMA retirement. The 30-object SDK target compiles this bridge;
 it neither installs those callbacks nor establishes NHI or dock function.
+
+
+`build-cm-kext.nix` now links the actual native IORegistry/PM/DART/IRQ callback
+provider with the Linux manager. `pdcio_cm=1` opts in after the firmware stage.
+It checks actual CIO power states, registers/join native AIC handlers, pins
+controller power for the cable, and retires DART mappings explicitly. Runtime
+OS strings come from kernel sysctls, avoiding the compatibility layer's local
+osrelease string. Host DROM is a runtime-only raw-byte private OF property.
+
+Only this larger variant dead-strips unreachable code after marking BSD
+linker sets no-dead-strip. All 29 SYSINIT/11 SYSUNINIT targets and order, seven
+C++ initializers and metaclasses are retained; the frozen collection now fits
+its existing reservation. This does not change boot.bin or other modules.
+The firmware-stage CIO03D is observed ready on M1; the combined CM kext is
+built only. PCIe/DP hooks still refuse until native tunnel providers exist.

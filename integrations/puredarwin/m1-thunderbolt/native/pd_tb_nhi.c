@@ -6,6 +6,7 @@
  * Native resource/DMA/PM/publication installation must precede this bridge.
  */
 #include "pd_tb_nhi.h"
+#include <linux/of.h>
 #include "pd_tb_dma.h"
 #include "driver/tb.h"
 #include "driver/nhi.h"
@@ -160,3 +161,29 @@ int pd_tb_nhi_stop(void *ctx)
  for(unsigned i=0;i<12;++i)if(s->tx[i] || s->rx[i])return -EBUSY;
  return pd_tb_dma_drain_status();
 }
+
+/* The parent device is a lifetime/reference anchor for the actual native
+ * owner. Its IORegistry node is that owner, not a second synthetic host. */
+struct device_node *pd_of_node_for_entry(void *entry);
+static void parent_release(struct device *dev){kfree(dev);}
+int pd_tb_nhi_device_create(void *entry,const void *drom,size_t bytes,void **out)
+{
+ if(!entry || !drom || bytes!=76 || !out || !pd_tb_native_ready())return -EINVAL;
+ struct device *dev=kzalloc(sizeof(*dev),GFP_KERNEL);if(!dev)return -ENOMEM;
+ device_initialize(dev);dev->release=parent_release;
+ struct device_node *original=pd_of_node_for_entry(entry);
+ struct device_node *node=original?kzalloc(sizeof(*node),GFP_KERNEL):NULL;
+ struct property *raw=node?kzalloc(sizeof(*raw)+bytes,GFP_KERNEL):NULL;
+ if(node && raw){
+  // Private node/cache: preserve raw ADT byte order. LinuxKPI's generic
+  // to_fdt otherwise swaps every non-string property divisible by four.
+  *node=*original;node->pd_next=NULL;node->properties=raw;
+  raw->name=kstrdup("apple,thunderbolt-drom",GFP_KERNEL);
+  raw->length=bytes;raw->value=raw+1;memcpy(raw->value,drom,bytes);
+  if(raw->name)dev->of_node=node;
+ }
+ int ret=dev->of_node?dev_set_name(dev,"acio1"):-ENODEV;
+ if(ret){put_device(dev);return ret;}
+ *out=dev;return 0;
+}
+int pd_tb_nhi_bus_init(void){return tb_domain_init();}
