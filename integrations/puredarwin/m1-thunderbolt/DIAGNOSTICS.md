@@ -1,8 +1,14 @@
-# Next exclusive dock window
+# Deferred exclusive dock window
 
 Machine trials are paused by the owner on 2026-11-15. This document authorizes
 no install, reboot, Linux visit or target workload. CIO40TX finished and qualified
 NON-AVE CIO29 was restored; diagnostic artifacts below are local builds only.
+
+The owner subsequently made Firefox the first priority. This is the retained
+LATER dock plan, superseded for the next window by the single combined
+AVD/K14/HID image and Linux reference in
+[../m1-firefox-kernel/README.md](../m1-firefox-kernel/README.md).
+No diagnostic-first or separate K14 install is currently planned.
 
 ## Captured result and source comparison
 

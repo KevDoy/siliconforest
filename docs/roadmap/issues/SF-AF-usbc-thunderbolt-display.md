@@ -3223,7 +3223,7 @@ only the diagnostic files plus the existing IRQ health fix, with no uninstalled
 USB registration imported into the Ethernet baseline. All six required repo
 checks pass. It is **uninstalled**, no capsule uploaded and no boot scheduled.
 
-### Plan for the next exclusive window
+### Superseded dock-only window plan (historical)
 
 First allow12min for one diagnostic trial including normal29 recovery: fresh
 coordination/owner guards and core→GUI→bench order; one normal Linux installer
@@ -3319,3 +3319,59 @@ before DRM component binding. The RTKit shared host is an IRQ/workloop anchor;
 mailboxes are separately keyed and validated per consumer, so that shared anchor
 alone is not a demonstrated mailbox-routing bug. These are remaining offline
 integration requirements, with no new machine trial implied.
+
+### Firefox-first combined kernel prepared offline, 2026-11-15
+
+The owner's latest instruction supersedes diagnostic-first and isolated-K14
+installation plans. The next authorized exclusive window starts with Firefox:
+ONE combined kernel on qualified NON-AVE29, containing AVD imported GPU capture
+buffers/cache/IRQ, K14 pinch and HID readiness. No failing Ethernet, uninstalled
+dock diagnostic, DCP or AVE changes are coupled into this image. No machine
+action, SSH, target lock, reboot or Linux visit occurred in this preparation.
+Last verified installed state remains29 restored21:52:25Z with standard desktop,
+UART reap and released locks recorded above.
+
+| Feature | Observed on M1 | Prepared offline only |
+|---|---|---|
+| Decoder/GPU shared backing | Installed AVD reports importcap0; strict zero-copy client refuses; fallback copies pixels | Exact media import contract, retained original BO/task/UPL, DART rollback/quarantine, IRQ41b6, actual Force CMO handoffs; three-file patch over all52 checked SDK155 files |
+| Pin/cache ownership | No native exported-BO import, task-death or old/new-visibility qualification | Frozen XNU/DRM pager and no-copy kernel mapping audit; actual native teardown/decode failure tests; real DC CIVAC API resolved through final ARM64 stub/chained pointer |
+| Pinch/rotation | No physical pinch installed or observed | K14 on exact installed Touch Bar variant; only4 multitouch files change, transport/Fn/keyboard preserved; actual decoder3601 angle oracles/lifecycle tests and native SDK |
+| HID readiness/timing | DESK7 reports near8ms, no drops/bursts; its reader scheduling lateness fixed in desktop stream | Native-publication rev002 preserved with FIONREAD/select; actual prepared-source4000 races plus pre-publication rejection; no kernel report-cadence change |
+| Combined image | Not installed/uploaded/scheduled |57 executable modules, exactly AVD/SPIHID/IOHIDFamily changed,54 other UUIDs including kernel/GPU/DRM/DCP/NVMe/CIO identical; all56 kext non-debug sections preserved; zero overlaps |
+| Firefox Linux reference | No Linux score captured | Local installed-Firefox runner reuses stock BrowserBench/Marionette code, fresh profile/no injected input/no browser install; visible viewport/scale/renderer/power captured |
+
+The detailed source/API audit, recipes, actual-source host checks and full window
+sequence are in [m1-firefox-kernel/README.md](../../../integrations/puredarwin/m1-firefox-kernel/README.md)
+and [SOURCE-AUDIT.md](../../../integrations/puredarwin/m1-firefox-kernel/SOURCE-AUDIT.md).
+The immutable AVD snapshot includes the earlier IRQ ownership fix; its upstream
+hardware frame40 cause remains unproved. CPU/GPU writes are excluded during
+decoder ownership by the cooperative DMA contract. Real GPU-completion leases
+must precede reuse; a header usecount alone is insufficient. Native pin/cache
+admission and Force-CMO performance remain hardware tests, not source claims.
+
+Local combined collection:
+ /nix/store/0lam9mk3qhihx7ziwi6q8wm77wv8y7dv-puredarwin-kc-firefox29-import-pinch-readiness.
+Collection SHA25630e04e6209d0147b604b6616cff7cdb20ec97d597949ab486e58ef40676ed1a3.
+Private packed capsule SHA2560befc6ffb6473f050b63c81453f52a3e61cfc4bbbb88721fc8cbf8e73a4caa82;
+its605-byte boot arguments and boot.bin are byte-identical to29, noAVE/pdave.
+Qualified29/a149e487… is the last verified installed image and recovery.
+
+#### Plan for the next owner-opened exclusive window
+
+Allow about50min: fresh coordination/owner checks2min; the normal Linux installer
+visit includes up to30min stock Speedometer3.1/MotionMark1.3/JetStream2.2 reference
+ONLY if Firefox exists; single combined install/UART/one-time SiliconForest boot
+3min; actual standard desktop/CLI admission2min; media/FX import-old/new/held64/
+pool-pressure/flush/task-exit/codec-hash/PTS/1080p60/4K30 qualification8min;
+physical pinch/rotate and ordinary input regression2min; retain results,
+qualified29 recovery if needed, standard-state verification/UART reap/unlock3min.
+No browser install or extra Linux reboot for the reference; retain incomplete/
+timeout results and mark viewport/scale differences. No synthetic input takes
+the owner's pointer/focus. No second speculative candidate is installed if a
+prerequisite fails; preserve the CPU-copy fallback and recover.
+
+The local dock41 diagnostic remains ready for a LATER explicitly opened dock
+window; the earlier12min sequence is retained as a dock plan, not the next
+Firefox window. USB/physical Keychron, DP provider graph/HPD/EDID/Samsung and10
+physical dock cable cycles remain unobserved. Original idle regression and
+compositor-specific SIGSTOP finding remain unresolved as recorded above.
