@@ -1,5 +1,10 @@
 # Staged MediaToolbox utilities
 
+**QuickTime work parked 2026-11-15 by owner direction:** Firefox media takes
+priority. Keep existing source, stages and installed providers unchanged.
+The unestablished FigAssetCreateWithURL ABI remains unresolved; no guessed
+success implementation or new QuickTime load attempt is scheduled.
+
 Linux/Nix builds use our own declarations and the installed media families.
 Five of QuickTime's seven reviewed imports are provided, with real operations:
 

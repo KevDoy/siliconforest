@@ -1,5 +1,10 @@
 # Staged QuickTime private dependencies
 
+**Parked 2026-11-15 by owner direction:** Firefox media is the priority.
+Keep all existing stages, evidence and installed providers. The last load
+attempt still stops at missing Quartz.framework; no QuickTime startup or
+playback is claimed and no additional launch is queued.
+
 This builds eight minimal private frameworks from Linux/Nix and our own/PD
 OSS declarations. No Apple SDK or native implementation bytes are inputs.
 These providers do not supply Apple's private services:

@@ -1,5 +1,9 @@
 # Third-party media target
 
+**Parked 2026-11-15 by owner direction:** work is reassigned to Firefox media.
+Keep existing installs and evidence. Fresh VLC headless v7 and GUI v22 remain
+host-prepared, unexecuted, with no queued M1 launch. No input injection.
+
 Current bounded results and the owner-input invalidation are recorded in
 [the15 November qualification](VLC-2026-11-15.md). The step history below is
 retained; its earlier headless results are not a current visible-playback claim.

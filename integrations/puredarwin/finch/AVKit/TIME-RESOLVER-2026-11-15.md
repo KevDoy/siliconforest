@@ -30,10 +30,22 @@ observations from that sequence do not establish an independent rounding or
 notification rule. Nor does a single at-end flag establish its full threshold
 formula. The raw sequence is retained rather than reduced to invented rules.
 
+V5 adds a0.1s run-loop advance after each boundary assignment and a3.001s
+vector. It returned0 in3.551s, portable SHA
+`2f00114b82a9a654b6e169de519d6734884b912fab326f59ccb62791c2ffe7e8`.
+For this five-second file, the at-end flag is false at3s and true at3.001s,
+for both interval1 and0.5. After the advance the actual player clamps negative
+and beyond-end seeks to0 and5, while the resolver can retain the requested
+out-of-range value. The transient target-clamp observations in v4 are not a
+permanent getter-clamping contract. A precision change can also reset the
+resolver's cache before the player's time changes. These observations rule
+out a simple always-read-through adapter; no KVO/settling guarantee follows
+from waiting a fixed0.1s.
+
 No `AVPlayerControllerTimeResolver` class is supplied just to resolve its name.
 Before a real port, the remaining work is to establish settled seeks,
 precision/end-time behavior and the controller/KVO notification linkage, then
 compare the same Linux-built program on the staged M1 provider. Raw native
-results remain in `runs/sffinch/m5-avkit-time-resolver-v{1,2,3,4}-reference.json`;
+results remain in `runs/sffinch/m5-avkit-time-resolver-v{1,2,3,4,5}-reference.json`;
 v1/v2 have no player, and v3/v4 use only our own local fixture. None is a GUI
 or M1 playback qualification.

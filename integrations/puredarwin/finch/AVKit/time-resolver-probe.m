@@ -93,13 +93,15 @@ int main(int argc,char **argv) {
    [r setTargetTime:1.375];pump(.1);printState(r,"attached-target",0);
    [r setCurrentTimeWithinEndTimes:2.125];pump(.1);printState(r,"attached-current-within",0);
    [r setTargetTimeWithinEndTimes:3.625];pump(.1);printState(r,"attached-target-within",0);
-   const double ends[]={-1,2.9,3,3.49,3.5,3.51,4,4.9,5,5.1,6};
+   const double ends[]={-1,2.9,3,3.001,3.49,3.5,3.51,4,4.9,5,5.1,6};
    for(unsigned n=0;n<sizeof(ends)/sizeof(ends[0]);n++){
     [r setCurrentTime:ends[n]];printState(r,"attached-end-boundary",n);
+    pump(.1);printState(r,"attached-end-settled",n);
    }
    [r setInterval:.5];printState(r,"attached-interval",0);
    for(unsigned n=0;n<sizeof(ends)/sizeof(ends[0]);n++){
     [r setCurrentTime:ends[n]];printState(r,"attached-half-interval",n);
+    pump(.1);printState(r,"attached-half-settled",n);
    }
    [r setResolution:.25];printState(r,"attached-resolution",0);
    [r setPlayerController:nil];printState(r,"detached",0);

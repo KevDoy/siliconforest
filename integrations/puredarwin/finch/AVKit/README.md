@@ -1,5 +1,11 @@
 # Finch AVKit, prefix stage
 
+**Parked 2026-11-15 by owner direction:** Firefox media takes priority. Keep
+all existing source, stages, raw failures and installed providers. The bounded
+controller and native resolver/menu probes remain for resumption. No further
+AVKit/QuickTime/VLC launch is queued; unresolved behavior is not implemented
+merely to fill symbol names.
+
 Build `build.nix` and `tests.nix` with the Linux/Nix toolchain. This ports the
 whole Finch `userland/AVKit/AVKit.m` against our own declarations and the staged
 Finch player sources in `../AVFoundation/player`. No Apple SDK input.
