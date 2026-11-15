@@ -3071,3 +3071,65 @@ performs no capture, restart, install or reboot. At this entry it has not run;
 the original idle/AppKit cause remains unresolved. The compositor's Shm drop
 worker uses a blocking Rust channel in source, so its raw CPU cost must not
 be mislabeled an explicit polling loop without further evidence.
+
+### CIO39NC actual trial: link remains up; DHCP still fails
+
+After DESK7's virtual-seat installation and fresh inactive owner checks,
+CIO39NC ran21:08:40–21:14:32Z. The normal installer completed21:10:15Z;
+UART capture preceded its first boot. Authorization and the actual12-function
+native inventory succeeded again, followed by the real mapper/MSI/BME path.
+The I210 interface was UP/running with1 Gb/s link and no mutex panic.
+Two DHCP DISCOVER writes were accepted after four initial EPERM refusals,
+but no OFFER/ACK, leased address or packet completion appeared. Native BSD
+packet counters remained zero, with2048 output bytes. The requested-normal-NC
+property and2 direct/258 bounce mappings were observed. This does not prove
+actual PTE attributes or establish a cache root cause. Stage(b) remains open.
+
+The same Linux visit observed no dma-coherent property throughout the live
+PCIe-C ancestry and actual kernel support for CPU/device DMA synchronization.
+All three ethtool commands were unavailable (FileNotFoundError); there is no
+Linux register-dump comparison from this visit. No Linux configuration changed.
+
+The bounded trace appeared in neither native dmesg nor the retained UART.
+Source review found its FreeBSD printf is redirected through freebsd_printf
+to dprintf, which returns when fbsdkpi_debug is absent. Thus missing messages
+are a diagnostic failure, not proof that descriptor routines were never called.
+The next source delta uses the existing unconditional pdos_log seam with the
+same finite budgets and adds the IOKit/FreeBSD transmit result. It adds no
+timer, polling worker, MMIO write or global debug boot argument. Native build
+and checks are still required before another trial.
+
+The failure was preserved and the normal installer restored qualified NON-AVE
+CIO29 at21:14:31Z; actual.next/socket/inject checks passed and the owned UART
+reader was reaped21:14:32Z before the boot locks released. No USB/display or
+hot-unplug success is claimed. The separately guarded CLI idle repeat started
+on this restored kernel at21:14:32Z and has no qualified result at this entry.
+
+The corrected unconditional logger and both transmit handoff sites subsequently
+native-built from the exact CIO39NC Ethernet tree. The source comparison has
+four changed files, two added private headers and3757 unchanged files; no
+functional DMA/packet policy or other kernel module is changed. Formatter
+truncation and the existing concurrent80,000-call/eight-record budget fixture
+pass with ASan/UBSan. All six required repository checks pass. This SDK is
+still uninstalled; the next collection must preserve the other57 modules.
+
+### Owner-idle repeat completed on restored CIO29
+
+The replacement measurement ran21:14:33–21:15:33Z. Owner state remained
+inactive, real pointer/key counters stayed zero, the actual compositor PID
+remained130, and the native process preflight found no yes load. There was no
+concurrent core installation or other GUI test in the coordination log.
+The sample used the restored CIO29 kernel with DESK7 and the20:55 Foundation
+version, so it is not interchangeable with the discarded20:21 measurement.
+
+Visible non-idle kernel threads consumed2.196% of one CPU; machine idle
+averaged98.310%. NHI counts rose by12TX+12RX interrupts around the two explicit
+snapshot queries, with no observed storm. The largest unnamed kernel thread
+used1.573%, and PDM1SPIHID used0.340%. The compositor consumed3.393% of one CPU:
+Shm drop1.987%, main0.961%, HID reader0.442%; its interrupt-wakeup rate was
+about433/s. The interactive fixed CPU loop took83.676–84.345ms and the syscall
+loop14.494ms. These are current measured values, not an AppKit regression test.
+The earlier k2/USB04 comparison and shared NVMe hot stack remain scoped
+negative evidence for a new Thunderbolt polling loop. The original reported
+AppKit slowdown's cause remains unresolved; neither the host tests nor this
+replacement sample establish a fix.

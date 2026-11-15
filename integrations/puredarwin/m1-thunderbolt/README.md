@@ -521,6 +521,12 @@ TX encapsulation, doorbell, completion query and RX-query site. Reads use
 the existing retained physical-access guard and avoid destructive interrupt
 and statistics registers. There is no new timer, worker or MMIO write.
 It is a diagnostic SDK, outside the daily boot profile.
+The first hardware trial exposed a logging mistake: FreeBSD `printf` reaches
+debug-only `dprintf`, and the normal kernel has no `fbsdkpi_debug` argument.
+Its missing records do not establish missing descriptor calls. The revised
+preparation formats bounded records through the existing unconditional
+`pdos_log` seam and records the IOKit/FreeBSD transmit handoff too. It does
+not enable global debug logging or change packet admission or MMIO writes.
 
 The dock USB preparation inherits the combined `build-host.nix` bundle,
 retains PDAppleUSB shared-PHY ownership and its exact personality, retains
@@ -532,13 +538,16 @@ and missing-component refusal. A detached SDK built without the broker was
 caught before any USB collection or boot and is not hardware-ready.
 
 
-`build-ethernet-noncoherent-kext.nix` is a separate, uninstalled candidate.
+`build-ethernet-noncoherent-kext.nix` is a separate qualification candidate.
 It requests normal noncacheable WC RAM for the actual owned coherent and
 bounce buffers, retains native DMA translation, and orders copies with DSB SY.
 Frozen XNU mapped-command synchronization does not itself flush CPU caches.
-This variant native-builds and its actual allocator fixtures pass; the pending
-trace collection excludes it. CPU mapping policy is a source hypothesis until
-a real device trial establishes descriptor and packet behavior.
+This variant native-builds and its actual allocator fixtures pass. CIO39NC
+booted it on the M1: the requested cache-policy property and owned mappings
+were observed, with 1 Gb/s link, but DHCP and packet completion still failed.
+Requested attributes do not independently prove actual CPU PTE attributes.
+The first trace was suppressed by the debug-only print path described above;
+no descriptor behavior or cache root cause was established.
 
 
 The prepared PCI USB DMA helper now requests normal-NC owned buffers. PCI

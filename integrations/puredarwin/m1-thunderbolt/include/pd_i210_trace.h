@@ -4,6 +4,26 @@
 #define PD_I210_TRACE_H
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdarg.h>
+#include <stdio.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+void pdos_log(const char *);
+#ifdef __cplusplus
+}
+#endif
+/* FreeBSD printf goes through debug-only dprintf in this shim. Keep this
+ * already-budgeted diagnostic independent of that global boot argument. */
+static inline void pd_i210_trace_log(const char *format, ...)
+{
+    char text[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    pdos_log(text);
+}
 static inline bool pd_i210_trace_take(uint32_t *budget)
 {
     uint32_t value = __atomic_load_n(budget, __ATOMIC_RELAXED);
