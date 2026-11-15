@@ -31,6 +31,15 @@ class PDAppleUSBHostNub : public IOPlatformDevice {
     OSDeclareDefaultStructors(PDAppleUSBHostNub)
 public:
     PDUSBDart *domain;
+    // This is a prepared controller child of PDAppleUSB, not a platform
+    // expert's DT child. IOPlatformDevice's default methods cast the parent
+    // to IOPlatformExpert; bypass those delegations for this synthetic nub.
+    bool compareName(OSString *name, OSString **matched) const override {
+        return IORegistryEntry::compareName(name,matched);
+    }
+    IOReturn getResources() override {
+        return domain && getDeviceMemoryCount()==1 ? kIOReturnSuccess : kIOReturnNotReady;
+    }
     IOReturn callPlatformFunction(const OSSymbol *name, bool wait,
                                   void *a, void *b, void *c, void *d) override {
         if (name && name->isEqualTo("PDAppleUSBDart")) {
