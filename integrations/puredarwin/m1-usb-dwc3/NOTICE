@@ -14,3 +14,8 @@ pd_soc.cpp/.h are referenced from m1-sound (GPL-2.0-only OR MIT), following
 Linux drivers/pmdomain/apple/pmgr-pwrstate.c and m1n1 src/pmgr.c:
   Copyright The Asahi Linux Contributors
 Original notices are retained in the compiled sources.
+
+The patch to RavynXHCIPort retains the upstream MIT license and
+Copyright (C) 2026 ravynOS Project. All rights reserved.
+The linked Apple DMA backend remains GPL-2.0 as described above.
+The new lifetime and IOVA search helpers and patch generator are MIT.

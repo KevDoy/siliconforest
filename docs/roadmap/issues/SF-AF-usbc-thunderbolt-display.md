@@ -212,3 +212,25 @@ TS3 cable reports TB without a direct USB connection, so it must not start
 DWC3. Direct keyboard/storage/Ethernet hardware and a USB-C display adapter
 have not been observed attached; the status file requests them without
 waiting for answers. Milestone 1 remains unfinished.
+
+### xHCI DMA and removal source, 2026-11-15 02:30Z
+
+`m1-usb-dwc3/build-xhci.nix` now SDK-builds a replacement RavynXHCIPort
+with the paired USB1 DART backend. All thirteen xHCI allocation sites and all
+buffer address sites use the adapter on Apple, including MSC bounce payloads.
+The IOVA allocator also honors physical-mask alignment: a 64KiB-aligned CPU
+buffer alone does not keep a translated single-TRB transfer within 64KiB.
+PCI/non-Apple allocation paths remain the upstream path.
+
+Removal closes new call admission and drains retained hotplug/bulk workers
+and active class operations before requiring hardware halt/reset. Failed
+drain/reset retains DMA; `PDAppleUSBDrain` returns busy and the parent may not
+reset the PHY. Old USB bus/storage clients retain the controller until they
+finish, and successful stop aborts transfers and terminates children. The
+provider's `pd-usb-dma-live` property covers partial attachment too.
+
+Host ASan/UBSan checks passed 100 concurrent removal cycles and 4,194,304
+fragmentation/alignment cases. The ARM64 SDK bundle builds; six repository
+checks pass. This source is **not installed** and no xHCI DMA, enumeration,
+HID, storage mount, DHCP or ten-cycle USB hotplug has been observed. ATC/DWC3
+parent lifecycle integration is the next step; this is not milestone 1 done.

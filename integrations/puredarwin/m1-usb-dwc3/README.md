@@ -1,38 +1,46 @@
-# Apple DWC3 / USB DMA port (SF-AF milestone 1, in progress)
+# Apple DWC3 / xHCI port (SF-AF milestone 1, in progress)
 
-`build-dma.nix` builds ARM64 SDK **objects only**. No host controller service
-or kernel collection member is added here yet. None of this DMA domain has
-run on the M1. The active hardware test belongs to `../m1-typec`.
+`build-xhci.nix` builds an experimental replacement RavynXHCIPort bundle
+against the PureDarwin ARM64 SDK. It is not installed or in the daily kernel.
+`build-dma.nix` builds the DMA adapter alone. Neither has performed controller
+DMA on the M1; the installed hardware sampler belongs to `../m1-typec`.
 
-The USB1 domain in `kernel/pd_usb_dart.cpp` shares one table root and allocator
-between ADT `dart-usb1` reg 0 / SID 0 and reg 1 / SID 1, matching the two
-`iommus` entries in Linux's `t8103.dtsi`. Its attach and invalidation sequence
-comes from the existing Linux Wi-Fi DART port; its table implementation is
-the existing `m1-dcp-dart` implementation, referenced at build time. It does
-not reuse the Wi-Fi DART or modify its mappings.
+`patches/apple-dma-lifetime.patch` retains upstream's MIT notices and binds a
+prepared `pd,apple-dwc3-host` IOPlatformDevice. Its parent must initialize the
+ATC PHY, DWC3 core and paired DART before publication; its
+`PDAppleUSBDart` platform function supplies the kernel-lifetime DMA domain.
+The xHCI driver validates DWC_usb31 identity and host role before attaching.
+The same bundle keeps the existing PCI/A733/Tegra paths.
 
-`PDUSBDMABuffer` allocates whole, owned 16KiB pages and gives the host a
-separate DMA address. xHCI's contexts, rings, scratchpads, EP0, interrupt,
-bulk, isochronous and BOT payload buffers all need this allocation path;
-`getPhysicalAddress()` is a CPU physical address, **not** this IOVA. A failed
-TLB invalidate poisons the domain and retains backing rather than recycling
-memory a bank may still translate. The domain's table allocations last for
-the kernel; unloading is unsupported. `prepare()` requires the controller in
-reset and no producer modifying mappings concurrently.
+Every xHCI allocation and buffer address (DCBAA, scratchpad, context, command,
+event, EP0, HID, bulk, isochronous and storage bounce buffers) uses the domain
+on Apple. CPU physical addresses remain distinct from device addresses.
+MSC direct client mapping is rejected by the existing noncoherent path, so
+payloads bounce. Both physical and IOVA alignment honor 64KiB TRB boundaries.
+`tools/mk_xhci_patch.py` regenerates the patch from the reference SDK tree and
+asserts each expected replacement; it does not modify that checkout.
 
-Still required before first host boot:
+The USB1 domain shares one table root and allocator between ADT `dart-usb1`
+reg 0 / SID 0 and reg 1 / SID 1, matching Linux `t8103.dtsi`. It references
+the existing DART table implementation at build time. TLB failure poisons
+the domain and quarantines backing; tables last for the kernel. `prepare()`
+requires the controller held in reset and no concurrent DMA producer.
 
-- connect every xHCI DMA allocation/address use to this adapter; initial
-  payload transfers bounce too (no untranslated direct MSC IODMACommand);
-- port the T8103 USB2-only ATC/PIPE/reset and Apple DWC3 core sequence;
-- Type-C role/mux lifecycle, then SuperSpeed calibration and lane routing;
-- xHCI teardown: the current upstream `quiesce()` sets the hotplug stop flag
-  but does not join its thread, and `free()` can release state that thread
-  still uses. Stopping the xHC alone does not make whole-controller removal
-  safe. Drain hotplug, bulk, interrupt producers and children before freeing;
-- paired-DART SDK and host tests, then actual controller DMA and fault checks.
+Removal closes admission, disables interrupts, wakes and drains synchronous
+calls and retained hotplug/bulk workers, then requires successful xHCI halt
+and reset. `PDAppleUSBDrain` returns busy if that fails; the parent must keep
+the PHY, controller and DMA alive then. `pd-usb-dma-live` on the provider also
+covers failed attachment. Successful stop aborts queued transfers, terminates
+children and breaks bus/storage ownership cycles. Old clients retain their
+controller and receive offline; descriptors unmap before releasing pages.
 
-Source table tests: `make -C ../m1-dcp-dart test` (host only). The new MMIO
-adapter and buffer lifetime are not established by those table tests. See
-SF-AF for baseline, install/rollback and shared-M1 rules. No new boot argument
-enables this directory's code yet.
+`host-test/run.sh` exercises production admission under concurrent removal
+(100 cycles, eight callers) with ASan/UBSan, and compares the production IOVA
+search against 4,194,304 independent fragmentation/alignment expectations.
+`make -C ../m1-dcp-dart test` covers the referenced page tables. These tests
+and SDK compilation do not establish MMIO, cache coherency or hotplug on M1.
+
+Still required: T8103 ATC/PIPE/reset and DWC3 lifecycle integration, collection
+build and real direct USB enumeration/HID/read-only storage/DHCP, then ten
+hotplug cycles. SuperSpeed lane calibration follows USB2. See SF-AF for the
+verified baseline and shared-M1 install/recovery rules.

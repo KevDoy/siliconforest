@@ -8,6 +8,7 @@
  * io-pgtable-dart.c based on io-pgtable-arm: Copyright (C) 2014 ARM Limited.
  */
 #include "pd_usb_dart.h"
+#include "pd_usb_iova.h"
 #include <sys/errno.h>
 #include <mach/vm_param.h>
 
@@ -143,20 +144,18 @@ int PDUSBDart::prepare()
     return ret;
 }
 
-int PDUSBDart::map(uint64_t pa, size_t bytes, uint64_t *dva)
+int PDUSBDart::map(uint64_t pa, size_t bytes, uint64_t *dva, size_t alignment)
 {
     if (!dva || !pa || !bytes || bytes > IOVA_BYTES ||
+        alignment < PD_DART_PAGE || alignment > IOVA_BYTES || (alignment & (alignment - 1)) ||
         (bytes & (PD_DART_PAGE - 1)) || (pa & ~PA_MASK) ||
         bytes - 1 > ((1ULL << 36) - 1) - pa) return EINVAL;
     if (!lock) return ENXIO;
     IOLockLock(lock);
     if (!ready || poisoned) { IOLockUnlock(lock); return EIO; }
-    size_t count = bytes / PD_DART_PAGE, run = 0, first = 0;
-    for (size_t i = 0; i < NPAGES; ++i) {
-        run = busy[i] ? 0 : run + 1;
-        if (run == count) { first = i + 1 - count; break; }
-    }
-    if (run != count) { IOLockUnlock(lock); return ENOSPC; }
+    size_t count = bytes / PD_DART_PAGE;
+    size_t first = pd_usb_iova_find(busy, NPAGES, IOVA_LO, PD_DART_PAGE, count, alignment);
+    if (first == SIZE_MAX) { IOLockUnlock(lock); return ENOSPC; }
     uint64_t addr = IOVA_LO + first * PD_DART_PAGE;
     int ret = pd_dart_table_map(&pt, addr, pa, bytes, PD_DART_PROT_READ | PD_DART_PROT_WRITE);
     if (!ret) {
@@ -205,20 +204,21 @@ uint32_t PDUSBDart::faults()
 
 OSDefineMetaClassAndStructors(PDUSBDMABuffer, IOBufferMemoryDescriptor)
 
-PDUSBDMABuffer *PDUSBDMABuffer::allocate(PDUSBDart *mapper, size_t bytes)
+PDUSBDMABuffer *PDUSBDMABuffer::allocate(PDUSBDart *mapper, size_t bytes, size_t alignment)
 {
-    if (!mapper || !bytes || bytes > IOVA_BYTES) return NULL;
+    if (!mapper || !bytes || bytes > IOVA_BYTES || alignment < PD_DART_PAGE ||
+        alignment > IOVA_BYTES || (alignment & (alignment - 1))) return NULL;
     size_t span = (bytes + PD_DART_PAGE - 1) & ~(PD_DART_PAGE - 1);
     PDUSBDMABuffer *mem = OSTypeAlloc(PDUSBDMABuffer);
     if (!mem) return NULL;
     if (!mem->initWithPhysicalMask(kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous,
-                                  span, PD_DART_PAGE, PA_MASK)) {
+                                  span, alignment, PA_MASK)) {
         mem->release();
         return NULL;
     }
     uint64_t pa = mem->getPhysicalSegment(0, NULL, kIOMemoryMapperNone), dva = 0;
     bzero(mem->getBytesNoCopy(), span);
-    int ret = mapper->map(pa, span, &dva);
+    int ret = mapper->map(pa, span, &dva, alignment);
     if (ret) {
         // A failed map may be a TLB timeout after the entries were installed.
         // Retain the descriptor/backing on failure; it cannot reach hardware

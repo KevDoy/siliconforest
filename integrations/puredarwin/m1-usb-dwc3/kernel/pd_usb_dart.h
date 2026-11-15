@@ -31,7 +31,7 @@ class PDUSBDart {
 public:
     PDUSBDart();
     int prepare();
-    int map(uint64_t pa, size_t bytes, uint64_t *dva);
+    int map(uint64_t pa, size_t bytes, uint64_t *dva, size_t alignment = PD_DART_PAGE);
     int unmap(uint64_t dva, size_t bytes);
     uint32_t faults();
 };
@@ -45,7 +45,7 @@ class PDUSBDMABuffer : public IOBufferMemoryDescriptor {
     uint64_t dva;
     size_t span;
 public:
-    static PDUSBDMABuffer *allocate(PDUSBDart *dart, size_t size);
+    static PDUSBDMABuffer *allocate(PDUSBDart *dart, size_t size, size_t alignment = PD_DART_PAGE);
     uint64_t dmaAddress() const { return dva; }
     void free() override;
 };
