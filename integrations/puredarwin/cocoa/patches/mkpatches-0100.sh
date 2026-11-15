@@ -144,3 +144,19 @@ mk am-0137 am-0139 0139w-windowserver-pinch-gestures.patch src/Frameworks/Window
 # 0140 (TERM8): am-0139 -> am-0140 (am-0139 = am-0137 + 0139, 0139w; frozen)
 mk am-0139 am-0140 0140-appkit-layout-priorities-in-order.patch $A/PDLayoutSolver.m
 ( diff -rq am-0139 am-0140 ) | sed 's/^/differs from am-0139: /'
+# 0141w, 0142 (TERM8): am-0140 -> am-0142 (am-0140 = am-0139 + 0140; frozen)
+mk am-0140 am-0142 0141w-windowserver-cursor-shapes.patch src/Frameworks/WindowServer/rpc_wayland.c
+mk am-0140 am-0142 0142-appkit-tracking-area-in-visible-rect.patch $A/NSView.m
+( diff -rq am-0140 am-0142 ) | sed 's/^/differs from am-0140: /'
+# 0143w, 0144 (TERM8, Firefox's windowless process): am-0142 -> am-0144 (am-0142 = am-0140 + 0141w, 0142; frozen)
+mk am-0142 am-0144 0143w-windowserver-new-surface-for-a-new-role-ends-with-compositor.patch src/Frameworks/WindowServer/rpc_wayland.c
+mk am-0142 am-0144 0144-appkit-reopen-and-quit-from-the-desk.patch $A/NSApplication.m $A/NSWindowMenuStrip.m
+( diff -rq am-0142 am-0144 ) | sed 's/^/differs from am-0142: /'
+# 0145w (TERM8): am-0144 -> am (am-0144 = am-0142 + 0143w, 0144; frozen)
+mk am-0144 am 0145w-windowserver-same-cursor-image-not-sent-again.patch src/Frameworks/WindowServer/rpc_wayland.c
+( diff -rq am-0144 am ) | sed 's/^/differs from am-0144: /'
+# 0146 (TERM8, FX-010): Onyx2D, the glyph cache keyed by face address and generation (am-0144 -> am, Onyx2D only)
+mk am-0144 am 0146-onyx2d-glyph-cache-knows-a-reused-face.patch $O/O2Context_builtin.m
+# 0147 (TERM8, FX-004): am-0146 -> am (am-0146 = am-0144 + 0145w, 0146; frozen)
+mk am-0146 am 0147-appkit-label-and-button-constructors.patch $A/NSTextField.h $A/NSTextField.m $A/NSButton.h $A/NSButton.m
+( diff -rq am-0146 am ) | sed 's/^/differs from am-0146: /'

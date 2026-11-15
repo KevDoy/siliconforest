@@ -526,6 +526,59 @@ the probe failed with the file in use (status 134) and passed with the new one, 
 libFoundation a17bce22 (before 43a5fc1b, kept as `/usr/lib/libFoundation.dylib.old12`); `sf_compat_push.sh check` 18/18.
 Revert: `macos-compat/sf-lib-install.sh` with `.old12` as the new file (core.lock, announced, lifeline open).
 
+### Firefox's windowless process, cursors, reopen, FX-010, FX-004 (owner's direction: Firefox first)
+Cocoa 0141w-0147, candidate c18 = AppKit 835cdbce, Onyx2D ace5dc3d, libWindowServer 739a1630 (`runs/sf-term8/c18`).
+NOT INSTALLED: the patch files are in `cocoa/patches/` and in `mkpatches-0100.sh`, not yet in `patched.nix`'s lists
+(add them after 0139w/0140/0217 as the generator's comments say, or take TERM8's working list). c18's gates began at
+23:23Z, after the desktop froze (~23:20Z, the compositor stuck opening the DRM device): void; to be run again after
+the recovery, then the direct install with `.pre-c18` kept (`runs/sf-term8/runI11.sh c18 <tag>`).
+- **A process left with no window** (OWNER-WINDOWLESS, CODEX-FX's reading of the owner's Firefox log: `xdg_wm_base#6:
+  error 0: Surface already has a role`, then `Wayland dispatch stopped with error 100`, the process alive, sound
+  playing). Two faults in libWindowServer. (1) A window shown again as another kind of role (a popup whose parent is
+  gone comes back as a toplevel; a level change between a layer and an ordinary window) was given the new role on its
+  old wl_surface; a surface keeps its role for life, so the compositor ended the connection. 0143w gives such a window
+  a new wl_surface (its fractional-scale and viewport objects, blur, opaque and input regions made again), at every
+  place a role is made, including the popup role made ahead (kWSWindowPrepareRole). (2) When the connection ended, the
+  dispatch thread stopped and everything else went on (`connected` stayed 1): the application ended only if someone
+  killed it. Now it says why (the protocol error and object, or the socket error) and ends with status 70, as a Mac
+  application does when its window server goes; its app-menu socket file is removed. `PD_WS_SURVIVE_DISCONNECT=1`
+  keeps the old behaviour for tests. Observed with my own probe (`runs/sf-term8/probe/rolechange.m`, no input): the
+  installed files reproduce both (the error, then the process alive); c17: "gets a new surface", no error, shown; with
+  the socket shut down under it the probe ends (status 70) and says so.
+- **Reopen and quit from the desk** (0144): the app-menu socket the compositor already uses for the title-bar menu
+  takes `reopen` (macOS's reopen event: the delegate's `-applicationShouldHandleReopen:hasVisibleWindows:`, unhide, a
+  minimised window brought back, else the untitled window) and `quit` (`-terminate:`, with or without a window).
+  Asked of DESK7 for the dock and the switcher (`runs/m1-coord/requests-for-DESK7.md`).
+- **Cursors** (0141w, 0142, 0145w): libWindowServer asks DESK7's compositor for named shapes (`wp_cursor_shape_v1`, the
+  map DESK7 gave) instead of uploading libwayland-cursor's images: the desk's own pointer set at the display's scale.
+  Terminal's text area never asked for an I-beam: it makes its cursor-update tracking area with
+  `NSTrackingInVisibleRect` and an empty rectangle, which this AppKit intersected with the bounds and dropped (0142:
+  such an area follows the visible rectangle, as on macOS). Terminal then sets its own I-beam (Apple ships high-contrast
+  I-beam TIFFs in Terminal.app and sets them with `-[NSCursor initWithImage:hotSpot:]`), which goes as a bitmap; AppKit
+  sets it at every pointer motion, so the same image is no longer copied into a new shared-memory buffer each time
+  (0145w). Observed (`PD_CURSOR_TRACE`, virtual-seat pointer): installed: Terminal only the arrow; c17: Terminal its
+  I-beam image once, Activity Monitor DEFAULT then EW_RESIZE over the column divider.
+- **FX-010** (nytimes.com's web-font text garbled: "Busness", "Mope to pead"): Onyx2D's glyph bitmap cache keyed the
+  rendered glyphs by the FT_Face's address, size and glyph number, and was never told when a face was freed. Firefox
+  makes and frees a face for each subset of a web font (nyt-franklin's unicode-range parts); a new subset's face made at
+  a freed one's address was given the old subset's bitmaps for the same glyph numbers. 0146: the key also holds a
+  number the face is given the first time it is seen (FreeType's client slot, `face->generic.data`, unused here), so a
+  reused address is a new face. Found by reading; CODEX-FX's nytimes.com run is the proof (asked).
+- **FX-004** (Firefox's crash reporter could not show its window: `+[NSTextField wrappingLabelWithString:]`
+  unrecognised): 0147 adds the 10.12 constructors (NSTextField label/wrapping label/attributed label/text field;
+  NSButton push button with title and/or image, check box, radio button).
+- **Test prefixes and AppKit's resources**: a candidate's AppKit run from a test prefix sometimes had no bundle
+  (`NSBundle bundleForClass:` gave the prefix directory: no key bindings, no check box or radio images; c17's visual
+  check showed Terminal's Preferences without them). The kernel names a hard-linked file by whichever of its names was
+  looked up last and dyld takes that name for the image; `stage.sh` had hard-linked the binary into the framework
+  directories and kept it bare at the prefix's top. It now writes one file per framework (`Versions/C` a link to `A`):
+  observed (`probe/bundlepath.m`) the bundle and `StandardKeyBindings.keyBindings` found. Earlier candidate runs may
+  have run without AppKit's resources at times; the installed files never did (they are in place).
+- **FX-001** (about:support "Display0 2561x1601@0Hz"): the system frameworks report the screen as 1707x1067 points at
+  scale 1.5 (the compositor's integer logical size, 1706.67 rounded up) and the display mode as 1707x1067 at 60 Hz;
+  1707 x 1.5 = 2560.5, Gecko's 2561. The panel's pixels (2560x1600) are not passed on. Not fixed yet; 0 Hz not
+  reproduced with the system CoreGraphics.
+
 ### Performance pass (item 4; on the M1, my own instances, owner idle unless said)
 Figures from runs judged by DESK7's real-input counters before and after (unchanged = the owner was idle).
 - Activity Monitor, launch to its first commit (`m1-am-launch.py`, fresh home, 3 runs each, installed then c14):
