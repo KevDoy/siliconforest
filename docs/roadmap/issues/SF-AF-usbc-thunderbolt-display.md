@@ -1,11 +1,12 @@
 # SF-AF: USB-C, Thunderbolt and external display on J293
 
 Owner: CODEX-TB. Survey started 15 November 2026. **No dock PCI/USB enumeration or external display has been established
-on SiliconForest; the ACIO M3 firmware stage is now observed ready.**
+on SiliconForest; ACIO M3, NHI control DMA/IRQs and host-router startup
+are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 07:34Z)
+## Current target and observed state (owner change; updated 08:50Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -14,17 +15,23 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** port-1 Type-C APP/status reads and TBT-only cable
-flags; CIO03D is installed with internal desktop/Wi-Fi intact. CIO01 failed
-preflight; CIO02 panicked in an unaligned SRAM I/O copy. The corrected CIO03D
-now reports RTKit ready, M3 state 0x01000000, NHI HOP_COUNT 12, IRQ enable 0,
-shared PHY owned, and no errors/quarantine. NHI DMA/domain remains inactive. **Not observed:** NHI
-up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
-enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
-The 31 CM/library/native/devres/NHI/PM objects, PHY/calibration, DART, crossbar and
-external-display work below are source/host/SDK evidence, not those hardware
-acceptance results. DESK5's second-output userland half is built; K1–K13
-remain the kernel contract, including per-CRTC flip IDs and external overlay.
+**Observed in Darwin:** CIO07, source `e6c674413`, capsule `e4f9e6d95055…`,
+boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
+startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
+read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
+ring state. The actual host-router service `0-0` and `usb4_port1` publish
+beneath the native domain. Full-bank DART reset removed the early SID15 fault;
+Linux and Darwin now have SID1 translating and unused streams disabled.
+The owned UART reader was reaped before lock release at 08:48:05Z.
+
+**Not observed in Darwin:** the dock router, authorization, any dock PCI
+function, Ethernet link/DHCP, dock USB enumeration/HID/read-only storage,
+HPD/EDID/external scanout or physical dock hotplug cycles. Host-router
+readiness is not dock discovery. PCIe-C cold-init/link helpers, endpoint
+DMA/bridge work and external-display sources remain separate source/host
+evidence. DESK5's second-output userland half is built; K1–K13 remain the
+kernel contract. CIO01/CIO02/CIO04–06 failures and recoveries are retained
+below, not relabeled as successful boots.
 
 The shortest path is shared port-1 PHY ownership → TBT ATC calibration →
 ACIO M3/RTKit power/reset/firmware and SID1 DART → NHI DMA/interrupts → the
@@ -1124,3 +1131,24 @@ retain DMA-owned backing on failed retirement, with actual device/IRQ/work
 drain before DART or PHY shutdown. An owned bounce path can prevent a stale
 translation from targeting recycled caller storage. This remains source
 audit and a requirement, not an installed fix or Ethernet observation.
+
+### CIO07 hardware qualification (08:48Z)
+
+The reset correction starts the real software connection manager and host
+router on M1 with error0 and quarantine clear. This removes the observed
+CIO05/06 failure; no SID15 mapping or bypass was needed. Live Linux register
+comparison during the same normal install visit confirms SID1 TCR `0x80`,
+all unused TCRs zero, and TX/RX control flags `0xc0000000` with IRQ mask
+`0x1001`. Native startup reaches the matching ring/IRQ state. No dock-router
+child or PCI endpoint has appeared yet. Next work checks the trained link
+and discovery before authorization and PCIe host activation. The guarded
+60-second idle profile completes with NHI ready and quarantine clear throughout.
+Printed non-idle kernel threads total 1.85% of one core (tiny omitted per-thread
+deltas are not counted), aggregate CPU idle averages 98.43%, and warm fixed
+work is 83.674–83.676ms for 50M operations and 14.620ms for 100k syscalls.
+The dominant unnamed thread254 accounts for 1.24% of one core; previous
+baselines identified thread254 as NVMe, but current-boot symbolization is
+pending. This does not reproduce the reported AppKit slowdown and does not
+claim its cause resolved. Current tool/userland hashes remain with the
+private profile, not an assertion that every userland file matched the older
+A/B. No added busy loop is evident in this NHI-up measurement.

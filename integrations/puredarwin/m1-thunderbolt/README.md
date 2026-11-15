@@ -7,7 +7,10 @@ with RTKit ready, M3 state 0x01000000 and twelve inactive NHI rings. The
 CIO05 reached native CM creation, DART setup and control-ring allocation, but
 domain startup failed with DART fault `0x8f0f0001` (SID15/no-TTBR) and errno12.
 The native fault latch quarantined the path; CIO03 was restored. NHI readiness
-and successful control DMA remain unobserved.
+and successful control DMA were unobserved in CIO05. CIO07 now passes native
+CM startup, NHI control DMA/IRQ and host-router publication after the full-bank
+DART reset (`e6c674413`). TX0/RX0 flags `c0000000`, IRQ mask `1001`, error0,
+quarantineNo. Dock-router discovery, PCIe/USB/Ethernet/display remain absent.
 The owner-attached TS3 Plus remains a Thunderbolt-only Type-C cable flag in
 Darwin; its USB/PCIe/Ethernet/display are not enumerated there.
 
