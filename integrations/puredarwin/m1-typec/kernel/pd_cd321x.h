@@ -26,6 +26,7 @@
 #define PD_TPS_STATUS_DATAROLE (1u << 6)
 #define PD_TPS_DATA_USB2 (1u << 4)
 #define PD_TPS_DATA_USB3 (1u << 5)
+#define PD_TPS_DATA_USB_DEVICE (1u << 7)
 #define PD_TPS_DATA_DP (1u << 8)
 #define PD_TPS_DATA_TBT (1u << 16)
 #define PD_CD321X_DATA_HPD (1u << 15)
@@ -49,5 +50,25 @@ static inline uint32_t pd_cd321x_le32(const uint8_t v[4])
 {
     return (uint32_t)v[0] | (uint32_t)v[1] << 8 |
            (uint32_t)v[2] << 16 | (uint32_t)v[3] << 24;
+}
+
+enum pd_cd321x_usb_role {
+    PD_CD321X_USB_NONE, PD_CD321X_USB_HOST, PD_CD321X_USB_DEVICE
+};
+
+/* One immutable IORegistry OSData property ("port-state"), copied as a unit
+ * by kernel clients. Separate diagnostic properties are not a snapshot ABI.
+ * An error is unavailable state, not a physical disconnect. */
+struct pd_cd321x_snapshot {
+    uint32_t status, data_status, sample, error;
+};
+
+/* CD321x uses DATA_STATUS for the DWC3 role, distinct from its PD data role
+ * in STATUS. See cd321x_update_work(): a TB-only cable does not start DWC3. */
+static inline enum pd_cd321x_usb_role pd_cd321x_usb_role(uint32_t status, uint32_t data)
+{
+    if (!(status & PD_TPS_STATUS_PLUG_PRESENT) || !(data & (PD_TPS_DATA_USB2 | PD_TPS_DATA_USB3)))
+        return PD_CD321X_USB_NONE;
+    return data & PD_TPS_DATA_USB_DEVICE ? PD_CD321X_USB_DEVICE : PD_CD321X_USB_HOST;
 }
 #endif

@@ -26,6 +26,13 @@ It does not emulate CD321x or establish hardware support. Kext lifetime:
 timer callback runs on its workloop, samples serialize on the bus lock;
 stop cancels/removes the timer before mappings and locks are freed.
 
+Kernel clients bind to the `PDAppleTypeC` service and use `copyProperty` on
+`port-state` (`pd_cd321x_snapshot`) to obtain a complete status/data/error
+sample. Separate display properties may change during a sample and are only
+diagnostics. A sample error must not be interpreted as a cable disconnect.
+`pd-data-role-host` is the PD role; DWC3's `usb-role` follows DATA_STATUS's
+USB connection/role bits. A Thunderbolt-only cable has USB role `none`.
+
 See [SF-AF](../../../docs/roadmap/issues/SF-AF-usbc-thunderbolt-display.md)
 for the surveyed chain and hardware evidence. GPL notices: NOTICE and each
 source file. Imported code is referenced at build time, never read from

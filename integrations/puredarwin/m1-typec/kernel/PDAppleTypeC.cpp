@@ -90,6 +90,8 @@ void PDAppleTypeC::sample()
         setProperty("error-count", failures, 32);
         if (failures == 1 || failures % 60 == 0)
             LOG("port 1 status read failed errno=%d (failed samples=%u)", ret, failures);
+        struct pd_cd321x_snapshot snapshot = {lastStatus, lastData, samples, (uint32_t)ret};
+        setProperty("port-state", &snapshot, sizeof(snapshot));
         // Failed samples never become disconnects or usable role changes.
         return;
     }
@@ -98,7 +100,10 @@ void PDAppleTypeC::sample()
     setProperty("data-status", d, 32);
     setProperty("plug-present", (bool)(s & PD_TPS_STATUS_PLUG_PRESENT));
     setProperty("orientation-reversed", (bool)(s & PD_TPS_STATUS_UPSIDE_DOWN));
-    setProperty("data-role-host", (bool)(s & PD_TPS_STATUS_DATAROLE));
+    setProperty("pd-data-role-host", (bool)(s & PD_TPS_STATUS_DATAROLE));
+    enum pd_cd321x_usb_role role = pd_cd321x_usb_role(s, d);
+    setProperty("usb-role", role == PD_CD321X_USB_HOST ? "host" :
+        role == PD_CD321X_USB_DEVICE ? "device" : "none");
     setProperty("usb2", (bool)(d & PD_TPS_DATA_USB2));
     setProperty("usb3", (bool)(d & PD_TPS_DATA_USB3));
     setProperty("displayport", (bool)(d & PD_TPS_DATA_DP));
@@ -106,7 +111,7 @@ void PDAppleTypeC::sample()
     setProperty("usb4", (bool)(d & PD_CD321X_DATA_USB4));
     setProperty("hpd", (bool)(d & PD_CD321X_DATA_HPD));
     if (!valid || s != lastStatus || d != lastData)
-        LOG("port 1 status=%08x data=%08x present=%u reverse=%u host=%u usb2=%u usb3=%u dp=%u tbt=%u usb4=%u hpd=%u (observed, PHY/host not started)",
+        LOG("port 1 status=%08x data=%08x present=%u reverse=%u pd_host=%u usb2=%u usb3=%u dp=%u tbt=%u usb4=%u hpd=%u (observed, PHY/host not started)",
             s, d, !!(s & PD_TPS_STATUS_PLUG_PRESENT), !!(s & PD_TPS_STATUS_UPSIDE_DOWN),
             !!(s & PD_TPS_STATUS_DATAROLE), !!(d & PD_TPS_DATA_USB2), !!(d & PD_TPS_DATA_USB3),
             !!(d & PD_TPS_DATA_DP), !!(d & PD_TPS_DATA_TBT), !!(d & PD_CD321X_DATA_USB4),
@@ -114,6 +119,8 @@ void PDAppleTypeC::sample()
     lastStatus = s;
     lastData = d;
     valid = true;
+    struct pd_cd321x_snapshot snapshot = {s, d, samples, 0};
+    setProperty("port-state", &snapshot, sizeof(snapshot));
 }
 
 void PDAppleTypeC::tick(OSObject *owner, IOTimerEventSource *source)
