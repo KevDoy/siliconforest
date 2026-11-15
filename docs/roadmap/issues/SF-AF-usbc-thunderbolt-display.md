@@ -2869,3 +2869,54 @@ differ in the native compatibility sources. Initial transformation/fixture
 and diagnostic-counter compilation failures are retained and corrected. The
 next trial keeps frozen CIO36 and replaces only the private Ethernet bundle;
 no hardware packet fix or completed DHCP milestone is claimed yet.
+
+
+### CIO37NET: native coherent mappings executed; DHCP still fails
+
+The Ethernet-only candidate retained the exact CIO36 module and changed only
+PDFBSDem's coherent allocation and DMA synchronization seam. On the M1,
+router authorization, the twelve-function native inventory, mapper/MSI/BME,
+and en1 UP/running with a 1 Gb/s link succeeded. There was no mutex panic.
+Two direct coherent mappings and 258 owned bounce mappings were published by
+the actual successful map paths. Those counters establish allocation paths,
+not NIC descriptor consumption or packet completion. DHCP received no OFFER
+or ACK and applied no IPv4 address. The first four BPF writes returned EPERM;
+tries five and six were accepted. BSD packet counters remained zero, with
+2048 output bytes; acceptance and byte accounting are not wire evidence.
+The failed lease gate prevented the subsequent quiet sixty-second observation.
+Private before-recovery captures are preserved; the normal CIO29 rollback
+completed at20:00:11Z with the actual.next/socket/inject checks passing;
+the UART reader was stopped before unlock at20:00:12Z. Ethernet remains unqualified.
+
+USB composition review also found a pre-hardware defect: the detached PCI USB
+SDK inherited build-xhci rather than the combined build-host bundle, losing
+the PDAppleUSB shared PHY broker, and replaced the broker's personality.
+That SDK was never installed. Preparation now preserves the broker and prepared
+direct-host personalities alongside exact FL1100 matching, requires actual
+broker source/CMake inclusion before mutation, and limits PCI access and late
+BME checks to the PCI branch. The actual-source composition fixture preserves
+all other files and rejects missing broker code/personality or direct-host
+personality before mutation. Native rebuild and hardware qualification remain
+pending; this is not USB input or storage evidence.
+
+
+### Preserved USB broker and bounded Ethernet diagnosis, source/native only
+
+The corrected dock USB variant now native-builds from the exact installed
+combined USB source. Only controller/header, plist/CMake and read-only storage
+changes plus the owned DMA helper differ; all broker/ATC/PMGR/common files are
+byte-identical. Its composition and actual transformed controller fixtures
+pass, as do all six required repository checks. Commit5ce5045d9 retains the
+broker and prepared direct-host personalities. This bundle is uninstalled;
+there is still no USB enumeration or Keychron input evidence.
+
+An opt-in Ethernet trace SDK native-builds with eight-record saturating
+budgets at existing TX encapsulation, doorbell, completion-query and RX-query
+sites. It reads guarded, non-destructive queue/control registers and adds no
+MMIO writes, timer or worker. Native source differs from CIO37NET only in
+igb_txrx.c and the diagnostic budget header. The actual concurrent budget
+fixture passes ASan/UBSan; the candidate collection changes only PDFBSDem's
+code UUID among58 executable modules, with zero overlaps. These are build
+results, not a hardware trace or packet result. The purpose of the next trial
+is to distinguish native packet submission, real tail/head advancement and
+CPU-visible completion before choosing another functional change.

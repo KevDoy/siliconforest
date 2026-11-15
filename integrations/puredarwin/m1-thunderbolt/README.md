@@ -19,7 +19,14 @@ driver retry/BME; qualified CIO29 was restored. The next source corrects
 this host's two prefetchable apertures (previously all advertised as MEM),
 preventing native TB prefetch maximization from consuming ordinary memory.
 The actual frozen allocator reproduces that starvation and permits nested
-I210 allocations with the corrected declarations; hardware retry is pending.
+I210 allocations with the corrected declarations. CIO33 observed actual BAR0
+allocation at CPU600100000/512KiB and driver attach; CIO36/37NET reached
+en1 UP/running with a real 1 Gb/s link. DHCP still receives no OFFER/ACK,
+so Ethernet packets and a lease remain unqualified. CIO37NET executed two
+direct coherent and 258 bounce mappings after the allocator/sync fix; mapping
+counters do not establish NIC descriptor consumption. Each failed trial
+restored the qualified non-AVE CIO29; the last restoration and strict actual
+.next compositor check completed at20:00:11Z, UART stopped at20:00:12Z.
 
 Default/enumeration profiles do not admit endpoint bus mastering. Network
 admission additionally requires a live native mapper, actual armed MSI route,
@@ -60,9 +67,9 @@ Host ASan/UBSan checks add 64 ring/E2E cases, descriptor wire bytes and DMA
 bounds, SRAM bounds, M1 DP-IN timing/error cases, failure at every startup
 step, failed teardown retention and changed-cable full-OFF ordering.
 
-Still required: dock router discovery and authorization; apciec1 tunneled
-host + MSI/DART/lifetime;
-PCIe-attached xHCI/Intel I210 (the existing em driver supports it), DP-IN /
+Observed: dock router discovery/authorization, apciec1 tunneled host, native
+MSI/DART binding and I210 link. Still required: Ethernet DHCP/packet evidence,
+PCIe-attached xHCI keyboard/storage, actual hot-remove lifetime, and DP-IN /
 dcpext tunnel binding and real dock hotplug. Never map or read ACIO children
 before power/RTKit readiness, or after shutdown (the Linux driver documents
 SError/watchdog resets on that ordering violation). Port 0 stays reserved.
@@ -480,8 +487,8 @@ back BME on only the derived I210 forwarding bridges and endpoint, leaving
 every xHCI blocked. No synthetic PCI domain, BDF, IRQ or DMA acknowledgment
 is used. The CLI reports the kernel admission checkpoint separately from
 independent interface/packet evidence. Ambiguous BME/startup failures retain
-IRQ/context/pages until reboot. Both native SDKs compile; hardware Ethernet
-link/DHCP and actual IRQ delivery still await testing. This is not hot-remove
+IRQ/context/pages until reboot. Both native SDKs compile. Hardware link is now observed on CIO36/37NET;
+DHCP and packet completion remain unqualified. This is not hot-remove
 support or a ten-cycle result.
 
 
@@ -507,3 +514,19 @@ The usual overlap gate still runs afterward. This recovers metadata space
 without moving the kernel or changing boot.bin. The candidate additionally
 checks all57 input bundle non-debug sections against their complete original
 SDKs after local-symbol stripping; this is build verification, not boot proof.
+
+
+The opt-in `build-ethernet-trace-kext.nix` adds at most eight records per
+TX encapsulation, doorbell, completion query and RX-query site. Reads use
+the existing retained physical-access guard and avoid destructive interrupt
+and statistics registers. There is no new timer, worker or MMIO write.
+It is a diagnostic SDK, outside the daily boot profile.
+
+The dock USB preparation inherits the combined `build-host.nix` bundle,
+retains PDAppleUSB shared-PHY ownership and its exact personality, retains
+the prepared direct DWC3 host, and adds only exact FL1100 PCI matching.
+Preparation refuses missing broker code/personality before changing source.
+PCI-specific ownership/MSI/late-BME checks remain in the PCI branch.
+`host-test/usb-composition.py <combined-native-source>` exercises preservation
+and missing-component refusal. A detached SDK built without the broker was
+caught before any USB collection or boot and is not hardware-ready.
