@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
 /*
- * Apple Type-C PHY driver, T8103 USB2 lifecycle subset.
+ * Apple Type-C PHY driver, T8103 common power/mode sequence.
  * Ported from Omacom linux-aurora 6a08a08e drivers/phy/apple/atc.c.
  * Copyright (C) The Asahi Linux Contributors
  * Author: Sven Peter <sven@kernel.org>
  *
- * No SuperSpeed/DP/TBT lane calibration is claimed by this subset.
+ * SuperSpeed modes require a validated runtime calibration callback.
  */
 #include "pd_atc_usb2.h"
+#include "pd_atc_modes.h"
 #include <errno.h>
+#include <stddef.h>
 
 static void mask(const struct pd_atc_io *io, enum pd_atc_window w,
                  uint32_t reg, uint32_t clear, uint32_t set)
@@ -64,8 +66,17 @@ int pd_atc_usb2_reset_assert(const struct pd_atc_io *io)
     usb2_off(io);
     return 0;
 }
-int pd_atc_usb2_start(const struct pd_atc_io *io, int reversed)
+int pd_atc_program_start(const struct pd_atc_io *io,const struct pd_atc_program *program,
+                         const struct pd_atc_calibration *cal,
+                         int (*aux_start)(const struct pd_atc_io *,unsigned))
 {
+    if (!io || !io->read || !io->write || !io->delay_us || !program ||
+        (program->aux && !aux_start) || (cal && !cal->apply) ||
+        program->lanes>0xfff || program->crossbar>0x3ffff ||
+        program->dp_lanes>3 || program->usb3_lanes>3 || program->usb4_lanes>3 ||
+        (program->dp_lanes & program->usb3_lanes) ||
+        (program->dp_lanes & program->usb4_lanes) ||
+        (program->usb3_lanes & program->usb4_lanes)) return EINVAL;
     // atcphy_usb2_power_on, without selecting HOST while DWC3 is in reset.
     step(io, PD_ATC_USB2, 0x08, 0, 0xf);
     step(io, PD_ATC_USB2, 0x04, 8, 0);
@@ -84,6 +95,7 @@ int pd_atc_usb2_start(const struct pd_atc_io *io, int reversed)
     mask(io, PD_ATC_CORE, 0x20000, 4, 0);
     mask(io, PD_ATC_CORE, 0x20000, 0, 8);
     if (io->common_tunables && (ret = io->common_tunables(io->ctx))) return ret;
+    if (cal && (ret = cal->apply(cal->ctx,program))) return ret;
     // atcphy_configure_post_tunable_t8103
     mask(io, PD_ATC_CORE, 0x1014, 0, 0x1fe000);
     mask(io, PD_ATC_CORE, 0x2000, 0, 1u << 28);
@@ -96,14 +108,25 @@ int pd_atc_usb2_start(const struct pd_atc_io *io, int reversed)
     step(io, PD_ATC_CORE, 0x08, 3u << 12, 3u << 12);
     step(io, PD_ATC_CORE, 0x08, 3u << 8, 3u << 8);
     step(io, PD_ATC_CORE, 0x08, 3u << 16, 3u << 16);
+    if (program->aux && (ret = aux_start(io,program->dp_lanes))) return ret;
     mask(io, PD_ATC_CORE, 0x2a00, 0, (1u << 1) | (1u << 5));
-    mask(io, PD_ATC_CORE, 0x48, 0xfff, 0x6db); // RX/TX, both lanes OFF
-    mask(io, PD_ATC_CORE, 0x4c, 0x3ffff, reversed ? 0xb : 0xa);
-    mask(io, PD_ATC_CORE, 0x20008, 4, 0); // no lane swap in USB2 mode
-    step(io, PD_ATC_CORE, 0x9010, 1, 0); // no DP PMA override
-    step(io, PD_ATC_CORE, 0x10010, 1, 0);
+    mask(io, PD_ATC_CORE, 0x48, 0xfff, program->lanes);
+    mask(io, PD_ATC_CORE, 0x4c, 0x3ffff, program->crossbar);
+    mask(io, PD_ATC_CORE, 0x20008, 4, program->swap ? 4 : 0);
+    for (unsigned lane = 0; lane < 2; ++lane) {
+        uint32_t reg = lane ? 0x10010 : 0x9010;
+        step(io, PD_ATC_CORE, reg, 1, program->dp_lanes & (1u << lane) ? 1 : 0);
+        if (program->dp_lanes & (1u << lane)) mask(io, PD_ATC_CORE, reg, 1u << 9, 0);
+    }
     mask(io, PD_ATC_CORE, 0x20000, 0, 1u << 4);
     return 0;
+}
+int pd_atc_usb2_start(const struct pd_atc_io *io, int reversed)
+{
+    // Keep the original USB2 API independent of the DP backend: the minimal
+    // host bundle links this shared program without enabling other modes.
+    const struct pd_atc_program p = { .lanes=0x6db, .crossbar=reversed?0xb:0xa };
+    return pd_atc_program_start(io,&p,NULL,NULL);
 }
 void pd_atc_usb2_release_reset(const struct pd_atc_io *io)
 {

@@ -1,13 +1,15 @@
-The ATC USB2 sequence selects GPL-2.0 from the upstream dual license.
+The ATC power/mode/DP sequences select GPL-2.0 from the upstream dual license.
 No firmware or device calibration values are included.
 
-src/pd_atc_usb2.c and include/pd_atc_usb2.h port the T8103 subset of
+src/pd_atc_usb2.c, src/pd_atc_modes.c, src/pd_atc_dp.c, their public headers
+and upstream/atc-t8103-dp.inc port the T8103 subset of
 Omacom linux-aurora 6a08a08e drivers/phy/apple/atc.c:
   SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause
   Copyright (C) The Asahi Linux Contributors
   Author: Sven Peter <sven@kernel.org>
 
-The compact tunable helper and kernel table mapping follow m1n1
+The compact tunable helper, pd_atc_calibration.c/.h runtime lane grouping
+and kernel table mapping follow m1n1
 src/tunables.c and src/kboot_atc.c, under this MIT license:
 
 Copyright The Asahi Linux Contributors

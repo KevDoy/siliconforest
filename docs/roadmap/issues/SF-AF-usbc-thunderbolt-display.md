@@ -319,3 +319,43 @@ invalidate failure. A second output requires shared framebuffer IOVAs in
 both display DARTs and retained backing on failed unmap/flush, along with
 real PHY/crossbar/Type-C providers and the external RTKit mailbox binding.
 No HPD/training/EDID/mode/second-output or TS3 tunnel success is claimed.
+
+### USB03 captured boot: lifecycle service attached, 2026-11-15 03:06Z
+
+USB03 capsule `7ae7d4240745c5450886ce40adbdb276572a3313a6fab253e7ae86131c0913f6`
+from KC `/nix/store/sh3yw7qb1zh3ixwnx8xkpvxppka3iqrb-puredarwin-kc-arm64-0.1`
+booted after DESK4's release and PERF's guarded libobjc install/checks. The
+cycle held gui.lock and bench, installed through the validated Linux script,
+used one-time boot, captured UART before first boot and stopped/reaped its
+owned reader before lock release at 03:06:08Z. Darwin banner was captured;
+no panic marker was found. The .next/inject desktop returned.
+
+Both PDAppleTypeC and PDAppleUSB are now registered/matched on real port 1.
+The unchanged TS3-only cable state reports USB role none, host-active No,
+alternate-mode-deferred Yes, removal-blocked No and zero sampler errors
+(61 samples at capture). The packaging dependency failure from USB02 is
+resolved. This establishes driver loading and deferred-mode behavior only:
+there was no direct USB device, no ATC/DWC3 host initialization or controller
+DMA, and no enumeration/HID/storage/DHCP/hotplug proof. The first direct
+plug remains a captured risky test to coordinate through the status file.
+The newer six-mode/calibration source work after this boot is not installed.
+
+### Six-mode ATC source and runtime calibration, 2026-11-15 03:16Z
+
+The ATC backend now ports USB2, USB3, USB3+DP, TBT3, USB4 and DP mode
+programs in both orientations. Runtime ADT calibration grouping follows
+m1n1: USB groups on the selected PMA plus DP TX on the other, both DP TX
+groups for DP, and both sets of CIO groups for TBT/USB4. Entire bundles
+are preflighted before PHY power writes and revalidated before applying;
+calibration failure blocks lane routing and reset release. No calibration
+payload is committed. TBT3 keeps PIPE dummy, distinct from USB4's backend.
+
+ASan/UBSan passes the twelve mode/orientation programs, ten calibration
+bundles, 56 missing properties, changed-program/late-malformed refusals,
+and existing power/DP cases. SDK object output is
+`/nix/store/71bbh5x17137bx12ks9k4vk0wcbsmb01-puredarwin-atc-objects-0.1`;
+the existing USB2 native bundle still builds with the shared power program
+(`/nix/store/4ksp2ljj2fv153asgk0xa7zdyjl52cy6-puredarwin-apple-usb-host-0.1`).
+All six repository checks pass (274 Python tests, 77 C groups). USB03
+remains installed; native lane-calibration selection and safe USB3 PIPE
+routing are the next attachment work. This is source/SDK evidence only.
