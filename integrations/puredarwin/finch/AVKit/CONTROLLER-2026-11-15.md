@@ -44,6 +44,9 @@ controller. Its native defaults are interval1 and other scalar values0;
 changing interval/resolution recomputes bounds. These facts alone are not an
 implementation of the resolver's controller linkage, target seeking or KVO.
 No AVPlayerControllerTimeResolver class is supplied merely to fill its name.
+The later distinct-setter and attached-controller observations are recorded in
+[the resolver evidence](TIME-RESOLVER-2026-11-15.md); immediate cached time and
+completed asynchronous seek are measured separately.
 
 The final private provider builds with77 exports, retaining all73 previous
 exports. Target qualification is recorded separately after the staged M1 test;
@@ -104,3 +107,17 @@ not a substitute for this new failure.
 Raw results, strict failure and frame differences are in the two named private
 run directories. Kernel-owner/FX observations were filed without requesting a
 kernel change or boot slot. No canonical provider was replaced.
+
+The raw-byte follow-up `avd-capture-bytes-v1` ran22:07:48–56Z. A software
+control and three hardware runs produced150 frames each: all600 NV12 frames
+match the independent Linux bytes exactly. Each hardware run reports150
+hardware pictures. The probe preserves51.84MB of raw output and per-frame
+hashes, and records byte offsets, luma counts and error magnitudes for any
+future mismatch. It does not overwrite the earlier failure.
+
+Two other AVD contexts remain present, with global interleaving even during
+the software control. There are no new errors/timeouts/stale/DART events, but
+every independent kernel-isolation gate is false. Thus frame40 was not
+reproduced and remains open. The source-only IRQ ownership fix
+`41b6f2d34` is **not installed** and has no hardware-fix qualification; see
+[the IRQ analysis](../../m1-avd/IRQ-OWNERSHIP-2026-11-15.md).
