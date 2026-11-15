@@ -56,7 +56,7 @@ ssh -o UserKnownHostsFile="$HOME/.ssh/known_hosts_m1_siliconforest" -o HostKeyAl
   while :; do
     r=\$((r+1))
     if [ \$end = 0 ] && [ \$r -ge $MAX_RUN ]; then echo \"CAREFUL command still running after ${MAX_RUN}s: SIGKILL\"; pkill -9 -P \$pid; kill -9 \$pid; fi
-    k=\$(wc -l < \$C)
+    k=\$(wc -l < \$C | tr -d ' ')
     [ \$k -gt \$c ] && sed -n \"\$((c+1)),\${k}p\" \$C | while IFS= read -r x; do echo \"CMD \$x\"; done && c=\$k
     m=\$(dmesg | wc -l)
     [ \$m -gt \$n ] && dmesg | tail -n \$((m-n)) | while IFS= read -r x; do echo \"KLOG \$x\"; done && n=\$m

@@ -24,6 +24,12 @@ in base.overrideAttrs (old: {
     mkdir -p compat/linux
     printf '%s\n' '#define KEY_ESC 1' '#define KEY_SPACE 57' '#define KEY_LEFT 105' \
       '#define KEY_RIGHT 106' '#define KEY_DOWN 108' '#define BTN_LEFT 0x110' > compat/linux/input.h
+    # SFVK_CUBE_INSTANCES=<n>: the cube drawn n times on top of itself each frame (depth LESS_OR_EQUAL, so
+    # every instance is shaded; the picture is the same): a heavy frame per present, for the
+    # present-race test (tools/sfvk-present-race.sh). Unset: one draw, as upstream.
+    sed -i '/^#include <stdlib.h>$/a static uint32_t sf_cube_instances(void) { const char *e = getenv("SFVK_CUBE_INSTANCES"); long n = e ? strtol(e, 0, 10) : 1; return n > 0 ? (uint32_t)n : 1; }' cube/cube.c
+    substituteInPlace cube/cube.c --replace-fail 'vkCmdDraw(submission_resource->cmd, 12 * 3, 1, 0, 0);' \
+      'vkCmdDraw(submission_resource->cmd, 12 * 3, sf_cube_instances(), 0, 0);'
     # the Darwin libwayland has no share/wayland; the protocol is the same file in the native one
     substituteInPlace cube/CMakeLists.txt --replace-fail '$'{WAYLAND_CLIENT_PATH}/wayland.xml \
       ${pkgs.wayland-scanner}/share/wayland/wayland.xml

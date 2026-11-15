@@ -256,6 +256,12 @@ The checks of step 5 again (table, mounts), `journalctl -k -b | grep "macsmc-reb
 (no boot-error line after a clean SiliconForest restart), `sudo e2fsck -fn` of `p3` through
 `m1-storage/tools/dr_linux_root.sh wcheck` (clean, journal start 0).
 
+The userland comes over SSH once SiliconForest runs (`m1-storage/tools/sf_userland_push.sh push gtar|sys|brew|claude`,
+then `push gpu`: the GL Mesa and Vulkan of `m1-vulkan/system.nix` at the system paths, previous files kept as
+`.old-<tag>`; relaunch the compositor afterwards). The kit's command line carries `pdavd=1` (hardware video
+decode, `/dev/pdavd`; its firmware `avd-fw-v2-t0.bin`, MIT, goes to `/Library/Firmware/apple/` from the M1's
+Linux, `m1-avd/tools/avd_disk_test.sh push`) and `if_attach_nx=46` (Wi-Fi receive statistics; SF-AC).
+
 ## Updating the kernel later (no recovery mode, no macOS)
 
     ./build.sh && python3 -I -B test_kit.py                 # workstation: out/boot.bin, out/kernel.bin

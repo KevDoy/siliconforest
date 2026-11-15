@@ -27,6 +27,11 @@
 #   claude  the Claude Code CLI as its vendor ships it (runs/homebrew/cli/claude-bin, fetched by the
 #           Homebrew stream from downloads.claude.ai and checked against its manifest), at
 #           /usr/local/lib/claude-code/<version>/claude with /usr/local/bin/claude pointing at it
+#   gpu     the graphics of the default install (../../m1-vulkan/system.nix: GL Mesa b7b03c5 in
+#           /usr/local/lib/mesa-asahi, the Vulkan loader, Honeykrisp, /etc/vulkan/icd.d, vulkaninfo and
+#           vkcube): `push gpu` runs ../../m1-vulkan/tools/sf-gpu-install.sh push + install (files there
+#           and different are kept as <name>.old-<tag>; `sf-gpu-install.sh revert <tag>` undoes it).
+#           Running programs keep the GL they loaded: relaunch the compositor afterwards (gui.lock).
 #   apps    what macOS applications need of the system beyond `sys` (../../terminal-app/
 #           build-macos-apps-root.nix; docs/roadmap/issues/SF-Y-terminal-app.md): the application stack
 #           with its patches, the Swift runtime, the framework wrappers, /usr/bin/open and /usr/bin/login.
@@ -58,6 +63,8 @@ list() {  # <stage directory>: "sha256  path" of every regular file, "target<TAB
   echo "$1: $(grep -c . "$1.sha256") files, $(grep -c . "$1.links" || true) links, $(du -sm "$1" | cut -f1) MB"
 }
 case "${1:?stage|known|ssh|push|verify|libsystem}" in
+push|verify) if [ "${2:-}" = gpu ]; then G=integrations/puredarwin/m1-vulkan/tools/sf-gpu-install.sh
+    [ "$1" = push ] && { "$G" push && "$G" install "${SF_GPU_TAG:-b7b03c5}"; } || "$G" status; exit $?; fi;;&
 libsystem)
   F=${2:?the new libSystem.B.dylib}; PR=${3:?sf-xpc-probe (userland/jit/build-jit-test.nix)}; I=integrations/puredarwin/m1-storage/userland/sf-libsystem-install.sh
   [ "$(head -c 4 "$F" | od -An -tx1 | tr -d ' ')" = cffaedfe ] || { echo "$F is not a 64-bit Mach-O" >&2; exit 2; }
