@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 13:22Z)
+## Current target and observed state (owner change; updated 13:57Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,19 +15,21 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO20, source `a92aa5bab`, capsule
-`aec4d08c8731…`, qualified13:18:41Z; owned UART reaped13:18:42Z before
-lock release. The normal desktop, Wi-Fi, RTKit/NHI control DMA/IRQs, host router,
-PHY ownership and privileged snapshot ABI remain healthy. Both physical lanes
-still report UNPLUGGED (state7), no remote router. CD3217 S0, exact Linux
-MASK1 bits1/9/10 and EVENT1 acknowledgement/readback work, with no dock link.
-The actual IOCatalogue contains exactly the four allowed PCI personalities
-(three bridges and the exact existing Wi-Fi match), profile valid/error0.
-UID65534 authorization is denied without changing its counter; root advances
-it0->1 and receives native ENODEV19. No PCI host is published and the independent
-inventory reports zero functions, zero xHCI and zero I210 (exit2). The image has
-57 code modules, no AVE kext and no pdave boot argument. The PCIe enumeration
-path is installed but unexercised because the physical peer is absent.
+**Observed in Darwin:** installed non-AVE CIO21, kernel source `a7cf6b22e`,
+CLI `0d36fe096`, capsule `e0519170e573…`, qualified13:46:19Z; owned UART
+reaped13:46:21Z before lock release. The normal desktop/Wi-Fi/NHI/RTKit/PHY and
+snapshot ABI remain healthy. At13:45:17Z an actual administrator peerless
+retry completed the real domain/ring/worker/IRQ/DMA/DART drain, RTKit and ACIO
+poweroff, broker-verified PHY release, reacquisition/calibration and second
+NHI startup. The native registry retains one host-router and one physical-port
+node; no stale children appeared. UID65534 denial leaves count0->0, root retry
+advances0->1, and a second root retry is denied1->1. M3 control reads3 before
+and after START in both generations, so bit0 was already enabled.
+Both lanes still report UNPLUGGED7/remote0. The second real TS3 approval returns
+ENODEV19/count2 and actual PCI inventory returns exit2/functions0. The actual
+catalogue still contains only three PCI bridge personalities and exact Wi-Fi;
+57 code modules, no AVE kext, no pdave argument and no endpoint mapper. This is
+peerless lifecycle evidence, not a dock/peripheral/physical-hotplug milestone.
 
 **CIO16 failed qualification:** the same non-AVE diagnostic image reached
 healthy NHI/RTKit/Type-C/PHY startup, but the standard desktop and inject
@@ -1919,3 +1921,36 @@ The target slot will capture both UART startups, require actual stop/reacquire/
 NHI checkpoints and an unchanged desktop, test UID/budget denial, rerun actual
 TS3 approval/inventory if a peer appears, and restore qualified CIO20 on failure.
 The separate I210 mapper remains excluded from that candidate image.
+
+### CIO21 runtime qualification and separate PCIe-C power guard
+
+The source/SDK peerless retry above is now observed on the M1, with all actual
+stop/reacquire/NHI and negative privilege/budget checks passing. No second
+system boot was required for the runtime retry. Initial firmware syslog reaches
+Phase2. The later post-runtime dmesg capture was too late: the131KiB ring begins
+at uptime79.7s and contains mainly sandbox/code-signing messages, with neither
+CIO startup retained. UART captured the system boot but does not contain those
+firmware syslog strings. Therefore the post-retry firmware phase is unverified;
+the actual restarted hardware still reports both lanes unplugged. This gap is
+not relabeled as observed Phase2 after the retry.
+
+After the new lifecycle behavior, quiet60s measured kernel2.229853% of one CPU,
+aggregate98.15885% idle and18 NHI interrupts including query boundaries. The
+compositor used3.374861% of one CPU: HID0.426192%, cleanup2.028593%, main0.917225%.
+Wakeups431.9167/s interrupt,362.6/s platform-idle, timer bins115.9833/209.0/s.
+Warm50M integer83.679–83.761ms,100k syscalls14.654ms; cold147.643ms kept separate.
+The reported AppKit slowdown remains unexplained. The later loadavg1.49/1.43/0.82
+was collected during other agents' GUI work and is not a quiet idle measurement.
+
+A separate source fix gives the native PCI host the same always-on PCIe-C PMGR
+gate proof already used by its controller backend. ACIO/PHY power alone does
+not prove the PCIe-C domain accessible. Host startup and every config access now
+check that gate before reading PCIe-C RUN/link, reject reset/disabled/off/all-ones
+states, and reject all-ones RUN/link too. No register programming is changed.
+Native enum SDK and all six repository checks pass; this guard is not installed
+in CIO21 and has no actual PCI hotplug qualification yet.
+
+The I210 interrupt audit confirms the existing private fbsdkpi path counts real
+IOPCIFamily interrupt indexes marked PCIMessaged. It must be supplied an actual
+AIC-backed MSI route; the Wi-Fi bridge's custom MSI function alone is not that
+integration. No fabricated interrupt index or successful MSI stub is supplied.

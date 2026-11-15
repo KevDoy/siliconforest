@@ -25,11 +25,15 @@ bool PDCIOPCIHost::start(IOService *provider)
        provider->getProperty("PDCIOPCIEnumerationOnly")!=kOSBooleanTrue ||
        !pd_adt_u32("/chosen","chip-id",0,&chip) || chip!=0x8103 ||
        !powerProof(powerContext))return false;
+    // ACIO can remain powered while PCIe-C loses its own domain. Never
+    // infer this separate gate from the CM's cable/PHY lifetime alone.
+    if(!powerGate.mapPhys(0x23b700450ULL,4) || !physicalPower())return false;
     // CPU mappings only; no PCIe-C DART parameter/register access here.
     // PDMmio supplies nonposted Device-nGnRnE root/config accesses.
     if(!config.mapNode("/arm-io/apciec1",0) || config.phys!=0x530000000ULL || config.len<0x8000000 ||
        !port.mapNode("/arm-io/apciec1",2) || port.phys!=0x521000000ULL || port.len<0x8000)return false;
-    if(!(port.r32(0x804)&1) || !(port.r32(0x208)&1))return false;
+    UInt32 run=port.r32(0x804),link=port.r32(0x208);
+    if(run==UINT32_MAX || link==UINT32_MAX || !(run&1) || !(link&1))return false;
     IOLockLock(accessLock);view.bytes=config.len;view.admitted=true;IOLockUnlock(accessLock);
     IOPCIAddressSpace root={};UInt32 vendor=configRead32(root,0),classCode=configRead32(root,8);
     if(vendor==UINT32_MAX || !(vendor&0xffff) || (vendor&0xffff)==0xffff ||
@@ -48,13 +52,23 @@ IOReturn PDCIOPCIHost::blockConfiguration()
     // the borrowed power context or the controller mappings after revocation.
     IOLockLock(accessLock);view.admitted=false;IOLockUnlock(accessLock);return kIOReturnSuccess;
 }
+bool PDCIOPCIHost::physicalPower()
+{
+    if(!powerGate.va)return false;
+    __asm__ volatile("dsb sy; isb" ::: "memory");
+    UInt32 state=powerGate.r32(0);
+    __asm__ volatile("dsb sy; isb" ::: "memory");
+    return state!=UINT32_MAX && (state&0xf0)==0xf0 && !(state&((1u<<31)|(1u<<10)));
+}
 volatile uint8_t *PDCIOPCIHost::address(IOPCIAddressSpace space,UInt8 offset,unsigned width)
 {
     uint64_t off;
     unsigned reg=((unsigned)space.es.registerNumExtended<<8)|offset;
     if(pd_pciec_config_offset(&view,space.s.busNum,space.s.deviceNum,
                              space.s.functionNum,reg,width,&off))return NULL;
-    if(!powerProof || !powerProof(powerContext) || !(port.r32(0x804)&1) || !(port.r32(0x208)&1))return NULL;
+    if(!powerProof || !powerProof(powerContext) || !physicalPower())return NULL;
+    UInt32 run=port.r32(0x804),link=port.r32(0x208);
+    if(run==UINT32_MAX || link==UINT32_MAX || !(run&1) || !(link&1))return NULL;
     return config.va+off;
 }
 UInt32 PDCIOPCIHost::readConfig(IOPCIAddressSpace space,UInt8 offset,unsigned width)
@@ -109,7 +123,7 @@ void PDCIOPCIHost::free()
     if(view.admitted || (startAttempted && !stopped)){
         IOLog("PDCIOPCIHost: retaining controller mappings after incomplete stop\n");return;
     }
-    config.unmap();port.unmap();
+    config.unmap();port.unmap();powerGate.unmap();
     if(accessLock){IOLockFree(accessLock);accessLock=NULL;}
     OSSafeReleaseNULL(leaseOwner);IOPCIBridge::free();
 }

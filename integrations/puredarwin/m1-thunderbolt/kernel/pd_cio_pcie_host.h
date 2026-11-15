@@ -10,7 +10,7 @@
 #include <IOKit/pci/IOPCIBridge.h>
 #include "pd_soc.h"
 #include "pd_pciec_config.h"
-/* Enumeration-only native adapter. Not yet wired to the connection manager.
+/* Enumeration-only native adapter, wired only in the explicit CM profile.
  * The caller must activate the real tunnel, cold-init/start PCIe-C, retain
  * its actual power/PHY ownership and omit PCI endpoint personalities before
  * starting this object. A registry marker alone is NOT binding/DMA proof.
@@ -25,9 +25,10 @@ class PDCIOPCIHost : public IOPCIBridge {
     void *powerContext;
     bool (*powerProof)(void *);
     IOLock *accessLock;
-    PDMmio config,port;
+    PDMmio config,port,powerGate;
     pd_pciec_config_view view;
     bool startAttempted,stopped;
+    bool physicalPower(); // Always-on PMGR proof before any PCIe-C access.
     volatile uint8_t *address(IOPCIAddressSpace,UInt8,unsigned);
     UInt32 readConfig(IOPCIAddressSpace,UInt8,unsigned);
     void writeConfig(IOPCIAddressSpace,UInt8,unsigned,UInt32);
