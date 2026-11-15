@@ -42,6 +42,14 @@ def main():
         raise FileExistsError('Application, runtime and desktop entry must all be absent')
     old_pins = pins.read_bytes() if pins.exists() else b''
     ids = old_pins.decode().splitlines()
+    # An empty persisted list means the desktop's default strip. Materialize
+    # that list before adding Firefox so its other tiles remain visible.
+    defaults = Path('/usr/share/chonkstep/dock-pins')
+    inherited_defaults = not any(value.strip() for value in ids) and defaults.is_file()
+    if inherited_defaults:
+        ids = defaults.read_text().splitlines()
+    firefox_pin_existed = any(value.strip() == 'org.mozilla.firefox' for value in old_pins.decode().splitlines())
+    ids = [value for value in ids if value.strip() != 'org.mozilla.firefox']
     # The requested neighbouring tiles must also exist if the persisted strip is empty.
     for item in ['com.apple.Terminal', 'com.apple.ActivityMonitor']:
         if item not in [v.strip() for v in ids]:
@@ -116,7 +124,8 @@ def main():
     if old_preferences is not None:
         (backup/'LaunchServices.plist').write_bytes(old_preferences)
     record = dict(plan,token=token,installed_at=datetime.now(timezone.utc).isoformat(),
-                  pins_before=ids[:position]+ids[position+1:],added_pins=[v for v in ids if v not in old_pins.decode().splitlines()],
+                  pins_before=ids[:position]+ids[position+1:],added_pins=[] if firefox_pin_existed else ['org.mozilla.firefox'],
+                  inherited_default_pins=inherited_defaults,
                   preferences_existed=old_preferences is not None,pins_existed=pins.exists(),
                   desktop_content=entry.decode(),final_cold_files=verified,final_cold_links=verified_links)
     (staging_app/'Contents/siliconforest-install.json').write_text(json.dumps(dict(runtime=str(root),token=token))+'\n')

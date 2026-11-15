@@ -33,7 +33,11 @@ def main():
     spec=spec_from_file_location('owner_install',root/'owner-install.py');mod=module_from_spec(spec);spec.loader.exec_module(mod)
     write=mod.atomic_write
     pins=Path(record['pins']);ids=pins.read_text().splitlines() if pins.exists() else []
-    ids=[v for v in ids if v.strip() not in record['added_pins']]
+    # Older receipts also listed the neighbouring Terminal/Activity Monitor
+    # tiles. Preserve every other app, including defaults materialized during
+    # installation and later owner/desktop changes.
+    removable={v for v in record['added_pins'] if v=='org.mozilla.firefox'}
+    ids=[v for v in ids if v.strip() not in removable]
     if not ids and not record['pins_existed']:pins.unlink(missing_ok=True)
     else:write(pins,('\n'.join(ids)+('\n' if ids else '')).encode())
     preferences=Path(record['preferences'])
