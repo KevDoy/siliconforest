@@ -12,7 +12,7 @@ let
 in pkgs.stdenv.mkDerivation {
   name = "siliconforest-finch-AVFoundation-assets-arm64";
   src = finch;
-  patches = [ ./patches/0001-asset-reader-without-video-composition.patch ./patches/0002-retained-foundation-date-and-file-apis.patch ./patches/0003-retained-locale-scanner-methods.patch ./patches/0004-retained-nsvalue-getvalue.patch ./patches/0005-media-selection-locale-api.patch ];
+  patches = [ ./patches/0001-asset-reader-without-video-composition.patch ./patches/0002-retained-foundation-date-and-file-apis.patch ./patches/0003-retained-locale-scanner-methods.patch ./patches/0004-retained-nsvalue-getvalue.patch ./patches/0005-media-selection-locale-api.patch ./patches/0006-full-track-video-edit-offset.patch ];
   dontConfigure = true;
   buildPhase = ''
     export DARWIN_SDK_ROOT=${sdk}

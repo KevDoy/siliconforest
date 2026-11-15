@@ -14,6 +14,7 @@ import sys
 
 api = runpy.run_path(sys.argv[1])
 mapping = {
+    '/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit': '/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit',
     '/usr/lib/libFoundation.dylib': '/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation',
     '/usr/lib/libCoreFoundation.dylib': '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation',
 }
