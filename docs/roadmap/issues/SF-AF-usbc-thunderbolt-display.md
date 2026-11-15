@@ -3023,3 +3023,21 @@ These are consistent with prior controls and keep frequency warmup as a clue;
 they do not establish the cause of the reported AppKit slowdown. That finding
 remains unresolved. TERM8's c12 framework installation acquired GUI after this
 sample released it, so later app timing comparisons need that version boundary.
+
+
+### Next boot order revised before any hardware action
+
+With the normal-NC Ethernet SDK, allocator fixtures and exact collection/input
+checks complete, the pending diagnostic-only CIO38TRACE boot was superseded
+by CIO39NC. The sole waiting wrapper was stopped while still blocked on the
+shared core lock, before GUI/bench acquisition or target preflight. No CIO38
+kernel was installed or booted; its artifacts and receipts remain preserved.
+CIO39NC keeps the same bounded trace and changes only PDFBSDem among58
+executable modules; the other57 match CIO37NET. This removes an otherwise
+extra diagnostic-only reboot. It is scheduled after20:30Z and after TERM8's
+entire guarded core pipeline releases, with the same strict preflight,
+normal known-good non-AVE CIO29 recovery and actual.next restoration.
+It also captures the bound Linux I210 driver's read-only ethtool registers
+and live PCIe-C DMA-property/configuration evidence during the normal Linux
+visit. There is no additional Linux boot or configuration change. At this
+entry, CIO39NC remains uninstalled and its cache hypothesis unconfirmed.
