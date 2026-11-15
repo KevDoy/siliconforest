@@ -19,6 +19,14 @@ def pending_hold(text, install_reservation=False, now=None):
         if event:
             owner, body = event[1], event[2]
             lower_body = body.lower()
+            # A kernel owner's dated reservation blocks new work immediately.
+            # It is not an actual reboot epoch and has no timeout-based release.
+            if re.match(r'^notice\s+[a-z0-9_-]+\s+earliest\s*\d{2}:\d{2}:\d{2}z\b', lower_body):
+                active[(owner, 'scheduled-reboot')] = (line, [], owner)
+            elif ((owner, 'scheduled-reboot') in active and
+                  lower_body.startswith('scheduling correction:') and
+                  re.search(r'earliest\s*[a-z0-9_-]+\s*\d{2}:\d{2}:\d{2}z\b', lower_body)):
+                active[(owner, 'scheduled-reboot')] = (line, [], owner)
             # A physical flock alone does not end an announced desktop install.
             # Only the same owner's actual release/correction closes its hold.
             if ((lower_body.startswith('gui.lock: install ') and
@@ -26,6 +34,7 @@ def pending_hold(text, install_reservation=False, now=None):
                     lower_body.startswith('gui.lock: compositor relaunch')):
                 active[(owner, 'desktop-install')] = (line, [], owner)
             if (lower_body.startswith('gui.lock released') or
+                    lower_body.startswith('checks done, gui.lock released;') or
                     lower_body.startswith('correction: gui.lock was released at the end of the install') or
                     (lower_body.startswith('done (runs/m1-coord/done-') and
                      'm1 left on the installed daily compositor' in lower_body)):
@@ -61,6 +70,7 @@ def pending_hold(text, install_reservation=False, now=None):
             if lower_body.startswith('cancelled ') and 'no reboot' in lower_body:
                 active.pop((owner, 'explicit'), None)
                 active.pop((owner, 'reboot'), None)
+                active.pop((owner, 'scheduled-reboot'), None)
                 desktop_before_reboot.pop(owner, None)
             for key, (notice, markers, release_owner) in list(active.items()):
                 if release_owner in (None, owner) and any(body.startswith(m) for m in markers):
@@ -90,6 +100,7 @@ def pending_hold(text, install_reservation=False, now=None):
                 # started during recovery, all core pipelines, and all holds
                 # when no actual reboot start was recorded for this owner.
                 if (owner, 'reboot') in active:
+                    active.pop((owner, 'scheduled-reboot'), None)
                     for key, notice in desktop_before_reboot.pop(owner, {}).items():
                         if key in active and active[key][0] == notice:
                             del active[key]

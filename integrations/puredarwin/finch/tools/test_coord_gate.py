@@ -196,5 +196,37 @@ class HoldTests(unittest.TestCase):
         self.assertIsNotNone(gate.pending_hold(text+'U TERM8 gui.lock released\n'))
         self.assertIsNone(gate.pending_hold(text+'U DESK6 gui.lock released\n'))
 
+    def test_desktop_checked_release_is_actual_same_owner_event(self):
+        text = 'T DESK6 gui.lock: install desk6-005 + compositor relaunch\n'
+        end = 'checks done, gui.lock released; M1 standard: .next desk6-005\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM8 '+end))
+        self.assertIsNotNone(gate.pending_hold(text+'U DESK6 waiting for '+end))
+        self.assertIsNone(gate.pending_hold(text+'U DESK6 '+end))
+        self.assertIsNotNone(gate.pending_hold(text+'U PERF core.lock: GUARDED INSTALL now\nV DESK6 '+end))
+
+    def test_kernel_earliest_notice_is_reservation_not_reboot_epoch(self):
+        text = 'T DESK6 gui.lock: install desk6 + compositor relaunch\n'
+        text += 'U CODEX-TB NOTICE CIO37NET earliest19:51:00Z AFTER current owner; coreSH->guiEX->bench\n'
+        text += 'V CODEX-TB SCHEDULING CORRECTION: earliestCIO37NET19:52:30Z (supersedes19:51). No hardware action\n'
+        self.assertIn('19:52:30Z', gate.pending_hold(text))
+        # A release of a physical lock, another owner, or even an unrelated
+        # return cannot consume this future reservation or the old desktop hold.
+        self.assertIsNotNone(gate.pending_hold(text+'W CODEX-TB gui.lock released\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'W CODEX-TB M1 back in SiliconForest\n'))
+        text += 'W CODEX-TB cio37 clean reboot to Linux\n'
+        self.assertIsNotNone(gate.pending_hold(text+'X OTHER M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'X CODEX-TB M1 back in SiliconForest\n'))
+
+    def test_future_kernel_reservation_never_expires_or_quotes_complete(self):
+        text = '2026-11-15T19:49:13Z CODEX-TB NOTICE CIO37NET earliest19:51:00Z AFTER other work\n'
+        far_future = gate.datetime(2027, 1, 1, tzinfo=gate.timezone.utc)
+        self.assertIsNotNone(gate.pending_hold(text, now=far_future))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB waiting for M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U OTHER CANCELLED trial; no reboot\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB CANCELLED trial; no reboot\n'))
+
+    def test_quoted_kernel_notice_is_not_a_reservation(self):
+        self.assertIsNone(gate.pending_hold('T CODEX quoted: NOTICE CIO37NET earliest19:51:00Z\n'))
+
 if __name__ == '__main__':
     unittest.main()
