@@ -361,11 +361,26 @@ int PDAppleCIO::readSnapshot()
  if(stopping || quarantined || !cm || !cmPowered(this))return ENODEV;
  if(diagnosticCount==UINT32_MAX)return EOVERFLOW;
  ++diagnosticCount;setProperty("link-query-count",(uint64_t)diagnosticCount,32);
+ setProperty("m3-control-readback",rc.r32(0x0c),32);
+ setProperty("m3-live-state",rc.r32(0xa8),32);
+ setProperty("nhi-interrupt-enable-live",nhi.r32(0xd0010),32);
+ setProperty("nhi-interrupt-status-live",nhi.r32(0xd0000),32);
  auto req=request(PD_USBC_PHY_SNAPSHOT);int phyRet=phy(req);
  setProperty("phy-query-error",(uint64_t)phyRet,32);
+ auto typec=getProvider()?getProvider()->getProvider():NULL;
+ IOReturn control=typec?typec->callPlatformFunction("PDAppleTypeCControlSnapshot",false,NULL,NULL,NULL,NULL):kIOReturnNotReady;
+ setProperty("typec-control-query-error",(uint32_t)control,32);
+ const size_t capacity=512,bytes=capacity*sizeof(pd_cio_tunable_observation);size_t count=0;
+ auto records=(pd_cio_tunable_observation *)IOMallocData(bytes);
+ int tuneRet=records?pd_cio_tunables_observe(&tunables,&tuning,records,capacity,&count):ENOMEM;
+ if(!tuneRet && !setProperty("cio-tuning-registers",records,count*sizeof(*records)))tuneRet=ENOMEM;
+ if(records)IOFreeData(records,bytes);
+ setProperty("cio-tuning-count",(uint32_t)count,32);
+ setProperty("cio-tuning-error",(uint32_t)tuneRet,32);
+ setProperty("cio-tuning-valid",tuneRet==0);
  int ret=pd_cio_cm_snapshot(cm);
  setProperty("link-query-error",(uint64_t)ret,32);
- return phyRet?phyRet:ret;
+ return phyRet?phyRet:ret?ret:tuneRet?tuneRet:control==kIOReturnSuccess?0:EIO;
 }
 void PDAppleCIO::diagnosticTick(OSObject *owner,IOTimerEventSource *)
 {

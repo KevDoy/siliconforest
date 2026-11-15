@@ -341,3 +341,22 @@ device/class values and counts the four xHCI controllers and I210. Exit0
 requires that entire registry target set; absent/partial sets return2 and
 incomplete queries return1. It never reads config space or proves Ethernet,
 USB, DMA or authorization. Native execution is qualified separately.
+
+
+The next diagnostic adds actual root five-DWORD and lane eight-DWORD basic
+headers plus two-DWORD PHY capabilities, wrapping counts of the24 real NHI
+IRQ handlers, current M3/IRQ registers and the256 native programmed ACIO
+tuning addresses. Runtime tuning data stays private; only the prevalidated
+owned address lists are sampled, under the existing power/lease gate, with
+capacity512 and all-address preflight before reads. No SRAM, DART parameters,
+firmware memory, user addresses, IRQ acknowledge or mode write is added by
+these queries. The current startup and explicit root requests are the only
+callers; handler counters add no sampling timer. A missing/failed Type-C
+control snapshot makes the explicit diagnostic fail.
+
+PDAppleTypeC's matching read-only control query samples event1, mask1, S0,
+status and data status through its real port1 transport, serialized with its
+existing1Hz sampler. Its command gate rejects calls after stop; it publishes
+valid/error/count and invokes no task or IRQ-clear/mask write. These reads
+are sequential observations, not an atomic snapshot of firmware activity.
+Neither diagnostics nor host/SDK tests establish the dock link.

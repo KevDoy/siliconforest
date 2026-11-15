@@ -222,17 +222,25 @@ int pd_cio_cm_snapshot(PDCIOCM *s)
  s->owner->setProperty("host-router-device",(uint64_t)status.root_device,32);
  s->owner->setProperty("host-router-max-port",(uint64_t)status.max_port,32);
  s->owner->setProperty("nhi-cable-info-readback",(uint64_t)status.cable_info,32);
+ bool headerOk=s->owner->setProperty("host-router-header",status.root_header,sizeof(status.root_header)) &&
+  s->owner->setProperty("host-router-header-valid",status.root_header_valid!=0) &&
+  s->owner->setProperty("nhi-irq-counts",status.irq_count,sizeof(status.irq_count));
  auto ports=OSArray::withCapacity(status.port_count);
  if(!ports)return ENOMEM;
- bool ok=true;
+ bool ok=headerOk;
  for(unsigned i=0;i<status.port_count && ok;++i){
-  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(11);
+  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(13);
   if(!item){ok=false;break;}
   const char *keys[]={"port","state","error","remote","remote-vendor","remote-device",
    "phy-capability","flags-valid","lane-disabled","adapter-locked","remote-authorized"};
   const uint32_t values[]={p.port,p.state,p.error,p.remote,p.remote_vendor,p.remote_device,
    p.cap_phy,p.flags_valid,p.lane_disabled,p.adapter_locked,p.remote_authorized};
   for(unsigned n=0;n<11 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
+  if(ok && p.flags_valid){
+   auto phy=OSData::withBytes(p.phy,sizeof(p.phy));auto header=OSData::withBytes(p.header,sizeof(p.header));
+   ok=phy && header && item->setObject("phy-registers",phy) && item->setObject("adapter-header",header);
+   OSSafeReleaseNULL(phy);OSSafeReleaseNULL(header);
+  }
   if(ok)ok=ports->setObject(item);item->release();
  }
  if(ok)ok=s->owner->setProperty("physical-port-state",ports);

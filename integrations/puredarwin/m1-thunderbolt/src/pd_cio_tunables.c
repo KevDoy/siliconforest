@@ -59,3 +59,25 @@ int pd_cio_tunables_apply(const struct pd_cio_tunables *b,const struct pd_cio_tu
     }
     return 0;
 }
+int pd_cio_tunables_observe(const struct pd_cio_tunables *b,const struct pd_cio_tunable_io *io,
+ struct pd_cio_tunable_observation *out,size_t capacity,size_t *count)
+{
+    if(!count)return EINVAL;*count=0;
+    if(!b || !b->checked || !io || !io->read || !out || !capacity || capacity>512)return EINVAL;
+    int ret=validate(b);if(ret)return ret;
+    size_t required=0;
+    for(unsigned n=0;n<11;++n){
+        size_t records=b->entries[n].bytes/24;
+        if(records>capacity-required)return EOVERFLOW;
+        required+=records;
+    }
+    size_t index=0;
+    for(unsigned n=0;n<11;++n){
+        const uint8_t *p=b->entries[n].raw;
+        for(size_t off=0;off<b->entries[n].bytes;off+=24){
+            uint32_t address=groups[n].base+le32(p+off);
+            out[index++]=(struct pd_cio_tunable_observation){groups[n].window,address,io->read(io->ctx,groups[n].window,address)};
+        }
+    }
+    *count=index;return 0;
+}

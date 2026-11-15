@@ -13,12 +13,14 @@
 #include "pd_i2c.h"
 #include "pd_cd321x.h"
 #include "pd_cd321x_power.h"
+#include "pd_cd321x_control.h"
 #include <mach/mach_time.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOMessage.h>
 #include <IOKit/IOTimerEventSource.h>
+#include <IOKit/IOCommandGate.h>
 #include <libkern/OSAtomic.h>
 #include <pexpert/pexpert.h>
 
@@ -30,6 +32,8 @@ class PDAppleTypeC : public IOService {
     PDI2C bus;
     IOWorkLoop *loop;
     IOTimerEventSource *timer;
+    IOCommandGate *gate;
+    uint32_t acceptingControls,controlCount;
     uint8_t address;
     uint32_t lastStatus, lastData, lastVdo, lastFlags, samples, failures;
     bool valid;
@@ -40,12 +44,15 @@ class PDAppleTypeC : public IOService {
     static uint64_t powerNow(void *) { uint64_t ns;absolutetime_to_nanoseconds(mach_absolute_time(),&ns);return ns/1000000; }
     static void powerSleep(void *,unsigned ms) { IOSleep(ms); }
     void sample();
+    int readControl();
+    static IOReturn controlAction(OSObject *,void *,void *,void *,void *);
     static void tick(OSObject *owner, IOTimerEventSource *source);
 public:
     IOService *probe(IOService *provider, SInt32 *score) override;
     bool start(IOService *provider) override;
     void stop(IOService *provider) override;
     void free() override;
+    IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
 };
 
 #define super IOService
@@ -156,6 +163,39 @@ void PDAppleTypeC::tick(OSObject *owner, IOTimerEventSource *source)
     self->sample();
     source->setTimeoutMS(1000);
 }
+int PDAppleTypeC::readControl()
+{
+    if(controlCount==UINT32_MAX)return EOVERFLOW;
+    pd_cd321x_control value={};
+    int ret=pd_cd321x_control_observe(this,powerRead,&value);
+    setProperty("control-read-count",++controlCount,32);
+    setProperty("control-read-error",(uint32_t)ret,32);
+    setProperty("control-read-valid",ret==0);
+    if(!ret){
+        bool ok=setProperty("control-event1",value.event1,sizeof(value.event1)) &&
+            setProperty("control-mask1",value.mask1,sizeof(value.mask1)) &&
+            setProperty("control-power",(uint32_t)value.power,32) &&
+            setProperty("control-status",pd_cd321x_le32(value.status),32) &&
+            setProperty("control-data-status",pd_cd321x_le32(value.data),32);
+        if(!ok){ret=ENOMEM;setProperty("control-read-error",(uint32_t)ret,32);setProperty("control-read-valid",false);}
+    }
+    return ret;
+}
+IOReturn PDAppleTypeC::controlAction(OSObject *owner,void *,void *,void *,void *)
+{
+    auto self=OSDynamicCast(PDAppleTypeC,owner);
+    if(!self || !__atomic_load_n(&self->acceptingControls,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
+    return self->readControl()?kIOReturnIOError:kIOReturnSuccess;
+}
+IOReturn PDAppleTypeC::callPlatformFunction(const OSSymbol *name,bool wait,void *a,void *b,void *c,void *d)
+{
+    if(name && name->isEqualTo("PDAppleTypeCControlSnapshot")){
+        if(a || b || c || d)return kIOReturnBadArgument;
+        if(!gate || !__atomic_load_n(&acceptingControls,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
+        return gate->runAction(controlAction);
+    }
+    return IOService::callPlatformFunction(name,wait,a,b,c,d);
+}
 
 bool PDAppleTypeC::start(IOService *provider)
 {
@@ -192,8 +232,13 @@ bool PDAppleTypeC::start(IOService *provider)
     if(ret)return false; // No state publication, PHY or ACIO start after failed setup.
     loop = IOWorkLoop::workLoop();
     timer = IOTimerEventSource::timerEventSource(this, tick);
-    if (!loop || !timer || loop->addEventSource(timer) != kIOReturnSuccess)
+    gate=IOCommandGate::commandGate(this);
+    if (!loop || !timer || !gate || loop->addEventSource(timer) != kIOReturnSuccess ||
+        loop->addEventSource(gate)!=kIOReturnSuccess)
         return false;
+    controlCount=0;
+    __atomic_store_n(&acceptingControls,1,__ATOMIC_RELEASE);
+    readControl(); // Diagnostic failure never fabricates usable cable state.
     timer->setTimeoutMS(1);
     registerService();
     return true;
@@ -201,18 +246,21 @@ bool PDAppleTypeC::start(IOService *provider)
 
 void PDAppleTypeC::stop(IOService *provider)
 {
+    __atomic_store_n(&acceptingControls,0,__ATOMIC_RELEASE);
     if (timer) {
         timer->cancelTimeout();
         timer->disable();
         // removeEventSource serializes with the workloop's current callback.
         if (loop) loop->removeEventSource(timer);
     }
+    if(gate){gate->disable();if(loop)loop->removeEventSource(gate);}
     super::stop(provider);
 }
 
 void PDAppleTypeC::free()
 {
     OSSafeReleaseNULL(timer);
+    OSSafeReleaseNULL(gate);
     OSSafeReleaseNULL(loop);
     bus.regs.unmap();
     if (bus.lock) { IOLockFree(bus.lock); bus.lock = NULL; }

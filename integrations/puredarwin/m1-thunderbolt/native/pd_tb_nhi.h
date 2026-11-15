@@ -38,9 +38,13 @@ struct pd_tb_nhi_port_status {
  uint32_t port,state,error,remote,remote_vendor,remote_device;
  uint32_t cap_phy,flags_valid,lane_disabled,adapter_locked;
  uint32_t remote_authorized;
+ uint32_t phy[2],header[8];
 };
 struct pd_tb_nhi_status {
  uint32_t root_vendor,root_device,max_port,port_count,cable_info;
+ uint32_t root_header[5];
+ uint32_t root_header_valid;
+ uint32_t irq_count[24];
  struct pd_tb_nhi_port_status ports[16];
 };
 int pd_tb_nhi_snapshot(void *,struct pd_tb_nhi_status *);

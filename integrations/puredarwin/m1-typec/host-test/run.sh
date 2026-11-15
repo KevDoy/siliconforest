@@ -11,3 +11,6 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
   -I"$HERE/../kernel" "$HERE/test_power.c" -o "$TEMP/test-power"
 "$TEMP/test-power"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
+  -I"$HERE/../kernel" "$HERE/test_control.c" -o "$TEMP/test-control"
+"$TEMP/test-control"

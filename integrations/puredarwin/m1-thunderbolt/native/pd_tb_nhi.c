@@ -24,6 +24,7 @@ struct pd_tb_nhi {
  struct pd_tb_nhi_config config;
  struct tb_ring *tx[12],*rx[12];
  struct tb *domain;
+ uint32_t irq_count[24]; // Wrapping actual handler counts, no sampling timer.
  bool started,failed;
 };
 static struct pd_tb_nhi *owner(struct tb_nhi *nhi)
@@ -52,6 +53,7 @@ static int interrupt(void *arg)
  struct tb_ring *r=arg;struct pd_tb_nhi *s=owner(r->nhi);
  spin_lock(&r->nhi->lock);spin_lock(&r->lock);
  writel(BIT(index_of(r)),s->config.nhi_base+IRQ_STATUS);
+ __atomic_add_fetch(&s->irq_count[index_of(r)],1,__ATOMIC_RELAXED);
  if(!pd_tb_native_ready()){
   active(r,false);fail(s);
  }
@@ -186,11 +188,15 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
  struct pd_tb_nhi *s=ctx;
  if(!s || !out || !s->domain || !s->started || !present(&s->nhi))return -ENODEV;
  memset(out,0,sizeof(*out));
+ for(unsigned i=0;i<24;++i)out->irq_count[i]=__atomic_load_n(&s->irq_count[i],__ATOMIC_RELAXED);
  mutex_lock(&s->domain->lock);
  struct tb_switch *root=s->domain->root_switch;int ret=0;
  if(!root || !root->ports){ret=-ENODEV;goto done;}
  out->root_vendor=root->config.vendor_id;out->root_device=root->config.device_id;
  out->max_port=root->config.max_port_number;
+ ret=tb_sw_read(root,out->root_header,TB_CFG_SWITCH,0,5);
+ if(ret)goto done;
+ out->root_header_valid=1;
  int cap=tb_switch_find_vse_cap(root,0x00);
  if(cap<0){ret=cap;goto done;}
  ret=tb_sw_read(root,&out->cable_info,TB_CFG_SWITCH,cap+1,1);
@@ -206,6 +212,7 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
   else{
    p->state=lane.state;p->lane_disabled=lane.disabled;
    p->adapter_locked=lane.locked;p->flags_valid=1;
+   memcpy(p->phy,lane.phy,sizeof(p->phy));memcpy(p->header,lane.header,sizeof(p->header));
   }
   if(port->remote){
    p->remote=1;p->remote_vendor=port->remote->sw->vendor;p->remote_device=port->remote->sw->device;

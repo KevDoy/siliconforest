@@ -16,3 +16,8 @@ following Linux drivers/pmdomain/apple/pmgr-pwrstate.c and m1n1 src/pmgr.c:
   Copyright The Asahi Linux Contributors
 The GPL licence option is selected for this kext. Original notices remain in
 every compiled source. No firmware is included.
+
+pd_cd321x_control.h uses the read-only event1/mask1/S0/status/data register
+layout from the same pinned Linux tipd/core.c, retaining Intel/Heikki Krogerus
+and Asahi notices, GPL-2.0. It acknowledges no interrupts and changes no mask.
+The native command-gate adapter and host failure tests use that actual helper.

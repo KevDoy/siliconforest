@@ -23,6 +23,13 @@ struct pd_cio_tunable_io {
  * Return 0 or positive errno; external ACIO/PHY serialization required. */
 int pd_cio_tunables_load(struct pd_cio_tunables *,const struct pd_cio_tunable_io *);
 int pd_cio_tunables_apply(const struct pd_cio_tunables *,const struct pd_cio_tunable_io *,enum pd_cio_window);
+struct pd_cio_tunable_observation { uint32_t window,offset,value; };
+/* Read only the validated immutable tuning address list, never firmware/SRAM.
+ * All addresses/counts preflight before any read; count=0 on failure.
+ * Native caller must establish actual power/lease/serialization. This helper
+ * and its checked bit do not supply that hardware or lifetime proof. */
+int pd_cio_tunables_observe(const struct pd_cio_tunables *,const struct pd_cio_tunable_io *,
+ struct pd_cio_tunable_observation *,size_t capacity,size_t *count);
 #ifdef __cplusplus
 }
 #endif

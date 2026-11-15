@@ -1508,3 +1508,24 @@ The positive four-controller/I210 path remains unobserved. No further reboot
 will interrupt the announced Firefox30-minute stability slot; source/host
 work proceeds on combined Type-C control/NHI lane diagnostics and endpoint
 DMA preparation.
+
+### Combined next diagnostic: source/SDK only, CIO15 remains installed
+
+With23 PHY/MAC/PLL and five PIPE registers matching Linux but lanes still7,
+the next read-only candidate batches the remaining control boundaries:
+Type-C event1/mask1/power/status/data via a real serialized port1 control
+reader, root/adapter/PHY headers over NHI, actual wrapping24-handler IRQ
+counts, live M3/IRQ state and256 ACIO tuning register observations. Every
+tuning address/count is preflighted before reads (capacity512); no firmware/
+SRAM/DART parameters or caller-provided addresses are read. The native
+Type-C helper has input and every-read failure tests; failed reads leave
+output unchanged. Its query shares the existing sampler's workloop and is
+rejected after stop. No IRQ acknowledge, mask/role/mode write or new recurring
+poll is introduced. Source/SDK evidence remains separate from hardware.
+
+The Linux comparison is prepared for the next ordinary visit: fixed port1
+I2C_RDWR register reads (bus DT i2c@235010000/usb-pd@3f, actual bound driver,
+J293), with the Linux adapter serializing each address-prefix/read transfer;
+no I2C_SLAVE_FORCE, command task or IRQ/mask write. ACIO samples use the
+same256 validated addresses and active-NHI/authorized-dock guard. Raw
+snapshots remain private. No extra visit/boot interrupts FX's stability slot.
