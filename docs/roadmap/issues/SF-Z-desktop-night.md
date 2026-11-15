@@ -970,6 +970,9 @@ picture, over the terminal at the bottom left), `t2-am-cmdm-back`, `t1-desk-cmdm
 the tile goes (`destroyed by its client while minimised: its tile goes`, seen with Terminal.app's crash). Not
 exercised on the M1: the title-bar button (the owner's theme has none), the title-bar menu's Minimize, AppKit's own
 Window > Minimize, a quit while minimised (host-tested: `a_minimised_windows_tile_goes_with_its_client`).
+With the final desk6-next-005: desk terminal 3/3 and Activity Monitor 3/3 again (`t5.txt`; `t5-am-cmdm-min`: the
+tiles side by side at the bottom left, each the window's picture - two of them desk terminals another agent's test had
+minimised).
 
 ### 2. "The dock launchers disappeared when I clicked on them and tried to move them"
 **Cause.** A press on a launcher tile became a drag after ~7 px; during the drag the dock only darkened the tile in
@@ -1010,7 +1013,9 @@ written (`moved from place 1 to 3 (written)`); a quick drop far away: back, noth
 then removed; `chonkstep-dock --defaults`: the four back; the context menu (`d2-h-menu`: Open, Options ▸); a click
 wobbling 5 px on Activity Monitor's tile: it opened (`WMMAC open ...`). Captures `d2-a-move-mid` (the strip making
 room, the tile following the pointer), `d2-b-moved`, `d2-c-away` (the tile at 3/4 of the pointer: the unit fault
-fixed in 005), `d2-e-remove-label`, `d2-f-removed`, `d2-g-defaults`.
+fixed in 005), `d2-e-remove-label`, `d2-f-removed`, `d2-g-defaults`. With dock-005 (`c5.txt`): the dragged tile lies
+under the pointer with "Remove from Dock" just above it (`c5-b-held`), and a tile's name sits beside its tile without
+overlapping it (`c5-a-name`; DESK5's ~20 px overlap had the same cause).
 
 ### 3. Requests addressed to the desk
 - **Pinch/rotate**: the compositor offers `zwp_pointer_gestures_v1` and gives pinches to the client under the pointer
@@ -1019,7 +1024,9 @@ fixed in 005), `d2-e-remove-label`, `d2-f-removed`, `d2-g-defaults`.
   driver does not report pinches (`M1TP_MT_G_IGNORED`): the kernel requirement is **K14** in
   `runs/m1-coord/requests-for-CODEX-TB.md` (ring version 2 with a kind, scale and angle; the compositor already reads
   version 1 and 2, lib test `the_trackpad_ring_reads_swipes_of_version_1_and_pinches_of_version_2`). Until then inject
-  `pinch ...` in `.next`. AppKit's side (NSEvent magnify/rotate) is TERM8's.
+  `pinch ...` in `.next`: observed routing on the M1, `WMGESTURE pinch begin fingers=2 to the client under the pointer
+pid=Some(151) (zwp_pointer_gestures_v1)` (a desk terminal, which binds no gestures: no client reaction is claimed).
+AppKit's side (NSEvent magnify/rotate) is TERM8's.
 - **Command-W / Command-Q for Mac applications**: a window is a Mac application's when its app id is a bundle's in the
   application folders, or its process runs from inside any `.app`, or it serves an app-menu socket (Firefox outside
   the catalogue was taken by the desk: CODEX-FX's finding). Not exercised with Firefox on the M1.
