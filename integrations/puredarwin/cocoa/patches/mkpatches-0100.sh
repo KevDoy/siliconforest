@@ -14,7 +14,8 @@
 #   am-0126/  = am-0123/ + 0125, 0126 (frozen; TERM6)
 #   am-0127/  = am-0126/ + 0127 (frozen; TERM6)
 #   am-0128/  = am-0127/ + 0128 (frozen; TERM6)
-#   am/       = am-0128/ + 0129 on (the current tree; TERM6)
+#   am-0129/  = am-0128/ + 0129 (frozen; TERM6)
+#   am/       = am-0129/ + 0130 on (the current tree; TERM6)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -85,3 +86,6 @@ mk am-0126 am-0127 0127-appkit-float-value-abi-colour-well-click-opaque-menus.pa
 # 0128 (TERM6): am-0127 -> am-0128
 mk am-0127 am-0128 0128-appkit-table-header-sort-indicator-slot.patch $A/NSTableHeaderCell.m $A/NSTableHeaderView.m
 ( diff -rq am-0127 am-0128 ) | sed 's/^/differs from am-0127: /'
+# 0129 (TERM6): am-0128 -> am-0129
+mk am-0128 am-0129 0129-windowserver-frames-kept-by-default.patch src/Frameworks/WindowServer/rpc_wayland.c
+( diff -rq am-0128 am-0129 ) | sed 's/^/differs from am-0128: /'
