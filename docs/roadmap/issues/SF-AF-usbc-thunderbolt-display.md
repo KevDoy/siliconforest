@@ -2774,8 +2774,11 @@ still required. This panic is separate from the earlier unresolved idle-load
 and AppKit timing report.
 
 Qualified non-AVE CIO29 was restored19:06:17Z; UART was reaped19:06:18Z before
-lock release, and the standard desktop/inject check passed. Default boot
-remains Linux. No AVE module, boot argument, probe or extraction was added.
+lock release. Its directory-only inject check passed, but the actual process
+was the daily compositor: that was insufficient restoration. DESK6 restored
+the real .next process at19:13Z and again during its19:25Z install. CIO36
+adds a strict actual-process/socket/inject preflight and conditional normal
+.next relaunch before releasing its recovery lock. Default boot remains Linux. No AVE module, boot argument, probe or extraction was added.
 
 ### Dedicated FL1100 controller preparation — uninstalled, 2026-11-15
 
