@@ -1,0 +1,76 @@
+/* SPDX-License-Identifier: GPL-2.0-only OR MIT */
+/* Private pd_soc.cpp extension, PMGR sequences from Linux pmgr-pwrstate.c,
+ * Copyright The Asahi Linux Contributors. T8103 ACIO1 owner only.
+ */
+static int pd_cio_gate_map(uint32_t cell,PDMmio &reg)
+{
+    if (!cell || (cell&~PMGR_DEVICE_ID)) return EINVAL;
+    const uint8_t *dev=dev_find((uint16_t)cell);
+    if (!dev || (dev[DEV_FLAGS]&PMGR_FLAG_VIRTUAL)) return ENOENT;
+    unsigned idx=dev[DEV_PSREG_IDX];
+    if ((idx+1)*12>gPmgr.psRegsLen) return EINVAL;
+    unsigned n=le32(gPmgr.psRegs+idx*12);
+    if(n>=gPmgr.regs->getCount())return EINVAL;
+    auto md=OSDynamicCast(IOMemoryDescriptor,gPmgr.regs->getObject(n));
+    uint64_t off=(uint64_t)le32(gPmgr.psRegs+idx*12+4)+((uint64_t)dev[DEV_ADDR_OFFSET]<<3);
+    if (!md || off>md->getLength() || md->getLength()-off<4)return EINVAL;
+    uint64_t base=md->getPhysicalSegment(0,NULL,kIOMemoryMapperNone);
+    return base && base<=UINT64_MAX-off && reg.mapPhys(base+off,4)?0:ENXIO;
+}
+/* Called only after all children and RTKit have stopped. Never walks up to
+ * shared parents or disables PCIe-C's always-on domain. Partial failure keeps
+ * parent/PHY ownership; retry may finish remaining gates. */
+int pd_cio_power_off()
+{
+    pmgr_lock_init();if(!gPmgr.lock)return ENOMEM;
+    IOLockLock(gPmgr.lock);
+    int ret=pmgr_load();PDMmio maps[16];
+    unsigned count=pd_adt_cells("/arm-io/acio1","clock-gates");
+    if(!count || count>16)ret=EINVAL;
+    for(unsigned i=0;!ret && i<count;++i){
+        uint32_t cell=0;
+        if(!pd_adt_u32("/arm-io/acio1","clock-gates",i,&cell)){ret=EINVAL;break;}
+        ret=pd_cio_gate_map(cell,maps[i]);
+    }
+    for(unsigned i=count;!ret && i>0;--i){
+        auto &reg=maps[i-1];
+        uint32_t value=reg.r32(0);
+        if(value==UINT32_MAX || (value&PMGR_RESET)){ret=EBUSY;break;}
+        // Do not replay hardware BUSY or latched WAS_* bits.
+        value&=~(PMGR_AUTO_ENABLE|PMGR_WAS_CLKGATED|PMGR_WAS_PWRGATED|
+                  (1u<<11)|PMGR_DEV_DISABLE|(1u<<12)|PMGR_PS_TARGET);
+        reg.w32(0,value);
+        ret=ETIMEDOUT;
+        for(unsigned wait=0;wait<1000;++wait){
+            uint32_t now=reg.r32(0);
+            if(!(now&(PMGR_PS_ACTUAL|PMGR_PS_TARGET|PMGR_AUTO_ENABLE))){ret=0;break;}
+            IODelay(1);
+        }
+    }
+    for(unsigned i=0;i<16;++i)maps[i].unmap();
+    IOLockUnlock(gPmgr.lock);return ret;
+}
+/* The caller has exclusive ownership and has verified the PCIe-C host/DART
+ * are unbound; reset only its first (ATC1_PCIE) gate, never the Wi-Fi bridge. */
+int pd_cio_pcie_reset()
+{
+    pmgr_lock_init();if(!gPmgr.lock)return ENOMEM;
+    IOLockLock(gPmgr.lock);
+    int ret=pmgr_load();uint32_t cell=0;PDMmio reg;
+    if(!ret && !pd_adt_u32("/arm-io/apciec1","clock-gates",0,&cell))ret=ENOENT;
+    if(!ret)ret=pd_cio_gate_map(cell,reg);
+    if(!ret){
+        uint32_t before=reg.r32(0);
+        if(((before&PMGR_PS_ACTUAL)>>4)!=PMGR_PS_ACTIVE)ret=EBUSY;
+        else{
+            uint32_t clear=PMGR_WAS_CLKGATED|PMGR_WAS_PWRGATED|(1u<<11);
+            reg.mask32(0,clear,PMGR_DEV_DISABLE);
+            reg.mask32(0,clear,PMGR_RESET);IODelay(1);
+            reg.mask32(0,clear|PMGR_RESET,0);
+            reg.mask32(0,clear|PMGR_DEV_DISABLE,0);
+            uint32_t now=reg.r32(0);
+            if((now&(PMGR_RESET|PMGR_DEV_DISABLE)) || ((now&PMGR_PS_ACTUAL)>>4)!=PMGR_PS_ACTIVE)ret=EIO;
+        }
+    }
+    reg.unmap();IOLockUnlock(gPmgr.lock);return ret;
+}

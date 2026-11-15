@@ -388,11 +388,13 @@ int PDAppleUSB::observeCable(const pd_cd321x_snapshot &state)
         // silently steal its USB lanes for a four-lane DP-only claim.
         else if ((d&PD_TPS_DATA_DP) && !(d&PD_TPS_DATA_USB3)) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_DP);
     }
+    uint64_t before=lease.epoch;
     int ret=pd_usbc_phy_observe(&lease,key,eligible,!!(state.status&PD_TPS_STATUS_UPSIDE_DOWN));
     setProperty("phy-cable-epoch",lease.epoch,64);
     setProperty("phy-eligible-modes",lease.eligible,32);
     if (ret) quarantined=true;
     if (lease.phase==PD_USBC_PHY_REVOKED) queueRevoke();
+    if (lease.epoch!=before) messageClients(kIOMessageServicePropertyChange);
     return ret;
 }
 void PDAppleUSB::sample()

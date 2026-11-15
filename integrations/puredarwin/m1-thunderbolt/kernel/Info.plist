@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>PDAppleCIO</string>
+	<key>CFBundleGetInfoString</key>
+	<string>GPL-2.0; Apple ACIO from Omacom Linux, Sven Peter / Asahi Linux Contributors; RTKit GPL-2.0-only OR MIT. See NOTICE.</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.puredarwin.driver.PDAppleCIO</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>PDAppleCIO</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+		<key>Apple ACIO port1</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>org.puredarwin.driver.PDAppleCIO</string>
+			<key>IOClass</key>
+			<string>PDAppleCIO</string>
+			<key>IOMatchCategory</key>
+			<string>PDAppleCIO</string>
+			<key>IOProviderClass</key>
+			<string>PDAppleUSB</string>
+		</dict>
+	</dict>
+	<key>OSBundleLibraries</key>
+	<dict>
+		<key>com.apple.kpi.bsd</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.iokit</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.libkern</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.mach</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.unsupported</key>
+		<string>8.0.0</string>
+	</dict>
+	<key>OSBundleRequired</key>
+	<string>Root</string>
+</dict>
+</plist>

@@ -75,3 +75,22 @@ Products GmbH; Copyright (c) 2006 Tejun Heo <teheo@suse.de>. Its unchanged
 reference is upstream/lib/devres-reference.c. The native private BSD
 LinuxKPI file is extended, retaining its existing notices. Host group
 layout/allocation fixtures are MIT and establish no hardware drain.
+
+
+kernel/PDAppleCIO.cpp and pd_cio_rtkit.c adapt port-1 ACIO startup/shutdown,
+M3 ready checks, retained SRAM mapping and PCIe-C pre-start reset ordering
+from Linux drivers/thunderbolt/apple.c (pinned revision above):
+  Copyright (c) Sven Peter <sven@kernel.org>
+The T8103 CIO reset sequence comes from drivers/reset/reset-apple-cio.c:
+  Copyright The Asahi Linux Contributors, GPL-2.0-only OR MIT.
+kernel/pd_cio_pmgr.inc adapts drivers/pmdomain/apple/pmgr-pwrstate.c, same
+copyright and dual license. Its ADT table resolution uses the privately staged
+m1-sound/kernel/pd_soc.cpp port of m1n1's MIT PMGR code. The m1-sound NOTICE
+is included by the native bundle recipe with its permission/warranty notice.
+The existing m1-gpu-rtkit port is compiled privately into the bundle, retaining
+all its GPL-2.0-only OR MIT source notices. No firmware is included.
+
+kernel/pd_cio_dart.* specializes the previously ported m1-usb-dwc3 DMA adapter
+for NHI's one ACIO1 DART/SID1. It retains its Linux apple-dart.c and
+io-pgtable-arm/dart copyright notices; the shared table walker and IOVA
+allocator are copied from their existing ports, with those notices intact.

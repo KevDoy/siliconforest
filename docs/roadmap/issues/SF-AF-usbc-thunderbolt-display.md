@@ -758,3 +758,32 @@ actual PMGR refusal/parser paths and all existing ATC/DWC3/DMA lifetime suites.
 This is not installed and proves no dock operation. Next is the native ACIO
 RTKit/NHI attachment, its SID1 DART/interrupts and real CM/root-router discovery;
 then apciec1 brings the dock's PCI endpoints into IOPCIFamily.
+
+
+## Native ACIO1 service candidate (06:06Z, execution pending)
+
+PDAppleCIO now links as a native kext. With `pdcio=1`, it consumes the shared
+TBT/USB4 lease, refuses a bound apciec1 host/DART, resets that PCIe-C block,
+powers ACIO and boots M3 using the existing M3v2 RTKit transport. It uses
+runtime immutable tunables and only the validated ADT SRAM __DATA window.
+It refuses RTKit's polling mode. One attempted startup per cable epoch and
+producer epoch-change notifications avoid a retry/event-query busy loop.
+RTKit/power-off errors preserve the PHY and resources rather than acknowledging
+a false drain. Actual native PMGR-extension fault/timeout tests and SDK build
+pass. Two early packaging builds failed (permissions/header staging); corrected
+builds pass. No target execution is asserted in this paragraph.
+
+The first collection candidate reuses USB04's frozen inputs, replacing only
+Type-C and RavynXHCIPort and adding PDAppleCIO. UUID comparison preserves all
+other modules, including internal DCP, GPU, NVMe and Wi-Fi; boot.bin reproduces
+byte for byte. Common LinuxKPI weak USB imports remain unreachable in this
+non-USB service, like the existing DCP/AGX copies: pd_fbsd_init only initializes
+the required taskqueues and does not call the USB attachment helpers.
+
+The firmware-stage properties deliberately distinguish RTKit-ready from
+NHI-ready (false), domain/router/authorization and dock PCI enumeration.
+A separate single-DART/SID1 native NHI DMA adapter compiles but is not activated
+in this stage. Its root must be reprogrammed after ACIO power cycles; suspend
+refuses outstanding mappings or a failed invalidation. NHI interrupts and
+connection-manager attachment are the following implementation step, followed
+by PCIe-C enumeration and the owner's prepared dock keyboard/LAN connection.

@@ -143,3 +143,41 @@ and still-open groups, removed markers, every allocation failure, crossing
 close refusal, full teardown and reentrant callbacks. Native PM tests also
 reject out-of-contract suspension-query values. No native shared connector
 aggregate, controller power, ACIO, DMA or tunnel binding is installed yet.
+
+
+## Native ACIO1 firmware stage (not yet installed)
+
+`build-kext.nix` now builds PDAppleCIO, matching the port-1 shared PHY provider
+when `pdcio=1`. It requests an exclusive TBT/USB4 lease, verifies that the
+apciec1 host/DART have no service clients, resets that PCIe-C controller before
+ACIO power-on, enables ACIO, performs the bounded T8103 CIO reset sequence,
+and boots M3 through the existing interrupt-driven RTKit port. It validates
+the immutable runtime tunables before any startup write. RTKit shared buffers
+map only the ADT's validated SRAM __DATA segment, with checked IOVA bounds;
+no firmware is copied or written. The 2 ms mailbox polling mode is refused.
+
+A successful firmware stage reports `rtkit-ready`, raw M3 firmware state,
+NHI HOP_COUNT and interrupt-enable state. It explicitly reports `nhi-ready`
+false: there is no bound control channel/domain/router or dock PCI function
+in this stage. Startup is attempted once per cable epoch, with no periodic
+retry timer. The PHY producer notifies clients only on epoch changes, so a
+query cannot generate an event/query loop. Revocation queues cleanup;
+failed RTKit shutdown or power-off retains the handle, power and PHY lease.
+No shared PMGR parent is powered down. The read-only gate check must pass
+again before another initial PHY handoff.
+
+The bundle also compiles a separate NHI-only PDCIODart/PDCIODMABuffer adapter
+for `/arm-io/dart-acio1`, SID1. It is not activated by the firmware stage.
+It retains checked map/unmap invalidation and quarantined backing; suspend
+refuses outstanding mappings and retires translations before power-off,
+while tables remain available for a later reprogrammed root. It must only
+be called with NHI rings stopped and CPU workers joined. It is unrelated to
+the USB paired DART and the future downstream PCIe-C mapper.
+
+SDK kext and frozen-USB04 collection builds pass. The private collection
+comparison leaves every original kernel/module UUID unchanged except Type-C
+and RavynXHCIPort and adds PDAppleCIO; internal DCP, AGX, Wi-Fi and NVMe are
+retained. Native power tests execute the actual extension with malformed
+ADT/mapping injection, all-gate preflight, reverse shutdown and parent
+retention after a timeout. All CM/PHY/DMA host suites and repository checks
+pass. First target execution is still required; these are build/host facts.
