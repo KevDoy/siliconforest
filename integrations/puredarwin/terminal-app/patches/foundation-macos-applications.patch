@@ -1,6 +1,6 @@
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSCoder.h b/src/Frameworks/Foundation/Coding.subproj/NSCoder.h
---- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-14 10:29:13.147892744 -0800
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-11 22:36:07.494506290 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.h	2026-11-14 20:18:00.988536108 -0800
 @@ -14,7 +14,7 @@
  
  /* NSCoding and NSSecureCoding are declared in NSObject.h, where Apple puts them. */
@@ -20,8 +20,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  - (int)decodeIntForKey:(NSString *)key;
  - (int32_t)decodeInt32ForKey:(NSString *)key;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-13 13:36:45.977257047 -0800
+--- a/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-11 22:36:07.494506290 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSCoder.m	2026-11-14 20:18:00.988712917 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -54,8 +54,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
 +- (BOOL)requiresSecureCoding { return NO; }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-13 13:21:40.944630498 -0800
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-11 22:36:07.494506290 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.h	2026-11-14 20:18:00.988843891 -0800
 @@ -13,7 +13,8 @@
  
  @class NSData, NSMutableArray, NSError;
@@ -86,8 +86,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  
  - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)length;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m
---- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:16:53.431656493 -0800
-+++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-13 13:36:45.977407737 -0800
+--- a/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-11 22:36:07.494506290 -0800
++++ b/src/Frameworks/Foundation/Coding.subproj/NSKeyedUnarchiver.m	2026-11-14 20:18:00.989029311 -0800
 @@ -6,6 +6,8 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -415,8 +415,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Coding.sub
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSArray.m b/src/Frameworks/Foundation/Collections.subproj/NSArray.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-14 13:10:57.596477241 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSArray.m	2026-11-14 20:18:00.989770384 -0800
 @@ -17,6 +17,8 @@
  #import <Foundation/FoundationErrors.h>
  #import <Foundation/NSData.h>
@@ -488,8 +488,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.h b/src/Frameworks/Foundation/Collections.subproj/NSData.h
---- a/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-14 10:29:31.478135606 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.h	2026-11-14 20:18:00.990522892 -0800
 @@ -37,8 +37,15 @@
      NSDataWritingWithoutOverwriting = 1 << 1
  };
@@ -507,8 +507,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  + (instancetype)dataWithBytes:(const void *)bytes length:(NSUInteger)length;
  + (instancetype)dataWithBytesNoCopy:(void *)bytes length:(NSUInteger)length;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSData.m b/src/Frameworks/Foundation/Collections.subproj/NSData.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-14 10:29:31.478443410 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSData.m	2026-11-14 20:18:00.990954739 -0800
 @@ -110,6 +110,39 @@
  
  @implementation NSData
@@ -550,8 +550,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  {
  	return __NSDataAutorelease(CFDataCreate(kCFAllocatorDefault, NULL, 0));
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-14 13:10:57.597145624 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSDictionary.m	2026-11-14 20:18:00.991662499 -0800
 @@ -10,6 +10,8 @@
  #import <Foundation/NSEnumerator.h>
  #import <Foundation/NSException.h>
@@ -600,8 +600,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
      CFMutableDictionaryRef result = CFDictionaryCreateMutable(
          kCFAllocatorDefault, (CFIndex)count, &ns_dictionary_key_callbacks,
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h
---- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-14 10:26:11.046730089 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.h	2026-11-14 20:18:00.992530772 -0800
 @@ -13,10 +13,42 @@
  #import <Foundation/NSObjCRuntime.h>
  #import <Foundation/NSZone.h>
@@ -649,8 +649,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  
  typedef struct {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-14 10:26:34.625574634 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSHashTable.m	2026-11-14 20:18:00.993390585 -0800
 @@ -9,6 +9,7 @@
  #import <Foundation/NSHashTable.h>
  #import <Foundation/NSArray.h>
@@ -670,7 +670,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
      table->_capacity = (capacity < 8) ? 8 : capacity * 2;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h
 --- a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h	2026-11-14 10:55:19.075446401 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.h	2026-11-14 20:18:00.993839037 -0800
 @@ -0,0 +1,32 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSIndexPath, declared from macOS's public names (no SDK header copied).
@@ -706,7 +706,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +#endif /* NSIndexPath_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m	2026-11-14 10:55:19.075361120 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexPath.m	2026-11-14 20:18:00.993931476 -0800
 @@ -0,0 +1,94 @@
 +// SPDX-License-Identifier: MIT
 +// SiliconForest: NSIndexPath, with AppKit's item/section form of it (it was in the Foundation wrapper,
@@ -803,8 +803,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +@end
 +
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-13 13:36:29.471136542 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSIndexSet.m	2026-11-14 20:18:00.994081855 -0800
 @@ -398,3 +398,41 @@
  }
  
@@ -848,8 +848,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +}
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h
---- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-14 10:26:28.052435551 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.h	2026-11-14 20:18:00.994749580 -0800
 @@ -12,13 +12,42 @@
  #import <Foundation/NSObject.h>
  #import <Foundation/NSObjCRuntime.h>
@@ -895,8 +895,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  
  typedef struct {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-13 13:16:53.432269729 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-14 10:26:34.627900296 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-11 22:36:07.495091044 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSMapTable.m	2026-11-14 20:18:00.995266219 -0800
 @@ -9,6 +9,7 @@
  #import <Foundation/NSMapTable.h>
  #import <Foundation/NSArray.h>
@@ -916,7 +916,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
      table->valueCallBacks = valueCallBacks;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h b/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h
 --- a/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h	2026-11-14 10:25:55.143992643 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerArray.h	2026-11-14 20:18:00.995913825 -0800
 @@ -0,0 +1,36 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSPointerArray, declared from the public names of macOS's Foundation
@@ -956,7 +956,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +#endif /* NSPointerArray_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m b/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m
 --- a/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m	2026-11-14 10:27:27.977630721 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerCollections.m	2026-11-14 20:18:00.996014775 -0800
 @@ -0,0 +1,920 @@
 +/*
 + * Copyright (c) 2026 The Finch Project contributors.
@@ -1880,7 +1880,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h b/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h
 --- a/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h	2026-11-14 10:25:55.117992916 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSPointerFunctions.h	2026-11-14 20:18:00.996345423 -0800
 @@ -0,0 +1,46 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSPointerFunctions, declared from the public names and values of
@@ -1929,8 +1929,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +
 +#endif /* NSPointerFunctions_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.h b/src/Frameworks/Foundation/Collections.subproj/NSSet.h
---- a/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-13 13:16:53.432324537 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-14 10:29:31.478715781 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-11 22:36:07.495593123 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.h	2026-11-14 20:18:00.996449302 -0800
 @@ -42,6 +42,7 @@
  - (BOOL)isEqualToSet:(NSSet *)other;
  - (NSEnumerator *)objectEnumerator;
@@ -1940,8 +1940,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
  @end
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collections.subproj/NSSet.m b/src/Frameworks/Foundation/Collections.subproj/NSSet.m
---- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-13 13:16:53.432324537 -0800
-+++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-14 13:10:57.597707230 -0800
+--- a/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-11 22:36:07.495593123 -0800
++++ b/src/Frameworks/Foundation/Collections.subproj/NSSet.m	2026-11-14 20:18:00.996663287 -0800
 @@ -6,9 +6,12 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -2004,8 +2004,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Collection
 +}
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h
---- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-13 13:16:53.433353953 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-14 10:29:51.374487410 -0800
+--- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-11 22:36:07.495593123 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.h	2026-11-14 20:18:00.997540055 -0800
 @@ -37,10 +37,31 @@
  
  #define NSUndefinedDateComponent NSIntegerMax
@@ -2049,8 +2049,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  - (instancetype)initWithCalendarIdentifier:(NSString *)identifier;
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m
---- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-13 13:16:53.433353953 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-14 10:30:04.451227097 -0800
+--- a/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-11 22:36:07.496584236 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSCalendar.m	2026-11-14 20:18:00.997708812 -0800
 @@ -15,6 +15,21 @@
  /* Gregorian only, via the C library's civil-time conversion. Non-Gregorian
   * identifiers are accepted and behave as Gregorian. */
@@ -2133,8 +2133,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  
  - (NSDateComponents *)components:(NSCalendarUnit)units fromDate:(NSDate *)date {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h
---- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-13 13:16:53.433353953 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-14 12:45:37.741792312 -0800
+--- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-11 22:36:07.496584236 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.h	2026-11-14 20:18:00.998435115 -0800
 @@ -4,7 +4,7 @@
  #import <Foundation/NSObject.h>
  #import <Foundation/NSDate.h>
@@ -2145,8 +2145,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
      NSTimeInterval _duration;
  }
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m
---- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-13 13:16:53.433353953 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-14 12:45:43.107589807 -0800
+--- a/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-11 22:36:07.496584236 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDateInterval.m	2026-11-14 20:18:00.998615421 -0800
 @@ -2,6 +2,7 @@
  // Copyright (c) 2026 The PureDarwin Project, SPDX-License-Identifier: MPL-2.0 OR BSD-2-Clause
  
@@ -2176,8 +2176,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
 +
  @end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subproj/NSDate.m b/src/Frameworks/Foundation/Date.subproj/NSDate.m
---- a/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-13 13:16:53.433353953 -0800
-+++ b/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-14 14:22:54.087148916 -0800
+--- a/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-11 22:36:07.496584236 -0800
++++ b/src/Frameworks/Foundation/Date.subproj/NSDate.m	2026-11-14 20:18:00.998804162 -0800
 @@ -7,6 +7,7 @@
   */
  
@@ -2207,9 +2207,110 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Date.subpr
  - (instancetype)initWithTimeIntervalSinceReferenceDate:(NSTimeInterval)seconds {
      if (_CFIsObjC(CFDateGetTypeID(), (void *)self))
          return [super init];
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.h b/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.h
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.h	2026-11-11 22:36:07.496584236 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.h	2026-11-14 23:56:12.851112573 -0800
+@@ -51,6 +51,9 @@
+  * the wait, once the descriptor has something to read. */
+ - (void)waitForDataInBackgroundAndNotify;
+ 
++/* Called on a background queue whenever the descriptor has something to read (nil: no longer) */
++@property (copy) void (^readabilityHandler)(NSFileHandle *);
++
+ @end
+ 
+ FOUNDATION_EXPORT NSString *const NSFileHandleDataAvailableNotification;
+diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.m
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.m	2026-11-11 22:36:07.497008684 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileHandle.m	2026-11-14 23:56:12.850764741 -0800
+@@ -21,11 +21,15 @@
+ #include <errno.h>
+ #include <unistd.h>
+ #include <sys/select.h>
++#include <sys/stat.h>
++#include <dispatch/dispatch.h>
+ 
+ @implementation NSFileHandle {
+     int _fd;
+     BOOL _closeOnDealloc;
+     CFRunLoopRef _waitRunLoop;
++    void (^_readabilityHandler)(NSFileHandle *);
++    dispatch_source_t _readSource;
+ }
+ 
+ static NSFileHandle *_open(Class cls, NSString *path, int flags) {
+@@ -231,10 +235,65 @@
+ }
+ 
+ 
+-/* Returns whatever can be read without blocking further; for a regular file
+- * that is the rest of the file. */
++/* As Apple's: for a regular file the rest of the file; for a pipe, socket or terminal what one read
++ * gives once something is there (it waits for that), an empty data at the end. It read to the end of
++ * the stream, so a reader called as data arrived (a readability handler) got nothing until the writer
++ * had finished. */
+ - (NSData *)availableData {
+-    return [self readDataToEndOfFile];
++    struct stat st;
++
++    if (fstat(_fd, &st) == 0 && S_ISREG(st.st_mode)) {
++        return [self readDataToEndOfFile];
++    }
++
++    unsigned char chunk[65536];
++    ssize_t got;
++
++    do {
++        got = read(_fd, chunk, sizeof(chunk));
++    } while (got < 0 && errno == EINTR);
++    return got > 0 ? [NSData dataWithBytes:chunk length:(NSUInteger)got] : [NSData data];
++}
++
++/* Apple's readabilityHandler: called on a background queue, one call at a time, whenever the
++ * descriptor has something to read (the end of a pipe included: -availableData then gives empty data
++ * and the caller sets the handler to nil). Activity Monitor reads `sample`'s report this way; the
++ * message went nowhere, the report never came and its progress sheet stayed. */
++- (void (^)(NSFileHandle *))readabilityHandler {
++    void (^handler)(NSFileHandle *);
++
++    @synchronized(self) {
++        handler = [[_readabilityHandler retain] autorelease];
++    }
++    return handler;
++}
++
++- (void)setReadabilityHandler:(void (^)(NSFileHandle *))handler {
++    @synchronized(self) {
++        if (_readSource != NULL) {
++            dispatch_source_cancel(_readSource);
++            dispatch_release(_readSource);
++            _readSource = NULL;
++        }
++        void (^old)(NSFileHandle *) = _readabilityHandler;
++        _readabilityHandler = [handler copy];
++        [old release];
++        if (handler != nil && _fd >= 0) {
++            NSFileHandle *handle = self;
++
++            _readSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)_fd, 0,
++                                                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
++            // the source's handler keeps the file handle until the handler is replaced
++            dispatch_source_set_event_handler(_readSource, ^{
++                void (^call)(NSFileHandle *) = [handle readabilityHandler];
++
++                if (call != nil) {
++                    call(handle);
++                }
++            });
++            dispatch_resume(_readSource);
++        }
++    }
+ }
+ 
+ @end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m
---- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:16:53.434019832 -0800
-+++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-13 13:36:45.978142073 -0800
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-11 22:36:07.497008684 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSFileManager.m	2026-11-14 20:18:00.999390088 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -2244,8 +2345,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
 +}
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m b/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m
---- a/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-13 13:16:53.434019832 -0800
-+++ b/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-14 13:10:48.082734001 -0800
+--- a/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-11 22:36:07.497008684 -0800
++++ b/src/Frameworks/Foundation/FileManager.subproj/NSPathUtilities.m	2026-11-14 20:18:01.000136030 -0800
 @@ -191,7 +191,7 @@
  
      CFStringRef path = CFURLCopyFileSystemPath(stripped, kCFURLPOSIXPathStyle);
@@ -2274,8 +2375,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/FileManage
  
  - (NSArray<NSString *> *)pathComponents {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m
---- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:16:53.434448999 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-13 13:36:45.975985919 -0800
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-11 22:36:07.498141685 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSDateFormatter.m	2026-11-14 20:18:01.000620727 -0800
 @@ -189,3 +189,15 @@
  }
  
@@ -2293,8 +2394,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 +- (NSUInteger)formatterBehavior { return 1040; }
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m
---- a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-13 13:16:53.434448999 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-13 18:29:24.849932934 -0800
+--- a/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-11 22:36:07.498141685 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSNumberFormatter.m	2026-11-14 20:18:01.001039762 -0800
 @@ -20,6 +20,10 @@
  
  @implementation NSNumberFormatter
@@ -2308,7 +2409,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
  }
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h
 --- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h	2026-11-14 10:28:44.585138426 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponentsFormatter.h	2026-11-14 20:18:01.001399071 -0800
 @@ -0,0 +1,47 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSPersonNameComponentsFormatter, declared from the public names and values of
@@ -2359,7 +2460,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 +#endif /* NSPersonNameComponentsFormatter_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h
 --- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h	2026-11-14 10:28:44.584154392 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.h	2026-11-14 20:18:01.001506696 -0800
 @@ -0,0 +1,24 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSPersonNameComponents, declared from the public names of macOS's Foundation
@@ -2387,7 +2488,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 +#endif /* NSPersonNameComponents_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m
 --- a/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m	2026-11-14 10:28:44.586974872 -0800
++++ b/src/Frameworks/Foundation/Formatters.subproj/NSPersonNameComponents.m	2026-11-14 20:18:01.001577563 -0800
 @@ -0,0 +1,358 @@
 +/*
 + * Copyright (c) 2026 The Finch Project contributors.
@@ -2748,8 +2849,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Formatters
 +
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m
---- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-13 13:16:53.434729533 -0800
-+++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-14 02:50:14.341897114 -0800
+--- a/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-11 22:36:07.498471502 -0800
++++ b/src/Frameworks/Foundation/KVC.subproj/NSKeyValueCoding.m	2026-11-14 20:18:01.001751494 -0800
 @@ -21,6 +21,8 @@
  #include <string.h>
  #include <stdio.h>
@@ -3892,8 +3993,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/KVC.subpro
  
  - (void)addObserver:(NSObject *)observer
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h
---- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-13 13:16:53.434958194 -0800
-+++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-14 10:29:07.581041167 -0800
+--- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-11 22:36:07.498471502 -0800
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.h	2026-11-14 20:18:01.003816132 -0800
 @@ -25,6 +25,7 @@
  @interface NSLocale : NSObject <NSCopying>
  
@@ -3903,8 +4004,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.sub
  + (NSArray *)preferredLanguages;
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m
---- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-13 13:16:53.434958194 -0800
-+++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-14 10:29:13.160444558 -0800
+--- a/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-11 22:36:07.498697549 -0800
++++ b/src/Frameworks/Foundation/Locale.subproj/NSLocale.m	2026-11-14 20:18:01.004046439 -0800
 @@ -25,6 +25,11 @@
      return (NSLocale *)CFAutorelease(CFLocaleCopyCurrent());
  }
@@ -3919,7 +4020,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Locale.sub
  }
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h
 --- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	2026-11-14 10:28:14.132949486 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.h	2026-11-14 20:18:01.004286310 -0800
 @@ -0,0 +1,58 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSDecimal and its functions, declared from the public names, layout and values
@@ -3981,7 +4082,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.su
 +#endif /* NSDecimal_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m
 --- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m	2026-11-14 10:28:14.143492624 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimal.m	2026-11-14 20:18:01.004350803 -0800
 @@ -0,0 +1,965 @@
 +/*
 + * Copyright (c) 2026 The Finch Project contributors.
@@ -4950,7 +5051,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.su
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h b/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h
 --- a/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h	2026-11-14 10:28:21.505850276 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSDecimalNumber.h	2026-11-14 20:18:01.004643708 -0800
 @@ -0,0 +1,93 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: NSDecimalNumber and NSDecimalNumberHandler, declared from the public names and
@@ -5046,8 +5147,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.su
 +
 +#endif /* NSDecimalNumber_h */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m
---- a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-13 13:16:53.435383221 -0800
-+++ b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-13 18:29:24.836524309 -0800
+--- a/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-11 22:36:07.499118007 -0800
++++ b/src/Frameworks/Foundation/Numeric.subproj/NSNumber.m	2026-11-14 20:18:01.004782202 -0800
 @@ -684,3 +684,37 @@
      _CFRuntimeBridgeClasses(CFNumberGetTypeID(), "NSNumber");
  }
@@ -5087,8 +5188,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Numeric.su
 +#undef NS_BOOLEAN_VALUE
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/Foundation.h b/src/Frameworks/Foundation/Runtime.subproj/Foundation.h
---- a/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-14 10:55:19.095487640 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-11 22:36:07.499575926 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/Foundation.h	2026-11-14 20:18:01.006275297 -0800
 @@ -47,6 +47,13 @@
  #import <Foundation/NSKeyValueObserving.h>
  #import <Foundation/NSLock.h>
@@ -5104,8 +5205,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  #import <Foundation/NSByteOrder.h>
  #import <Foundation/NSRangeEntries.h>
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-14 13:10:48.083062061 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-11 22:36:07.500033411 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSBundle.m	2026-11-14 20:18:01.006705796 -0800
 @@ -11,6 +11,11 @@
  #import <Foundation/NSDictionary.h>
  #import <Foundation/NSString.h>
@@ -5208,8 +5309,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  /* The bundle's classes all live in the one image here, so this is a lookup by
   * name rather than a per-bundle class table. */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSException.m b/src/Frameworks/Foundation/Runtime.subproj/NSException.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-13 13:53:53.870421956 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-11 22:36:07.500033411 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSException.m	2026-11-14 20:18:01.007498389 -0800
 @@ -6,6 +6,11 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -5257,8 +5358,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:16:53.436328669 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-13 13:41:04.042310718 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-11 22:36:07.500033411 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSForwarding.m	2026-11-14 20:18:01.007930226 -0800
 @@ -110,8 +110,15 @@
  "   .globl _NSForwardingTrampoline          \n"
  "   .p2align 2                              \n"
@@ -5335,8 +5436,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  static void _NSInstallForwardHandler(void) {
  #if defined(NS_HAVE_FORWARDING_TRAMPOLINE) && ARGON_LIBOBJC2
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m b/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-13 13:16:53.437324470 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-14 13:10:48.082342787 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-11 22:36:07.500593062 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSObjCRuntime.m	2026-11-14 20:18:01.008566718 -0800
 @@ -15,8 +15,10 @@
      if (cString == NULL) {
          return nil;
@@ -5351,8 +5452,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  
  /* CFStringGetCStringPtr can refuse, so go through a bounded copy. */
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h
---- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-13 13:16:53.438324457 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-14 12:45:37.742115628 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-11 22:36:07.501593049 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.h	2026-11-14 20:18:01.008999098 -0800
 @@ -20,6 +20,7 @@
      NSDate *_expirationDate;
      NSSet *_keywords;
@@ -5370,8 +5471,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  @property (getter=isEligibleForSearch) BOOL eligibleForSearch;
  @property (getter=isEligibleForPublicIndexing) BOOL eligibleForPublicIndexing;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-13 13:16:53.438324457 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-14 12:45:37.742235236 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-11 22:36:07.501593049 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserActivity.m	2026-11-14 20:18:01.009196601 -0800
 @@ -55,12 +55,15 @@
      [_expirationDate release];
      [_keywords release];
@@ -5389,8 +5490,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
  
  - (void)setUserInfo:(NSDictionary *)userInfo {
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m
---- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:16:53.438324457 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-13 13:28:47.364980906 -0800
+--- a/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-11 22:36:07.501593049 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/NSUserDefaults.m	2026-11-14 20:18:01.009519259 -0800
 @@ -289,3 +289,17 @@
  }
  
@@ -5411,7 +5512,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h b/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h
 --- a/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h	2026-11-14 10:36:58.253541975 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/PDAutoreleaseCF.h	2026-11-14 20:18:01.009915601 -0800
 @@ -0,0 +1,21 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: put in front of every source of this Foundation (-include, ../../../../terminal-app/
@@ -5436,7 +5537,7 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
 +#endif
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h b/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h
 --- a/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h	1969-12-31 16:00:00.000000000 -0800
-+++ b/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h	2026-11-14 10:26:55.288952911 -0800
++++ b/src/Frameworks/Foundation/Runtime.subproj/PDFinch.h	2026-11-14 20:18:01.010009226 -0800
 @@ -0,0 +1,30 @@
 +/* SPDX-License-Identifier: MIT
 + * SiliconForest: what the files taken from Finch (MIT OR Apache-2.0) expect from Finch's
@@ -5469,8 +5570,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/Runtime.su
 +}
 +#endif
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m
---- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-13 17:45:12.394757875 -0800
+--- a/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-11 22:36:07.502817340 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSAttributedString.m	2026-11-14 20:18:01.010156937 -0800
 @@ -39,6 +39,19 @@
  
  @implementation NSAttributedString
@@ -5530,8 +5631,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
  }
  
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m
---- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-13 17:48:01.837099596 -0800
+--- a/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-11 22:36:07.502817340 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSCharacterSet.m	2026-11-14 20:18:01.010753199 -0800
 @@ -6,6 +6,7 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -5557,8 +5658,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +}
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSString.h b/src/Frameworks/Foundation/String.subproj/NSString.h
---- a/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-14 10:29:07.580115225 -0800
+--- a/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-11 22:36:07.502817340 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSString.h	2026-11-14 20:18:01.011148174 -0800
 @@ -155,6 +155,8 @@
  - (const char *)fileSystemRepresentation;
  - (NSArray *)componentsSeparatedByString:(NSString *)separator;
@@ -5569,8 +5670,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
  - (NSRange)paragraphRangeForRange:(NSRange)range;
  - (NSRange)rangeOfString:(NSString *)string options:(NSStringCompareOptions)options;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.subproj/NSString.m b/src/Frameworks/Foundation/String.subproj/NSString.m
---- a/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:16:53.440526676 -0800
-+++ b/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-13 13:56:11.786892112 -0800
+--- a/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-11 22:36:07.502817340 -0800
++++ b/src/Frameworks/Foundation/String.subproj/NSString.m	2026-11-14 20:18:01.011619573 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */
@@ -5781,8 +5882,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/String.sub
 +
 +@end
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.h b/src/Frameworks/Foundation/URL.subproj/NSURL.h
---- a/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-13 13:16:53.441146971 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-14 13:11:38.350397551 -0800
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-11 22:36:07.503435864 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.h	2026-11-14 20:18:01.012884722 -0800
 @@ -20,6 +20,7 @@
  + (instancetype)fileURLWithPath:(NSString *)path;
  
@@ -5792,8 +5893,8 @@ diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subpro
  - (nullable NSString *)path;
  - (BOOL)isFileURL;
 diff -ruN -x '*.o' -x '*.orig' -x '*.rej' a/src/Frameworks/Foundation/URL.subproj/NSURL.m b/src/Frameworks/Foundation/URL.subproj/NSURL.m
---- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-13 13:16:53.441146971 -0800
-+++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 13:11:38.349893712 -0800
+--- a/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-11 22:36:07.503435864 -0800
++++ b/src/Frameworks/Foundation/URL.subproj/NSURL.m	2026-11-14 20:18:01.013050498 -0800
 @@ -6,6 +6,10 @@
   * file, You can obtain one at https://mozilla.org/MPL/2.0/.
   */

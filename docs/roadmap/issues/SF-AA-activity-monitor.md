@@ -163,6 +163,53 @@ Installed 09:3xZ (direct): AppKit 62b9520a (0130 + 0131, the nix build). The sam
 (`vinst`): Activity Monitor's tabs, scrolled, a column made wider and the inspector as before; Terminal's window, tab,
 menu and Preferences as before (two crops differ in where the check's click landed, not in what was drawn).
 
+### The inspector (owner's finding 3; cocoa 0132, Foundation, `/usr/sbin/lsof`)
+Seen with my own `sfsleeper` (a copy of `/bin/sleep`) and synthetic input; captures `shots/ai3`..`ai9`, view trees from
+`PD_VIEW_DUMP=1` + SIGUSR2 (`shots/ai*-views.txt`).
+- **Memory and Statistics rows one over another.** The window came out at the nib's content height (274 points) and
+  the tab's rows were squeezed into the 90 points left. The selected tab's view was a fixed box in the layout (placed
+  by its autoresizing mask), so nothing in it could make the tab view or the window larger. 0132: the layout holds a
+  tab view's selected item view by its margins; a window is made as large as its content's fitting size when it is
+  shown and when its tab view shows another tab (`PD_WINFRAME_TRACE=1` says when): 274 -> 304 points (Memory), 348
+  (Statistics). Values such as "391.08 GB" wrapped over two lines onto the next row: a wrapping label wrapped at the
+  width an earlier, shorter value ("0 bytes") had left it. 0132: it wraps only when something else sets its width
+  and its text is not a short value a little too wide. Also read from the nib: `NSControlLineBreakMode`,
+  `NSControlUsesSingleLineMode`.
+- **Open Files and Ports empty.** Activity Monitor runs `/usr/sbin/lsof -Fn -p <pid>`; there was no lsof.
+  `tools/sf-lsof.c` is one (new file at `/usr/sbin/lsof`, 08:30Z): current directory, executable, mapped files (each
+  once) and every descriptor (paths, TCP/UDP endpoints, UNIX sockets, pipes, kqueues) from `proc_pidinfo` and the
+  `proc_info` system call (`proc_pidfdinfo` is not exported here), in lsof's field format. Observed: the tab lists the
+  process's files.
+- **Sample: progress sheet forever, no text.** Activity Monitor reads `sample`'s report with
+  `-[NSFileHandle setReadabilityHandler:]`, which our Foundation did not have (the message went nowhere), and
+  `-availableData` read to the end of the stream. Foundation (`terminal-app/patches/foundation-macos-applications.patch`):
+  readabilityHandler on a dispatch read source, availableData that returns what one read gives. Observed from a test
+  prefix: "Sample of sfsleeper" with the report (2185 samples in 3 s) and its status line.
+- **Still wrong**: Executable Path stays empty (the text view has the path, `PD_VIEW_DUMP`; it is not drawn: a one-line
+  text view lower than this system font's line); "Context Switches:" cut ("Context Sw"); Mach Messages In/Out empty;
+  Process Group shows only the number for a group whose leader has exited (as macOS would).
+
+### Visual QA checklist (owner's finding 4; synthetic input, my own instances, 150 %, `visgate.sh`)
+Each row was looked at in the crops named (`runs/sf-term6/shots/`, not committed); "before" is the build installed until
+08:30Z (6ea19cb4, `vref2-vis-*`), "after" the 0132 test build (`vc42-vis-*`, `ai9-*`). Latencies are from the sections above.
+
+| View | Check | Result |
+|---|---|---|
+| Main window, CPU tab after 3 refreshes | names, figures, icons, header, sort chevron in its slot | pass (`vc42-vis-am-cpu`) |
+| Memory / Energy / Disk / Network tabs | header and rows drawn | pass, except: Energy empty (no history), Disk rows empty, Network bytes 0 (all three as before) |
+| Scrolled (wheel) | rows, stripes, no smear | pass (`vc42-vis-am-scrolled`); wheel step -> commit 31 ms (was 49) |
+| Column made wider (drag) | cells and header follow, no stale pixels | pass (`vc42-vis-am-colresized`, `crn311-wide`); motion -> frame 29-34 ms median (was >= 154-257) |
+| Column reordered (header drag) | values and chevron move with the column | pass (`co29-*`) |
+| Window resized | layout follows | pass by the probe (69 ms a step, was 335); not by a person's corner drag |
+| Text after minutes of refreshes | no garbled strings | pass with 0131 (the 0130 failure, above); stress with the cache forced small |
+| Inspector header | parent, group, %CPU, user, hangs | pass; Executable Path empty: FAIL |
+| Inspector Memory | four rows, values on one line | pass after 0132 (`vc42-vis-insp-mem`); before: rows overlapping |
+| Inspector Statistics | twelve rows | pass after 0132 but "Context Switches:" cut; Mach Messages In/Out empty |
+| Inspector Open Files and Ports | the process's files | pass with `/usr/sbin/lsof` |
+| Sample | report shown, status on one line | pass with the new Foundation from a prefix (`ai8`, `ai9`); installed: after its guarded install |
+| CPU Usage / CPU History windows | graph drawn | FAIL, not worked on this round (item 4c) |
+| Terminal window, tab, Shell menu, Preferences | as before | pass (diff 0.00, Preferences 1.64: a test prefix has no AppKit resources, so no radio and check box images; installed: as before) |
+
 What it was, from `sf-prof` profiles of the drag (`shots/cr1`, `crp25`..`crp32`):
 - each drag event ran `-tile`, which reloads every row (`noteNumberOfRowsChanged`); events were taken one by one,
   so the column fell further behind with each;

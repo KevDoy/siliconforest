@@ -340,6 +340,14 @@
 #   0131  AppKit (TERM6): the string layout cache of 0130 let go of a generation while a layout found in it was
 #         being drawn and kept (use after free: Activity Monitor's text garbled after a few minutes, the owner's
 #         report; a crash within 20 s with PD_TYPESET_LIMIT=30, the generation size, now settable to test)
+#   0132  AppKit (TERM6, Activity Monitor's inspector): a tab view's selected item view is held by its margins in the
+#         layout (what is in it can make the tab view, and the window, larger); a window is made as large as its
+#         content's fitting size when it is shown and when its tab view shows another tab (the inspector's rows were
+#         squeezed into the nib's 274 points, one over another); a wrapping label wraps only when something else sets
+#         its width and its text is not a short value a little too wide ("391.08 GB" had wrapped onto the next row,
+#         the sample window's status one word per line); the control's NSControlLineBreakMode and
+#         NSControlUsesSingleLineMode from the nib (-usesSingleLineMode); PD_VIEW_DUMP=1 + SIGUSR2: every window's
+#         view tree on stderr
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -421,6 +429,7 @@ let
     ./patches/0128-appkit-table-header-sort-indicator-slot.patch
     ./patches/0130-appkit-column-drag-scroll-copy-split-panes.patch
     ./patches/0131-appkit-typeset-cache-generation-kept.patch
+    ./patches/0132-appkit-inspector-tab-content-window-fits-single-line-values.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
