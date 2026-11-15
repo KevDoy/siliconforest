@@ -11,6 +11,9 @@
 #include "pd_tb_dma.h"
 #include "pd_tb_nhi.h"
 #include "pd_rtkit_platform.h"
+#ifdef PD_CIO_PCIE_ENUMERATION
+#include "pd_cio_pci_enumeration.h"
+#endif
 #include <IOKit/IOLib.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLocks.h>
@@ -34,6 +37,12 @@ struct PDCIOCM {
  int irqs[25];
  bool dmaLive,irqLive,busReady;
  uint32_t failed;
+#ifdef PD_CIO_PCIE_ENUMERATION
+ PDCIOPCIEnumeration *pci;
+ static int pciPrepare(void *p){auto s=(PDCIOCM *)p;return s->pci?-s->pci->prepare():-ENODEV;}
+ static int pciActivated(void *p){auto s=(PDCIOCM *)p;return s->pci?-s->pci->activated():-ENODEV;}
+ static int pciDeactivate(void *p){auto s=(PDCIOCM *)p;return s->pci?-s->pci->deactivate():-ENODEV;}
+#endif
  struct Slot {
   void *device;IOService *node;
   pd_tb_pm_state pm;
@@ -177,7 +186,16 @@ PDCIOCM *pd_cio_cm_create(IOService *owner,void *ctx,bool (*powered)(void *))
  pd_tb_dma_ops dma={s,s->device,PDCIOCM::dma_lock,PDCIOCM::dma_unlock,PDCIOCM::power,PDCIOCM::alloc,PDCIOCM::retire};
  ret=pd_tb_dma_install(&dma);if(ret)return failure("dma-install",ret);
  ret=pd_tb_nhi_bus_init();if(ret)return failure("bus-init",ret);
- s->busReady=true;owner->setProperty("cm-create-stage","complete");owner->setProperty("cm-create-error",(uint32_t)0,32);return s;
+ s->busReady=true;
+#ifdef PD_CIO_PCIE_ENUMERATION
+ s->pci=OSTypeAlloc(PDCIOPCIEnumeration);
+ if(!s->pci || !s->pci->initWithOwner(owner,s,PDCIOCM::power))return failure("pci-enumeration-owner",ENOMEM);
+ owner->setProperty("pci-enumeration-build",true);
+ owner->setProperty("pci-enumeration-profile-valid",s->pci->checkProfile()==0);
+#else
+ owner->setProperty("pci-enumeration-build",false);
+#endif
+ owner->setProperty("cm-create-stage","complete");owner->setProperty("cm-create-error",(uint32_t)0,32);return s;
 }
 int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
 {
@@ -197,6 +215,9 @@ int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
  s->irqLive=true;pd_rtkit_platform_irq_enable(s->irqs[24]);
  s->owner->setProperty("cm-start-stage","nhi-create");
  pd_tb_nhi_config config={};config.ctx=s;config.device=s->device;config.nhi_base=nhi;config.pdf_base=pdf;config.powered=PDCIOCM::power;
+#ifdef PD_CIO_PCIE_ENUMERATION
+ config.pci_prepare=PDCIOCM::pciPrepare;config.pci_activated=PDCIOCM::pciActivated;config.pci_deactivate=PDCIOCM::pciDeactivate;
+#endif
  config.irq_request=pd_rtkit_platform_irq_request;config.irq_enable=pd_rtkit_platform_irq_enable;config.irq_free=pd_rtkit_platform_irq_free;
  for(unsigned i=0;i<12;++i){config.rx_irq[i]=s->irqs[i];config.tx_irq[i]=s->irqs[12+i];}
  ret=pd_tb_nhi_create(&config,&s->nhi);
@@ -208,10 +229,28 @@ int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
 int pd_cio_cm_stop(PDCIOCM *s)
 {
  if(!s)return EINVAL;
+#ifdef PD_CIO_PCIE_ENUMERATION
+ // tb_domain_remove() is void and cannot propagate a failed native tunnel
+ // teardown. Do not mistake that return for a PCI child/DMA drain. This
+ // first-enumeration profile has no such drain and pins power until reboot.
+ if(s->pci && s->pci->blocksStop())return EBUSY;
+#endif
  if(s->nhi){int ret=pd_tb_nhi_stop(s->nhi);if(ret)return ret<0?-ret:ret;s->nhi=NULL;}
  if(s->irqLive){pd_rtkit_platform_irq_free(s->irqs[24]);s->irqLive=false;}
  if(s->dmaLive){int ret=s->dart.suspend();if(ret)return ret;s->dmaLive=false;}
  return __atomic_load_n(&s->failed,__ATOMIC_ACQUIRE)?EIO:0;
+}
+int pd_cio_cm_authorize_ts3(PDCIOCM *s)
+{
+#ifdef PD_CIO_PCIE_ENUMERATION
+ if(!s || !s->pci || !s->nhi || !s->live())return ENODEV;
+ int ret=pd_tb_nhi_authorize_ts3(s->nhi);if(ret)return ret<0?-ret:ret;
+ // Actual approval and post-activation have returned and released the
+ // Linux domain lock. Native PCIe waits must never run inside those hooks.
+ return s->pci->publishAfterApproval();
+#else
+ (void)s;return EOPNOTSUPP;
+#endif
 }
 int pd_cio_cm_snapshot(PDCIOCM *s)
 {

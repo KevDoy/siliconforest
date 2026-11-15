@@ -50,7 +50,7 @@ int PDCIOPCIController::read(void *ctx,pd_pciec_window win,uint32_t off,uint32_t
  auto s=(PDCIOPCIController *)ctx;
  if(!out || (unsigned)win>PD_PCIEC_OE || (off&3) ||
     off>s->windows[win].len || s->windows[win].len-off<4)return -EINVAL;
- if(!s->live())return -ENODEV;
+ if(!s->live() || !s->tunnelProof(s->context))return -ENODEV;
  ordered();uint32_t value=s->windows[win].r32(off);ordered();*out=value;return 0;
 }
 int PDCIOPCIController::write(void *ctx,pd_pciec_window win,uint32_t off,uint32_t value)
@@ -58,7 +58,7 @@ int PDCIOPCIController::write(void *ctx,pd_pciec_window win,uint32_t off,uint32_
  auto s=(PDCIOPCIController *)ctx;
  if((unsigned)win>PD_PCIEC_OE || (off&3) ||
     off>s->windows[win].len || s->windows[win].len-off<4)return -EINVAL;
- if(!s->live())return -ENODEV;
+ if(!s->live() || !s->tunnelProof(s->context))return -ENODEV;
  ordered();s->windows[win].w32(off,value);ordered();return 0;
 }
 int PDCIOPCIController::tune(void *ctx,pd_pciec_window win)

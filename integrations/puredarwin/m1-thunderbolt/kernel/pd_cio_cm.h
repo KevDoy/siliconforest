@@ -11,4 +11,5 @@ PDCIOCM *pd_cio_cm_create(IOService *owner,void *power_ctx,bool (*powered)(void 
 int pd_cio_cm_start(PDCIOCM *,void *nhi,void *pdf,uint32_t cable);
 int pd_cio_cm_stop(PDCIOCM *);
 int pd_cio_cm_snapshot(PDCIOCM *); // one read-only actual PHY/link query
+int pd_cio_cm_authorize_ts3(PDCIOCM *); // explicit private enum profile only
 #endif

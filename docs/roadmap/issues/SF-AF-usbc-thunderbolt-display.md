@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 12:23Z)
+## Current target and observed state (owner change; updated 12:51Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,8 +15,8 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO17, source `83786dc6e`, capsule
-`fcf8f72d697e…`,
+**Observed in Darwin:** non-AVE CIO18, source `1613d830d`, capsule
+`211cae69e8a0…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -25,20 +25,21 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at12:20:29Z. An explicit late snapshot also reports state7/remote0;
+lock release at12:35:09Z. An explicit late snapshot also reports state7/remote0;
 UID65534 was denied without incrementing the query count, while root completed
 one request and advanced it1->2; the post-idle query advanced it to3. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
-or `pdave` argument. CIO17 also acknowledges one real CD3217 EVENT1 word,
-with zero errors and EVENT1 cleared; the mask stays unchanged. Both lanes
-remain7/remote0, so acknowledgement alone did not establish the link.
+or `pdave` argument. CIO18 changes and verifies the exact Linux CD3217
+mask (bits1/9/10), acknowledges one real EVENT1 word with zero errors and
+clears EVENT1. Both lanes remain7/remote0: S0, mask setup and acknowledgement
+are working but have not established the Thunderbolt link.
 
 **CIO16 failed qualification:** the same non-AVE diagnostic image reached
 healthy NHI/RTKit/Type-C/PHY startup, but the standard desktop and inject
 directory were absent at75s. It was restored to qualified CIO15 at11:45:55Z;
 the owned UART reader was reaped at11:45:56Z before lock release. No new
 compositor-start record or first SF_SESSION marker was captured. The cause
-is unresolved. A same-image CIO16B repeat is announced for12:00Z or later,
+is unresolved. A same-image CIO16B repeat ran at12:00Z,
 with process/launchd state capture and bounded additional session waiting.
 That repeat qualified at12:03:54Z (UART reaped12:03:55Z): the normal desktop
 was already present at75s and all snapshot/privilege/ABI checks passed. The
@@ -1734,3 +1735,68 @@ IRQ/work or backing-memory drain. All712 modeled I/O failures plus lock,
 readback and100us busy bounds pass sanitizers; the native CM SDK and six checks
 pass. This code is not wired/installed and is excluded from CIO17/CIO18.
 No PCIe-C DART register has been touched on Darwin by this preparation.
+
+### CIO18 observed: Linux mask and events match; physical link remains absent
+
+CIO18/source1613d830d/capsule211cae69e8a0… qualified at12:35:07Z, after
+waiting for TERM7's visual slot. UART was stopped/reaped at12:35:09Z before
+lock release. The actual mask-write-attempted flag is true, both before/after
+reads valid, exact Linux bits1/9/10 read back, mask error0. Actual event ack1,
+error0, EVENT1zero. Standard desktop/.next/inject, Wi-Fi, NHI/RTKit, shared PHY
+and root/UID65534 snapshot controls pass. Both lanes are still7/remote0. All
+five Type-C control values now match the same-visit active Linux sample;
+all256 ACIO full words/masks and five root-header words match as well.
+No router/auth/PCI/USB/Ethernet/DP evidence is added. This remains a57module,
+non-AVE collection with605arguments and no pdave argument. AVE stays paused.
+
+Quiet61s: nonidle kernel2.48174% of one CPU, aggregate98.05677% idle,18 NHI
+interrupts including diagnostics; warm50M integer83.682–83.809ms and100k
+syscalls14.610ms. Actual compositor pdhid-reader0.42421%, shared-memory cleanup
+2.33342% of one CPU. These do not establish the reported AppKit slowdown's
+cause. Cold first-round timing is retained separately and not substituted
+for the warm baseline. No idle fix is claimed.
+
+A full-word comparison, rather than only intended masks, now covers all174
+unique PHY tuning addresses. Six differ outside programmed masks:2088,
+2a28,9000/90ac/10000/100ac. The2088 register is AUSPLL_FREQ_DESC_C and Linux
+has an active DP tunnel; the other differences are not treated as permission
+to force unknown bits. Native firmware syslog reaches lane-init Phase2 after
+Phase1, without a captured assert. Prior Linux cycles wrote full dmesg on
+Linux but did not stream that file back to the host; the next ordinary visit
+will capture it to compare actual firmware version/phases. No firmware or
+kernel-image extraction is involved, and no extra AVE work is authorized.
+
+### Explicit TS3 approval and enumeration profile: source/SDK, not installed
+
+The private enumeration CM build now wires the actual three native PCIe hooks.
+Pre-activation reserves the real owner/maps without PCIe MMIO. Post-activation
+records completion only. The administrator-only exact request
+pd-cio-authorize-ts3 calls the real direct-TS3 allowlist/approval helper. Only
+after real tb_domain_approve_switch and the post callback return and release
+the domain lock does the native owner cold-init/link PCIe-C, block all64 DART
+streams and start the native IOPCIFamily host. Each controller access checks
+its current activation lease and physical power. This source is not in CIO18.
+
+Before activation and again before host publication it reads the actual
+IOCatalogue, permitting only the real PCI bridge class/bundle and the exact
+existing Wi-Fi match among IOPCIDevice personalities. Startup also reports
+the actual profile result without failing NHI startup. It does not trust a
+registry marker for driver exclusion. The copied frozen-base profile removes
+endpoint PCI matches from16plists while preserving all72 code files and all
+non-PCI personalities. Three PCI bridge personalities remain; the separate
+unchanged PDBwfm supplies Wi-Fi. The separate native USB profile removes its
+Generic XHCI match. Both ordinary and explicit CM SDK variants, the native
+authorization CLI, actual artifact verification, host helpers and six required
+checks pass. The first enum SDK attempt failed on a copied read-only CMake
+file; that receipt is preserved, the copied file permission fixed, and the
+final builds pass. No target execution or positive approval is claimed.
+
+BME stays unconditionally stripped; no endpoint mapper/MSI or driver admission
+is supplied. Failed/removed programmed hosts block config and pin resources
+until reboot. CM stop explicitly refuses after an enumeration attempt because
+the Linux void domain-removal API cannot propagate a failed native child drain.
+There is no hot-remove success claim; the ten physical cycles still require
+real child/IRQ/work/TLB teardown. The new CLI's successful return would mean
+approval/host startup only; the independent PCI inventory must still observe
+all four xHCI controllers and I210 before stage(a) passes. Its UID65534 denial
+mode and real-catalogue result await the next suitable native boot.

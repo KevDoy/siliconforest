@@ -46,9 +46,8 @@ Host ASan/UBSan checks add 64 ring/E2E cases, descriptor wire bytes and DMA
 bounds, SRAM bounds, M1 DP-IN timing/error cases, failure at every startup
 step, failed teardown retention and changed-cable full-OFF ordering.
 
-Still required: qualify the implemented SID1 DART/ring DMA path and Linux NHI
-control channel/software connection
-manager and authorization; apciec1 tunneled host + MSI/DART/lifetime;
+Still required: dock router discovery and authorization; apciec1 tunneled
+host + MSI/DART/lifetime;
 PCIe-attached xHCI/Intel I210 (the existing em driver supports it), DP-IN /
 dcpext tunnel binding and real dock hotplug. Never map or read ACIO children
 before power/RTKit readiness, or after shutdown (the Linux driver documents
@@ -333,7 +332,8 @@ proof and, like linkStart, must run outside the CM domain lock after its
 post callback returns. The pre callback reserves ownership/prerequisites
 without PCIe-C MMIO. This prevents a future caller from interpreting
 "cold-init before reset release" as permission to touch a gated controller
-before its real tunnel exists. The adapter remains uninstalled/unwired.
+before its real tunnel exists. The ordinary build leaves it unwired. The
+explicit enumeration variant below connects it in source; it is uninstalled.
 
 `build-pci-inventory.nix` builds a read-only native inventory CLI. It follows
 actual IOPCIDevice ancestry to PDCIOPCIHost, prints only public BDF/vendor/
@@ -382,3 +382,36 @@ they establish no device/IRQ/work drain or real DART TLB proof. Native mapper,
 MSI/IRQ/work teardown, positive DMA and Ethernet link/DHCP remain required.
 The Ethernet driver is not in any boot collection and no I210 has enumerated
 on Darwin. These changes do not explain idle CPU in the installed kernel.
+
+`build-enumeration-cm-kext.nix` is an explicit private first-inventory variant.
+It installs the three real CM PCIe hooks, but the pre hook only reserves
+ownership/mappings and the post hook only records that it ran. The administrator
+request `pd-cio-authorize-ts3` calls the existing native direct-TS3 allowlist and
+real `tb_domain_approve_switch`. Only after that function and its post callback
+return and release the Linux domain lock does the native owner cold-initialize
+PCIe-C, wait for link, block all64 endpoint DART streams and publish its native
+IOPCIFamily host. NHI can continue its own traffic throughout these waits.
+Failure blocks config accesses and retains resources. A programmed enumeration
+host deliberately prevents CM stop/power release until reboot: real PCI child,
+IRQ/work/TLB teardown is still required for hot-remove. A void Linux domain-stop
+return is not accepted as proof of that drain.
+
+This profile requires the actual IOCatalogue to contain only IOPCI2PCIBridge
+personalities and the exact existing BCM4378 Wi-Fi match among IOPCIDevice
+drivers. The guard inspects real retained catalogue dictionaries at startup,
+before activation and before bridge publication; a marker is insufficient.
+`build-enumeration-base.nix` copies an explicitly selected frozen base and removes
+other PCI endpoint personalities. Actual artifact verification changes16plists,
+preserves72 code files byte-for-byte and retains the three PCI bridge matches;
+the separate frozen PDBwfm supplies the allowed Wi-Fi match. The USB profile
+also removes Generic XHCI from the separate native USB bundle. Ordinary builds,
+installed bundles and non-PCI personalities are unaffected. No tunnel-compatibility
+or BME admission flag is added; the bridge always strips BME and the DART path
+only blocks streams. The independent inventory CLI must still observe all four
+xHCI controllers and I210 before stage(a) passes. These source/build results
+provide no router, approval, tunnel, PCI enumeration or hot-remove evidence.
+
+`build-authorize-tool.nix` builds the matching administrator CLI and a UID65534
+denial mode. It accepts no arbitrary route/address/key. Its successful return
+means the actual approval and native host startup returned successfully;
+Ethernet, USB and even the complete PCI inventory are separate checks.

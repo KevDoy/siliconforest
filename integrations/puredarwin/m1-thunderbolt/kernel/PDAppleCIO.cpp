@@ -46,8 +46,10 @@ class PDAppleCIO: public IOService {
  uint32_t cmLive;
  IOTimerEventSource *diagnosticTimer;
  uint32_t diagnosticCount;
+ uint32_t authorizationCount;
  static void diagnosticTick(OSObject *,IOTimerEventSource *);
  static IOReturn snapshotAction(OSObject *,void *,void *,void *,void *);
+ static IOReturn authorizationAction(OSObject *,void *,void *,void *,void *);
  int readSnapshot();
  static bool cmPowered(void *);
  int startCM();
@@ -285,6 +287,7 @@ bool PDAppleCIO::start(IOService *p)
 #ifdef PD_CIO_CM
  diagnosticTimer=IOTimerEventSource::timerEventSource(this,diagnosticTick);
  if(!diagnosticTimer || loop->addEventSource(diagnosticTimer)!=kIOReturnSuccess)return false;
+ authorizationCount=0;setProperty("authorization-request-count",(uint32_t)0,32);
 #endif
  setProperty("port-index",1,32);setProperty("rtkit-ready",false);setProperty("nhi-ready",false);
  __atomic_store_n(&accepting,1,__ATOMIC_RELEASE);__atomic_store_n(&drained,1,__ATOMIC_RELEASE);
@@ -297,9 +300,11 @@ IOReturn PDAppleCIO::setProperties(OSObject *properties)
  // accepts only a bounded read request, never addresses or register writes.
  if(IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)return kIOReturnNotPrivileged;
  auto dict=OSDynamicCast(OSDictionary,properties);
- if(!dict || dict->getCount()!=1 || dict->getObject("pd-cio-read-snapshot")!=kOSBooleanTrue)return kIOReturnBadArgument;
+ if(!dict || dict->getCount()!=1)return kIOReturnBadArgument;
  if(!gate || !__atomic_load_n(&accepting,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
- return gate->runAction(snapshotAction);
+ if(dict->getObject("pd-cio-read-snapshot")==kOSBooleanTrue)return gate->runAction(snapshotAction);
+ if(dict->getObject("pd-cio-authorize-ts3")==kOSBooleanTrue)return gate->runAction(authorizationAction);
+ return kIOReturnBadArgument;
 #else
  (void)properties;return kIOReturnUnsupported;
 #endif
@@ -392,6 +397,16 @@ IOReturn PDAppleCIO::snapshotAction(OSObject *owner,void *,void *,void *,void *)
  auto s=OSDynamicCast(PDAppleCIO,owner);
  if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return kIOReturnNotReady;
  return s->readSnapshot()?kIOReturnIOError:kIOReturnSuccess;
+}
+IOReturn PDAppleCIO::authorizationAction(OSObject *owner,void *,void *,void *,void *)
+{
+ auto s=OSDynamicCast(PDAppleCIO,owner);
+ if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return kIOReturnNotReady;
+ if(s->authorizationCount==UINT32_MAX)return kIOReturnNoResources;
+ s->setProperty("authorization-request-count",++s->authorizationCount,32);
+ int ret=pd_cio_cm_authorize_ts3(s->cm);
+ s->setProperty("authorization-request-error",(uint32_t)ret,32);
+ return !ret?kIOReturnSuccess:ret==EOPNOTSUPP?kIOReturnUnsupported:kIOReturnIOError;
 }
 bool PDAppleCIO::cmPowered(void *ctx)
 {
