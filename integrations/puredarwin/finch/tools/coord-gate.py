@@ -18,6 +18,16 @@ def pending_hold(text, install_reservation=False, now=None):
         if event:
             owner, body = event[1], event[2]
             lower_body = body.lower()
+            # A physical flock alone does not end an announced desktop install.
+            # Only the same owner's actual release/correction closes its hold.
+            if (lower_body.startswith('gui.lock: install ') and
+                    ('compositor' in lower_body or 'relaunch' in lower_body)):
+                active[(owner, 'desktop-install')] = (line, [], owner)
+            if (lower_body.startswith('gui.lock released') or
+                    lower_body.startswith('correction: gui.lock was released at the end of the install') or
+                    (lower_body.startswith('done (runs/m1-coord/done-') and
+                     'm1 left on the installed daily compositor' in lower_body)):
+                active.pop((owner, 'desktop-install'), None)
             if (lower_body.startswith('gui.lock: start ') and 'idle' in lower_body and
                     ('measurement' in lower_body or 'cpu/rss check' in lower_body)):
                 duration = re.search(r'(\d+(?:\.\d+)?)\s*(?:-minute|minutes?|min)\b', lower_body)

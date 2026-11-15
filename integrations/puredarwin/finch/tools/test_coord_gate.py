@@ -152,5 +152,24 @@ class HoldTests(unittest.TestCase):
         self.assertIsNone(gate.pending_hold(text+'U CODEX-TB CIO02 recovered USB04; M1 back in SiliconForest\n'))
         self.assertIsNotNone(gate.pending_hold(text+'U PERF core.lock: GUARDED INSTALL now\nV CODEX-TB CIO02 recovered USB04; M1 back in SiliconForest\n'))
 
+    def test_desktop_install_requires_actual_same_owner_release(self):
+        text = 'T DESK6 gui.lock: install desk6 + compositor relaunch (.next)\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        for marker in [
+            'U TERM8 gui.lock released\n',
+            'U DESK6 waiting for gui.lock released\n',
+            'U DESK6 NOTICE gui.lock released will follow tests\n',
+        ]:
+            self.assertIsNotNone(gate.pending_hold(text+marker))
+        self.assertIsNone(gate.pending_hold(text+'U DESK6 gui.lock released\n'))
+        self.assertIsNone(gate.pending_hold(text+'U DESK6 done (runs/m1-coord/done-DESK6): M1 left on the installed daily compositor\n'))
+
+    def test_desktop_install_explicit_correction_is_owner_scoped(self):
+        text = 'T DESK6 gui.lock: install desk6 + compositor relaunch (.next)\n'
+        correction = 'correction: gui.lock was released at the end of the install (TERM8 has it now)\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX '+correction))
+        self.assertIsNone(gate.pending_hold(text+'U DESK6 '+correction))
+        self.assertIsNotNone(gate.pending_hold(text+'U PERF core.lock: GUARDED INSTALL now\nV DESK6 '+correction))
+
 if __name__ == '__main__':
     unittest.main()

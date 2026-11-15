@@ -33,7 +33,7 @@ and remaining limits are recorded below; earlier table entries retain their scop
 | SystemConfiguration / Network | Network12 Swift files + C facade audited;Foundation prerequisite reproducer only | Linux/Nix Swift6.3.3 cross sysroot using PD OSS declarations;actual type-check failure preserved | SystemConfiguration retained;Network canonical path absent;no Network built or staged | Foundation imports,but Data/URL/UUID/NSLock conveniences needed by Finch fail to type-check | Foundation owner dependency request;then Security protocol helpers,whole Network build,loopback/reference tests |
 | ColorSync | All four `userland/ColorSync/ColorSync*.c` files and exact skcms module at Finch's Skia m155 pin | Own declarations, PD CFRuntime layout, Linux/Nix C++ backend build; licenses retained | Thin 11-export wrapper replaced with reviewed 293-export provider; all old names retained, cold hash and .pre-finch backup recorded. Old wrapper name-string objects must not enter ICC APIs | Installed CLI regressions PASS including compat18/18; 152 profile/transform/tag/MD5 result lines MATCH identical Linux-built M5 client. Local ICC checksum uses existing private MIT MD5 after public CC_MD5 regression | Public CC_MD5 failure separately filed to PERF; device preferences, external CMM plugins and profile-file install untested; Finch CMM limits remain |
 | ImageIO | None yet | None | PureDarwin CGImageSource implementation retained | Not run | Reconcile with graphics owner before any whole ImageIO port |
-| CoreImage CPU | All7 CoreImage implementation/constant/filter-table files;original comparison program | Own30-class/119 typed-protocol declarations;real retained color-provider adapters;validated direct float/half bitmap recipes;software-rendering comparison | Canonical path absent,but QuartzCore.pd has5 static class collisions+4 generated CI filter names;owner reconciliation requested,no install | Focused10-line float/half/HDR/stride/alpha/filter probe MATCH same-byte M5;original suite both exit0,raw DIFF;85/86 rendered pixel rows match(upstream quantization),PNG round-trip differs | Gray conversion missing real provider;infinite CGRect descriptions differ;GPU/Metal/kernel language/CV interop/profile/RAW/detector paths unverified |
+| CoreImage CPU | All7 CoreImage implementation/constant/filter-table files;original comparison program | Own30-class/119 typed-protocol declarations;real retained color-provider adapters;validated direct float/half bitmap recipes;software-rendering comparison | Canonical path absent,but QuartzCore.pd has5 static class collisions+4 generated CI filter names;owner reconciliation requested,no install | Private corrected dependencies: original raw suite, CPU probe and semantic extent probe MATCH same-byte M5;86/86 pixels and6extents agree | Gray conversion, PNG premultiplication and finite geometry dependency bugs fixed privately; TERM must adopt canonical Onyx/CG patches. GPU/Metal/kernel language/CV interop/profile/RAW/detector paths unverified |
 | PDFKit non-GUI | PDFKit.m ten document/page/text/model classes prepared;PDFView and print method excluded | Own declarations/numeric facts;actual Linux/Nix build failure and CGPDF export audit;original one-page fixture/public CLI probe | Canonical path absent;retained CoreGraphics/Onyx expose11/56 CGPDF calls needed;45 missing;no candidate built/staged | M1 not run;Linux-built probe native M5 passes3 lines:page/version/metadata/text/find/selection. First native fixture clipped text;smaller original text fixture corrected | Graphics-owner public CGPDF scanner/object/string/permission/outline/context dependency request;then framework build,M1 execution and comparisons |
 | Accelerate | Whole vDSP/vMisc/BLAS/LAPACK/Quadrature/LinearAlgebra/SparseBLAS/Sparse groups, all18 vImage C sources, BLAS ABI generator and original tests | Own declarations and Sparse overload glue; compiler-rt complex helpers; saturating int16 conversion; exact-value sinpi reduction; observed Quadrature workspace rules; NSObject LA lifetime adapter | Previously absent canonical umbrella now INSTALLED: all nine groups, 3,478 effective exports. Cocoa subset retained separately; final recipe rebuild reproduces all 40 installed files | Independent vectors/BLAS ABIs/LAPACK LU-inverse and sparse direct/iterative/lifecycle assertions PASS. Same-byte native comparisons MATCH vDSP300/vMisc207/BLAS614/SparseBLAS348/Quadrature40 lines. LA247 differs only NSObject superclass; Sparse62 differs on FGMRES diagonal-preconditioner acceptance | vImage 1,158/1,159 lines match; Display P3 coarse80/82 DIFF retained. Installed Root/VT/HAL/desktop/app-open/compat18 checks PASS. Full catalogue and general numerical equivalence unclaimed |
 | CoreMedia | All15 `userland/CoreMedia/*.[cm]` implementation files and internal headers | Own declarations,PD CFRuntime,correct28-byte/align4 custom-block callback ABI; grow comparison description buffers | Repository thin75-export implementation; live canonical path absent. Candidate2609 retains75/75. INSTALLED at previously absent canonical path; cold hashes before load | Original comparison exits0 but DIFF CF descriptions; independent time/block/sample/NV12 ownership probe MATCH same Linux-built M5 binary | Installed root-provider/VT600hardware/HAL/app-open/compat18 checks PASS;callback clients must rebuild;general ABI conformance unclaimed |
@@ -280,3 +280,40 @@ and189 audio decodes for the60-sample/95-packet fixture; do not treat those as
 unique pictures. Raw rc stats, kernel before/after and own HAL evidence are in
 `runs/sffinch/vlc-hardware-canonical-v1/qualification.json`. This remains dummy
 video output; the AppKit window dependency is unchanged.
+
+
+November15 continuation: AVKit's coherent bounded local-file player now uses
+real AVAssetReader/VideoToolbox frames and retained AudioQueue output. The final
+M1 stage-v3 matches all150 frame hashes and PTS, reports150 actual AVD
+completions/no errors, and returns230400 audio frames after a0.2s seek from a
+240000-frame/48kHz source. Own AVPlayerLayer/transport shapes render into a CPU
+bitmap; no window/panel/acoustic or streaming support is inferred. AVFoundation
+exports2501->2574 with none lost; browser speech/display/auth wrapper retained.
+See finch/AVKit/README.md and AVFoundation/player/README.md for bounds.
+
+Eight requested private QuickTime dependencies are staged: TCC, PhotosFormats,
+MediaRemote, GeoKit, MobileAsset, MonitorPanel, PerformanceAnalysis and
+FeatureFlags. All21 required imports resolve and negative-service/Swift witness
+fixtures pass on M1. No service is fabricated. AVKit remains6/18 required
+imports; MediaToolbox now6/7, with the professional-reader void opt-in explicitly
+reporting no registry. Unknown FigAssetCreateWithURL ABI remains absent. Actual
+unchanged QuickTime load-v4 returns-6 in dyld at missing Quartz.framework after
+clearing WebKit/CoreMediaIO; no app startup or playback. See finch/QuickTime.
+
+Retained media DIFFs are classified in finch/DIFFERENCES-2026-11-15.md. AAC/MP3
+fixture differences are bounded decoder/PNS/rounding variations; LA differs in
+private superclass metadata. Sparse's genuine missing matrix+opaque overload
+is fixed and native-matched; extra enum-overload convergence remains a visible
+compatibility difference. CI gray conversion, PNG alpha and geometry were real
+bugs. Private CI/Onyx/CG now match all86pixel+6extent rows and independent
+semantic predicates; canonical Onyx/CG adoption belongs to TERM.
+
+Zero-copy remains private and unqualified on hardware. Optional AVD capture
+import retains ABI1/default behavior. Follow-up DART invalidation failures
+quarantine backing until reboot and reject subsequent DMA; task ownership
+retains identity against PID reuse. Linux kext SDK and logical fault fixtures
+are separate from a hardware trial, which belongs to CODEX-TB. Native
+cross-process tests disproved GetUseCount as a global lifetime predicate; the
+producer now uses IsInUse and passes explicit child-hold/release controls.
+Handoff ordering, GPU completion, actual storage aliasing and1080p60 remain
+unproven. No AVE activity or kernel collection was built or installed here.
