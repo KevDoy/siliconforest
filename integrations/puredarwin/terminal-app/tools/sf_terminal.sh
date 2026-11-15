@@ -181,7 +181,9 @@ install)
   new) direct new;;
   direct) direct all;;
   core)
-    [ "${3:-}" = dyld ] || SF_COMPAT_STAGE=$IN/core $C/tools/sf_compat_push.sh replace ${3:-}
+    if [ "${3:-}" = dyld ]; then  # dyld alone: only the probes and the installer to /private/tmp/sf-test
+      tar -C $IN/core/test --owner=0 --group=0 --numeric-owner -cf - . | "${SSH[@]}" 'mkdir -p /private/tmp/sf-test && cd /private/tmp/sf-test && tar -xf - && chmod 755 *'
+    else SF_COMPAT_STAGE=$IN/core $C/tools/sf_compat_push.sh replace ${3:-}; fi
     if [ -z "${3:-}" ] || [ "$3" = dyld ]; then
       want=$(cat $IN/core/dyld.sha256); dp=$(cat $IN/core/dyld.probe 2>/dev/null || echo sf-arm64e-probe)
       "${SSH[@]}" 'cat > /usr/lib/dyl2 && sync' < $IN/core/dyld.new

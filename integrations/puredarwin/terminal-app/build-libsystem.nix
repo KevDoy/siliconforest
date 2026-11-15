@@ -7,13 +7,14 @@
 #   ../libsystem-default/patches/macos26-sdk-imports.patch
 # (the recipe says what each does). Kept as a name the recipes of this directory import.
 #
-# SF_LIBSYSTEM=opt: the same source and patches compiled with optimisation
-# (../libsystem-default/build-libsystem-opt.nix; SF-Y, "Performance: optimised core libraries").
-# An environment variable (as ../rebase/pd.nix's SF_PD) so that the tree other agents build stays
-# the installed one until the optimised build has been rehearsed and installed.
+# Since 15 November 2026 (rehearsals pf2b/pf2b-2, installed on the M1's disk): the same source and
+# patches compiled with optimisation, ../libsystem-default/build-libsystem-opt.nix (libSystem a715a1e2,
+# dyld be18e963; SF-Y, "Performance: optimised core libraries"). SF_LIBSYSTEM=debug: PureDarwin's -O0
+# build of before (the default recipe itself, ba8013eb/a0da8333), an environment variable as
+# ../rebase/pd.nix's SF_PD. The RAM root and QEMU images still stage the default recipe.
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-libsystem.nix
 let which = builtins.getEnv "SF_LIBSYSTEM"; in
-if which == "opt" then import ../libsystem-default/build-libsystem-opt.nix { }
-else if which == "" || which == "debug" then import ../libsystem-default/build-libsystem.nix
+if which == "" || which == "opt" then import ../libsystem-default/build-libsystem-opt.nix { }
+else if which == "debug" then import ../libsystem-default/build-libsystem.nix
 else throw "SF_LIBSYSTEM=${which}: expected opt or debug"

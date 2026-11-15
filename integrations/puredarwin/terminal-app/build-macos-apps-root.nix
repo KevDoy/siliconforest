@@ -3,7 +3,7 @@
 # macOS 26 SDK run on it (first: Apple's Terminal.app; GitHub issue 52,
 # docs/roadmap/issues/SF-Y-terminal-app.md): one tree rooted at /, every file from a recipe.
 #
-#   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix (SF_LIBSYSTEM=opt: optimised)
+#   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix (optimised; SF_LIBSYSTEM=debug: -O0)
 #   usr/lib/libobjc.A.dylib                      ./build-libobjc.nix (only with SF_LIBOBJC=new: PD_POOL_TRACE
 #                                                read once; without it the root keeps its own libobjc)
 #   usr/lib/libFoundation.dylib                  ./build-foundation.nix
@@ -40,7 +40,7 @@ let
   p = pd.packages.x86_64-linux;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   libsystem = import ./build-libsystem.nix;
-  optimised = builtins.getEnv "SF_LIBSYSTEM" == "opt";
+  optimised = builtins.getEnv "SF_LIBSYSTEM" != "debug";
   libobjc = if builtins.getEnv "SF_LIBOBJC" == "new" then import ./build-libobjc.nix else null;
   foundation = import ./build-foundation.nix;
   corefoundation = import ./build-corefoundation.nix { };
