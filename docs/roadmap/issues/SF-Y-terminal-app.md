@@ -186,12 +186,54 @@ xdg_popup. 0123 changes:
 | tracking start to the release of that frame (the compositor took it), median / p90 | 57.8 / 84.8 ms | 28.6 / 47.9 ms |
 | `-openSubmenuAtIndex:` alone, median | 47.8 ms | 16.0 ms |
 
+Later the whole M1 ran slower than at 03:29Z: the same old build took 60-70 ms where it had taken 44 (load average
+about 1.3 with nothing of mine running, after CODEX-TB's 03:33Z kernel). The comparison was therefore repeated with
+both builds from test prefixes, alternating in one hold. Tracking start to commit, median / p90: old 2cd9ea2a
+60.3 / 74.1 and 70.5 / 77.1 ms; new (0123 + 0125) 38.8 / 45.5 and 32.5 / 41.0 ms. That is under 50 ms at p90.
+0125 also lights the strip's title with only the strip drawn (not the whole window). It no longer validates the
+whole main menu before every menu (1-3 ms; each menu is validated when it opens). The accent colour is read again
+only when the global preferences file changes: CFPreferencesAppSynchronize read every domain, Terminal's own
+profiles included, about 2 ms per menu.
+
+A mistake shipped with 0123 and was fixed by 0125: the pieces were drawn antialiased, so half-transparent lines
+showed where they met. They were in the installed menus from 04:26Z to 04:54Z. I had compared a dump of the old
+vector drawing with the pieces only after installing. After the fix the two panels match (`runs/sf-term6/
+menucmp.sh`; `PD_MENU_VECTOR=1` draws the vectors). 0125 also gives the shadow rings a hole of the panel's own
+shape. The old plain hole, a rectangle 8 points inside the panel, left a darker band down the panel's inside edges
+in both versions. In the build after 0125 (not yet installed), menus are opaque where the compositor cannot blur
+behind them, as macOS's are with Reduce Transparency. At 92 % the text of the window behind showed through sharp.
+
+Highlight against the pointer. The pointer was swept down the Shell menu and back by the inject module's `stream
+abs` (records from a thread of their own at 125 and 250 Hz, as a device sends them, 0.33 px/ms). Old and new were
+run from prefixes in one hold; latency from the motion the app received to the highlight's commit, and to the
+release of that frame (the compositor has shown it):
+
+| Sweep | Build | motion to commit, median / p95 / max | motion to release, median / p95 / max |
+|---|---|---|---|
+| 125 Hz | old 2cd9ea2a | 2.8 / 23.3 / 44.0 ms | 9.7 / 28.9 / 57.6 ms |
+| 125 Hz | new | 2.6 / 10.8 / 31.7 ms | 9.1 / 19.9 / 36.6 ms |
+| 250 Hz | old | 3.0 / 16.5 / 47.2 ms | 9.3 / 25.9 / 52.3 ms |
+| 250 Hz | new | 2.6 / 12.4 / 61.1 ms | 6.3 / 27.9 / 66.2 ms |
+
+The median is within one frame; p95 is about one frame, and the max is up to four frames. "Under the pointer in
+every presented frame" is not possible here and was not reached. The compositor draws the pointer where it is
+when it renders, but the menu can only show what it drew for an earlier motion. In the frames right after the
+pointer crosses into a row, the highlight is still on the previous row: for a pointer moving v px/ms, about
+v × latency / row height of the frames (rows are 33 px at 150 %). At 0.33 px/ms and 9 ms that is about 9 % of
+frames, one row behind. For a fast flick of 2 px/ms it is about half the frames for a moment, again one row.
+I also tried a screen capture every few frames during the sweep. The captures stall the compositor's loop while
+the pointer thread keeps moving, so they show the menu 3 rows behind. That measures the capture, not the
+desktop, and was not used.
+
 ### Installed (04:26Z, direct, the previous files kept as `.pre-t6`)
 AppKit f0bcba93 (0123; .pre-t6 = 2cd9ea2a) and libWindowServer df87120c (0124; .pre-t6 = 5d359f88). Both are the
 nix builds of the committed patches, byte-equal to the gated test builds. After-install checks
 (`runs/sf-term6/tcheck6.sh`, only my own pids): Terminal opened, Preferences opened, closed and reopened,
 Inspector, new tab, colour panel, Shell menu, Activity Monitor and its inspector opened and closed with the app
-alive (`shots/inst1-sheet.png`). `sf_compat_push.sh check` 18/18. `/usr/bin/sample` is new (SF-AA). Revert:
+alive (`shots/inst1-sheet.png`). `sf_compat_push.sh check` 18/18. `/usr/bin/sample` is new (SF-AA). 04:52Z: AppKit
+7320ca67 and libWindowServer f834f297 (0125, 0126) replaced them, after a further robustness pass on that build
+(Activity Monitor 228 actions, Terminal 204, no crash and no exception). The same checks passed (`shots/inst2-sheet.png`;
+the Shell menu without lines). `.pre-t6` is still the file from before TERM6. Revert:
 `ln -f <path>.pre-t6 <path>.back && mv -f <path>.back <path>`.
 
 ## Performance: optimised core libraries (15 November, night; PERF)
