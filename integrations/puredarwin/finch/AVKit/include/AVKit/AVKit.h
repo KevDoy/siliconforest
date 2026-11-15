@@ -8,6 +8,7 @@
 /* SPDX-License-Identifier: MIT */
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AVKit/SFPlayerController.h>
 typedef NSInteger AVPlayerViewControlsStyle,AVDisplayDynamicRange,AVRoutePickerViewButtonState;
 typedef NSUInteger AVVideoFrameAnalysisType;
 @class AVPlayerView,AVRoutePickerView,AVPictureInPictureController,AVPictureInPictureControllerContentSource;

@@ -20,9 +20,14 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
  AVPlayer *missing=[[AVPlayer alloc] initWithURL:[NSURL fileURLWithPath:missingPath]];
  double missingDeadline=seconds()+5;while(missing.currentItem.status==AVPlayerItemStatusUnknown&&seconds()<missingDeadline)pump(.01);
  [missing play];need(missing.currentItem.status==AVPlayerItemStatusFailed&&missing.currentItem.error&&missing.rate==0&&!missing.currentItem.canPlayReverse&&!missing.currentItem.canPlayFastForward,"missing file fails without simulated playback capabilities");
- printf("AVKIT_UNAVAILABLE missing-file=failed rate=0 reverse=0 fast-forward=0\n");[missing release];
+ AVPlayerController *failedController=[[AVPlayerController alloc] init];failedController.player=missing;
+ [failedController play:nil];[failedController seekToTime:1];
+ need(!failedController.canPlay&&!failedController.canSeek&&!failedController.isPlaying&&failedController.error!=nil,"controller does not report failed file as playable");
+ failedController.player=nil;[failedController release];
+ printf("AVKIT_UNAVAILABLE missing-file=failed rate=0 reverse=0 fast-forward=0 controller-play=0 seek=0\n");[missing release];
 
  AVPlayer *player=[[AVPlayer alloc] initWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]]];
+ AVPlayerController *controller=[[AVPlayerController alloc] init];controller.player=player;
  AVPlayerView *view=[[AVPlayerView alloc] initWithFrame:NSMakeRect(0,0,320,218)];view.player=player;
  double deadline=seconds()+15;while(player.currentItem.status==AVPlayerItemStatusUnknown&&seconds()<deadline)pump(.01);
  if(player.currentItem.error)fprintf(stderr,"item-error: %s\n",[[player.currentItem.error description] UTF8String]);
@@ -31,19 +36,22 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
  need([prepared[@"videoFrames"] unsignedIntegerValue]>1&&[prepared[@"videoFrames"] isEqual:prepared[@"videoSamples"]]&&[prepared[@"hardware"] boolValue],"hardware pictures decoded");
  need([prepared[@"audioFrames"] unsignedIntegerValue]>0,"audio PCM decoded");
  NSArray *digests=[player sfPlaybackFrameDigests];for(NSUInteger n=0;n<digests.count;n++)printf("AVKIT_FRAME index=%lu pts=%.9f md5=%s\n",(unsigned long)n,[digests[n][@"pts"] doubleValue],[digests[n][@"md5"] UTF8String]);
- player.volume=.05;[player play];deadline=seconds()+5;while(CMTimeGetSeconds(player.currentTime)<.45&&seconds()<deadline)pump(.01);
+ need(controller.hasContent&&controller.canPlay&&controller.canSeek&&controller.hasEnabledVideo&&controller.hasEnabledAudio,"controller reads actual prepared tracks");
+ need(fabs(controller.contentDuration-CMTimeGetSeconds(player.currentItem.duration))<.001,"controller reads actual duration");
+ controller.volume=.05;[controller play:nil];deadline=seconds()+5;while(CMTimeGetSeconds(player.currentTime)<.45&&seconds()<deadline)pump(.01);
  need(player.rate==1&&CMTimeGetSeconds(player.currentTime)>=.45,"queue-clock playback starts");
- [player pause];double paused=CMTimeGetSeconds(player.currentTime);pump(.15);double held=CMTimeGetSeconds(player.currentTime);
+ need(controller.isPlaying&&controller.canPause,"controller exposes active transport");
+ [controller pause:nil];double paused=CMTimeGetSeconds(player.currentTime);pump(.15);double held=CMTimeGetSeconds(player.currentTime);
  need(fabs(paused-held)<.025&&player.rate==0,"pause holds queue clock");
- __block BOOL sought=NO;[player seekToTime:CMTimeMake(1,5) completionHandler:^(BOOL finished){sought=finished;}];pump(.05);
- need(sought&&fabs(CMTimeGetSeconds(player.currentTime)-.2)<.01,"paused seek reports actual position");
+ [controller seekToTime:.2];pump(.05);
+ need(!controller.isPlaying&&fabs(controller.currentTime-.2)<.01,"controller paused seek reports actual position");
  printf("AVKIT_LIFECYCLE paused=%.6f held=%.6f seek=%.6f\n",paused,held,CMTimeGetSeconds(player.currentTime));
  const size_t width=320,height=218;uint8_t *pixels=calloc(width*height,4);CGColorSpaceRef color=CGColorSpaceCreateDeviceRGB();
  CGContextRef bitmap=CGBitmapContextCreate(pixels,width,height,8,width*4,color,kCGImageAlphaPremultipliedLast|kCGBitmapByteOrderDefault);need(bitmap!=NULL,"CPU drawing context");
  NSGraphicsContext *graphics=[NSGraphicsContext graphicsContextWithGraphicsPort:bitmap flipped:NO];
  [NSGraphicsContext saveGraphicsState];[NSGraphicsContext setCurrentContext:graphics];
  [[NSColor blackColor] set];NSRectFill(NSMakeRect(0,0,width,height));uint8_t *blank=malloc(width*height*4);need(blank!=NULL,"blank reference allocation");memcpy(blank,pixels,width*height*4);
- [player play];deadline=seconds()+CMTimeGetSeconds(player.currentItem.duration)+8;
+ [controller togglePlayback:nil];deadline=seconds()+CMTimeGetSeconds(player.currentItem.duration)+8;
  while(player.rate!=0&&seconds()<deadline){pump(.015);[view drawRect:view.bounds];NSView *transport=view.subviews.lastObject;[transport drawRect:transport.bounds];}
  [view drawRect:view.bounds];NSView *transport=view.subviews.lastObject;[transport drawRect:transport.bounds];
  [NSGraphicsContext restoreGraphicsState];
@@ -57,6 +65,9 @@ int main(int argc,char **argv){setvbuf(stdout,NULL,_IOLBF,0);@autoreleasepool{
  need([final[@"error"] intValue]==0&&[final[@"callbacks"] unsignedIntegerValue]>0&&[final[@"audioQueued"] isEqual:final[@"audioFrames"]],"retained queue accepts all remaining audio");
  need([final[@"deviceRate"] doubleValue]>0,"actual device sample rate");
  need([final[@"audioReturned"] unsignedIntegerValue]+(NSUInteger)llround([final[@"clientRate"] doubleValue]/5)==[final[@"audioFrames"] unsignedIntegerValue],"every post-seek source buffer returned");
- view.player=nil;[view release];[player release];CGContextRelease(bitmap);CGColorSpaceRelease(color);free(pixels);free(blank);
+ need(!controller.isPlaying&&controller.canPause,"controller is stopped and still permits idempotent pause");
+ controller.player=nil;need(!controller.hasContent&&!controller.canPlay&&isnan(controller.currentTime),"detached controller advertises no media");
+ [controller release];view.player=nil;[view release];[player release];CGContextRelease(bitmap);CGColorSpaceRelease(color);free(pixels);free(blank);
+ printf("AVKIT_CONTROLLER_PASS duration/tracks/play/pause/seek/toggle/end/detach over real player\n");
  printf("AVKIT_PLAYER_PASS headless CPU draw only; no window/panel/acoustic claim\n");return 0;
 }}

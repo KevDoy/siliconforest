@@ -128,3 +128,15 @@ report unavailable. The eight unresolved imports are the two media-selection
 menu functions, AVPlayerController, AVPlayerControllerTimeResolver,
 AVPlayerControlsViewController (+metaclass), AVTouchBarRecordingControlsProvider
 and AVVolumeControlSlider. No canonical AVKit installation or GUI test occurred.
+
+
+## Bounded transport controller and current strict failure
+
+`SFPlayerController.m` provides real scalar/transport operations over our
+AVPlayer. [Its audit](CONTROLLER-2026-11-15.md) separates the three exact native/
+M1 value comparisons and successful transport/HAL assertions from the current
+strict playback failure:149/150 frame hashes match under two other decoder
+contexts, with a new global stale completion. Frame40 is wrong; this is not a
+bit-exact pass. No tolerance or classifier was weakened. The private image has
+77 exports, all73 prior retained;11/18 reviewed imports resolve (9 implemented,
+2 explicitly unavailable). Private UI/KVO/inspection families remain incomplete.
