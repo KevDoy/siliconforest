@@ -1,0 +1,10 @@
+PDAppleAVE source port, in progress; no hardware encoder result yet.
+Reference: https://github.com/aquarat/apple-m-series-ave-driver
+Pinned commit: 9ab14e45281e8f61fb499b760408028171a5f2b5 (GPL-2.0-only).
+Copied upstream files retain SPDX and notices. tools/upstream/COPYING is GPLv2.
+No Apple kernel, firmware, DPE table or derived input bytes are in this tree.
+Private Acis extraction is owner-authorized; encoder firmware must come solely
+from this M1's iBoot preload, not a downloaded firmware file.
+
+Host selftests copied from tools/{abi_selftest,adt_selftest}; only local header
+include paths adapted to kernel/upstream. kshim/shim retain GPL-2.0-only notices.

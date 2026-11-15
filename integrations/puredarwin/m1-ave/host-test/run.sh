@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+here=$(cd -- "$(dirname -- "$0")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$here/include" "$here/kernel/pdave_preload.c" "$here/kernel/pdave_identity.c" "$here/host-test/preload_test.c" -o "$work/preload-test"
+"$work/preload-test"
+python3 "$here/host-test/test_extract.py"
+# The copied GPL tests compile the owned copied source, never private inputs.
+for name in abi adt; do
+ unit="$here/host-test/upstream/${name}_selftest"
+ source=ave_cmd
+ if [[ $name == adt ]]; then source=ave_adt; fi
+ "${CC:-cc}" -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -g -I"$unit/shim" -include "$unit/kshim.h" -I"$here/kernel/upstream" "$unit/${name}_selftest.c" "$here/kernel/upstream/$source.c" -o "$work/$name-test"
+ "$work/$name-test"
+done

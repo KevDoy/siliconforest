@@ -1,14 +1,42 @@
 # SF-AD — AVE encoder source-port study
 
-**Offline study, 14 November 2026; DPE clarification updated15 November. No AVE kernel build, AVE device access, firmware
-extraction, installation or encoder execution was performed.** The first target
-is the T8103/J293 M1. Keep the working PDAppleAVD decoder and audio stack.
+**Source port in progress, 15 November 2026. Diagnostic PDAppleAVE kext SDK build and private Acis extraction are complete;
+no kernel collection build/install, AVE device access or hardware encoding has
+been performed.**
+The first target is T8103/J293; preserve the working PDAppleAVD decoder and audio.
+
+Owner decision on 15 November authorizes extracting the Acis DPE table from a
+macOS kernel image. Inputs and extracted bytes stay under git-ignored
+`private/ave/`; source/build/SHA-256 belong only in its private ledger. The only
+authorized transfer of extracted bytes is to this M1's SiliconForest firmware
+directory, recorded in an install ledger. Reproducible extraction code belongs
+in the repository; Apple bytes do not. Encoder firmware remains exclusively
+this machine's iBoot preload. No firmware file may be fetched or installed.
+
+First measure the live `/arm-io/ave` identity/version properties and segment
+sizes on SiliconForest. The M1's macOS27.0 installation does not identify the
+preload. Upstream selects exact13.5 or26.6/26.6.2 ABIs and rejects unknown
+versions; do not force13.5 on an unknown image. Match the kernel/table choice to
+that measurement and document the compatibility evidence before any encode.
+CODEX-TB owns the kernel collection and boot slots; request the early preload
+reservation and kext on its current base rather than building another base.
+
+Live read-only IORegistry metadata on15 November now confirms `pre-loaded=1`,
+TEXT size`0xcc000` (flags3), DATA size`0x128000` (flags0), and chosen
+iBoot identity mapping exactly to13.5 in the pinned m1n1 firmware table. This
+matches upstream13.5 H13G placement sizes. Actual TEXT build-string validation
+and cold DATA reservation are still pending; size agreement alone is not ABI
+proof. A matching13.5 kernelcache and manifest were subsequently acquired by bounded
+ZIP range requests from Apple CDN; Acis extraction produced the expected0/1/39
+entry layout and is held privately pending the remaining checks. CODEX-TB has the early
+reservation/identity request. Detailed live metadata remains private.
 
 The reference is aquarat's GPL-2.0-only
 [apple-m-series-ave-driver, pinned at 9ab14e45281e8f61fb499b760408028171a5f2b5](https://github.com/aquarat/apple-m-series-ave-driver/tree/9ab14e45281e8f61fb499b760408028171a5f2b5).
 It is cloned, git-ignored, under `sources/ref-ave` with a sparse source/document
-checkout. No firmware, kernelcache, RAM dump or derived-data directory was
-checked out; no firmware-fetch/generation tool was run. Upstream documentation
+checkout. No Apple-derived data was checked out from upstream. The later owner-authorized
+kernel/DPE acquisition is held only under ignored private/ave/, with its provenance
+recorded only in the private ledger. No firmware image or RAM dump was fetched. Upstream documentation
 is CC BY-SA 4.0; this report cites it and the code without copying its prose or
 tables. Its LGPL FFmpeg patches are separate from the GPL driver.
 
@@ -17,8 +45,8 @@ tables. Its LGPL FFmpeg patches are separate from the GPL driver.
 The session/command code is a useful source-port base. It is **not ready to run
 under the owner's “iBoot-preloaded firmware only” rule**. The current Linux path
 still opens a firmware Mach-O file, and its enabled DPE initialization loads
-AppleAVE2-derived register tables. Those inputs must be removed or independently
-replaced before an authorized hardware attempt. A Linux build alone would not
+AppleAVE2-derived register tables. The firmware file path must be replaced with preload adoption; the DPE table
+may now be extracted privately from a matching kernel image before a hardware attempt. A Linux build alone would not
 settle either problem.
 
 Start with one T8103 instance, H.264, NV12, one reference, no B frames, fixed QP,
@@ -90,8 +118,9 @@ power-domain reset may already erase it, and final register values do not recove
 the original clear/set masks, ordering, or volatile/status-bit semantics. Reading
 unpowered or wrong-generation banks can reset the machine. Such a future capture
 needs the kernel/boot owner and must keep all runtime Apple-derived bytes private
-on the device. No MMIO access, memory dump, extraction, firmware copy or kernel
-change was performed for this update.
+on the device. That earlier derivation study performed no MMIO access or memory
+dump. The later authorized private kernel-table extraction is described above;
+no preloaded firmware segment was copied.
 
 The distinction between **ASC firmware tunables in DATA** and **host DPE
 register tables** is essential. An empty ASC table was used successfully in
@@ -100,8 +129,8 @@ It does not prove the DPE data can be omitted.
 
 | Input in the current reference | Origin / current use | Owner-compliant route and limit |
 |---|---|---|
-| `apple/ave_h13g.bin` | Unwrapped AppleAVE2FW_H13G Mach-O, requested by `ave_fw_load()` and other identity/restore helpers | Do **not** fetch an IPSW, copy a Mac file or install this file. Adopt only the copy iBoot already loaded, identified by `pre-loaded` and `segment-ranges` (32-byte entries). Rewrite image-walk/validation paths to consume reserved segments and known protocol/layout facts. Whether all bytes needed for validation/restart remain in J293's preload must be measured; the upstream file loader cannot simply be called unchanged. |
-| `apple/ave-13.5-dpe-acis_8103.bin` | Host DPE settings from AppleAVE2.kext's `gs_sAVE_DPE_CfgSet_Acis_8103`, normally generated from a macOS13.5 `kernelcache.release.mac13g` (the extractor also finds the same set in the other13.5 kernelcaches). Acis has 0 CAT-default, 1 CAC-default and 39 CAC-8-bit entries. `AVEDPE01` stores three counts plus `{offset,clear,set}` triples. | **Unresolved functional prerequisite under current authorization.** No kernelcache extraction, old deleted header, other-SoC table or source-history copy is allowed as a shortcut. `dpe_tunables=0` skips initialization/enable; it does not establish even low-quality encoding. The source says every working encode needed it; the cited T8103 success used Acis. No successful omission or preload-memory derivation was found. An early private on-device register capture might inform independent initialization only if iBoot actually programmed and preserved the block, which is unmeasured. Final values alone do not reveal masks/order/status semantics. |
+| `apple/ave_h13g.bin` | Unwrapped AppleAVE2FW_H13G Mach-O, requested by `ave_fw_load()` and other identity/restore helpers | Do **not** fetch, copy or install this firmware file. An authorized kernelcache/IPSW is solely a source for the private DPE table. Adopt only the copy iBoot already loaded, identified by `pre-loaded` and `segment-ranges` (32-byte entries). Rewrite image-walk/validation paths to consume reserved segments and known protocol/layout facts. Whether all bytes needed for validation/restart remain in J293's preload must be measured; the upstream file loader cannot simply be called unchanged. |
+| `apple/ave-13.5-dpe-acis_8103.bin` | Host DPE settings from AppleAVE2.kext's `gs_sAVE_DPE_CfgSet_Acis_8103`, normally generated from a macOS13.5 `kernelcache.release.mac13g` (the extractor also finds the same set in the other13.5 kernelcaches). Acis has 0 CAT-default, 1 CAC-default and 39 CAC-8-bit entries. `AVEDPE01` stores three counts plus `{offset,clear,set}` triples. | **Extraction now authorized; version compatibility remains unresolved.** Extract from the selected matching kernel image into `private/ave/`, with source/build/hash only in the private ledger. Do not substitute another SoC table or assume the13.5 table fits an unidentified preload. `dpe_tunables=0` skips initialization/enable; it does not establish even low-quality encoding. The source says every working encode needed it; the cited T8103 success used Acis. No successful omission or preload-memory derivation was found. An early private on-device register capture might inform independent initialization only if iBoot actually programmed and preserved the block, which is unmeasured. Final values alone do not reveal masks/order/status semantics. |
 | Pristine DATA / `apple/ave-13.5-h13g-data-pristine.bin` | Firmware DATA plus BSS and iBoot fills, used for owned DATA/restart. The T8103 reference DATA span is0x128000; actual placement must come from the live ADT. On stock-m1n1 J274 Linux overwrote the preload; the Linux solution builds DATA from the firmware **file**. | Reserve/copy this boot's cold DATA before allocator use or first ASC start, retain it privately on-device, restore only after proven quiescence. Do not dump it to Linux/M5/repository. If already overwritten, fail and require a fresh boot with a proper handoff; a disk firmware file or another machine's dump is outside scope. Check that our boot memory reservation actually covers both segments before any driver experiment. |
 | ASC tunables (`TUNS`/`TUNZ`) and tag fills (`CpAd`, `WrAd`, `IOBA`, `SOC_`) | iBoot writes fields in DATA. The image has an empty ASC-tunable table; upstream reconstructed T8103 DATA with that table when its live copy was gone. | Prefer the exact cold preload. A deliberate empty-table reconstruction would need the corresponding preloaded image bytes and separately reviewed validation, not borrowed H13S values. Upstream's successful empty-ASC result does not authorize skipping DPE tables. |
 | STKG stack-guard field | Per-boot iBoot value; an older research builder retained a sample cookie | Keep the current boot's value private with its DATA snapshot. Do not copy the research sample; no shared sample value is needed for the interface. |
@@ -112,7 +141,9 @@ The input inventory and extraction format are checked against
 [the DPE loader](https://github.com/aquarat/apple-m-series-ave-driver/blob/9ab14e45281e8f61fb499b760408028171a5f2b5/driver/ave_drv.c#L612),
 [the firmware loader](https://github.com/aquarat/apple-m-series-ave-driver/blob/9ab14e45281e8f61fb499b760408028171a5f2b5/driver/ave_fw.c#L1648)
 and [T8103's SoC data](https://github.com/aquarat/apple-m-series-ave-driver/blob/9ab14e45281e8f61fb499b760408028171a5f2b5/driver/ave_soc.c).
-No extraction/generation command in those documents is an instruction to run it here.
+Only the reviewed `m1-ave/tools` wrappers implement the newly authorized
+extraction scope. Upstream firmware-fetch/reconstruction commands remain
+outside that scope.
 
 ## Local host-only checks
 
@@ -128,7 +159,10 @@ execution. No Apple-derived input was needed for these host checks.
 Use a versioned, fixed-width ABI modeled on the ownership discipline of
 `pdavd_ioctl.h`, rather than its stateless codec-control payloads. AVE is a
 **stateful encoder**: its context owns reference frames and work surfaces.
-This is a design proposal; no header, ioctl number or driver is implemented.
+The ioctl/session contract remains a design proposal. Initial pure preload/DPE validation/programming code, unchanged command/ADT
+parsers, and a diagnostic-only PDAppleAVE service with INFO ioctl are staged
+under `m1-ave`. The kext SDK build passes; codec capabilities stay zero, DATA
+is untouched, and no power/DMA/session or hardware result is implemented yet.
 
 | Operation | Initial behavior |
 |---|---|
@@ -160,10 +194,11 @@ DAPF writes at the wrong power/start phase causing a system error, incorrect
 DART ownership/cache ordering, firmware reply lengths and timeout teardown of
 active DMA. The reference's H.264 B-frame restriction and latest unrerun changes
 must remain visible. Preserve separate GPL kernel files and LGPL/MIT userland
-interfaces; keep all Apple-derived runtime bytes on-device.
+interfaces; keep preloaded firmware bytes on-device. Authorized kernel/DPE
+inputs stay under private/ave/, except the explicitly permitted M1 table install.
 
-The next useful owner decision is how to resolve the **Acis DPE input without
-using Apple files**, and who owns the early preload reservation/handoff. This
-study does not request permission to build or boot a kernel. Until those inputs
-are resolved, continue software encoding/decoding and retain the working AVD
-path; do not report AVE hardware support.
+Next work is the live preload/version inventory, a reproducible private DPE
+extractor, then the source port and CODEX-TB integration request. The owner has
+resolved the permission question; actual ABI/table compatibility and cold DATA
+reservation remain technical prerequisites. Keep software encoding available;
+do not report AVE hardware support before the30-frame/PSNR milestone.
