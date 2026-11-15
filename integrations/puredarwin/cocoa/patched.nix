@@ -265,7 +265,9 @@
 #         default profile then draws opaque, as macOS with Reduce Transparency; `defaults write
 #         com.apple.universalaccess reduceTransparency -bool false` gives translucency back); windows tell the
 #         window server whether they are opaque; menus: motion coalesced, a submenu opens after the pointer
-#         rests 60 ms on its item instead of being built while the pointer passes, PD_WS_TIMING lines
+#         rests 60 ms on its item instead of being built while the pointer passes, PD_WS_TIMING lines;
+#         NSPathControl has no intrinsic width (its cell's 10000 points made Terminal's Profiles > Text box
+#         10000 points wide: the black bar over "Background"); PD_IMAGE_TRACE
 #   0121  WindowServer: the opaque region of an opaque toplevel; _windowServerCanBlurBehind; PD_WS_SCALE (a test
 #         instrument: one application's backing stores at a chosen scale); pointer motion in PD_WS_TIMING
 #   0122  Onyx2D: a clip's edges within 1/1024 of a pixel boundary are on it (a dirty rect that went to points
