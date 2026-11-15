@@ -19,6 +19,105 @@ int PDCIOPCIHost::bindI210Access(IOPCIDevice *device)
     return 0;
 }
 
+int PDCIOPCIHost::bindDockUSBAccess(IOPCIDevice *device)
+{
+    if(!device || ml_at_interrupt_context() || !interruptPower(this) ||
+       device->configRead32(0)!=0x11001b73 || (device->configRead32(8)>>8)!=0x0c0330 ||
+       (device->configRead16(4)&4))return ENODEV;
+    IORegistryEntry *p=device;unsigned depth=0;
+    while(p && p!=this && depth++<64)p=p->getParentEntry(gIOServicePlane);
+    if(p!=this || usbEndpoint)return EBUSY;
+    auto mapper=IOMapper::copyMapperForDevice(device);
+    bool ready=mapper && mapper->metaCast("PDCIOPCIDartMapper") &&
+        mapper->getProvider()==networkEndpoint &&
+        mapper->callPlatformFunction("PDCIOPCIDMAReady",false,device,NULL,NULL,NULL)==kIOReturnSuccess;
+    OSSafeReleaseNULL(mapper);if(!ready)return ENODEV;
+    device->retain();__atomic_store_n(&usbEndpoint,device,__ATOMIC_RELEASE);
+    return 0;
+}
+
+IOReturn PDCIOPCIHost::admitDockUSB(IOPCIDevice *device)
+{
+    if(!device || device!=__atomic_load_n(&usbEndpoint,__ATOMIC_ACQUIRE) ||
+       ml_at_interrupt_context() || !msi || !interruptPower(this) ||
+       device->configRead32(0)!=0x11001b73 || (device->configRead32(8)>>8)!=0x0c0330 ||
+       (device->configRead16(4)&4))return kIOReturnNotReady;
+    auto mapper=IOMapper::copyMapperForDevice(device);
+    bool ready=mapper && mapper->metaCast("PDCIOPCIDartMapper") &&
+        mapper->getProvider()==networkEndpoint &&
+        mapper->callPlatformFunction("PDCIOPCIDMAReady",false,device,NULL,NULL,NULL)==kIOReturnSuccess;
+    OSSafeReleaseNULL(mapper);
+    if(!ready || !msi->routeReady(device))return kIOReturnNotReady;
+    Grant chain[8]={};UInt32 count=0;unsigned depth=0;
+    IORegistryEntry *p=device;
+    while(p && p!=this && depth++<64){
+        auto pci=OSDynamicCast(IOPCIDevice,p);
+        if(pci){
+            if(count==8)return kIOReturnUnsupported;
+            UInt32 id=pci->configRead32(0),code=pci->configRead32(8)>>8;
+            if(id==UINT32_MAX || (!count ? pci!=device || code!=0x0c0330 : code!=0x060400))
+                return kIOReturnUnsupported;
+            chain[count++]={pci,id,code,pci->getBusNumber(),pci->getDeviceNumber(),pci->getFunctionNumber()};
+        }
+        p=p->getParentEntry(gIOServicePlane);
+    }
+    if(p!=this || count<2)return kIOReturnUnsupported;
+    // Retained identities from I210 admission are the only existing grants.
+    // Snapshot under the config lock, then use normal config calls outside it.
+    Grant old[16]={};UInt32 oldCount=0;
+    IOLockLock(accessLock);
+    bool active=view.admitted && bmeActive && networkAttempted && !usbAttempted;
+    if(active){oldCount=grantCount;memcpy(old,grants,oldCount*sizeof(*old));}
+    IOLockUnlock(accessLock);if(!active || !oldCount || oldCount>8)return kIOReturnNotPermitted;
+    auto it=IORegistryIterator::iterateOver(this,gIOServicePlane,kIORegistryIterateRecursively);
+    if(!it)return kIOReturnNoMemory;
+    unsigned seen=0,xhci=0,i210=0;bool valid=true;
+    while(auto object=it->getNextObject()){
+        if(++seen>256){valid=false;break;}
+        auto pci=OSDynamicCast(IOPCIDevice,object);if(!pci)continue;
+        UInt32 id=pci->configRead32(0),code=pci->configRead32(8)>>8;
+        UInt16 command=pci->configRead16(4);bool granted=false;
+        for(UInt32 n=0;n<oldCount;++n)if(old[n].device==pci){
+            granted=old[n].id==id && old[n].code==code &&
+                old[n].bus==pci->getBusNumber() && old[n].slot==pci->getDeviceNumber() &&
+                old[n].function==pci->getFunctionNumber();
+            if(!granted)valid=false;
+        }
+        if(id==UINT32_MAX || command==UINT16_MAX || bool(command&4)!=granted){valid=false;break;}
+        if(code==0x0c0330 && (id==0x11001b73 || id==0x12421b21 || id==0x15d48086))++xhci;
+        else if(pci==networkEndpoint && id==0x15338086 && code==0x020000)++i210;
+        else if(code!=0x060400){valid=false;break;}
+    }
+    if(!it->isValid())valid=false;it->release();
+    if(!valid || xhci!=4 || i210!=1 || !interruptPower(this) || !msi->routeReady(device))return kIOReturnNotReady;
+    IOLockLock(accessLock);
+    if(!view.admitted || !bmeActive || usbAttempted || grantCount!=oldCount){IOLockUnlock(accessLock);return kIOReturnNotPermitted;}
+    usbAttempted=true;
+    for(UInt32 n=0;n<count;++n){
+        bool found=false;
+        for(UInt32 i=0;i<grantCount;++i)if(grants[i].device==chain[n].device)found=true;
+        if(!found){grants[grantCount]=chain[n];grants[grantCount++].device->retain();}
+    }
+    IOLockUnlock(accessLock); // <= old8 + new8; existing I210 grants unchanged.
+    bool ok=true;
+    for(UInt32 n=count;n>0;--n){
+        if(!interruptPower(this)){ok=false;break;}
+        auto pci=chain[n-1].device;pci->setBusMasterEnable(true);
+        UInt16 command=pci->configRead16(4);
+        if(command==UINT16_MAX || !(command&4)){ok=false;break;}
+    }
+    if(!ok){
+        leaseOwner->setProperty("pcie-usb-BME-error",(UInt32)EIO,32);
+        blockConfiguration();return kIOReturnIOError; // Pin all, no false drain.
+    }
+    setProperty("PDCIOI210Only",false);
+    setProperty("PDCIOI210AndFL1100",true);
+    device->setProperty("PDCIOUSBHostBusMasterAdmitted",true);
+    leaseOwner->setProperty("pcie-usb-BME-error",(UInt32)0,32);
+    leaseOwner->setProperty("pcie-usb-BME-ancestor-count",count-1,32);
+    return kIOReturnSuccess;
+}
+
 bool PDCIOPCIHost::busMasterAllowed(IOPCIAddressSpace space)
 {
     // accessLock is held. Never call a mapper/IRQ query here: they read config.

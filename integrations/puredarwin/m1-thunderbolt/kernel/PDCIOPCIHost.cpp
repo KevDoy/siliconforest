@@ -18,6 +18,7 @@ bool PDCIOPCIHost::initForEnumeration(IOService *owner,void *ctx,bool (*proof)(v
 #endif
 #if PD_CIO_I210_NETWORK
     bzero(grants,sizeof(grants));grantCount=bmeActive=0;networkAttempted=false;networkEndpoint=NULL;
+    usbAttempted=false;usbEndpoint=NULL;
 #endif
     view={0x10000000,0,127,false};startAttempted=false;stopped=true;
     if(!owner || !ctx || !proof || !IOPCIBridge::init())return false;
@@ -139,12 +140,17 @@ IOReturn PDCIOPCIHost::callPlatformFunction(const OSSymbol *name,bool wait,
 {
 #if PD_CIO_I210_NETWORK
     if(name && name->isEqualTo("PDCIOPCIEndpointAccess")){
-        if(p1!=__atomic_load_n(&networkEndpoint,__ATOMIC_ACQUIRE) || p2 || p3 || p4)return kIOReturnBadArgument;
+        if(!p1 || (p1!=__atomic_load_n(&networkEndpoint,__ATOMIC_ACQUIRE) &&
+           p1!=__atomic_load_n(&usbEndpoint,__ATOMIC_ACQUIRE)) || p2 || p3 || p4)return kIOReturnBadArgument;
         return interruptPower(this)?kIOReturnSuccess:kIOReturnNotReady;
     }
     if(name && name->isEqualTo("PDCIOPCIEnableI210DMA")){
         if(p2 || p3 || p4 || ml_at_interrupt_context())return kIOReturnBadArgument;
         return admitI210(OSDynamicCast(IOPCIDevice,(IOService *)p1));
+    }
+    if(name && name->isEqualTo("PDCIOPCIEnableDockUSBDMA")){
+        if(p2 || p3 || p4 || ml_at_interrupt_context())return kIOReturnBadArgument;
+        return admitDockUSB(OSDynamicCast(IOPCIDevice,(IOService *)p1));
     }
 #endif
     if(name==gIOPlatformGetMessagedInterruptControllerKey){

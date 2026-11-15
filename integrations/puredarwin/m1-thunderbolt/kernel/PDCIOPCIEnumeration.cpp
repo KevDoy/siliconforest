@@ -277,6 +277,7 @@ int PDCIOPCIEnumeration::prepareDockUSBMapper()
  OSSafeReleaseNULL(query);if(!ready)return fail(EIO);
  ret=host->publishDockUSBResources(endpoint);if(ret)return fail(ret);
  ret=host->resolveDockUSBInterrupt(endpoint);if(ret)return fail(ret);
+ ret=host->bindDockUSBAccess(endpoint);if(ret)return fail(ret);
  owner->setProperty("pcie-usb-mapper-stage","actual-shared-root-resources-MSI-no-driver-no-BME");
  owner->setProperty("pcie-usb-mapper-created",true);return 0;
 }

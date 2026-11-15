@@ -24,8 +24,12 @@ cannot break that ownership cycle. Every existing USB ring/payload release
 site must therefore be converted before using this class. Failed prepare,
 segment validation, complete or inactive-clear retains backing until reboot.
 
-Still required: factory command wiring, retained per-MMIO physical access
-guards, posted-write mappings, registered/armed MSI, checked late BME/run,
+The host now supplies retained endpoint access binding and a checked late USB
+BME API that preserves existing I210 grants and admits only the selected
+FL1100 ancestry after real mapper/MSI readiness. No driver calls it yet.
+
+Still required: factory command wiring, driver use of per-MMIO physical access
+guards, posted-write mappings, registered/armed MSI and late BME/run,
 all USB release sites and actual
 IRQ/work/producer teardown. No Ethernet, keyboard, storage or hot-unplug
 result follows from this source or a successful object build.

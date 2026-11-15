@@ -42,11 +42,14 @@ class PDCIOPCIHost : public IOPCIBridge {
     bool msiPhysicalAccess();
 #endif
 #if PD_CIO_I210_NETWORK
-    struct Grant { IOPCIDevice *device; UInt32 id,code; UInt8 bus,slot,function; } grants[8];
+    struct Grant { IOPCIDevice *device; UInt32 id,code; UInt8 bus,slot,function; } grants[16];
     UInt32 grantCount,bmeActive;
     IOPCIDevice *networkEndpoint;
     bool networkAttempted;
+    IOPCIDevice *usbEndpoint;
+    bool usbAttempted;
     IOReturn admitI210(IOPCIDevice *);
+    IOReturn admitDockUSB(IOPCIDevice *);
     bool busMasterAllowed(IOPCIAddressSpace);
     int publishEndpointResources(IOPCIDevice *,bool usb);
 #endif
@@ -64,6 +67,7 @@ public:
 #endif
 #if PD_CIO_I210_NETWORK
     int bindI210Access(IOPCIDevice *);
+    int bindDockUSBAccess(IOPCIDevice *);
     int publishI210Resources(IOPCIDevice *);
     int publishDockUSBResources(IOPCIDevice *);
     int resolveDockUSBInterrupt(IOPCIDevice *);

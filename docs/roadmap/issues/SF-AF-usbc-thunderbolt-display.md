@@ -2721,3 +2721,25 @@ xqc8d9di0pw55w1sla20dy0xwmfm6970 and the updated host sanitizer suite pass;
 all six required repository checks pass. These checks establish compilation
 and host logic only. The factory is excluded from frozen CIO35, which still
 reuses CIO33's kernel and tests I210 DHCP with the native status tool.
+
+### Dock USB access and late DMA admission — source only, 2026-11-15
+
+The detached factory now also binds a retained access identity for the selected
+FL1100. Its guard uses the same live physical power/RUN/link predicate as
+I210. A separate late USB DMA request requires the actual bound shared mapper,
+armed native MSI, live endpoint/bridge identity, all four expected dock USB
+controllers, and the active I210 with exactly its existing bridge grants.
+It unions the selected USB ancestry with the existing grants (bounded16),
+retains new identities before writes, and enables bridges root-to-leaf before
+the endpoint. It preserves I210 grants and keeps the other three xHCI devices
+blocked. Failed new writes revoke configuration/interrupt admission and pin
+ownership; this is quarantine, never a successful DMA drain.
+
+Native SDK 0w40v8nrmwfl93pyi3ah89sj3v740fhc passes. The actual two new admission
+methods run under ASan/UBSan in host-test/usb-admission.py: identity/inventory,
+mapper/MSI/power/IRQ-context refusals, grant preservation, write ordering,
+repeat refusal, and new bridge/endpoint write failures. The initial fixture
+incorrectly expected a failed rewrite of already enabled BME to clear it;
+that failed receipt remains and the corrected fixture explicitly faults new
+grants. All six repository checks pass. No driver calls the late request yet;
+no USB controller was started and CIO35 excludes this source entirely.
