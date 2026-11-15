@@ -111,6 +111,17 @@ QuickTime query wrapper. The six host policy tests use explicitly synthetic
 receipts and prove only classifier behavior; no hardware event is inferred.
 Actual shared-capture results and browser1080p60 still require owner trials.
 
+The source cache-ownership contract remains unqualified too: the import path
+pins/maps InOut pages, zeroes them and programs DART, without an explicit data
+cache handoff around decode. FX's exported BO uses writeback storage because
+header atomics require exclusive accesses. Pinning, prepare/complete, DART
+invalidation and `dsb` are not independent CPU/AVD/GPU coherency evidence.
+Before an import-capable trial, establish actual AVD coherence or a correct
+data-subrange ownership/cache protocol and test old/new contents under reuse.
+Do not disable caching for the entire BO as a shortcut; shared header atomics
+and conflicting aliases must be respected. This is a future prototype review
+requirement, not a failure observed on the installed importcap0 kernel.
+
 The subsequent M1 `media-private-controls-v3` establishes actual exportable GPU
 storage in both parent and looked-up child (valid copied FD and16KiB data
 offset), explicit cross-process H/R lifetime controls and exact byte transport.

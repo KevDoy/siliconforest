@@ -96,6 +96,9 @@ unknown codec, leaving the output slot untouched on failure. The source uses
 those same error/ownership facts; the output is never a fabricated extension.
 Native M5 stereo support is true; this platform must report false. That is a
 capability difference, not a reason to fabricate multi-image decoding.
-These queries build and the M1 stage is prepared, not yet executed. They cover
-the final two missing reviewed VT imports at the export level only. No decoder
-implementation or canonical library is replaced by this stage.
+The M1 `media-private-controls-v3` query completed at19:39Z with exit0: the
+three extension statuses and unchanged output slots match the same-byte M5
+reference; stereo reports false as required here. They cover the final two
+missing reviewed VT imports. This is a public query fixture, not a decoder
+execution or canonical replacement. Actual QuickTime remains the v4 Quartz
+loader failure, despite this later export/query evidence.

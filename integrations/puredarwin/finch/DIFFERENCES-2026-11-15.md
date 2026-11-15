@@ -203,6 +203,9 @@ CoreGraphics recipes by their owner, then requalified with the whole graphics
 stack. Rebuild CoreImage against the corrected geometry header too: fixing only
 the shared-library constant cannot repair predicates already inlined into a
 client. `geometry-build.nix` demonstrates this dependency for the private test.
-The separate retained vImage
-Display-P3 result (80 versus 82) is not fixed or reclassified by these four
-groups; it still needs its color-profile/provider audit.
+The separate retained vImage Display-P3 result (80 versus82) received a later
+[profile/provider audit](Accelerate/P3-DIFFERENCE-2026-11-15.md). It was a real
+named-profile selection bug, now fixed privately: named P3 without ICC data
+fell back to sRGB. The unchanged full vImage comparison now matches82; focused
+component metadata/arithmetic differences remain raw and documented. This
+follow-up does not alter the original four groups or their raw receipts.
