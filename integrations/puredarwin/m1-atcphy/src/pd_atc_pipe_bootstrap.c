@@ -34,3 +34,28 @@ int pd_atc_pipe_bootstrap_dummy(const struct pd_atc_io *io,
        (io->read(io->ctx,PD_ATC_PIPE,0x1c)&0x11)!=0x10)return EIO;
     return 0;
 }
+int pd_atc_pipe_bootstrap_aon(const struct pd_atc_io *io,
+                             const struct pd_atc_pipe_state *state,int acio_off)
+{
+    if(!io || !io->read || !io->write || !state)return EINVAL;
+    if(!acio_off || state->backend!=PD_ATC_DUMMY || state->dummy_pending)return EBUSY;
+    uint32_t mux=io->read(io->ctx,PD_ATC_PIPE,0xc);
+    uint32_t ack=io->read(io->ctx,PD_ATC_PIPE,0x14);
+    uint32_t aon=io->read(io->ctx,PD_ATC_PIPE,0x1c);
+    uint32_t override=io->read(io->ctx,PD_ATC_PIPE,0x20);
+    if(mux==UINT32_MAX || ack==UINT32_MAX || aon==UINT32_MAX || override==UINT32_MAX)return EIO;
+    if((mux&0x3f)!=0x22 || (ack&1) || (override&0x900f)!=0x9002)return EBUSY;
+    /* m1n1 writes the WHOLE AON word1. Linux reset_assert then clears
+     * RESET_N(bit0) and sets CLAMP(bit4), giving word0x10. Darwin inherits
+     * word0x30. Test only this exact cold baseline difference while both
+     * controller and ACIO are stopped; do not infer bit5's function.
+     * Reject any other unknown bits instead of destroying their state. */
+    if(aon==0x10)return 0;
+    if(aon!=0x30)return EBUSY;
+    io->write(io->ctx,PD_ATC_PIPE,0x1c,0x10);
+    if(io->read(io->ctx,PD_ATC_PIPE,0x1c)!=0x10 ||
+       (io->read(io->ctx,PD_ATC_PIPE,0xc)&0x3f)!=0x22 ||
+       (io->read(io->ctx,PD_ATC_PIPE,0x14)&1) ||
+       (io->read(io->ctx,PD_ATC_PIPE,0x20)&0x900f)!=0x9002)return EIO;
+    return 0;
+}

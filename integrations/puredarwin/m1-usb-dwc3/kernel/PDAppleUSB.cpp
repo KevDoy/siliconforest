@@ -634,6 +634,13 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
         setProperty("pipe-bootstrap-error",(uint32_t)ret,32);
         setProperty("pipe-bootstrap-after-aon",pipe.r32(0x1c),32);
         setProperty("pipe-bootstrap-after-override",pipe.r32(0x20),32);
+        if(!ret){
+            setProperty("pipe-aon-normalize-before",pipe.r32(0x1c),32);
+            ret=priorACIOOff(); // Fresh proof before this separate baseline test.
+            if(!ret)ret=pd_atc_pipe_bootstrap_aon(&atcIO,&pipeState,1);
+            setProperty("pipe-aon-normalize-error",(uint32_t)ret,32);
+            setProperty("pipe-aon-normalize-after",pipe.r32(0x1c),32);
+        }
     }
     if (!ret) {setProperty("phy-start-stage","configure-mode");ret=pd_atc_mode_start(&atcIO,target,flip,&cal);}
     if (!ret && target==PD_ATC_MODE_USB4) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB4_BACKEND);
@@ -753,7 +760,7 @@ int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
     case PD_USBC_PHY_SNAPSHOT: {
         if (stopping || !mapped || quarantined) { ret=EIO;break; }
         ret=pd_usbc_phy_live(&lease,req->owner,req->token);if(ret)break;
-        uint32_t offsets[]={0x8,0x48,0x4c,0x1b0,0x20000,0x20004,0x20008,0x2a00,0x9010,0x10010};
+        uint32_t offsets[]={0x8,0x48,0x4c,0x1b0,0x20000,0x20004,0x20008,0x2a00,0x9010,0x10010,0x84,0x8c,0x90,0x9c,0xa8,0xac,0x1014,0x1028,0x17000,0x17004,0x17080,0x17088,0x1708c};
         uint32_t values[sizeof(offsets)/sizeof(offsets[0])];
         for(unsigned i=0;i<sizeof(offsets)/sizeof(offsets[0]);++i)values[i]=core.r32(offsets[i]);
         uint32_t pipeOffsets[]={0xc,0x10,0x14,0x1c,0x20};

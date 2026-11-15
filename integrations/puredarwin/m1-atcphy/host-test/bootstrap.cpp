@@ -27,5 +27,17 @@ int main(){
  {Model m;m.regs[8]|=1u<<22;auto io=m.io();assert(!pd_atc_pipe_bootstrap_dummy(&io,&state,1) && m.regs[8]==(0x9332|(1u<<22)) && m.regs[7]==0x30);}
  for(unsigned i=0;i<2;i++){Model m;auto io=m.io();if(i)m.regs[8]&=~0x1000u;else m.regs[8]=(m.regs[8]&~0xfu)|3u;assert(pd_atc_pipe_bootstrap_dummy(&io,&state,1)==EBUSY && !m.writes);}
  state.dummy_pending=true;{Model m;auto io=m.io();assert(pd_atc_pipe_bootstrap_dummy(&io,&state,1)==EBUSY && !m.writes);}
- puts("HOST ONLY: parked PIPE baseline, physical-reset/ACIO proof refusals, inaccessible MMIO and failed readbacks pass");
+ state={PD_ATC_DUMMY,false};
+ {Model m;m.regs[8]=0x9332;auto io=m.io();assert(!pd_atc_pipe_bootstrap_aon(&io,&state,1));assert(m.writes==1 && m.regs[7]==0x10 && m.regs[8]==0x9332);assert(!pd_atc_pipe_bootstrap_aon(&io,&state,1) && m.writes==1);}
+ for(unsigned n=0;n<32;++n){
+  Model m;m.regs[8]=0x9332;m.regs[7]=0x30^(1u<<n);auto io=m.io();
+  if(n==5)assert(!pd_atc_pipe_bootstrap_aon(&io,&state,1) && !m.writes);
+  else assert(pd_atc_pipe_bootstrap_aon(&io,&state,1)==EBUSY && !m.writes);
+ }
+ for(unsigned n=0;n<4;++n){Model m;m.regs[8]=0x9332;unsigned off[]={3,5,7,8};m.regs[off[n]]=UINT32_MAX;auto io=m.io();assert(pd_atc_pipe_bootstrap_aon(&io,&state,1)==EIO && !m.writes);}
+ {Model m;m.regs[8]=0x9332;auto io=m.io();assert(pd_atc_pipe_bootstrap_aon(&io,&state,0)==EBUSY && !m.writes);}
+ {Model m;auto io=m.io();assert(pd_atc_pipe_bootstrap_aon(&io,&state,1)==EBUSY && !m.writes);}
+ {Model m;m.regs[8]=0x9332;m.stuck=1;auto io=m.io();assert(pd_atc_pipe_bootstrap_aon(&io,&state,1)==EIO && m.writes==1);}
+ for(unsigned n=0;n<2;++n){Model m;m.regs[8]=0x9332;auto io=m.io();pd_atc_pipe_state bad={n?PD_ATC_DUMMY:PD_ATC_USB3_BACKEND,(bool)n};assert(pd_atc_pipe_bootstrap_aon(&io,&bad,1)==EBUSY && !m.writes);}
+ puts("HOST ONLY: parked PIPE baseline, exact cold AON normalization, every foreign AON bit, physical-reset/ACIO proof refusals, inaccessible MMIO and failed readbacks pass");
 }

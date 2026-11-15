@@ -23,6 +23,12 @@ int pd_atc_pipe_park(const struct pd_atc_io *,struct pd_atc_pipe_state *,bool st
  * The function separately verifies actual dummy/ACK/reset/clamp state.
  * No direct host or NHI client may be published before it succeeds. */
 int pd_atc_pipe_bootstrap_dummy(const struct pd_atc_io *,const struct pd_atc_pipe_state *,int acio_off);
+/* Experimental T8103 cold AON baseline: accept only observed0x30 or the
+ * m1n1+Linux held-reset/clamp baseline0x10. Requires a fresh native ACIO-off
+ * proof and a drained/parked DWC3. Never releases DWC3 reset. Bit5's meaning
+ * is not established; this reproduces the published whole-word bootstrap,
+ * not a general bit5 control. Reject every other AON state without writes. */
+int pd_atc_pipe_bootstrap_aon(const struct pd_atc_io *,const struct pd_atc_pipe_state *,int acio_off);
 #ifdef __cplusplus
 }
 #endif

@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 10:42Z)
+## Current target and observed state (owner change; updated 10:52Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,7 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO13, source `fd0fb5bc5`, capsule `dede421225bc…`,
+**Observed in Darwin:** non-AVE CIO14, source `7eee763ea`, capsule `064c9d569efe…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -24,7 +24,7 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at10:38:14Z. An explicit late snapshot also reports state7/remote0;
+lock release at10:51:13Z. An explicit late snapshot also reports state7/remote0;
 UID65534 was denied without incrementing the query count, while root completed
 one request and advanced it1->2. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
@@ -1434,3 +1434,30 @@ posted endpoint BARs and child drain are outstanding. Any attempted programming
 pins its owner/mappings until reboot; revocation only blocks access and is
 not hotplug teardown. CIO14's separately frozen diagnostic is the queued
 hardware candidate; this controller is not in that collection.
+
+### CIO14 observed: both lanes enabled and unlocked, still UNPLUGGED
+
+At10:51:12Z CIO14 passed its actual native NHI/PHY/calibration, privilege,
+standard desktop and Wi-Fi checks; UART was reaped at10:51:13Z. Both actual
+NHI reads report PHY capability17, flags-valid1, lane-disabled0 and
+adapter-locked0, yet state7/remote0. The same Linux visit reports capability17,
+LD0/LCK0 and UP/state2 on both lanes. Disabled/locked adapters therefore do
+not explain this particular link failure. No dock router/auth/PCI/Ethernet/
+USB/DP has been established on Darwin. The installed collection remains
+non-AVE,57 modules/no pdave/605 arguments, and excludes the newer unwired
+PCIe controller adapter. Next source comparison: remaining cold PIPE AON
+baseline difference; no register meaning is inferred from that difference.
+
+### Next functional hypothesis: exact cold PIPE AON baseline
+
+The public pinned m1n1 usb.c writes the whole AON word1; Linux atc.c then
+clears DWC3 RESET_N and sets CLAMP, giving0x10. Darwin's observed cold/parked
+word is0x30. Bit5's meaning remains unknown. A separate guarded experiment
+accepts only these exact two words, with current ACIO-off and drained,
+parked/reset/clamped DWC3 proof and dummy PHY enabled. It writes only the
+held-reset word0x10, verifies readback, and rejects every other AON state.
+It never releases reset. This is a cold-baseline hypothesis, not a claim
+that bit5 explains training. The same bounded lease snapshot includes13
+additional documented MAC/BIST/PLL registers for the Linux comparison,
+without recurring polling or writes. CIO14 remains installed until a
+separately validated and announced candidate is run.

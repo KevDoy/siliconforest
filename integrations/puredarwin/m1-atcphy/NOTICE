@@ -39,3 +39,9 @@ m1n1 src/usb.c at121fcbf35d4501814b58ca5347926a4173b6a512 (MIT,
 Copyright The Asahi Linux Contributors), followed by the held-reset/clamp
 state from Linux atc.c. The MIT permission and warranty notice above applies.
 The native adapter never releases an uninitialized DWC3 core here.
+
+The separate experimental AON normalization accepts only the observed cold
+word0x30 or the effective public m1n1 whole-word initialization + Linux
+held-reset/clamp word0x10. It does not establish bit5's meaning or general
+control semantics. Native callers require fresh physical ACIO-off and
+completed DWC3 drain/park proof before this one cold write; no reset release.
