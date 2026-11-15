@@ -278,6 +278,13 @@ int pd_cio_cm_authorize_ts3(PDCIOCM *s)
  (void)s;return EOPNOTSUPP;
 #endif
 }
+#ifdef PD_CIO_ENDPOINT_MAPPER
+int pd_cio_cm_prepare_i210_dma(PDCIOCM *s)
+{
+ if(!s || !s->pci || !s->nhi || !s->live())return ENODEV;
+ return s->pci->prepareI210Mapper();
+}
+#endif
 int pd_cio_cm_snapshot(PDCIOCM *s)
 {
  if(!s || !s->nhi || !s->live())return ENODEV;

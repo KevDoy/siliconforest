@@ -3,6 +3,7 @@
 #include <IOKit/IOCatalogue.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceTreeSupport.h>
+#include <IOKit/IORegistryEntry.h>
 #include <libkern/c++/OSOrderedSet.h>
 #include <sys/errno.h>
 OSDefineMetaClassAndStructors(PDCIOPCIEnumeration,OSObject)
@@ -10,6 +11,9 @@ bool PDCIOPCIEnumeration::initWithOwner(IOService *service,void *ctx,bool (*proo
 {
  owner=nub=NULL;context=NULL;powerProof=NULL;lock=NULL;controller=NULL;host=NULL;
  posted=committed=attempted=revoked=0;preparing=false;
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ i210Mapper=NULL;mapperAttempted=false;
+#endif
  if(!service || !ctx || !proof || !OSObject::init())return false;
  lock=IOLockAlloc();if(!lock)return false;
  service->retain();owner=service;context=ctx;powerProof=proof;return true;
@@ -143,12 +147,81 @@ int PDCIOPCIEnumeration::publishAfterApproval()
  owner->setProperty("pcie-enumeration-error",(uint32_t)0,32);
  owner->setProperty("pcie-enumeration-stage","host-published-inventory-required");return 0;
 }
+#ifdef PD_CIO_ENDPOINT_MAPPER
+int PDCIOPCIEnumeration::prepareI210Mapper()
+{
+ // The owning CIO command gate serializes this with activation/revocation.
+ // No Linux CM domain lock or controller lock may be held across start().
+ if(!controller || !host || !tunnel(this) || host->isInactive())return ENODEV;
+ int ret=catalogueSafe();if(ret)return ret; // Still no endpoint driver matching.
+ IOLockLock(lock);
+ bool prior=mapperAttempted;
+ if(!prior)mapperAttempted=true;
+ IOLockUnlock(lock);
+ if(prior)return EBUSY;
+ auto it=IORegistryIterator::iterateOver(host,gIOServicePlane,kIORegistryIterateRecursively);
+ if(!it)return ENOMEM;
+ IOPCIDevice *endpoint=NULL;unsigned seen=0;bool valid=true;
+ while(auto object=it->getNextObject()){
+  if(++seen>256){valid=false;break;}
+  auto dev=OSDynamicCast(IOPCIDevice,object);if(!dev)continue;
+  if(dev->configRead32(0)!=0x15338086 || (dev->configRead32(8)>>8)!=0x020000)continue;
+  if(endpoint){valid=false;break;}
+  endpoint=dev;endpoint->retain();
+ }
+ if(!it->isValid())valid=false;
+ it->release();
+ if(!valid || !endpoint){OSSafeReleaseNULL(endpoint);return ENODEV;}
+ // Never replace another mapper binding, including an unresolved phandle.
+ auto existing=endpoint->copyProperty("iommu-parent");
+ if(existing){existing->release();endpoint->release();return EBUSY;}
+ auto mapper=OSTypeAlloc(PDCIOPCIDartMapper);
+ if(!mapper || !mapper->initWithController(controller,endpoint)){
+  OSSafeReleaseNULL(mapper);endpoint->release();return ENOMEM;
+ }
+ // Publish the owned reference before any possible TTBR write. All partial
+ // attempts stay pinned with this enumeration context until reboot.
+ IOLockLock(lock);i210Mapper=mapper;IOLockUnlock(lock);
+ owner->setProperty("pcie-i210-mapper-stage","start-and-validate-blocked-inventory");
+ // initHardware freshly verifies four xHCI + one I210, all BME clear,
+ // real host ancestry, requester/SID0, power/RUN/link and owned tables.
+ bool ok=tunnel(this) && mapper->attach(endpoint) && mapper->start(endpoint);
+ auto query=OSSymbol::withCString("PDCIOPCIDMAReady");
+ if(ok)ok=query && mapper->callPlatformFunction(query,false,endpoint,NULL,NULL,NULL)==kIOReturnSuccess;
+ OSSafeReleaseNULL(query);
+ if(ok)ok=tunnel(this) && !endpoint->getProperty("iommu-parent") &&
+           endpoint->setProperty("iommu-parent",mapper);
+ if(ok){
+  IOMapper *resolved=IOMapper::copyMapperForDevice(endpoint);
+  ok=resolved==mapper;OSSafeReleaseNULL(resolved);
+ }
+ query=OSSymbol::withCString("PDCIOPCIDMAReady");
+ if(ok)ok=query && tunnel(this) &&
+   mapper->callPlatformFunction(query,false,endpoint,NULL,NULL,NULL)==kIOReturnSuccess;
+ OSSafeReleaseNULL(query);
+ if(!ok){
+  mapper->stop(endpoint); // Revoke/pin only, never a DMA drain acknowledgment.
+  endpoint->release();return fail(EIO);
+ }
+ mapper->registerService();
+ owner->setProperty("pcie-i210-mapper-stage","actual-object-bound-no-BME");
+ owner->setProperty("pcie-i210-mapper-created",true); // Historical binding, not a live/DMA proof.
+ endpoint->release();return 0;
+}
+#endif
 int PDCIOPCIEnumeration::deactivate()
 {
  __atomic_store_n(&revoked,1,__ATOMIC_RELEASE);
  __atomic_store_n(&committed,0,__ATOMIC_RELEASE);
  __atomic_store_n(&posted,0,__ATOMIC_RELEASE);
- IOLockLock(lock);auto bridge=host;auto ctl=controller;IOLockUnlock(lock);
+ IOLockLock(lock);auto bridge=host;auto ctl=controller;
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ auto mapper=i210Mapper;if(mapper)mapper->retain();
+#endif
+ IOLockUnlock(lock);
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ if(mapper){mapper->stop(mapper->getProvider());mapper->release();} // Revoke/pin, no drain.
+#endif
  if(bridge)bridge->blockConfiguration();
  int ret=ctl?ctl->revoke():0;
  // No synchronous child termination while the CM domain lock is held.

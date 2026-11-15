@@ -5,6 +5,9 @@
 #include <IOKit/IOLocks.h>
 #include "pd_cio_pcie_controller.h"
 #include "pd_cio_pcie_host.h"
+#ifdef PD_CIO_ENDPOINT_MAPPER
+#include "pd_cio_pci_mapper.h"
+#endif
 /* Private, enumeration-only profile. No matching personality or DMA/MSI
  * admission. prepare/activated/deactivate are actual Linux CM hooks.
  * publishAfterApproval is called ONLY after real TS3 approval returns,
@@ -22,6 +25,10 @@ class PDCIOPCIEnumeration : public OSObject {
  PDCIOPCIHost *host;
  uint32_t posted,committed,attempted,revoked;
  bool preparing;
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ PDCIOPCIDartMapper *i210Mapper;
+ bool mapperAttempted;
+#endif
  static bool power(void *);
  static bool tunnel(void *);
  int catalogueSafe();
@@ -33,6 +40,9 @@ public:
  int activated();
  int deactivate();
  int publishAfterApproval();
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ int prepareI210Mapper(); // Actual IOMapper only; no BME or endpoint admission.
+#endif
  bool blocksStop() const;
  bool pristineForRetrain(); // No reserved controller or attempted host.
  void free() override;

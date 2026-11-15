@@ -423,3 +423,15 @@ resources reserved. It performs the existing NHI/IRQ/DMA/RTKit/PHY stop and
 restart sequence; it is not a generic register interface or a polling retry.
 Native SDK and policy checks pass; target drain/restart evidence is pending.
 The `build-pci-dma-kext.nix` mapper variant is separate and uninstalled.
+
+
+The explicit `build-pci-dma-kext.nix` and `build-pci-msi-kext.nix` variants
+now include an administrator-only, single-attempt mapper factory.
+`build-prepare-i210-mapper-tool.nix` builds its native request CLI and real
+UID-denial control. It requires the live completed blocked PCI inventory,
+finds the actual I210 under this host, starts the owned mapper, binds its
+actual IOMapper object, and checks native lookup and readiness again. Partial
+attempts remain retained until reboot; stop revokes and pins, without claiming
+a child-DMA drain. BME stays blocked and no endpoint personality is added.
+The ordinary and enumeration builds exclude this factory. All four SDK
+variants and the CLI compile; no target mapper request or DMA is yet observed.

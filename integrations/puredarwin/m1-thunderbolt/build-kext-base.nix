@@ -20,6 +20,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
       substituteInPlace "$dest/CMakeLists.txt" --replace-fail \
         '"''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIController.cpp"' \
         '"''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIController.cpp" "''${CMAKE_CURRENT_SOURCE_DIR}/PDCIOPCIDartMapper.cpp"'
+      printf '\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_ENDPOINT_MAPPER=1)\n' >> "$dest/CMakeLists.txt"
     ''}
     ${pkgs.lib.optionalString pciEnumeration ''
       chmod u+w "$dest/CMakeLists.txt"

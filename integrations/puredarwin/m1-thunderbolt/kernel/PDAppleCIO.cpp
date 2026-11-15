@@ -49,6 +49,10 @@ class PDAppleCIO: public IOService {
  uint32_t diagnosticCount;
  uint32_t authorizationCount;
  uint32_t retrainCount;
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ uint32_t mapperCount;
+ static IOReturn mapperAction(OSObject *,void *,void *,void *,void *);
+#endif
  static void diagnosticTick(OSObject *,IOTimerEventSource *);
  static IOReturn snapshotAction(OSObject *,void *,void *,void *,void *);
  static IOReturn authorizationAction(OSObject *,void *,void *,void *,void *);
@@ -297,6 +301,9 @@ bool PDAppleCIO::start(IOService *p)
  diagnosticTimer=IOTimerEventSource::timerEventSource(this,diagnosticTick);
  if(!diagnosticTimer || loop->addEventSource(diagnosticTimer)!=kIOReturnSuccess)return false;
  authorizationCount=retrainCount=0;setProperty("authorization-request-count",(uint32_t)0,32);
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ mapperCount=0;setProperty("i210-mapper-request-count",(uint32_t)0,32);
+#endif
  setProperty("retrain-request-count",(uint32_t)0,32);
 #endif
  firmwareStarts=0;setProperty("firmware-start-count",(uint32_t)0,32);
@@ -316,6 +323,9 @@ IOReturn PDAppleCIO::setProperties(OSObject *properties)
  if(!gate || !__atomic_load_n(&accepting,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
  if(dict->getObject("pd-cio-read-snapshot")==kOSBooleanTrue)return gate->runAction(snapshotAction);
  if(dict->getObject("pd-cio-authorize-ts3")==kOSBooleanTrue)return gate->runAction(authorizationAction);
+#ifdef PD_CIO_ENDPOINT_MAPPER
+ if(dict->getObject("pd-cio-prepare-i210-mapper")==kOSBooleanTrue)return gate->runAction(mapperAction);
+#endif
  if(dict->getObject("pd-cio-retrain-peerless")==kOSBooleanTrue)return gate->runAction(retrainAction);
  return kIOReturnBadArgument;
 #else
@@ -446,6 +456,18 @@ IOReturn PDAppleCIO::authorizationAction(OSObject *owner,void *,void *,void *,vo
  s->setProperty("authorization-request-error",(uint32_t)ret,32);
  return !ret?kIOReturnSuccess:ret==EOPNOTSUPP?kIOReturnUnsupported:kIOReturnIOError;
 }
+#ifdef PD_CIO_ENDPOINT_MAPPER
+IOReturn PDAppleCIO::mapperAction(OSObject *owner,void *,void *,void *,void *)
+{
+ auto s=OSDynamicCast(PDAppleCIO,owner);
+ if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return kIOReturnNotReady;
+ if(s->mapperCount)return kIOReturnNotPermitted;
+ s->setProperty("i210-mapper-request-count",++s->mapperCount,32);
+ int ret=pd_cio_cm_prepare_i210_dma(s->cm);
+ s->setProperty("i210-mapper-request-error",(uint32_t)ret,32);
+ return ret?kIOReturnIOError:kIOReturnSuccess;
+}
+#endif
 IOReturn PDAppleCIO::retrainAction(OSObject *owner,void *,void *,void *,void *)
 {
  auto s=OSDynamicCast(PDAppleCIO,owner);
