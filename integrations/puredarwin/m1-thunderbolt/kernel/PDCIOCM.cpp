@@ -20,6 +20,7 @@
 extern "C" {
 // XNU libkern/sysctl.h private KPI; present in the exact installed kernel.
 int kernel_sysctlbyname(const char *,void *,size_t *,void *,size_t);
+extern char hostname[]; // actual XNU export; no compatibility-layer homonym
 int pd_cio_nhi_irqs_resolve(int [25]);
 void pd_tb_native_fault(int);
 }
@@ -67,6 +68,14 @@ struct PDCIOCM {
   if(!out || size!=sizeof(Uts))return -EINVAL;
   Uts v={};const char *names[]={"kern.ostype","kern.hostname","kern.osrelease","kern.osversion"};
   for(unsigned i=0;i<4;++i){
+   // kern.hostname deliberately lacks CTLFLAG_KERN in XNU. A kernel sysctl
+   // call returns EPERM even though userspace can read it. Use the actual
+   // exported hostname, as Linux drivers read their live UTS string; reject
+   // truncation. The other three MIBs explicitly allow kernel callers.
+   if(i==1){
+    size_t n=strnlen(hostname,sizeof(v.fields[i]));if(n==sizeof(v.fields[i]))return -EOVERFLOW;
+    memcpy(v.fields[i],hostname,n+1);continue;
+   }
    size_t n=sizeof(v.fields[i]);int ret=kernel_sysctlbyname(names[i],v.fields[i],&n,NULL,0);
    if(ret)return ret>0?-ret:ret;
    if(!n || n>sizeof(v.fields[i]) || !memchr(v.fields[i],0,n))return -EOVERFLOW;
@@ -142,22 +151,33 @@ struct PDCIOCM {
 };
 PDCIOCM *pd_cio_cm_create(IOService *owner,void *ctx,bool (*powered)(void *))
 {
- if(!owner || !powered || !powered(ctx))return NULL;
- auto s=new PDCIOCM{};if(!s)return NULL;
+ if(!owner)return NULL;
+ auto failure=[owner](const char *stage,int error)->PDCIOCM *{
+  owner->setProperty("cm-create-stage",stage);owner->setProperty("cm-create-error",(uint32_t)(error<0?-error:error),32);
+  IOLog("PDAppleCIO: CM create %s failed errno=%d\n",stage,error);return NULL;
+ };
+ owner->setProperty("cm-create-stage","power");
+ if(!powered || !powered(ctx))return failure("power",EIO);
+ auto s=new PDCIOCM{};if(!s)return failure("context",ENOMEM);
  s->owner=owner;owner->retain();s->powerCtx=ctx;s->powered=powered;
  s->registryLock=IOLockAlloc();s->stateLock=IOLockAlloc();s->dmaLock=IOLockAlloc();
  s->entry=IORegistryEntry::fromPath("/arm-io/acio1",gIODTPlane);
  // Keep any partially installed callback context pinned until reboot.
- if(!s->registryLock || !s->stateLock || !s->dmaLock || !s->entry)return NULL;
+ if(!s->registryLock || !s->stateLock || !s->dmaLock || !s->entry)return failure("resources",ENOMEM);
  pd_tb_native_ops ops={s,PDCIOCM::lock,PDCIOCM::unlock,PDCIOCM::publish,PDCIOCM::unpublish,PDCIOCM::event,PDCIOCM::runtime,PDCIOCM::osInfo,PDCIOCM::forget};
  OSObject *raw=s->entry->copyProperty("thunderbolt-drom");
  auto drom=OSDynamicCast(OSData,raw);
- int ret=drom && drom->getLength()==76?pd_tb_native_install(&ops):-EINVAL;
- if(!ret)ret=pd_tb_nhi_device_create(s->entry,drom->getBytesNoCopy(),drom->getLength(),&s->device);
- OSSafeReleaseNULL(raw);if(ret)return NULL;
+ int ret=drom && drom->getLength()==76?0:EINVAL;
+ if(ret){OSSafeReleaseNULL(raw);return failure("drom",ret);}
+ owner->setProperty("cm-create-stage","native-install");
+ ret=pd_tb_native_install(&ops);
+ if(ret){OSSafeReleaseNULL(raw);return failure("native-install",ret);}
+ ret=pd_tb_nhi_device_create(s->entry,drom->getBytesNoCopy(),drom->getLength(),&s->device);
+ OSSafeReleaseNULL(raw);if(ret)return failure("parent-device",ret);
  pd_tb_dma_ops dma={s,s->device,PDCIOCM::dma_lock,PDCIOCM::dma_unlock,PDCIOCM::power,PDCIOCM::alloc,PDCIOCM::retire};
- if(pd_tb_dma_install(&dma) || pd_tb_nhi_bus_init())return NULL;
- s->busReady=true;return s;
+ ret=pd_tb_dma_install(&dma);if(ret)return failure("dma-install",ret);
+ ret=pd_tb_nhi_bus_init();if(ret)return failure("bus-init",ret);
+ s->busReady=true;owner->setProperty("cm-create-stage","complete");owner->setProperty("cm-create-error",(uint32_t)0,32);return s;
 }
 int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
 {
@@ -166,14 +186,20 @@ int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
  auto base=(volatile uint32_t *)nhi;
  if(!base || !pdf || (base[0]&0x3ff)!=12 || base[0xd0010/4])return EBUSY;
  for(unsigned i=0;i<12;++i)if(base[(0x10010+i*0x4000)/4]&(1u<<31) || base[(0x80010+i*0x4000)/4]&(1u<<31))return EBUSY;
- int ret=s->dart.prepare();if(ret)return ret;s->dmaLive=true;
+ s->owner->setProperty("cm-start-stage","dart-prepare");
+ int ret=s->dart.prepare();if(ret){s->owner->setProperty("cm-start-error",(uint32_t)ret,32);return ret;}s->dmaLive=true;
+ s->owner->setProperty("cm-start-stage","irq-resolve");
  ret=pd_cio_nhi_irqs_resolve(s->irqs);if(ret)return -ret;
  ret=pd_rtkit_platform_irq_request(s->irqs[24],PDCIOCM::dartInterrupt,s,"acio1-dart");if(ret)return -ret;
  s->irqLive=true;pd_rtkit_platform_irq_enable(s->irqs[24]);
+ s->owner->setProperty("cm-start-stage","nhi-create");
  pd_tb_nhi_config config={};config.ctx=s;config.device=s->device;config.nhi_base=nhi;config.pdf_base=pdf;config.powered=PDCIOCM::power;
  config.irq_request=pd_rtkit_platform_irq_request;config.irq_enable=pd_rtkit_platform_irq_enable;config.irq_free=pd_rtkit_platform_irq_free;
  for(unsigned i=0;i<12;++i){config.rx_irq[i]=s->irqs[i];config.tx_irq[i]=s->irqs[12+i];}
- ret=pd_tb_nhi_create(&config,&s->nhi);if(!ret)ret=pd_tb_nhi_start(s->nhi,cable);
+ ret=pd_tb_nhi_create(&config,&s->nhi);
+ if(!ret){s->owner->setProperty("cm-start-stage","domain-start");ret=pd_tb_nhi_start(s->nhi,cable);}
+ s->owner->setProperty("cm-start-error",(uint32_t)(ret<0?-ret:ret),32);
+ if(!ret)s->owner->setProperty("cm-start-stage","complete");
  return ret<0?-ret:ret;
 }
 int pd_cio_cm_stop(PDCIOCM *s)

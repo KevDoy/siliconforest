@@ -978,3 +978,33 @@ key-only authentication was explicitly enforced after discovering passwords
 had been allowed. Exact before/after values, backup files and revert steps
 are in SF-R's reaching-Linux note and the coordination log. No extra reboot
 was used for this change; prior 9-second/60-second SSH workarounds are relaxed.
+
+
+### CIO04CMB setup refusal and OS-info blocker (08:03Z)
+
+The corrected 605-byte capsule booted without panic. Its extended 24-byte
+Type-C snapshot is valid/error-free and derives TBT cable-info 0x411. M3
+reported firmware ready, but CM creation returned a generic EIO before DART
+preparation was logged. Cleanup completed: no retained PHY ownership or
+quarantine. The guard restored CIO03 at 08:02:26; UART was reaped before
+releasing locks at 08:02:28. NHI rings/CM and dock PCI remain unobserved.
+
+Source inspection finds a definite OS-info blocker: XNU's kern.hostname MIB
+lacks CTLFLAG_KERN, so kernel_sysctlbyname rejects that read with EPERM. The
+other three OS MIBs permit kernel callers. Native creation previously hid the
+underlying return as generic EIO; the target did not expose its precise stage.
+The correction reads the actual exported hostname with a bounded copy (no
+compatibility-layer homonym), retains real sysctls for the other fields, and
+adds creation/start stage+errno and one-time power/ring/IRQ snapshots. No new
+periodic poll is introduced. Native build/collection retry is in progress.
+
+PCIe-C survey refinement from native DT plus the pinned Linux DTS: endpoint
+DART is 0x521008000/SID15, separate from NHI's 0x501a80000/SID1. MSI base is
+818/count32; the root interrupt is 850. Exact resource names come from DTS:
+config 0x530000000, RC 0x520000000, port0 0x521000000, fabric 0x520004000,
+debug 0x520200000. Linux additionally names LTSSM 0x521010000 and OE-fabric
+0x520008000 beyond the five raw ADT entries. Informal PHY/port labels from the
+earlier survey must not be used to map these windows. The pinned
+`t8103-pciec-tunables.dtsi` supplies the additional OE-fabric configuration;
+no captured calibration values are being added to source. Native endpoint
+bridge/DMA and PCI xHCI/I210 binding are still unimplemented.

@@ -221,6 +221,11 @@ int PDAppleCIO::stopFirmware()
 {
 #ifdef PD_CIO_CM
  if(cm){int ret=pd_cio_cm_stop(cm);if(ret)return ret;}
+ if(power && firmwareReady){
+  setProperty("nhi-interrupt-enable",nhi.r32(0xd0010),32);
+  setProperty("nhi-control-tx-options",nhi.r32(0x10010),32);
+  setProperty("nhi-control-rx-options",nhi.r32(0x80010),32);
+ }
  __atomic_store_n(&cmLive,0,__ATOMIC_RELEASE);setProperty("nhi-ready",false);
 #endif
  firmwareReady=false;setProperty("rtkit-ready",false);
@@ -336,10 +341,16 @@ int PDAppleCIO::startCM()
  if(!ret)ret=pd_cd321x_tbt_cable_info(&snapshot,&cable);
  OSSafeReleaseNULL(value);if(ret)return ret;
  // USB4 EUDO support is a separate stage. Never guess a TBT cable word.
+ setProperty("cm-atc-cio-power",reset.r32(0x458),32);
+ setProperty("cm-aon-cio-power",reset.r32(0x460),32);
+ setProperty("cm-ausb-cio-power",reset.r32(0x468),32);
  if(!cm)cm=pd_cio_cm_create(this,this,cmPowered);
  if(!cm)return EIO;
  ret=pd_cio_cm_start(cm,(void *)nhi.va,(void *)pdf.va,cable);
  setProperty("nhi-cable-info",cable,32);setProperty("nhi-ready",ret==0);
+ setProperty("nhi-interrupt-enable",nhi.r32(0xd0010),32);
+ setProperty("nhi-control-tx-options",nhi.r32(0x10010),32);
+ setProperty("nhi-control-rx-options",nhi.r32(0x80010),32);
  return ret;
 }
 #endif

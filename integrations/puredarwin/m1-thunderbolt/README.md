@@ -229,8 +229,10 @@ it neither installs those callbacks nor establishes NHI or dock function.
 provider with the Linux manager. `pdcio_cm=1` opts in after the firmware stage.
 It checks actual CIO power states, registers/join native AIC handlers, pins
 controller power for the cable, and retires DART mappings explicitly. Runtime
-OS strings come from kernel sysctls, avoiding the compatibility layer's local
-osrelease string. Host DROM is a runtime-only raw-byte private OF property.
+OS strings come from real kernel state, avoiding the compatibility layer's
+local osrelease string. XNU rejects kernel calls to kern.hostname because it
+lacks CTLFLAG_KERN; the bounded actual hostname export is used for that field,
+with kernel sysctls for the other OS values. Host DROM is a runtime-only raw-byte private OF property.
 
 Only this larger variant dead-strips unreachable code after marking BSD
 linker sets no-dead-strip. All 29 SYSINIT/11 SYSUNINIT targets and order, seven
