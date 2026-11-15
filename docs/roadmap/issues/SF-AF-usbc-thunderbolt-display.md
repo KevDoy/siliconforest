@@ -1109,3 +1109,18 @@ access failures, stale SID15/root/error state, and retained TLB timeouts.
 Native SDK/collection and all six repository checks pass for the final
 correction (274 Python tests, 77 C groups, six mutation detections); the
 collection has zero overlaps. Hardware qualification remains pending.
+
+### Endpoint DMA audit before enabling I210
+
+The existing `PDFBSDem` glue includes both `em` and `igb`. FreeBSD iflib
+reaches `fbsdkpi/haiku/freebsd_network/bus_dma.cpp`, whose per-device tags
+call `pdos_dma_map_phys`. The XNU seam in `fbsdkpi/xnu/pd_fbsd_os.cpp` already
+uses `IOMapper::copyMapperForDevice` and `IODMACommand`; absence of a mapper
+can still return a physical address. Its `pdos_dma_unmap` currently ignores
+the result of `clearMemoryDescriptor(true)` and releases command/descriptor
+ownership. Therefore an endpoint mapper alone is not lifetime qualification.
+Before I210 binding, the tunnel path must refuse physical fallback and
+retain DMA-owned backing on failed retirement, with actual device/IRQ/work
+drain before DART or PHY shutdown. An owned bounce path can prevent a stale
+translation from targeting recycled caller storage. This remains source
+audit and a requirement, not an installed fix or Ethernet observation.
