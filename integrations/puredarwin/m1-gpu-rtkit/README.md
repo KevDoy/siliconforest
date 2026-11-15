@@ -546,3 +546,22 @@ Everything at runtime. In particular:
 7. the replaced kfifo, the `devm` variant, `apple_mbox_get_byname` by node name: compiled,
    never executed;
 8. the Rust wrappers beyond what rustc reaches while `device`/`devres` do not compile.
+
+### Multi-client platform initialization and ACIO1 M3 layout (SF-AF)
+
+The platform initializer serializes allocation and release-publishes one
+complete lock/workloop/retained host anchor. Failed allocation cleans its
+partial objects and permits retry. The anchor stays for the lifetime of
+this kext's platform copy; this adds no firmware/DMA/child drain mechanism.
+Each mailbox still owns its separate interrupt/resource slots.
+
+The native resolver now accepts `iop,m3wrap-v2-acio` only on
+`/arm-io/acio-cpu1` (port0 stays reserved). It binds the existing Linux M3v2
+mailbox implementation using reg0 directly, rather than adding ASC's
+0x8000 offset. ASCv4 resolution remains available for internal/external
+DCP and the GPU. Shared native layout validation refuses undersized or
+overflowing registers and nonconsecutive/duplicate IRQs before publication.
+`test/run-native-layout.sh` tests 48 IRQ permutations and all undersized
+windows under ASan/UBSan. The complete PDDcp SDK bundle builds with this
+adapter. This newer source is not installed by USB04 and establishes no
+ACIO boot or external-DCP runtime result.

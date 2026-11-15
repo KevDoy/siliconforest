@@ -34,6 +34,7 @@
 #include <sys/errno.h>
 
 #include "pd_rtkit_platform.h"
+#include "pd_rtkit_layout.h"
 
 #define SOC_PAGE 0x4000ULL
 
@@ -87,6 +88,7 @@ struct Mapping {
 };
 
 IOService *gHost;
+int gInitState; // 0 uninitialized, 1 allocating, 2 release-published
 IOWorkLoop *gLoop;
 IOLock *gLock; /* gIrqs[].depth/registered/fn, gMbox, gMaps; thread context only */
 const char *gPrefix = "pd_rtkit: ";
@@ -305,18 +307,33 @@ extern "C" {
 
 int pd_rtkit_platform_init(void *host)
 {
-    if (gHost)
-        return 0;
     if (!host)
         return -EINVAL;
-    gLock = IOLockAlloc();
-    gLoop = IOWorkLoop::workLoop();
-    if (!gLock || !gLoop)
+    for (;;) {
+        if (__atomic_load_n(&gInitState,__ATOMIC_ACQUIRE)==2)
+            return 0;
+        int expected=0;
+        if (__atomic_compare_exchange_n(&gInitState,&expected,1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))
+            break;
+        IOSleep(1);
+    }
+    IOLock *lock=IOLockAlloc();
+    IOWorkLoop *loop=IOWorkLoop::workLoop();
+    if (!lock || !loop) {
+        if (lock) IOLockFree(lock);
+        OSSafeReleaseNULL(loop);
+        __atomic_store_n(&gInitState,0,__ATOMIC_RELEASE);
         return -ENOMEM;
-    gHost = (IOService *)host;
+    }
+    gLock=lock;gLoop=loop;
+    gHost=(IOService*)host;
+    // IRQ/timer nubs use this anchor for the lifetime of this port's copy.
+    // Per-mailbox clients retain their own native teardown responsibilities.
+    gHost->retain();
     gIrqMode = pd_rtkit_platform_bootarg("pdrtkit_irq", kIrqModeReregister);
     if (gIrqMode < kIrqModePoll || gIrqMode > kIrqModeReregister)
         gIrqMode = kIrqModeReregister;
+    __atomic_store_n(&gInitState,2,__ATOMIC_RELEASE);
     return 0;
 }
 
@@ -345,7 +362,7 @@ int pd_rtkit_platform_mbox_resolve(const char *path, struct pd_rtkit_mbox_res *r
     Mbox *m = NULL;
     int ret = 0;
 
-    if (!gHost || !path || !res || !fullPath(path, full, sizeof(full)))
+    if (__atomic_load_n(&gInitState,__ATOMIC_ACQUIRE)!=2 || !path || !res || !fullPath(path, full, sizeof(full)))
         return -EINVAL;
 
     IOLockLock(gLock);
@@ -372,7 +389,13 @@ int pd_rtkit_platform_mbox_resolve(const char *path, struct pd_rtkit_mbox_res *r
             break;
         }
         /* iop,ascwrap-v8 and later are a different mailbox (Linux apple,asc-mailbox-v4 does not cover them) */
-        if (!nodeIsCompatible(node, "iop,ascwrap-v4")) {
+        bool m3=nodeIsCompatible(node,"iop,m3wrap-v2-acio");
+        // Port0 is the reserved bench path. Only ACIO1 is qualified here.
+        if (m3 && strcmp(full,"/arm-io/acio-cpu1")) {
+            ret=-ENODEV;
+            break;
+        }
+        if (!m3 && !nodeIsCompatible(node, "iop,ascwrap-v4")) {
             logf("%s: not an iop,ascwrap-v4 node", full);
             ret = -ENODEV;
             break;
@@ -381,7 +404,6 @@ int pd_rtkit_platform_mbox_resolve(const char *path, struct pd_rtkit_mbox_res *r
         bzero(&m->res, sizeof(m->res));
         strlcpy(m->res.path, full, sizeof(m->res.path));
         strlcpy(m->res.name, node->getName(gIODTPlane) ? node->getName(gIODTPlane) : "asc", sizeof(m->res.name));
-        m->res.linux_compatible = "apple,asc-mailbox-v4";
 
         /* registry-owned array: used here, never released, asked for once per node */
         OSArray *regs = IODTResolveAddressing(node, "reg", NULL);
@@ -390,47 +412,18 @@ int pd_rtkit_platform_mbox_resolve(const char *path, struct pd_rtkit_mbox_res *r
             m->res.asc_phys = d->getPhysicalSegment(0, NULL, kIOMemoryMapperNone);
             m->res.asc_size = d->getLength();
         }
-        if (!d || !m->res.asc_phys || m->res.asc_size < PD_RTKIT_ASC_MBOX_OFFSET + PD_RTKIT_ASC_MBOX_SIZE) {
-            logf("%s: reg 0 not resolved or too small (0x%llx len 0x%llx)", full,
-                 (unsigned long long)m->res.asc_phys, (unsigned long long)m->res.asc_size);
-            ret = -EINVAL;
-            break;
-        }
-        m->res.mbox_phys = m->res.asc_phys + PD_RTKIT_ASC_MBOX_OFFSET;
-        m->res.mbox_size = PD_RTKIT_ASC_MBOX_SIZE;
-
         OSData *ints = OSDynamicCast(OSData, node->getProperty("interrupts"));
-        if (!ints || ints->getLength() != 4 * sizeof(UInt32)) {
-            logf("%s: expected 4 interrupts, property is %u bytes", full, ints ? ints->getLength() : 0);
-            ret = -EINVAL;
+        UInt32 listed[4];
+        if (!d || !ints || ints->getLength()!=sizeof(listed)) {
+            ret=-EINVAL;
             break;
         }
-        UInt32 sorted[4];
-        memcpy(m->res.aic_listed, ints->getBytesNoCopy(), sizeof(m->res.aic_listed));
-        memcpy(sorted, m->res.aic_listed, sizeof(sorted));
-        for (int i = 1; i < 4; i++)
-            for (int j = i; j > 0 && sorted[j - 1] > sorted[j]; j--) {
-                UInt32 t = sorted[j];
-                sorted[j] = sorted[j - 1];
-                sorted[j - 1] = t;
-            }
-        /*
-         * Apple's tree does not name the four lines and does not list them in
-         * ascending order (gfx-asc on J293: 576 575 578 577). Linux's device
-         * trees give every ASC mailbox four consecutive AIC numbers as
-         * send-empty, send-not-empty, recv-empty, recv-not-empty (t8103.dtsi
-         * agx_mbox: 575..578), so the roles are taken from the sorted numbers.
-         */
-        if (sorted[3] != sorted[0] + 3 || sorted[1] != sorted[0] + 1 || sorted[2] != sorted[0] + 2) {
-            logf("%s: interrupts %u %u %u %u are not four consecutive numbers", full, (unsigned)sorted[0],
-                 (unsigned)sorted[1], (unsigned)sorted[2], (unsigned)sorted[3]);
-            ret = -EINVAL;
+        memcpy(listed,ints->getBytesNoCopy(),sizeof(listed));
+        ret=pd_rtkit_mbox_layout(m3,m->res.asc_phys,m->res.asc_size,listed,&m->res);
+        if (ret) {
+            logf("%s: invalid %s mailbox registers or IRQ layout",full,m3?"M3v2":"ASCv4");
             break;
         }
-        m->res.aic_send_empty = sorted[0];
-        m->res.aic_send_not_empty = sorted[1];
-        m->res.aic_recv_empty = sorted[2];
-        m->res.aic_recv_not_empty = sorted[3];
 
         int srcSend = -1, srcRecv = -1;
         for (int i = 0; i < 4; i++) {
@@ -476,7 +469,8 @@ int pd_rtkit_platform_mbox_for_consumer(void *consumer_node, int index, char *pa
 
     if (!path || index != 0)
         return -ENOENT;
-    if (node && nodeIsCompatible(node, "iop,ascwrap-v4") && name) {
+    if (node && (nodeIsCompatible(node, "iop,ascwrap-v4") ||
+                 nodeIsCompatible(node,"iop,m3wrap-v2-acio")) && name) {
         /* an ASC wrapper is its own mailbox; every one on this SoC is a child of /arm-io */
         return snprintf(path, len, "/arm-io/%s", name) < (int)len ? 0 : -EINVAL;
     }

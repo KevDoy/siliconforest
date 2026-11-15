@@ -48,11 +48,11 @@ struct pd_rtkit_mbox_res {
 	char		path[PD_RTKIT_PATH_MAX];	/* device-tree path of the ASC node */
 	char		name[PD_RTKIT_NAME_MAX];	/* its name, "gfx-asc" */
 	void		*node;		/* IORegistryEntry in gIODTPlane, retained for the kext's life */
-	/* Linux's compatible for this mailbox hardware: "apple,asc-mailbox-v4" for iop,ascwrap-v4 */
+	/* Linux compatible: ASCv4 or ACIO M3v2 (direct reg0, without ASC offset). */
 	const char	*linux_compatible;
 	uint64_t	asc_phys;	/* reg 0, with the parents' ranges applied */
 	uint64_t	asc_size;
-	uint64_t	mbox_phys;	/* asc_phys + PD_RTKIT_ASC_MBOX_OFFSET */
+	uint64_t	mbox_phys;	/* ASC: asc_phys + 0x8000; ACIO M3v2: asc_phys */
 	uint64_t	mbox_size;
 	/* AIC numbers in the order the node lists them, and by role (sorted: see the .cpp) */
 	uint32_t	aic_listed[4];
