@@ -7,6 +7,7 @@ typedef CFTypeRef ColorSyncProfileRef, ColorSyncTransformRef;
 typedef unsigned ColorSyncDataDepth, ColorSyncDataLayout;
 enum { kColorSync32BitFloat=7, kColorSyncByteOrderDefault=0 };
 extern const CFStringRef kColorSyncSRGBProfile, kColorSyncGenericGrayGamma22Profile;
+extern const CFStringRef kColorSyncDisplayP3Profile;
 extern const CFStringRef kColorSyncGenericCMYKProfile, kColorSyncGenericLabProfile, kColorSyncGenericXYZProfile;
 extern const CFStringRef kColorSyncProfile, kColorSyncRenderingIntent, kColorSyncTransformTag;
 extern const CFStringRef kColorSyncRenderingIntentAbsolute, kColorSyncRenderingIntentRelative;

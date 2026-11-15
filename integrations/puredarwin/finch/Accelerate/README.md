@@ -58,3 +58,13 @@ multidimensional-table values are authored numeric declarations checked against
 Finch's mode implementation and the maintainer's
 [Go bindings](https://pkg.go.dev/github.com/deploymenttheory/go-bindings-macosplatform/bindings/internal/raw/frameworks/accelerate).
 No SDK headers were imported.
+
+The separate [Display-P3 audit](P3-DIFFERENCE-2026-11-15.md) resolves the retained
+80/82 difference as a real adapter bug: named CG P3 had no ICC bytes and vImage
+fell back to the sRGB profile. The narrow named-P3 fallback now uses our existing
+real ColorSync P3 profile. Private baseline/fixed M1 and same-byte M5 controls
+verify named/explicit/generated profiles; the original full vImage test now
+MATCHes native with coarse82. A new detailed probe retains its raw DIFF for
+ICC availability and small CMM arithmetic differences (one U8 component by one
+LSB; max F32 error0.000045597), equally present in explicit-profile controls.
+No new tolerance or mask is added; this audit changes no canonical provider.

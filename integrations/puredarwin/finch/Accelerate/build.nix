@@ -13,7 +13,7 @@ let
 in pkgs.stdenv.mkDerivation {
   name = "siliconforest-finch-Accelerate-arm64";
   src = finch;
-  patches = [ ./patches/0001-vdsp-nearest-int16-saturation.patch ./patches/0002-local-la-lifetime.patch ./patches/0003-quadrature-runtime-workspace.patch ];
+  patches = [ ./patches/0001-vdsp-nearest-int16-saturation.patch ./patches/0002-local-la-lifetime.patch ./patches/0003-quadrature-runtime-workspace.patch ./patches/0005-vimage-named-display-p3.patch ];
   nativeBuildInputs = [ pkgs.python3 ];
   dontConfigure = true;
   buildPhase = ''
