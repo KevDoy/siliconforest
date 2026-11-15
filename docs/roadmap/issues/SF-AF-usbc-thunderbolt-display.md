@@ -2776,3 +2776,29 @@ and AppKit timing report.
 Qualified non-AVE CIO29 was restored19:06:17Z; UART was reaped19:06:18Z before
 lock release, and the standard desktop/inject check passed. Default boot
 remains Linux. No AVE module, boot argument, probe or extraction was added.
+
+### Dedicated FL1100 controller preparation — uninstalled, 2026-11-15
+
+A separate SDK-only driver variant now connects the real PCIe-C mapper to
+all13 xHCI allocation sites, actual native BAR posted-write mappings, retained
+per-MMIO physical guards and checked MSI-before-late-BME startup. Extended
+capabilities and BIOS handoff had raw accesses outside the inline register
+helpers; these are guarded too. Any inaccessible/all-ones read closes
+admission and stops workers, and cannot be mistaken for a halted controller.
+The generic BAR sizing/address fallback and client-page DMA path are excluded.
+
+Every ring/payload allocation stays in a retained controller ledger until
+real whole-controller halt/reset and explicit DMA completion/clear. Ordinary
+release sites therefore cannot free backing after a control timeout. BOT
+cache ownership uses explicit failed-transfer state instead of native retain
+counts, which include command/mapper ownership. Initial qualification retains
+all mappings while running: bounded4096 ledger entries,2048 shared-mapper
+slots and256MiB IOVA; allocation exhaustion refuses work. It is not unlimited
+storage operation. Read-only storage rejection remains in the dedicated patch.
+
+Native ARM64 SDK7wckrvc74sln33c48bhb36f5a8zcgr5y and all six repository checks
+pass. Actual transformed methods run under ASan/UBSan for guards, protocol-cap
+parsing, BIOS handoff, inaccessible status, active worker/operation and reset
+timeouts, and partial mapping-retirement failure. No real IRQ/work joining,
+hardware halt, USB enumeration, physical typing or storage result is claimed.
+Factory/catalogue command wiring remains; this driver is excluded from CIO36.

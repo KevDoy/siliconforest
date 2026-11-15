@@ -18,7 +18,7 @@ PDPCIUSBDMABuffer *PDPCIUSBDMABuffer::allocate(IOService *device,UInt64 bytes,UI
  if(!ready){OSSafeReleaseNULL(property);return NULL;}
  auto memory=OSTypeAlloc(PDPCIUSBDMABuffer);
  if(!memory){property->release();return NULL;}
- memory->command=NULL;memory->endpoint=NULL;memory->iova=0;memory->retiring=0;memory->prepared=false;
+ memory->command=NULL;memory->endpoint=NULL;memory->iova=0;memory->retiring=memory->unsafe=0;memory->prepared=false;
  UInt64 span=(bytes+page-1)&~(page-1);
  if(!memory->initWithPhysicalMask(kernel_task,kIODirectionInOut|kIOMemoryPhysicallyContiguous,
                                  span,alignment,mask)){

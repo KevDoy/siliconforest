@@ -1,37 +1,45 @@
-# Detached PCI xHCI DMA helper
+# Dedicated PCI dock xHCI preparation
 
-This is source preparation for the dock, excluded from every boot collection.
-`build-dock-usb-dma-objects.nix` checks the helper against the actual native
-USB SDK and exports only its object. It does not bind an xHCI controller or
-make the old generic PCI allocation path safe.
+Source only: no boot collection selects this driver. The native ARM64 SDK
+build passes, but no USB controller, keyboard, storage or hot-unplug result
+has been observed on the M1.
 
-The helper requires the actual shared PCIe-C IOMapper lookup and a fresh
-readiness response for this endpoint. The native mapper now has an explicit registration method for up to four
-actual dock xHCI endpoints on the same host, reserving their real SID0
-requesters without resetting its root or IOVA allocator. A detached enumeration
-factory now selects the keyboard's FL1100 by its actual Alpine Ridge port0
-ancestry, binds the real shared mapper, verifies 32/64-bit native BAR resources
-and allocates one MSI through the real per-port family controller. No command
-calls that factory yet; it neither retries driver matching nor grants BME.
-Current boot profiles therefore still refuse USB. It must never
-initialize the direct USB1 DART or replace the active I210 root.
+`build-dock-usb-kext.nix` prepares a separate FL1100-only variant of the
+existing Ravyn xHCI lifetime/read-only-storage port. It requires actual host
+access binding and shared PCIe-C IOMapper lookup. It maps native BAR resources
+with posted writes, has no BAR sizing/address fallback, and requests checked
+late BME only after real MSI registration and arming. Scalar registers,
+doorbells, extended capabilities and BIOS handoff use guarded accessors.
+Physical loss, bounds refusal or all-ones reads latch failure, close operation
+admission and stop workers; they cannot qualify a successful halt/reset.
 
-Each allocation owns whole16KiB physical pages and a real IODMACommand.
-The driver must use `dmaAddress()`, explicitly call `retire()` after producer
-completion/halt, then release its reference only on success. The command and
-mapper retain the descriptor during mapping: implicit descriptor destruction
-cannot break that ownership cycle. Every existing USB ring/payload release
-site must therefore be converted before using this class. Failed prepare,
-segment validation, complete or inactive-clear retains backing until reboot.
+All13 ring/payload allocation sites use whole16KiB owned backing and actual
+IODMACommand translations. A controller ledger retains every allocation
+until operation/worker draining and real whole-controller halt/reset, then
+explicitly completes/clears each mapping. Ordinary ring/payload release sites
+drop client references while that ledger preserves backing. Failed prepare,
+complete or clear keeps backing until reboot. A partial retirement failure
+keeps the entire ledger/context and never reports a successful drain.
 
-The host now supplies retained endpoint access binding and a checked late USB
-BME API that preserves existing I210 grants and admits only the selected
-FL1100 ancestry after real mapper/MSI readiness. No driver calls it yet.
+This initial variant does not reclaim mappings while the controller runs.
+Its ledger is bounded4096 entries; the shared mapper currently limits active
+mappings to2048 and IOVA space to256MiB. Exhaustion refuses allocation. This
+is suitable for initial qualification, not an unlimited storage workload.
+BOT cache reuse uses explicit failed-transfer state, because command/mapper
+retains make a native buffer's reference count unsuitable for that decision.
+Client pages never bypass the owned bounces. Storage writes are rejected by
+the separate read-only qualification patch.
 
-Still required: factory command wiring, driver use of per-MMIO physical access
-guards, posted-write mappings, registered/armed MSI and late BME/run,
-all USB release sites and actual
-IRQ/work/producer teardown. No Ethernet, keyboard, storage or hot-unplug
-result follows from this source or a successful object build.
+The detached factory identifies the Keychron branch's actual FL1100 through
+Alpine Ridge port0 ancestry, registers its real SID0 requester without
+resetting the active I210 root/allocator, binds the native mapper/resources,
+allocates MSI, and binds retained host access. The host's late USB admission
+preserves actual I210 grants and admits only the selected USB ancestry after
+mapper/MSI/physical checks. No owner command or catalogue profile calls the
+factory yet. Every current boot profile still excludes USB admission.
 
-The native ARM64 object build passes; no controller or hardware test ran.
+Actual transformed guard, extended-capability/BIOS-handoff, quiesce and
+retirement methods pass ASan/UBSan host fixtures, including inaccessible
+status, worker/operation/reset timeouts and completion failures. These are
+host fixtures, not native IRQ joining or hardware producer-drain evidence.
+Factory/profile wiring and real M1 qualification remain before inclusion.
