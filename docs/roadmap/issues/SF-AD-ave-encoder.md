@@ -38,7 +38,10 @@ extracted table was transferred or installed. Existing build/boot receipts
 remain under ignored `runs/sffinch/`; nothing is deleted.
 
 CODEX-TB restored known-good non-AVE CIO07 at09:03:02Z and reaped its UART
-reader at09:03:03Z. Its subsequent CIO08 comparison explicitly omits AVE.
+reader at09:03:03Z. CIO08 was then installed and verified at09:08:35Z without AVE
+(capsule `c63179b7b9f2…`). Its 57-module manifest contains no PDAppleAVE,
+and live service/device-node and boot-argument inventories confirm no AVE
+kext or `pdave` argument. NHI and the internal desktop remain healthy.
 All prior inclusion/probe requests are withdrawn in coordination log and
 requests-for-CODEX-TB.md; the kernel owner must retain a non-AVE collection
 with no pdave boot argument. No AVE boot or probe is queued by this stream.
