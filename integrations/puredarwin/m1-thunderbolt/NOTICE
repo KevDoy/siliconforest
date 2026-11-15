@@ -1,0 +1,23 @@
+The Thunderbolt port selects GPL-2.0 (GPL-2.0-only for the DP-IN files).
+No firmware, host DROM, device identity, calibration or hardware capture is included.
+
+upstream/apple-dpin-* files are byte-for-byte source copies of
+Omacom linux-aurora 6a08a08e, drivers/thunderbolt/ (SHA256 in provenance.json).
+They retain their SPDX notices. The parent Apple ACIO/NHI driver is:
+  Copyright (c) Sven Peter <sven@kernel.org>
+
+src/pd_apple_nhi.c and include/pd_apple_nhi.h adapt Apple register layout,
+ring configuration, SRAM checks and T8103 DP-IN from apple.c, and the ring
+start/stop/descriptor sequence from nhi.c/nhi_regs.h/include/linux/thunderbolt.h:
+  Copyright (c) Sven Peter <sven@kernel.org>
+  Copyright (c) 2014 Andreas Noever <andreas.noever@gmail.com>
+  Copyright (C) 2018 Intel Corporation
+
+src/pd_cio_lifecycle.c adapts apple_cio_start/stop ordering from apple.c,
+Copyright (c) Sven Peter. src/pd_dpin_policy.c copies its platform policy.
+The NHI policy constants and test-only topology predicate retain the Linux
+GPL-2.0 notice and the nhi.h/tb.h copyright attribution above.
+
+New portability type/errno/bit headers and host assertion/OF fixtures are MIT;
+they implement no hardware or connection manager. The OF, KUnit and topology
+fixtures are only used by host tests, not by the SDK object target.
