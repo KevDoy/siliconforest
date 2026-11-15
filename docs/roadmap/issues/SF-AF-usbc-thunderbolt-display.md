@@ -5,7 +5,7 @@ external display or Thunderbolt operation has been established on SiliconForest.
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 06:24Z)
+## Current target and observed state (owner change; updated 06:41Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,8 +15,9 @@ its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
 **Observed in Darwin:** port-1 Type-C APP/status reads and TBT-only cable
-flags; CIO01 boots with internal desktop/Wi-Fi intact, but ACIO startup
-failed ENODEV before PHY acquisition. No RTKit start has been observed. **Not observed:** NHI
+flags; USB04 is restored with internal desktop/Wi-Fi intact. CIO01 failed
+preflight; CIO02 reached M3 SYSLOG reception, then panicked in an unaligned
+I/O-memory copy. RTKit-ready completion has not been observed. **Not observed:** NHI
 up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
 enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
 The 28 CM/library/native/devres objects, PHY/calibration, DART, crossbar and
@@ -833,3 +834,39 @@ client also keeps a lease token returned on a failed PHY setup, so cleanup
 cannot lose an owner when the PHY provider retained a partial session.
 CIO02 is the next announced dock startup boot. NHI DMA remains disabled in
 this firmware-stage test; no direct USB/adapter boot is planned.
+
+
+### CIO02 target FAILED; UART diagnosis and USB04 recovery (06:35Z)
+
+CIO02 capsule:
+`4433cfc7328b7e585a7150927962d89f030cc59a06298e5ca0042ca0d97e0af9`.
+The boot panicked at 06:30:09 with ESR alignment fault. Symbolication of its
+exact collection resolves kernel memmove+0xa4, caller apple_rtkit_memcpy+0x160,
+then apple_rtkit_syslog_rx_log and the RTKit RX workqueue. The I/O source is
+four modulo eight, copying a 16-byte SYSLOG context twelve bytes into SRAM.
+LinuxKPI defines memcpy_fromio as ordinary memcpy, which issued an unaligned
+device-memory access. This is a real native ACIO bug, not an NHI/DART fault.
+
+The trace establishes progression through PHY/power startup into actual M3
+SYSLOG reception. It does not establish completed RTKit-ready state, NHI up,
+host-router discovery, any tunnel or dock PCI function. No such result is
+claimed. The owned cycle was interrupted to recover promptly; M5 reset and
+the normal installer restored USB04. Standard .next/inject desktop/Wi-Fi were
+confirmed at 06:35:15; UART reader was stopped/reaped before locks released at
+06:35:17. The main CIO02 run remains FAILED; recovery passed. Rollback Type-C
+reads still report no errors and direct host inactive/alternate-mode deferred.
+The event-driven consumer and broker are therefore uninstalled again.
+
+The source fix ports Linux's aligned I/O-copy sequence, preserving the Kalray
+GPL-2.0-only notice/provenance. Only normal RAM is passed to libc; all I/O
+reads are byte or aligned 64-bit. ASan/UBSan instruments 263,168 alignment/
+length combinations and the exact fault shape; ARM64 codegen confirms the
+access widths. Native SDK/collection builds pass; target retry is pending.
+Other USB04 modules remain frozen for that retry.
+
+TERM6 separately reports an application-side idle CPU/RSS regression caused
+by WindowServer patch 0124 discarding frames and Activity Monitor recreating
+8 MB buffers. It installed correction 0129 at 06:26. That reported finding
+is separate from the unchanged NVMe worker measured in the kernel A/B; it is
+not a claim that our CPU-only probes established the AppKit timing cause or
+that a USB kernel change fixed those application timings.

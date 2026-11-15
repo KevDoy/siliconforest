@@ -565,3 +565,30 @@ overflowing registers and nonconsecutive/duplicate IRQs before publication.
 windows under ASan/UBSan. The complete PDDcp SDK bundle builds with this
 adapter. This newer source is not installed by USB04 and establishes no
 ACIO boot or external-DCP runtime result.
+
+
+## ACIO SRAM I/O-copy correction (15 November 2026)
+
+CIO02 target startup reached M3 SYSLOG reception but PANICKED with an unaligned
+kernel data abort. UART symbolication resolves kernel memmove called from
+apple_rtkit_memcpy -> apple_rtkit_syslog_rx_log. LinuxKPI's memcpy_fromio macro
+was ordinary memcpy; a SYSLOG context at SRAM+12 exposed its unaligned device
+load. USB04 was restored through the normal installer, with standard desktop,
+reader cleanup and lock release recorded separately. No NHI operation or dock
+PCI enumeration was observed in that failed boot.
+
+`src/pd_rtkit_iomem.h` ports the alignment/word/tail sequence from the pinned
+Linux lib/iomem_copy.c, with its **GPL-2.0-only**, Copyright 2024 Kalray notice.
+It is an exception to the older dual-license summary above: a combined build
+including this helper uses the GPL branch. Provenance SHA is recorded beside
+it. pd_rtkit_compat.h routes device-buffer reads through this helper. Reads
+are byte-sized until the source is aligned, then volatile aligned 64-bit reads,
+then a byte tail. Ordinary memcpy sees only a RAM local and RAM destination.
+The normal-memory branch of RTKit's copy remains unchanged.
+
+ASan/UBSan tests instrument the actual helper's read widths/bounds: 263,168
+source/destination alignment and length cases, no MMIO overread or destination
+clobber, zero length, and the actual SYSLOG+12/16-byte panic shape pass. Native
+ACIO SDK and collection builds pass. ARM64 disassembly shows LDRB prefix/tail
+and a single aligned LDR for the I/O word; libc's source is a stack local.
+Target retry remains pending; host/codegen evidence is not hardware success.

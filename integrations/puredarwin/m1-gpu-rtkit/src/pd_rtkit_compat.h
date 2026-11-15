@@ -20,6 +20,12 @@
 #include <asm/barrier.h>
 
 #include "pd_rtkit_platform.h"
+#include "pd_rtkit_iomem.h"
+
+/* LinuxKPI aliases this to ordinary memcpy, which may issue unaligned device
+ * loads. ACIO SRAM SYSLOG records actually triggered that data abort. */
+#undef memcpy_fromio
+#define memcpy_fromio(dst,src,bytes) pd_rtkit_memcpy_fromio((dst),(src),(bytes))
 
 /*
  * Logging. The layer's dev_err() is device_printf(dev->bsddev, ...), which

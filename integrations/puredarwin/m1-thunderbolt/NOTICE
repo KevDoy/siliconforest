@@ -94,3 +94,9 @@ kernel/pd_cio_dart.* specializes the previously ported m1-usb-dwc3 DMA adapter
 for NHI's one ACIO1 DART/SID1. It retains its Linux apple-dart.c and
 io-pgtable-arm/dart copyright notices; the shared table walker and IOVA
 allocator are copied from their existing ports, with those notices intact.
+
+
+The RTKit device-memory copy helper pd_rtkit_iomem.h derives from the pinned
+Linux lib/iomem_copy.c, GPL-2.0-only:
+  Copyright 2024 Kalray, Inc. All Rights Reserved.
+The combined native ACIO bundle selects GPL-2.0, including this helper.

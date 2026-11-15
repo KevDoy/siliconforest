@@ -5,7 +5,7 @@
 	<key>CFBundleExecutable</key>
 	<string>PDAppleCIO</string>
 	<key>CFBundleGetInfoString</key>
-	<string>GPL-2.0; Apple ACIO from Omacom Linux, Sven Peter / Asahi Linux Contributors; RTKit GPL-2.0-only OR MIT. See NOTICE.</string>
+	<string>GPL-2.0; Apple ACIO from Omacom Linux, Sven Peter / Asahi Linux Contributors; RTKit GPL-2.0-only OR MIT. See NOTICE.; I/O copy GPL-2.0-only, Copyright 2024 Kalray, Inc.</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.puredarwin.driver.PDAppleCIO</string>
 	<key>CFBundleInfoDictionaryVersion</key>
