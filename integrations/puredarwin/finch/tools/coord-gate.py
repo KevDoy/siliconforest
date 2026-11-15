@@ -27,6 +27,14 @@ def pending_hold(text, install_reservation=False, now=None):
                   lower_body.startswith('scheduling correction:') and
                   re.search(r'earliest\s*[a-z0-9_-]+\s*\d{2}:\d{2}:\d{2}z\b', lower_body)):
                 active[(owner, 'scheduled-reboot')] = (line, [], owner)
+            elif ((owner, 'scheduled-reboot') in active and
+                  (owner, 'reboot') not in active and lower_body.startswith('ack ') and
+                  'willwaitcoreshbeforeguiex/bench' in re.sub(r'\s+', '', lower_body) and
+                  'normaldesktopavailabletoothers' in re.sub(r'\s+', '', lower_body)):
+                # Explicit owner stand-down while another owner's offline QEMU
+                # rehearsal holds core.lock. This ends only the reservation,
+                # not a real reboot, guarded install or desktop session hold.
+                active.pop((owner, 'scheduled-reboot'), None)
             # A physical flock alone does not end an announced desktop install.
             # Only the same owner's actual release/correction closes its hold.
             if ((lower_body.startswith('gui.lock: install ') and

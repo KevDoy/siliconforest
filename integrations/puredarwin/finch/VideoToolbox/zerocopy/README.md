@@ -140,3 +140,22 @@ GPU-backed NV12 storage. A successful correctness control could remove a
 second CPU texture upload through FX's GPU rectangle blit, but would not prove
 direct hardware capture import, IPC/fence ordering, browser60fps or end-to-end
 zero-copy. `qualify-capture.py` continues to reject every copied capture run.
+
+FX's actual browser control on the same private cohort completes600/600 H264
+1080p60-source pictures and300/300 HEVC4K30-source pictures without reported
+drops. Its CGL transport counters show zero CPU upload/readback, with GPU
+rectangle blits; VT still reports1866240000/3732480000 copied bytes. Browser
+family CPU is125.54%/140.05% of one core over10.706/10.546 seconds. These are
+**not**60fps presentation results: rVFC delivers252/250 callbacks over10seconds,
+median40.02ms and p9550ms. This removes the second CPU upload, while both the
+first CPU copy and presentation-cadence problem remain. Raw owner evidence is
+recorded in requests-for-CODEX.md at20:05:18Z; no canonical provider changed.
+
+The separate public `CoreVideo/display-clock-probe.nix` measures actual callback
+arrival independently of advertised input/output timestamps. Same Linux-built
+SHA5c23eee17c8fa69cfbc83e53d45cac40c7758ad7719907e676ec5fcdaf22c90a
+runs on M5 and M1. M1 installed/private CV each produce121callbacks at measured
+60.0016/59.9832Hz; native M5 is119.963Hz on its own display. The retained M1
+GetActualOutputVideoRefreshPeriod returns the nominal constant, so measured
+arrival is the relevant control. This isolated observation does not locate
+Firefox's40ms cause or establish panel delivery, and motivates no timer patch.

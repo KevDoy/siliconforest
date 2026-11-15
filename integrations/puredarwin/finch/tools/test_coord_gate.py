@@ -228,5 +228,15 @@ class HoldTests(unittest.TestCase):
     def test_quoted_kernel_notice_is_not_a_reservation(self):
         self.assertIsNone(gate.pending_hold('T CODEX quoted: NOTICE CIO37NET earliest19:51:00Z\n'))
 
+    def test_owner_explicitly_defers_reservation_and_offers_normal_desktop(self):
+        text='T CODEX-TB NOTICE CIO38TRACE earliest20:10:00Z\n'
+        event='ACK TERM8coreEX/QEMU30-60min: pending38 willWAITcoreSH BEFOREguiEX/bench; normaldesktopavailabletoothers\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U OTHER '+event))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB '+event.replace('normaldesktopavailabletoothers','desktop still reserved')))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB '+event))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB cio38 clean reboot to Linux\nV CODEX-TB '+event))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM8 core.lock: GUARDED INSTALL now\nV CODEX-TB '+event))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB '+event+'V CODEX-TB NOTICE CIO38TRACE earliest21:10:00Z\n'))
+
 if __name__ == '__main__':
     unittest.main()
