@@ -31,6 +31,16 @@ ZIP range requests from Apple CDN; Acis extraction produced the expected0/1/39
 entry layout and is held privately pending the remaining checks. CODEX-TB has the early
 reservation/identity request. Detailed live metadata remains private.
 
+A second property-name inventory found `segment-names=__TEXT;__DATA` and no
+AVE-specific build/identity property. The chosen system firmware is newer than
+the stub iBoot; neither that nor the main macOS installation replaces the
+TEXT-tag check. The SDK-built diagnostic now publishes root-only INFO with
+lazy inventory and requires no extra boot argument (the current native kernel
+command line is close to its608-byte limit). It still leaves DATA untouched
+and reports no encoder capabilities. The copied upstream IPC/ring selftest
+now passes32120 synthetic checks in addition to2259 command and1270 ADT checks.
+No live mailbox handshake, DMA ordering or encoding result is implied.
+
 The reference is aquarat's GPL-2.0-only
 [apple-m-series-ave-driver, pinned at 9ab14e45281e8f61fb499b760408028171a5f2b5](https://github.com/aquarat/apple-m-series-ave-driver/tree/9ab14e45281e8f61fb499b760408028171a5f2b5).
 It is cloned, git-ignored, under `sources/ref-ave` with a sparse source/document

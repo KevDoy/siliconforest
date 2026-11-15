@@ -15,3 +15,8 @@ for name in abi adt; do
  "${CC:-cc}" -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -g -I"$unit/shim" -include "$unit/kshim.h" -I"$here/kernel/upstream" "$unit/${name}_selftest.c" "$here/kernel/upstream/$source.c" -o "$work/$name-test"
  "$work/$name-test"
 done
+
+"${CC:-cc}" -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$here/kernel/upstream" "$here/host-test/upstream/ipc_selftest/ipc_selftest.c" -o "$work/ipc-test"
+"$work/ipc-test"
+"${CC:-cc}" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I"$here/include" -I"$here/kernel" "$here/kernel/pdave_preload.c" "$here/kernel/pdave_ipc.c" "$here/host-test/ipc_test.c" -o "$work/transport-test"
+"$work/transport-test"

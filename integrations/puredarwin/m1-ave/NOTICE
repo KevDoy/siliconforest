@@ -6,5 +6,5 @@ No Apple kernel, firmware, DPE table or derived input bytes are in this tree.
 Private Acis extraction is owner-authorized; encoder firmware must come solely
 from this M1's iBoot preload, not a downloaded firmware file.
 
-Host selftests copied from tools/{abi_selftest,adt_selftest}; only local header
+Host selftests copied from tools/{abi_selftest,adt_selftest,ipc_selftest}; only local header
 include paths adapted to kernel/upstream. kshim/shim retain GPL-2.0-only notices.

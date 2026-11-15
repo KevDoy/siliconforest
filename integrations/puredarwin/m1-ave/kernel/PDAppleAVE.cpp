@@ -5,6 +5,7 @@
  */
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOLib.h>
+#include <IOKit/IOLocks.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IOService.h>
 #include <pexpert/pexpert.h>
@@ -27,11 +28,17 @@ struct Segment {uint64_t physical,iova,remap;uint32_t size,flags;};
 static_assert(sizeof(Segment)==32,"ADT segment");
 static_assert(sizeof(pdave_info)==192,"INFO ABI");
 static pdave_info gInfo;
+static IOLock *gInfoLock;
+static bool gInventoried;
+static int inventory();
 static int openNode(dev_t,int,int,proc_t){return 0;}
 static int closeNode(dev_t,int,int,proc_t){return 0;}
 static int ioctlNode(dev_t,u_long command,caddr_t data,int,proc_t) {
  if(command!=PDAVE_IOC_INFO)return ENOTTY;
- memcpy(data,&gInfo,sizeof(gInfo));return 0;
+ IOLockLock(gInfoLock);
+ if(!gInventoried){gInfo.error=inventory();gInventoried=true;}
+ memcpy(data,&gInfo,sizeof(gInfo));
+ IOLockUnlock(gInfoLock);return 0;
 }
 static struct cdevsw methods={.d_open=openNode,.d_close=closeNode,.d_read=eno_rdwrt,
  .d_write=eno_rdwrt,.d_ioctl=ioctlNode,.d_stop=eno_stop,.d_reset=eno_reset,
@@ -92,13 +99,15 @@ static int inventory() {
 bool PDAppleAVE::start(IOService *provider) {
  if(!IOService::start(provider))return false;
  uint32_t mode=0;PE_parse_boot_argn("pdave",&mode,sizeof(mode));
- if(mode!=1)return false; // only diagnostic mode implemented; other modes refuse
+ if(mode>1)return false; // no hardware mode implemented
+ gInfoLock=IOLockAlloc();if(!gInfoLock)return false;
  bzero(&gInfo,sizeof(gInfo));gInfo.abi=PDAVE_ABI_VERSION;gInfo.size=sizeof(gInfo);
- gInfo.error=inventory(); // INFO reports actual refusal; no advertised codec
- int major=cdevsw_add(-1,&methods);if(major<0)return false;
+ // Default publishes INFO only. Explicit root ioctl triggers the bounded read.
+ // Optional pdave=1 prefetches it; no boot-argument bytes are required.
+ if(mode==1){gInfo.error=inventory();gInventoried=true;}
+ int major=cdevsw_add(-1,&methods);if(major<0){IOLockFree(gInfoLock);gInfoLock=nullptr;return false;}
  void *node=devfs_make_node(makedev(major,0),DEVFS_CHAR,0,0,0600,"pdave");
- if(!node){cdevsw_remove(major,&methods);return false;}
- LOG("diagnostic only error=%u flags=0x%x TEXT=%u DATA=%u firmware=%s rtkit=%s; codec caps=0, DATA untouched",
-     gInfo.error,gInfo.flags,gInfo.segment_size[0],gInfo.segment_size[1],gInfo.firmware,gInfo.rtkit);
+ if(!node){cdevsw_remove(major,&methods);IOLockFree(gInfoLock);gInfoLock=nullptr;return false;}
+ LOG("diagnostic INFO only (lazy=%u); codec caps=0; no DATA/power/DMA access",!gInventoried);
  registerService();return true;
 }

@@ -3,8 +3,13 @@
  * aquarat/apple-m-series-ave-driver 9ab14e45281e8f61fb499b760408028171a5f2b5.
  * No Apple register values are embedded. See ../NOTICE and tools/upstream/COPYING. */
 #include "pdave/pdave_preload.h"
+#ifdef KERNEL
+#include <sys/errno.h>
+#include <libkern/libkern.h>
+#else
 #include <errno.h>
 #include <string.h>
+#endif
 static uint32_t le32(const unsigned char *p) {
     return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
 }

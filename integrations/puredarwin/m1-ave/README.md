@@ -10,7 +10,8 @@ missing cold reservations, malformed/overlapping ranges and malformed Acis
 input. Its DPE callback adapter ports upstream RMW, enable and masked readback
 order. It does not map/power hardware or establish that memory was reserved.
 The owned command/ADT copies pass2259+1270 upstream host checks; the new
-identity/preload/DPE tests and private-path/extractor checks also pass. These
+identity/preload/DPE tests and private-path/extractor checks also pass.
+The copied upstream IPC/phase-ring test adds32120 synthetic checks. These
 use synthetic/source-defined cases only, no private Apple inputs:
 
 ```
@@ -55,10 +56,21 @@ TEXT/DATA must ONLY be adopted from this machine's iBoot preload. Never upload
 those segments to Linux/M5 or reconstruct them from a firmware file.
 
 A diagnostic-only PDAppleAVE service and /dev/pdave INFO now compile against
-the PureDarwin SDK. pdave=1 reads metadata and bounded TEXT identity only when
+the PureDarwin SDK. An explicit root INFO ioctl reads metadata and bounded TEXT
+identity only when
 ADT puts both segments in DRAM below XNU physBase; it neither maps DATA nor
 programs hardware, and reports caps=0. It does not assert stage1/2 preserved
-cold DATA. pdave-info is the Linux-built client. Other boot modes refuse.
+cold DATA. pdave-info is the Linux-built client. No extra boot argument is needed (important at the native608-byte limit).
+Optional pdave=1 prefetches INFO; modes above1 refuse. No encoder is enabled.
+
+`pdave_ipc.c` ports the exact T8103/13.5 polling boot conversation through
+platform callbacks: W1C-before-scratch, DevID13/DevType10, FwIPC/heap info,
+seven strict channel descriptors and bounded ready polling. It validates all
+descriptors before initializing any ring, retains failed state and never frees
+potentially live DMA. Synthetic peer/fault tests cover malformed late
+descriptors, address bounds, register failure and finite timeouts. It SDK
+compiles but is deliberately NOT called by the diagnostic service: real cold
+preload, power, DART/DAPF and coherent memory ownership are still prerequisites.
 
 Remaining port: early reservation handoff, encoding ioctls,
 PMGR/DART/DAPF, actual scratch-register/ring IPC (not RTKit messaging), H264 IPPP
