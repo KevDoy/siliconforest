@@ -10,6 +10,7 @@ import re
 def pending_hold(text, install_reservation=False, now=None):
     now = now or datetime.now(timezone.utc)
     active = {}
+    desktop_before_reboot = {}
     owners = '[A-Z][A-Z0-9_-]*'
     agent_names = set(re.findall(r'^\S+\s+('+owners+r')[: ]', text, re.M))
     for line in text.splitlines():
@@ -20,8 +21,9 @@ def pending_hold(text, install_reservation=False, now=None):
             lower_body = body.lower()
             # A physical flock alone does not end an announced desktop install.
             # Only the same owner's actual release/correction closes its hold.
-            if (lower_body.startswith('gui.lock: install ') and
-                    ('compositor' in lower_body or 'relaunch' in lower_body)):
+            if ((lower_body.startswith('gui.lock: install ') and
+                    ('compositor' in lower_body or 'relaunch' in lower_body)) or
+                    lower_body.startswith('gui.lock: compositor relaunch')):
                 active[(owner, 'desktop-install')] = (line, [], owner)
             if (lower_body.startswith('gui.lock released') or
                     lower_body.startswith('correction: gui.lock was released at the end of the install') or
@@ -59,6 +61,7 @@ def pending_hold(text, install_reservation=False, now=None):
             if lower_body.startswith('cancelled ') and 'no reboot' in lower_body:
                 active.pop((owner, 'explicit'), None)
                 active.pop((owner, 'reboot'), None)
+                desktop_before_reboot.pop(owner, None)
             for key, (notice, markers, release_owner) in list(active.items()):
                 if release_owner in (None, owner) and any(body.startswith(m) for m in markers):
                     del active[key]
@@ -82,12 +85,25 @@ def pending_hold(text, install_reservation=False, now=None):
                 re.fullmatch(r'[a-z0-9-]+ recovered [a-z0-9-]+; m1 back in siliconforest', lower_body) or
                 (lower_body.startswith('idle-') and ' restored ' in lower_body and
                  lower_body.endswith('; m1 back in siliconforest'))):
+                # A verified matching reboot ends old desktop processes even
+                # when their owner omitted an end notice. Preserve holds that
+                # started during recovery, all core pipelines, and all holds
+                # when no actual reboot start was recorded for this owner.
+                if (owner, 'reboot') in active:
+                    for key, notice in desktop_before_reboot.pop(owner, {}).items():
+                        if key in active and active[key][0] == notice:
+                            del active[key]
                 active.pop((owner, 'reboot'), None)
                 active.pop((owner, 'gpu'), None)
                 active.pop((owner, 'gpu-session'), None)
             elif any(phrase in lower_body for phrase in
                      ['m1 reboot', 'siliconforest rebooting', 'clean reboot to linux', 'reboot now',
                       'will reboot the m1']):
+                if re.match(r'^(?:[a-z0-9-]+ )?(?:clean reboot to linux|m1 reboot now|reboot now|siliconforest rebooting)\b', lower_body):
+                    desktop_before_reboot.setdefault(owner, {
+                        key: value[0] for key, value in active.items()
+                        if key[1] == 'desktop-install'
+                    })
                 active[(owner, 'reboot')] = (line, [], owner)
             if lower_body.startswith('risky gpu test ') and ' finished:' in lower_body:
                 active.pop((owner, 'gpu'), None)

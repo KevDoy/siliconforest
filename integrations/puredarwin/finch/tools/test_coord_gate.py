@@ -171,5 +171,30 @@ class HoldTests(unittest.TestCase):
         self.assertIsNone(gate.pending_hold(text+'U DESK6 '+correction))
         self.assertIsNotNone(gate.pending_hold(text+'U PERF core.lock: GUARDED INSTALL now\nV DESK6 '+correction))
 
+    def test_verified_matching_reboot_ends_only_older_desktop_session(self):
+        text = 'T DESK6 gui.lock: install desk6 + compositor relaunch\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB will reboot the M1 in 2 minutes\nV CODEX-TB M1 back in SiliconForest\n'))
+        text += 'U CODEX-TB cio35 clean reboot to Linux\n'
+        self.assertIsNotNone(gate.pending_hold(text+'V CODEX M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'V CODEX-TB waiting for M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'V CODEX-TB M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'V PERF core.lock: GUARDED INSTALL now\nW CODEX-TB M1 back in SiliconForest\n'))
+
+    def test_recovery_preserves_newer_desktop_hold(self):
+        text = 'T DESK6 gui.lock: install old + compositor relaunch\n'
+        text += 'U CODEX-TB cio35 clean reboot to Linux\n'
+        text += 'V DESK6 gui.lock: install new + compositor relaunch\n'
+        # A repeated reboot notification must not extend the old snapshot.
+        text += 'W CODEX-TB M1 reboot now\nX CODEX-TB M1 back in SiliconForest\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNone(gate.pending_hold(text+'Y DESK6 gui.lock released\n'))
+
+    def test_actual_compositor_relaunch_without_install_word(self):
+        text = 'T DESK6 gui.lock: compositor relaunch (.next) to restore the standard state\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM8 gui.lock released\n'))
+        self.assertIsNone(gate.pending_hold(text+'U DESK6 gui.lock released\n'))
+
 if __name__ == '__main__':
     unittest.main()
