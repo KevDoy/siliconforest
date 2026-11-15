@@ -227,6 +227,7 @@ first: the kit rebuilt from the tree gave the installed `56759b9f…` byte for b
 - `e2fsck -fn` before each install: rc 4, the same findings as since the 21:06Z crash (inode 65144,
   blocks 636291-636295, group 17) plus 266 "extent tree could be narrower" optimisations, which are
   not errors. Not repaired.
+- **Installed now: k2, `sf/kernel.bin` `7ad3b4a9e6e7e3e1…`** (full hash and how to rebuild it: SF-R, "14-15 November, night"; `install/out/` holds it).
 - Revert: `sf-bootbin-install.sh <SFBOOT> --rollback` gives k1 (`35044741…`); the kits are in
   `runs/gfx2/kit-{base,k1,k2}` and the one before in `runs/m1-desktop-010/install-out-before-gfx2-avd-wifi/`.
 
