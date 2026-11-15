@@ -8,14 +8,17 @@ D=$T/compat; PY=/opt/homebrew/bin/python3
 PROGRAMS="/opt/homebrew/bin/node /usr/local/bin/claude /opt/homebrew/bin/python3 /opt/homebrew/bin/bash /opt/homebrew/bin/git /opt/homebrew/bin/vim /opt/homebrew/bin/nvim /opt/homebrew/bin/tmux"
 if [ ! -e /etc/compat-dyld-done ] && [ -r $D/dyld.new ]; then
     cat $D/dyld.new > /usr/lib/dyl2; sync
-    $PY $T/sf-dyld-install.py /usr/lib/dyl2 "$(cat $D/dyld.sha256)" $T/sf-arm64e-probe $PROGRAMS < /dev/null 2>&1 | sed 's/^/COMPAT_DYLD /'
-    $PY $T/sf-dyld-install.py /usr/lib/dyl2 "$(cat $D/dyld.sha256)" $T/sf-arm64e-probe $PROGRAMS < /dev/null 2>&1 | sed 's/^/COMPAT_DYLD again: /'
+    DP=sf-arm64e-probe; [ -r $D/dyld.probe ] && DP=$(cat $D/dyld.probe)
+    $PY $T/sf-dyld-install.py /usr/lib/dyl2 "$(cat $D/dyld.sha256)" $T/$DP $PROGRAMS < /dev/null 2>&1 | sed 's/^/COMPAT_DYLD /'
+    $PY $T/sf-dyld-install.py /usr/lib/dyl2 "$(cat $D/dyld.sha256)" $T/$DP $PROGRAMS < /dev/null 2>&1 | sed 's/^/COMPAT_DYLD again: /'
     ok "dyld replaced, the file of before kept as .old" '[ -e /usr/lib/dyld.old ] && [ ! -e /usr/lib/dyl2 ]'
     touch /etc/compat-dyld-done
 else
     echo "COMPAT_DYLD nothing to install in this boot: $(ls -l /usr/lib/dyld /usr/lib/dyld.old 2>&1 | awk '{print $5, $NF}' | tr '\n' ' ')"
 fi
-for p in sf-arm64e-probe sf-libsystem26-probe sf-kvo-probe sf-corefoundation-framework-probe sf-foundation-framework-probe sf-cf-o2-probe sf-cf-autorelease-probe; do
+# sf-dyld-probe only when the rehearsed dyld is the one it proves (dyld.probe names it); the others when staged
+DPS=; [ -r $D/dyld.probe ] && [ "$(cat $D/dyld.probe)" = sf-dyld-probe ] && DPS=sf-dyld-probe
+for p in sf-arm64e-probe $DPS sf-objc-probe sf-libsystem26-probe sf-kvo-probe sf-corefoundation-framework-probe sf-foundation-framework-probe sf-cf-o2-probe sf-cf-autorelease-probe; do
     [ -x $T/$p ] || { echo "COMPAT_PROBE $p not in this stage"; continue; }
     $T/$p > /private/tmp/p.out 2>&1; rc=$?
     echo "COMPAT_PROBE $p rc=$rc $(tail -n 1 /private/tmp/p.out | cut -c1-140)"

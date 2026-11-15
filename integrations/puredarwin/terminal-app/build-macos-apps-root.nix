@@ -3,7 +3,9 @@
 # macOS 26 SDK run on it (first: Apple's Terminal.app; GitHub issue 52,
 # docs/roadmap/issues/SF-Y-terminal-app.md): one tree rooted at /, every file from a recipe.
 #
-#   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix
+#   usr/lib/dyld, usr/lib/libSystem.B.dylib      ./build-libsystem.nix (SF_LIBSYSTEM=opt: optimised)
+#   usr/lib/libobjc.A.dylib                      ./build-libobjc.nix (only with SF_LIBOBJC=new: PD_POOL_TRACE
+#                                                read once; without it the root keeps its own libobjc)
 #   usr/lib/libFoundation.dylib                  ./build-foundation.nix
 #   usr/lib/libCoreFoundation.dylib              ./build-corefoundation.nix (-O2; CFAutorelease autoreleases)
 #   usr/lib/swift/*.dylib                        ./build-swift-runtime.nix
@@ -38,6 +40,8 @@ let
   p = pd.packages.x86_64-linux;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   libsystem = import ./build-libsystem.nix;
+  optimised = builtins.getEnv "SF_LIBSYSTEM" == "opt";
+  libobjc = if builtins.getEnv "SF_LIBOBJC" == "new" then import ./build-libobjc.nix else null;
   foundation = import ./build-foundation.nix;
   corefoundation = import ./build-corefoundation.nix { };
   swift = import ./build-swift-runtime.nix;
@@ -53,6 +57,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   mkdir -p $out/usr/lib/swift $out/${F} $out/usr/share/sf-test
   cp -L ${libsystem}/usr/lib/dyld ${libsystem}/usr/lib/libSystem.B.dylib ${foundation}/usr/lib/libFoundation.dylib $out/usr/lib/
   cp -L ${corefoundation}/usr/lib/libCoreFoundation.dylib $out/usr/lib/
+  ${if libobjc == null then "" else "cp -L ${libobjc}/usr/lib/libobjc.A.dylib $out/usr/lib/"}
   cp -L ${swift}/usr/lib/swift/*.dylib $out/usr/lib/swift/
   cp -L ${cocoa.windowserver}/usr/lib/libWindowServer.dylib $out/usr/lib/
   mkdir -p $out/${F}/AppKit.framework/Versions/A $out/${F}/AppKit.framework/Versions/C
@@ -86,7 +91,7 @@ in pkgs.runCommand "siliconforest-macos-apps-root-arm64" { nativeBuildInputs = [
   ln -s libSystem.B.dylib $out/usr/lib/libSystem.dylib      # for the links below only
   LF="-fuse-ld=${p.native-ld}/bin/ld -nostdlib -Wl,-syslibroot,$out -L$out/usr/lib -L${p.libobjc-arm64}/usr/lib -L${p.coreFoundation-arm64}/usr/lib -Wl,-platform_version,macos,26.5,26.5"
   T=$out/usr/share/sf-test; P=${./probe}
-  $CC $CF $P/sf-libsystem26-probe.c $LF $out/usr/lib/libSystem.B.dylib -o $T/sf-libsystem26-probe
+  $CC $CF ${if optimised then "-DSF_REQUIRE_OPTIMISED" else ""} $P/sf-libsystem26-probe.c $LF $out/usr/lib/libSystem.B.dylib -o $T/sf-libsystem26-probe
   $CC $CF $P/sf-kvo-probe.m $LF -lobjc -lFoundation -lCoreFoundation -lSystem -o $T/sf-kvo-probe
   $CC $CF $P/sf-cf-autorelease-probe.c $LF $out/usr/lib/libCoreFoundation.dylib -lobjc -lSystem -o $T/sf-cf-autorelease-probe
   $CC $CF $P/sf-cf-o2-probe.c $LF $out/usr/lib/libCoreFoundation.dylib -lSystem -o $T/sf-cf-o2-probe
@@ -104,6 +109,19 @@ assert magic == 0xfeedfacf and cpu == 0x0100000c, 'not a thin arm64 Mach-O'
 struct.pack_into('<I', d, 8, 0x80000002)                    # CPU_SUBTYPE_ARM64E, ptrauth ABI version 0
 open(sys.argv[2], 'wb').write(d)
 PYEOF
+  ${if libobjc == null then "" else "$CC $CF $P/sf-objc-probe.c $LF $out/usr/lib/libobjc.A.dylib -lSystem -o $T/sf-objc-probe"}
+  ${if !optimised then "" else ''
+  # the optimised dyld's proof: arm64e in its header as sf-arm64e-probe, and libobjc from DYLD_LIBRARY_PATH
+  $CC $CF $P/sf-dyld-probe.c $LF -lobjc -lSystem -o $T/sf-dyld-probe.arm64
+  python3 - $T/sf-dyld-probe.arm64 $T/sf-dyld-probe <<'PYEOF'
+import struct, sys
+d = bytearray(open(sys.argv[1], 'rb').read())
+magic, cpu, sub = struct.unpack_from('<IiI', d)
+assert magic == 0xfeedfacf and cpu == 0x0100000c, 'not a thin arm64 Mach-O'
+struct.pack_into('<I', d, 8, 0x80000002)
+open(sys.argv[2], 'wb').write(d)
+PYEOF
+  rm $T/sf-dyld-probe.arm64''}
   rm $T/sf-arm64e-probe.arm64 $out/usr/lib/libSystem.dylib
   find $out -type d -exec chmod 755 {} +
   find $out -type f \( -name '*.dylib' -o -name dyld -o -path '*.framework/Versions/*/*' -o -path '*/sf-test/*' -o -path '*/usr/bin/*' \) -not -path '*/Resources/*' -exec chmod 755 {} +

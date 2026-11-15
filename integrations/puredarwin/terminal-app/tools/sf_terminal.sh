@@ -115,7 +115,7 @@ install-stage)
   chmod -R u+w "$IN" 2>/dev/null || true; rm -rf "$IN"; mkdir -p $IN/core/replace $IN/core/test $IN/core/new $IN/direct/files
   cp $R/usr/share/sf-test/* $IN/core/test/; [ -d "$PR/usr/share/sf-test" ] && cp -n $PR/usr/share/sf-test/* $IN/core/test/
   cp $T/guest/sf-dyld-install.py $IN/core/test/
-  probe_of() { case "$1" in *libSystem*) echo sf-libsystem26-probe;; *libCoreFoundation*) echo sf-cf-autorelease-probe;; *libFoundation*) echo sf-kvo-probe;; *CoreFoundation) echo sf-corefoundation-framework-probe;; *Foundation) echo sf-foundation-framework-probe;; *IOKit) echo sf-iokit-framework-probe;; esac; }
+  probe_of() { case "$1" in *libobjc*) echo sf-objc-probe;; *libSystem*) echo sf-libsystem26-probe;; *libCoreFoundation*) echo sf-cf-autorelease-probe;; *libFoundation*) echo sf-kvo-probe;; *CoreFoundation) echo sf-corefoundation-framework-probe;; *Foundation) echo sf-foundation-framework-probe;; *IOKit) echo sf-iokit-framework-probe;; esac; }
   : > $IN/core/replace.list
   # the rehearsal's root is the image the disk root was made from: what ../../macos-compat brought to the
   # M1 since (its replaced libraries other than libSystem, its new files) goes first, so that the root
@@ -127,6 +127,8 @@ install-stage)
     cp -n $CS/test/* $IN/core/test/ 2>/dev/null || true
     cp -a --reflink=auto $CS/new/. $IN/core/new/; chmod -R u+w $IN/core/new
   fi
+  # libobjc: only when the tree has it (SF_LIBOBJC=new, ../build-macos-apps-root.nix)
+  [ -e $R/usr/lib/libobjc.A.dylib ] && CORE="$CORE usr/lib/libobjc.A.dylib"
   for f in $CORE; do
     leaf=$(basename $f); cp $R/$f $IN/core/replace/$leaf.new
     echo "/$f $(sha256sum $IN/core/replace/$leaf.new | cut -c1-64) /usr/share/sf-test/$(probe_of $f) $PROGRAMS" >> $IN/core/replace.list
@@ -134,6 +136,8 @@ install-stage)
   # SF_DYLD: a dyld that a rehearsal passed with, where the recipe's rebuild of the same source differs
   # only in its debug map (object file times) and code signature
   cp ${SF_DYLD:-$R/usr/lib/dyld} $IN/core/dyld.new; sha256sum $IN/core/dyld.new | cut -c1-64 > $IN/core/dyld.sha256
+  # the dyld's proof: sf-dyld-probe when the tree has it (the optimised dyld), else sf-arm64e-probe
+  if [ -z "${SF_DYLD:-}" ] && [ -e $R/usr/share/sf-test/sf-dyld-probe ]; then echo sf-dyld-probe; else echo sf-arm64e-probe; fi > $IN/core/dyld.probe
   # everything else; the wrappers that stand in front of a library the system has
   (cd $R && find . -type f -not -path './usr/share/sf-test/*' -not -path './nix-support/*' -printf '%P\n' | LC_ALL=C sort) | while read -r f; do
     case " $CORE usr/lib/dyld " in *" $f "*) continue;; esac
@@ -163,7 +167,7 @@ qemu)
   export SF_COMPAT_LIBSYSTEM=${SF_QEMU_LIBSYSTEM:-runs/sf-compat/stage/replace/libSystem.B.dylib.new}
   [ -s "$SF_COMPAT_LIBSYSTEM" ] || { echo "no libSystem for the rehearsal's root at $SF_COMPAT_LIBSYSTEM (SF_QEMU_LIBSYSTEM)" >&2; exit 2; }
   SF_COMPAT_STAGE=$IN/core SF_COMPAT_HOST_NEW=1 SF_COMPAT_EXTRA=$T/guest/qemu-terminal-extra.sh \
-  SF_COMPAT_MORE_FILES="$IN/core/dyld.new=$TT/compat/dyld.new $IN/core/dyld.sha256=$TT/compat/dyld.sha256" \
+  SF_COMPAT_MORE_FILES="$IN/core/dyld.new=$TT/compat/dyld.new $IN/core/dyld.sha256=$TT/compat/dyld.sha256 $IN/core/dyld.probe=$TT/compat/dyld.probe" \
     $C/tools/sf_compat_qemu.sh "$N" ${3:-};;
 install)
   [ -s $IN/core/replace.list ] || { echo "run sf_terminal.sh install-stage first" >&2; exit 2; }
@@ -177,11 +181,11 @@ install)
   new) direct new;;
   direct) direct all;;
   core)
-    SF_COMPAT_STAGE=$IN/core $C/tools/sf_compat_push.sh replace ${3:-}
+    [ "${3:-}" = dyld ] || SF_COMPAT_STAGE=$IN/core $C/tools/sf_compat_push.sh replace ${3:-}
     if [ -z "${3:-}" ] || [ "$3" = dyld ]; then
-      want=$(cat $IN/core/dyld.sha256)
+      want=$(cat $IN/core/dyld.sha256); dp=$(cat $IN/core/dyld.probe 2>/dev/null || echo sf-arm64e-probe)
       "${SSH[@]}" 'cat > /usr/lib/dyl2 && sync' < $IN/core/dyld.new
-      "${SSH[@]}" "/opt/homebrew/bin/python3 /private/tmp/sf-test/sf-dyld-install.py /usr/lib/dyl2 $want /private/tmp/sf-test/sf-arm64e-probe $PROGRAMS" < /dev/null \
+      "${SSH[@]}" "/opt/homebrew/bin/python3 /private/tmp/sf-test/sf-dyld-install.py /usr/lib/dyl2 $want /private/tmp/sf-test/$dp $PROGRAMS" < /dev/null \
         || echo "SFDYLD status $? (see the lines above; nothing is changed unless a line says installed)"
     fi;;
   app)
