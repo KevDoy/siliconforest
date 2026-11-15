@@ -20,6 +20,13 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
         if event:
             owner, body = event[1], event[2]
             lower_body = body.lower()
+            # A coordinator-declared frozen desktop blocks even CLI media
+            # work until the designated recovery owner confirms restoration.
+            # Do not infer recovery from time passing or a physical lock.
+            if owner == 'COORDINATOR' and lower_body.startswith('desktop frozen'):
+                active[(owner, 'recovery-freeze')] = (line, ['M1 back in SiliconForest'], 'CODEX-TB')
+            elif owner == 'COORDINATOR' and lower_body.startswith('m1 back in siliconforest'):
+                active.pop((owner, 'recovery-freeze'), None)
             # A kernel owner's dated reservation blocks new work immediately.
             # It is not an actual reboot epoch and has no timeout-based release.
             scheduled = re.match(r'^notice\s+[a-z0-9_-]+\s+earliest\s*(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
@@ -121,6 +128,8 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 re.fullmatch(r'[a-z0-9-]+ recovered [a-z0-9-]+; m1 back in siliconforest', lower_body) or
                 (lower_body.startswith('idle-') and ' restored ' in lower_body and
                  lower_body.endswith('; m1 back in siliconforest'))):
+                if owner in {'CODEX-TB', 'COORDINATOR'}:
+                    active.pop(('COORDINATOR', 'recovery-freeze'), None)
                 # A verified matching reboot ends old desktop processes even
                 # when their owner omitted an end notice. Preserve holds that
                 # started during recovery, all core pipelines, and all holds

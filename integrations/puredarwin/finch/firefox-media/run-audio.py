@@ -19,11 +19,11 @@ buffer=io.BytesIO()
 with tarfile.open(fileobj=buffer,mode='w',dereference=False) as tar:
     for path in a.stage.iterdir():tar.add(path,arcname=path.name)
 command='mkdir '+shlex.quote(work)+' && tar -C '+shlex.quote(work)+' -xf - && cd '+shlex.quote(work)+' && python3 compare-tests.py capture manifest.json --role candidate --output candidate.json'
-log('audio CLI START '+a.stage.name+' under gui.lock/bench; <=110s, owner guard, query +own silent units, no window/input/install/other-process signals.')
+log('audio CLI START '+a.stage.name+' under gui.lock/bench; <=110s, owner guard, own query/silent timing units, no window/input/install/other-process signals.')
 try:
     result=subprocess.run(ssh+[command],input=buffer.getvalue(),capture_output=True,timeout=70)
     (a.stage/'capture.stdout').write_bytes(result.stdout);(a.stage/'capture.stderr').write_bytes(result.stderr)
-    script="import json;from pathlib import Path;p=Path("+repr(work)+");print(json.dumps({n:json.loads((p/n).read_text()) if (p/n).is_file() else None for n in ['candidate.json','query/receipt.json','silence/receipt.json']}))"
+    script="import json;from pathlib import Path;p=Path("+repr(work)+");print(json.dumps({n:json.loads((p/n).read_text()) if (p/n).is_file() else None for n in ['candidate.json','query/receipt.json','silence/receipt.json','latency/receipt.json']}))"
     fetched=subprocess.run(ssh+['python3 -c '+shlex.quote(script)],capture_output=True,timeout=15)
     (a.stage/'fetch.stderr').write_bytes(fetched.stderr)
     if fetched.returncode==0:

@@ -8,7 +8,7 @@ from owner_input import OwnerInputGuard
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['query','silence'])
+    parser.add_argument('mode',choices=['query','silence','latency'])
     args=parser.parse_args();root=Path.cwd().resolve()
     if os.uname().sysname!='Darwin' or not str(root).startswith('/private/var/db/sffinch/'):
         raise ValueError('Fresh reviewed M1 prefix required')
@@ -17,7 +17,7 @@ def main():
     child=None
     try:
         guard=OwnerInputGuard();report['owner_before']=guard.before
-        argv=[str(root/'bin/audio-media-probe')]+(['--silence'] if args.mode=='silence' else [])
+        argv=[str(root/('bin/audio-latency-probe' if args.mode=='latency' else 'bin/audio-media-probe'))]+(['--silence'] if args.mode=='silence' else [])
         with (output/'stdout').open('wb') as out,(output/'stderr').open('wb') as err:
             guard.check()
             child=subprocess.Popen(argv,stdout=out,stderr=err,start_new_session=True)

@@ -8,6 +8,22 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_coordinator_freeze_requires_actual_recovery_owner_marker(self):
+        text="T COORDINATOR: desktop FROZEN since ~23:20Z; no work until 'M1 back in SiliconForest' is logged.\n"
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB waiting for M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U OTHER M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB gui.lock released\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB M1 back in SiliconForest; recovery verified\n'))
+        self.assertIsNone(gate.pending_hold(text+'U COORDINATOR: M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB cio29 recovered qualified29; M1 back in SiliconForest\n'))
+    def test_frozen_marker_does_not_expire_or_override_other_holds(self):
+        from datetime import datetime,timezone
+        text='T COORDINATOR: desktop FROZEN since23:20\n'
+        self.assertIsNotNone(gate.pending_hold(text,now=datetime(2030,1,1,tzinfo=timezone.utc)))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM8 core.lock: GUARDED INSTALL now\nV CODEX-TB M1 back in SiliconForest\n'))
+    def test_quoted_freeze_is_not_actual_coordinator_event(self):
+        self.assertIsNone(gate.pending_hold('T CODEX quoted COORDINATOR: desktop FROZEN\n'))
     def test_explicit_preboot_offer_requires_runtime_to_fit(self):
         from datetime import datetime,timezone
         now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
