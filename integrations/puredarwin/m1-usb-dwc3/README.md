@@ -124,3 +124,17 @@ retention and counter-overflow quarantine, plus the actual PMGR extension with
 malformed/unknown/active/auto/mapping-failure fixtures. Existing DMA/lifetime,
 all-mode ATC and DP clock/timeout suites pass. Neither these tests nor the SDK
 build establishes M1 gate state, TBT link, NHI DMA or dock PCI enumeration.
+
+
+The next diagnostic candidate snapshots the retained ATC tuning register
+addresses, with a maximum512 entries. It validates every compact group and
+the entire address list before reading any calibration register. Records are
+three little-endian32 words: window0/core or1/AXI2AF, offset, actual value.
+It reads no fuse-controller register, firmware storage or arbitrary address.
+There is one capture after exclusive TBT/USB4 PHY configuration while prior
+ACIO is proved off and before committing the client lease; later captures
+require the live owner/token through the existing bounded snapshot command.
+The pre-ACIO and later properties have independent error/count fields. No
+mode/rate write or timer is added. Values are live device calibration evidence
+and must remain in ignored private captures. Native SDK/collection builds and
+host ATC suites pass; this readback extension is not installed yet.

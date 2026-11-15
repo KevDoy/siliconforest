@@ -263,6 +263,8 @@ new timer, worker, register write or authorization. `link-query-count` counts
 the one startup query plus accepted explicit queries; errors remain in the
 existing query properties. Build `build-snapshot-tool.nix` for the native
 `pd-cio-snapshot` CLI; `--deny-unprivileged` drops credentials and requires
-rejection with no count change. Driver/tool SDK builds pass; hardware and
-privilege-boundary qualification are pending. This is a diagnostic interface,
+rejection with no count change. CIO11 qualifies this interface on the M1: UID65534 receives NotPrivileged
+with count1->1; root succeeds with count1->2. The late real read still shows
+both physical ports UNPLUGGED/state7 and no remote router. NHI/RTKit and the
+standard desktop remain healthy, with quarantine clear. This is a diagnostic interface,
 not evidence of a trained link or a dock router.

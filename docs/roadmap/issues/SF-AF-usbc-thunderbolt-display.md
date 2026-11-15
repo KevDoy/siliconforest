@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 09:44Z)
+## Current target and observed state (owner change; updated 09:56Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,7 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO10, source `052169534`, capsule `ae6f7b5af0de…`,
+**Observed in Darwin:** non-AVE CIO11, source `6e6646210`, capsule `691226d7fbda…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -24,7 +24,9 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at09:44:05Z. CD321x power7 was changed to S0 with the bounded
+lock release at09:53:24Z. An explicit late snapshot also reports state7/remote0;
+UID65534 was denied without incrementing the query count, while root completed
+one request and advanced it1->2. CD321x power7 was changed to S0 with the bounded
 SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
 or `pdave` argument.
 
@@ -1297,3 +1299,38 @@ reset also writes enable+0xfc and +0x100, the latter overlapping the TCR0
 address in this register layout; its actual active Linux state needs to be
 compared before adapting the bank-reset helper. No PCIe-C parameter probe or
 DART write has been performed by this stream.
+
+
+### CIO11 explicit read qualified, active Linux PCIe-C state (09:53Z)
+
+CIO11 returned to the standard desktop09:53:22Z, reader reaped09:53:24Z.
+The actual UID65534 request was rejected with NotPrivileged and count1->1;
+root succeeded with count1->2. The late physical-port capability reads still
+report UNPLUGGED/state7 on both lanes, error0 and no remote router. NHI/RTKit
+remain ready, quarantine clear. The main block is link training, not merely
+an early snapshot or a missing discovery event. Dock router/authorization,
+PCI endpoints, Ethernet, USB and external display remain unobserved in Darwin.
+
+During the same normal Linux visit, a bound controller and authorized active
+TS3/I210 guarded the PCIe-C capture. A root-port UP check preceded ordered,
+nonposted DART reads; parameter registers were excluded. The active64-stream
+bank has TCR0/8/16/24/32 at `0x80`, others zero, no ERROR.FLAG, global enable
+at+0xfc `0xffffffff` and+0x100 `0x80` (the latter is also TCR0). RID2SID
+entries prove the five bus3..7/device0 endpoints use SID0 and intermediate
+bus2/device1..4 bridges use SID8/16/24/32. Thus a native mapper must account
+for bridge streams as well as the shared endpoint stream. Raw TTBRs and all
+register captures remain private. No Darwin PCIe-C DART write has occurred.
+
+The next USB-provider-only source candidate reads at most512 calibration
+registers derived from the retained validated common/CIO lane groups, plus
+the analog registers already used by fuse-derived setup. It preflights the
+complete bounded list before reads, maps no new register window and never
+reads the fuse controller or firmware storage. One snapshot runs after PHY
+configuration with prior ACIO proved off and before client-lease commit;
+the other runs through the existing live owner/token query. Independent
+pre-ACIO/later counts and errors make partial results explicit. Linux will
+read the matching live-DT register list under the established active-dock
+guard, with masks/expected values kept private for comparison. Differences
+may be consequences of firmware training and must not be blindly written
+back. Native SDK/collection, ATC host suites and repository checks pass;
+this extension is not installed yet. No timer or mode/rate write is added.

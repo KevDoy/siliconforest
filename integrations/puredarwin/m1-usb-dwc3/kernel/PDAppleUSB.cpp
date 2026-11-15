@@ -119,6 +119,7 @@ class PDAppleUSB : public IOService {
     int beginAlt(pd_usbc_phy_mode,bool);
     int stopAlt();
     int phyRequest(pd_usbc_phy_request *);
+    int snapshotCalibration(bool beforeACIO=false);
     void queueRevoke();
     static IOReturn phyAction(OSObject *,void *,void *,void *,void *);
     static IOReturn stopAction(OSObject *,void *,void *,void *,void *);
@@ -237,6 +238,54 @@ const void *PDAppleUSB::getLane(void *ctx,const char *path,const char *name,size
     }
     *bytes=data->getLength();return data->getBytesNoCopy();
 }
+int PDAppleUSB::snapshotCalibration(bool beforeACIO)
+{
+    // Retained, validated runtime tuning only. Never read the fuse controller,
+    // firmware storage, arbitrary addresses, or a window outside this lease.
+    if(lease.mode!=PD_USBC_PHY_TBT && lease.mode!=PD_USBC_PHY_USB4)return EOPNOTSUPP;
+    auto addresses=OSData::withCapacity(4096);auto samples=OSData::withCapacity(6144);
+    if(!addresses || !samples){OSSafeReleaseNULL(addresses);OSSafeReleaseNULL(samples);return ENOMEM;}
+    auto addAddress=[&](uint32_t window,uint32_t offset)->int {
+        PDMmio &mmio=window?axi:core;
+        if(window>1 || !mmio.va || mmio.len<4 || (offset&3) || offset>mmio.len-4)return EINVAL;
+        if(addresses->getLength()/8>=512)return EOVERFLOW;
+        uint32_t pair[]={window,offset};return addresses->appendBytes(pair,sizeof(pair))?0:ENOMEM;
+    };
+    auto addGroup=[&](OSData *data,unsigned span,unsigned base,unsigned window)->int {
+        if(!data || !data->getLength())return ENOENT;
+        const auto raw=(const uint8_t *)data->getBytesNoCopy();
+        int ret=pd_atc_tunable_validate(raw,data->getLength(),span);if(ret)return ret;
+        for(unsigned n=0;n<data->getLength();n+=12){
+            ret=addAddress(window,base+(pd_atc_le32(raw+n)&0xffffff));if(ret)return ret;
+        }
+        return 0;
+    };
+    int ret=0;
+    for(unsigned i=0;!ret && i<10;++i){
+        if(!common[i] && groups[i].optional)continue;
+        ret=addGroup(common[i],0x4000,groups[i].base,i==0?1:0);
+    }
+    static const struct {const char *name;unsigned base;} lanes[]={
+        {"tunable_CIO_LN0_AUSPMA_TX_TOP",0xc000},{"tunable_CIO_LN0_AUSPMA_RX_TOP",0x9000},
+        {"tunable_CIO_LN0_AUSPMA_RX_SHM",0xb000},{"tunable_CIO_LN0_AUSPMA_RX_EQ",0xa000},
+        {"tunable_CIO_LN1_AUSPMA_TX_TOP",0x13000},{"tunable_CIO_LN1_AUSPMA_RX_TOP",0x10000},
+        {"tunable_CIO_LN1_AUSPMA_RX_SHM",0x12000},{"tunable_CIO_LN1_AUSPMA_RX_EQ",0x11000}
+    };
+    for(unsigned i=0;!ret && i<sizeof(lanes)/sizeof(lanes[0]);++i)
+        ret=addGroup(laneData?OSDynamicCast(OSData,laneData->getObject(lanes[i].name)):NULL,0x1000,lanes[i].base,0);
+    static const uint32_t analog[]={0x2a38,0x2aa4,0xa04,0x2a20,0x222c,0x22a4,0x2220};
+    for(unsigned i=0;!ret && i<sizeof(analog)/sizeof(analog[0]);++i)ret=addAddress(0,analog[i]);
+    // Complete validation/capacity proof before the first calibration read.
+    for(unsigned n=0;!ret && n<addresses->getLength();n+=8){
+        uint32_t row[3];memcpy(row,(const uint8_t *)addresses->getBytesNoCopy()+n,8);
+        row[2]=(row[0]?axi:core).r32(row[1]);
+        if(!samples->appendBytes(row,sizeof(row)))ret=ENOMEM;
+    }
+    if(!ret && (!setProperty(beforeACIO?"phy-pre-acio-calibration-registers":"phy-calibration-registers",samples) ||
+        !setProperty(beforeACIO?"phy-pre-acio-calibration-count":"phy-calibration-count",(uint64_t)(samples->getLength()/12),32)))ret=ENOMEM;
+    addresses->release();samples->release();return ret;
+}
+
 int PDAppleUSB::priorACIOOff()
 {
     // A stopped DWC3 is not proof of stopped ACIO. Check before even
@@ -570,6 +619,12 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
     }
     if (!ret) tunnel.configured=target==PD_ATC_MODE_TBT || target==PD_ATC_MODE_USB4;
     if (!ret) setProperty("phy-start-stage","configured");
+    if(!ret && tunnel.configured){
+        // Broker owns the calibrated PHY, prior ACIO was proved off, and
+        // this lease has not yet been committed to an NHI producer.
+        int diag=snapshotCalibration(true);
+        setProperty("phy-pre-acio-calibration-error",(uint32_t)diag,32);
+    }
     // DWC3 stays reset and unpublished in all three exclusive alt modes.
     return ret;
 }
@@ -684,7 +739,8 @@ int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
             setProperty("phy-snapshot-values",values,sizeof(values)) &&
             setProperty("pipe-snapshot-offsets",pipeOffsets,sizeof(pipeOffsets)) &&
             setProperty("pipe-snapshot-values",pipeValues,sizeof(pipeValues));
-        ret=ok?0:ENOMEM;
+        ret=ok?snapshotCalibration():ENOMEM;
+        setProperty("phy-calibration-error",(uint32_t)ret,32);
         break;
     }
     default:ret=EINVAL;
