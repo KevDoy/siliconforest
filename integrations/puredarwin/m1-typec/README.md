@@ -7,12 +7,21 @@ connection bits in IOKit. It is inert without `pdtypec=1`, and requires T8103,
 J293 and the expected preserved HPM node/address. The installed loader prunes
 port 0 to protect the serial cable.
 
-This is **not USB host support**. There is no Type-C setup, role/mux change,
-ATC PHY, USB DART, DWC3 or xHCI start yet. USB/TB/DP properties describe what
-the CD321x reports; they do not mean the corresponding host path is running.
-No PD controller writes/4CCs/IRQ clears are issued. I2C0's PMGR clock and
-FIFO setup are written by the shared transport; this is not a read-only MMIO
-probe. Only register-index writes followed by reads are sent to HPM1.
+This provider reports the negotiated Type-C state; PHY/DWC3/ACIO consumers
+own their respective hardware startup. Published USB/TB/DP bits alone do not
+establish a working host, tunnel or display.
+
+The next source candidate adds Linux's initial S0 check on the preserved
+port1. It requires APP firmware, reads SYSTEM_POWER_STATE and sends `SSPS`
+with a one-byte S0 payload only when the controller is not already in S0.
+It refuses a busy foreign command, bounds completion by one second and an
+iteration cap, sleeps between reads, handles rejection/timeout, and requires
+an actual S0 readback before publishing a service or cable snapshot. It makes
+no periodic command retry. No role swap, mux write, interrupt acknowledge,
+firmware update or transaction to port0 is added. The command transport uses
+the existing serialized I2C engine and Linux's length-prefixed framing.
+This initialization is source/host-tested, **not hardware-qualified yet**.
+CIO09 remains the installed non-AVE kernel while the candidate builds.
 
 Build: `nix-build build-kext.nix --no-out-link`. The experimental collection
 is `build-kc.nix`; it retains the disk/reboot base and adds one kext. Pack
@@ -22,7 +31,10 @@ shared install/out; install/reboot follows SF-AF and coordination RULES.
 
 Host test: `host-test/run.sh` checks the actual block decoder's length/error
 semantics, little-endian parsing and truncation boundaries under sanitizers.
-It does not emulate CD321x or establish hardware support. Kext lifetime:
+A second test exercises the actual S0 helper with callback hardware models:
+already-S0 sends no command; S3/S4/S5, every I/O failure, foreign busy and
+invalid commands, rejection, failed final readback, deadline and stalled-clock
+bounds. These host models do not establish CD321x hardware support. Kext lifetime:
 timer callback runs on its workloop, samples serialize on the bus lock;
 stop cancels/removes the timer before mappings and locks are freed.
 

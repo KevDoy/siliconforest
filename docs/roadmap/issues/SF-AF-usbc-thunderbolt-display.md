@@ -1229,3 +1229,33 @@ remain fixed and no AVE is included. This candidate is not yet installed.
 The normal Linux installation visit will read matching ATC/PIPE offsets and
 the active port1 host-router registers, guarded by a bound NHI, an authorized
 up TS3 Plus and the actual I210 endpoint. Raw captures remain private.
+
+
+### CIO09 observed comparison and next Type-C initialization (09:36Z)
+
+CIO09 (`09c6b7c6b`, capsule `4c10751c6847…`) returned to the standard
+SiliconForest desktop at09:31:33Z; the UART reader was reaped09:31:34Z.
+NHI/RTKit remain ready, quarantine is clear, and the leased PHY query and
+NHI link query succeeded exactly once. The collection has57 modules, noAVE
+and no `pdave` argument. Both physical lanes still report UNPLUGGED/state7
+and no remote router. No downstream dock or endpoint functionality is claimed.
+
+The active Linux TS3/I210 capture and native diagnostic match all ten ATC
+core registers, including lane/crossbar, power/reset, lane FSM and PLL clock
+controls, and both read back Apple cable word `0x411`. PIPE mux/request/ack
+also match. PIPE AON+0x1c differs in bit5, and NONSELECTED+0x20 in bit15.
+These differences are observations, not a cause: the pinned Linux code
+explicitly leaves dummy-PHY enable unchanged on T8103, and the AON bit is not
+identified by that driver. No speculative write to either bit is planned.
+
+An independent missing initialization step is now ported from the pinned
+`cd321x_switch_power_state` and command helper: on port1 with APP firmware,
+read SYSTEM_POWER_STATE; already-S0 performs no command; otherwise send the
+one-byte S0 `SSPS` task and require its completion/result and actual S0
+readback before publishing Type-C state. A busy foreign command is refused.
+The one-second deadline plus iteration bound, sleeping between reads, and
+no periodic retry prevent an idle command loop. Any error prevents PHY/ACIO
+admission. Host ASan/UBSan exercises the actual helper, including every I/O
+failure and frozen-clock bound. Native SDK/collection and all six repository checks pass, zero overlaps,
+only TypeC UUID changed and other56 fixed; this step is not yet installed and is not claimed as the missing
+link's cause. The next collection freezes every CIO09 module except TypeC.

@@ -6,11 +6,14 @@
  * Author: Heikki Krogerus <heikki.krogerus@linux.intel.com>
  * Copyright (C) The Asahi Linux Contributors
  *
- * First porting step: observe only the preserved port 1. No 4CC, PD register
- * write, IRQ acknowledge, role/PHY change, or port-0 transaction is sent.
+ * Port 1 only: perform the Linux S0/SSPS initialization when necessary,
+ * then observe negotiated state. No role swap, IRQ acknowledge, firmware
+ * update, mux write or port-0 transaction is sent.
  */
 #include "pd_i2c.h"
 #include "pd_cd321x.h"
+#include "pd_cd321x_power.h"
+#include <mach/mach_time.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
@@ -31,6 +34,11 @@ class PDAppleTypeC : public IOService {
     uint32_t lastStatus, lastData, lastVdo, lastFlags, samples, failures;
     bool valid;
     int blockRead(uint8_t reg, void *dst, unsigned len);
+    int blockWrite(uint8_t reg,const void *src,unsigned len);
+    static int powerRead(void *p,uint8_t reg,void *dst,size_t len) { return ((PDAppleTypeC *)p)->blockRead(reg,dst,(unsigned)len); }
+    static int powerWrite(void *p,uint8_t reg,const void *src,size_t len) { return ((PDAppleTypeC *)p)->blockWrite(reg,src,(unsigned)len); }
+    static uint64_t powerNow(void *) { uint64_t ns;absolutetime_to_nanoseconds(mach_absolute_time(),&ns);return ns/1000000; }
+    static void powerSleep(void *,unsigned ms) { IOSleep(ms); }
     void sample();
     static void tick(OSObject *owner, IOTimerEventSource *source);
 public:
@@ -74,6 +82,14 @@ int PDAppleTypeC::blockRead(uint8_t reg, void *dst, unsigned len)
     PDI2CMsg msg[2] = {{address, false, &reg, 1}, {address, true, wire, len + 1}};
     int ret = bus.transfer(msg, 2);
     return ret ? ret : pd_cd321x_unpack(wire, len + 1, dst, len);
+}
+
+int PDAppleTypeC::blockWrite(uint8_t reg,const void *src,unsigned len)
+{
+    if(!src || !len || len>PD_TPS_MAX_LEN)return EINVAL;
+    uint8_t wire[PD_TPS_MAX_LEN+2];wire[0]=reg;wire[1]=(uint8_t)len;
+    memcpy(wire+2,src,len);
+    PDI2CMsg msg={address,false,wire,len+2};return bus.transfer(&msg,1);
 }
 
 void PDAppleTypeC::sample()
@@ -146,7 +162,8 @@ bool PDAppleTypeC::start(IOService *provider)
     if (!super::start(provider)) return false;
     setProperty("port-index", 1, 32);
     setProperty("port-label", "USB-C Left-front");
-    setProperty("observer-only", true);
+    setProperty("observer-only", false);
+    setProperty("setup-policy","port1-S0-only");
     setProperty("hpm-path", hpmPath);
     setProperty("error-count", (uint32_t)0, 32);
     if (!bus.attach("/arm-io/i2c0", 100000)) {
@@ -162,8 +179,17 @@ bool PDAppleTypeC::start(IOService *provider)
     }
     setProperty("vendor-id", pd_cd321x_le32(vid), 32);
     setProperty("firmware-mode", mode, sizeof(mode));
-    LOG("port 1 vendor=%08x mode=%c%c%c%c; port 0 reserved, no PD setup or mux writes",
-        pd_cd321x_le32(vid), mode[0], mode[1], mode[2], mode[3]);
+    if(memcmp(mode,"APP ",4)) { LOG("port1 not APP; no SSPS or PHY admission");return false; }
+    pd_cd321x_power_io io={this,powerRead,powerWrite,powerNow,powerSleep};
+    pd_cd321x_power_result power={};ret=pd_cd321x_ensure_s0(&io,&power);
+    setProperty("system-power-before",(uint32_t)power.before,32);
+    setProperty("system-power-after",(uint32_t)power.after,32);
+    setProperty("system-power-command-issued",power.command_issued);
+    setProperty("system-power-polls",(uint32_t)power.polls,32);
+    setProperty("system-power-error",(uint32_t)ret,32);
+    LOG("port1 S0 before=%u after=%u SSPS=%u polls=%u error=%d; port0 reserved",
+        power.before,power.after,power.command_issued,power.polls,ret);
+    if(ret)return false; // No state publication, PHY or ACIO start after failed setup.
     loop = IOWorkLoop::workLoop();
     timer = IOTimerEventSource::timerEventSource(this, tick);
     if (!loop || !timer || loop->addEventSource(timer) != kIOReturnSuccess)
