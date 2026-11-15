@@ -138,7 +138,30 @@ The last four runs (`crfo1/2`, `crfn1/2`) were on AppKit 4cf85b64 (the nix build
 each, Activity Monitor 492 random actions and Terminal 444, `MallocScribble=1`, under `sf-catch`: no crash report, no
 exception. Terminal's figures, installed then 0130 (`term-fig.py`, two rounds each): launch to the first commit
 319-430 ms then 300-373 ms; echo 2-8 ms (52 ms once, the first key) then 4-9 ms; `seq 1 300000` 1.019/1.044 s then
-0.982/1.032 s.
+0.982/1.032 s; a wheel step over the flood's output to its commit 14-16 ms then 14-23 ms (median 15 and 14).
+Installed 08:30Z (direct, `.pre-t6` kept: the file from before TERM6): AppKit 4cf85b64, with `/usr/sbin/lsof`
+832cc60c (new, `tools/sf-lsof.c`, below). After-install checks on my own processes (`shots/inst5-sheet.png`): Terminal,
+Preferences opened/closed/reopened, Inspector, a tab, the colour panel, the Shell menu; Activity Monitor and its
+inspector opened and closed, alive. Revert: `ln -f <path>.pre-t6 <path>.back && mv -f <path>.back <path>`; `rm
+/usr/sbin/lsof`.
+
+**Regression, reverted 08:5xZ (the owner's report: "the text is all broken").** After a few minutes Activity Monitor's
+process names and figures came out garbled. Cause: 0130's layout cache for drawn strings keeps two generations; when the
+current one filled (800 strings: a few minutes of refreshes) it let go of the older one while a layout just found
+there was about to be drawn and kept again, so text was drawn from freed layout managers (use after free). The checks
+before the install were fresh launches of 15-140 s, before the first turnover: a fresh capture of 0130 matched the
+build before pixel for pixel. Reproduced with the generation size forced to 30 (`PD_TYPESET_LIMIT=30`): 0130 ended with
+SIGSEGV within 20 s; with the fix (cocoa 0131: the layout found is kept across the turnover) it drew correctly. The
+AppKit of before (6ea19cb4, 0127/0128) was put back at once. From now on every install is preceded and followed by
+`runs/sf-term6/visgate.sh` (Activity Monitor after refreshes, its five tabs, scrolled, a column made wider, the inspector's
+three tabs; Terminal's window, a tab, the Shell menu, Preferences), captured for the build before and the new one in the
+same hold and compared side by side (`visdiff.py`), and looked at.
+Fixed build: robustness pass with the generation size 30 (a turnover every few seconds) and `MallocScribble=1`: Activity
+Monitor 240 s, 432 random actions, alive, no report (Terminal's run was cut short by my own timeout). Visual check against
+the reverted build in one hold (`vref`/`vfix`, 15 views each): the same text; the differences are the changing figures.
+Installed 09:3xZ (direct): AppKit 62b9520a (0130 + 0131, the nix build). The same visual check on the installed files
+(`vinst`): Activity Monitor's tabs, scrolled, a column made wider and the inspector as before; Terminal's window, tab,
+menu and Preferences as before (two crops differ in where the check's click landed, not in what was drawn).
 
 What it was, from `sf-prof` profiles of the drag (`shots/cr1`, `crp25`..`crp32`):
 - each drag event ran `-tile`, which reloads every row (`noteNumberOfRowsChanged`); events were taken one by one,
