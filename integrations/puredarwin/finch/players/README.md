@@ -25,7 +25,8 @@ VLC plugin gaps filed to TERM6: strong AddressBook/ScriptingBridge/WebKit loads,
 CAOpenGLLayer, five AppKit constants, three display fade functions plus OpenGL
 acceleration query, Foundation NSAppleScript and CoreServices catalog/handler
 functions. The auhal plugin has no actual missing CoreAudio import in this scan.
-The VideoToolbox plugin has four field/deinterlace keys not yet supplied.
+The four VideoToolbox field/deinterlace keys are now installed and match native
+M5. Unsupported deinterlacing returns -12900/null; software fallback is required.
 Standalone plugin @executable_path diagnostics must be evaluated in the real app
 entry context; missing Sparkle/libvlccore paths there are not proven app gaps.
 
@@ -64,3 +65,32 @@ REA confirmed original thin arm64 entry identity; its Mach-O utility requires
 macOS and deep providers are unavailable on this Linux session. No REA execution
 or decompilation claim is made. sf_gapscan and actual M1 stderr are the relevant
 import/startup evidence here. Preserve failed receipts under runs/sffinch/.
+
+A separate bounded headless control (`prepare.py --minimal-headless`,
+`launch.py --headless`) retains13 actual vendor plugins, moving excluded copies
+outside the app search while leaving the verified original untouched. Dummy
+interface/video are explicit; auhal and avcodec remain real. Our Linux-built
+entry has an opt-in20s alarm, and headless mode refuses capture. In v2 on the
+M1 the real engine loaded25 modules, opened the own2s MP4 with60 H264 video
+samples/95 AAC packets, instantiated avcodec decoders and exited0. These are
+container/engine observations, not a qualified rendered/decoded frame count.
+No player window exists in this control. AUHAL enumerated real devices but
+rejected CurrentDevice272 with-10851: the retained PD unit accepted only its
+0x40 default alias. A source fix for actual validated output IDs is staged under
+../AudioToolbox/units; native same-byte probe passes, M1 prefix qualification is
+pending. `--audio-prefix` selects only the reviewed AudioToolbox framework in
+this stage's audio-prefix directory; generated CoreAudio is never staged.
+
+With the actual retained AUHAL candidate, v3 logs analog output opened; its
+video output failed because the CLI plugin selection omitted libvdummy. Its
+direct run later ended SIGSEGV after main logged0, preserved as a failure.
+V4 adds actual vdummy and supporting configuration modules, opt-in own-process
+HAL readFrame logging and an external sf-catch direct-run trace. It receives
+its first real decoded picture using vdummy, reports104448 HAL-consumed frames
+in the open-a run (104960 in direct), then the direct trace exits0/no exception.
+The HAL count includes device buffering/silence and is not a decoded-AAC sample
+count. Neither result establishes a window or screen capture. Exact frame
+statistics remain pending: the attempted rc alias does not exist on macOS;
+upstream only defines it on Windows. Fresh v5 uses the actual oldrc module and
+reads only its stats command through our private stage socket. No screen input,
+playback-changing control or canonical provider change is involved.

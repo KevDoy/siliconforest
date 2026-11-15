@@ -19,6 +19,7 @@ in pkgs.stdenv.mkDerivation {
   export DARWIN_SDK_ROOT=${sdk}
   cp ${mainSource} darwinvlc.m
   cp ${./SFVLCMain.h} SFVLCMain.h
+  cp ${./SFVLCHAL.h} SFVLCHAL.h
   chmod u+w darwinvlc.m
   python3 ${./entry-log.py} darwinvlc.m
   substituteInPlace darwinvlc.m --replace-fail '#include <vlc/vlc.h>' '#include "SFVLCMain.h"' --replace-fail '#include <vlc_common.h>' '/* public declarations supplied above */' --replace-fail '#include <vlc_charset.h>' '/* own CF string adapter supplied above */'
@@ -27,7 +28,7 @@ in pkgs.stdenv.mkDerivation {
  installPhase=''
   mkdir -p $out/bin $out/share/source
   cp VLC-SiliconForest $out/bin/
-  cp darwinvlc.m $out/share/source/
+  cp darwinvlc.m SFVLCMain.h SFVLCHAL.h $out/share/source/
  '';
  dontFixup=true;dontStrip=true;
 }

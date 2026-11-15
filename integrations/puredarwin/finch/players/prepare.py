@@ -14,6 +14,7 @@ def main():
     ap.add_argument('--system-compat',type=Path,help='Reviewed own legacy errno-table facade output')
     ap.add_argument('--bundle-id',help='Private stage identity, to avoid reusing another staged instance')
     ap.add_argument('--entry-program',type=Path,help='VLC original main rebuilt on Linux with upstream root option')
+    ap.add_argument('--minimal-headless',action='store_true',help='Explicit CLI-only module selection; no GUI/playback claim')
     a=ap.parse_args()
     known={r['name']:r for r in json.loads(Path(__file__).with_name('downloads.json').read_text())}
     row=known[a.download.name]
@@ -22,6 +23,18 @@ def main():
     if a.stage.exists():raise ValueError('Use a new stage')
     (a.stage/'Applications').mkdir(parents=True)
     shutil.copytree(a.bundle,a.stage/'Applications'/a.bundle.name,symlinks=True)
+    if a.minimal_headless:
+        selected={'dummy','avcodec','mp4','filesystem','packetizer_h264','packetizer_mpeg4audio',
+                  'auhal','audio_format','float_mixer','samplerate','swscale','logger','console_logger',
+                  'oldrc','vdummy','hotkeys','equalizer','scaletempo','subtitle','stream_out_transcode'}
+        plugins=a.stage/'Applications/VLC.app/Contents/MacOS/plugins'
+        disabled=a.stage/'disabled-plugins';disabled.mkdir()
+        wanted={'lib'+name+'_plugin.dylib' for name in selected}
+        if not wanted.issubset({p.name for p in plugins.iterdir()}):raise ValueError('Incomplete CLI plugin set')
+        for path in plugins.iterdir():
+            if path.name not in wanted:shutil.move(str(path),disabled/path.name)
+        (a.stage/'plugin-selection.json').write_text(json.dumps({'mode':'headless only','enabled':sorted(wanted),
+            'note':'Full verified original is untouched. Excluded copies retained outside the app plugin search.'},indent=2)+'\n')
     if a.system_compat:
         lib=a.stage/'Applications/VLC.app/Contents/MacOS/lib'
         shutil.copy2(a.system_compat/'lib/libSFVLCSystem.dylib',lib)
