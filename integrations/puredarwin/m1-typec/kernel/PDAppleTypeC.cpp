@@ -14,6 +14,7 @@
 #include <IOKit/IOService.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
+#include <IOKit/IOMessage.h>
 #include <IOKit/IOTimerEventSource.h>
 #include <libkern/OSAtomic.h>
 #include <pexpert/pexpert.h>
@@ -92,6 +93,7 @@ void PDAppleTypeC::sample()
             LOG("port 1 status read failed errno=%d (failed samples=%u)", ret, failures);
         struct pd_cd321x_snapshot snapshot = {lastStatus, lastData, samples, (uint32_t)ret};
         setProperty("port-state", &snapshot, sizeof(snapshot));
+        messageClients(kIOMessageServicePropertyChange);
         // Failed samples never become disconnects or usable role changes.
         return;
     }
@@ -121,6 +123,7 @@ void PDAppleTypeC::sample()
     valid = true;
     struct pd_cd321x_snapshot snapshot = {s, d, samples, 0};
     setProperty("port-state", &snapshot, sizeof(snapshot));
+    messageClients(kIOMessageServicePropertyChange);
 }
 
 void PDAppleTypeC::tick(OSObject *owner, IOTimerEventSource *source)

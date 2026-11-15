@@ -5,6 +5,33 @@ external display or Thunderbolt operation has been established on SiliconForest.
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
+## Current target and observed state (owner change, 2026-11-15 05:37Z)
+
+The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
+now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
+retained source paths, deferred until the owner makes that hardware available;
+no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
+its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
+and PCI xHCI are operating.
+
+**Observed in Darwin:** port-1 Type-C APP/status reads and TBT-only cable
+flags; USB04 boots with internal desktop/Wi-Fi intact. **Not observed:** NHI
+up, router authorization, any dock PCI function, Ethernet link/DHCP, dock USB
+enumeration/HID/read-only storage, HPD/EDID/external scanout or dock hotplug.
+The 28 CM/library/native/devres objects, PHY/calibration, DART, crossbar and
+external-display work below are source/host/SDK evidence, not those hardware
+acceptance results. DESK5's second-output userland half is built; K1–K13
+remain the kernel contract, including per-CRTC flip IDs and external overlay.
+
+The shortest path is shared port-1 PHY ownership → TBT ATC calibration →
+ACIO M3/RTKit power/reset/firmware and SID1 DART → NHI DMA/interrupts → the
+software manager's host/router enumeration and authorization → apciec1
+PCIe tunnel/root/hotplug → existing I210 and PCI xHCI drivers → dock DP-IN
+and dcpext. Each boundary requires a Darwin register/trace observation
+compared with the saved Linux TS3 trace before calling the next stage ready.
+Bench Type-C port 0 stays reserved. Ordinary Wi-Fi PCIe port 0 is a different
+namespace from that protected USB-C port; retain its working bridge.
+
 ## Reference and baseline
 
 Omacom `sources/gpu-plan/linux-aurora`, detached at
@@ -32,7 +59,9 @@ coordination log at 00:54:36Z. The first installation and its evidence are recor
 
 ## Inventory and port order
 
-Linux paths below are relative to the reference checkout.
+Linux paths below are relative to the reference checkout. This table retains
+the initial survey inventory; the current target above and acceptance order
+below supersede historical next-step notes.
 
 | piece | Linux driver + path | what exists in SiliconForest today | port plan | size/risk |
 |---|---|---|---|---|
@@ -172,18 +201,41 @@ focused SDK/host checks are recorded separately.
 
 ## Observable milestones
 
-1. **Direct USB2/3:** implement I2C/CD321x, T8103 ATC, Apple DWC3 lifecycle,
-   USB DART and xHCI binding; then ioreg enumeration, physical HID typing,
-   read-only external storage mount, actual adapter DHCP/gateway. Repeat ten
-   disconnect/reconnect cycles with UART captured, no panic or stale DMA.
-   First implementation step: reuse PA Semi I2C port, publish CD321x state
-   for the unreserved port. This step is not USB host support by itself.
-2. **Direct DP alt mode:** real dcpext instance, PHY/crossbar, HPD, link,
-   EDID/preferred mode, atomic scanout, compositor second output; replug.
-3. **TS3/Samsung:** ACIO/NHI + authorization, PCIe tunnel to actual dock
-   xHCI/Ethernet, USB device and DHCP; DP tunnel to Samsung. Dock replug.
-4. **TS4/Kensington/adapters:** inventory actual models, apply tunnel/alt-mode
-   paths appropriate to each; record hardware absent rather than passing it.
+The owner revised the acceptance order on 15 November 2026:
+
+1. **Dock PCI enumeration first.** Keep TS3 attached. Observe current TBT
+   negotiation, acquire the shared ATC lease without taking the bench port,
+   validate/power the ACIO1 M3/RTKit/DART/NHI chain and its interrupts, then
+   enumerate/authorize the actual router. Extend the existing native bridge
+   to the Type-C port-1 `apciec1` tunnel root, with separate ECAM, RID/DART,
+   MSI and downstream removal ownership. Acceptance is Darwin ioreg/PCI
+   inventory of the saved Linux endpoints: two `1b73:1100`, `1b21:1242`,
+   `8086:15d4`, and I210 `8086:1533`. No PCIe devices have appeared yet.
+2. **Dock Ethernet.** Audit/include the existing FreeBSD-derived
+   `PDFBSDem` I210 personality (currently omitted from the M1 boot set),
+   including its DMA behind the new root. Require the physical I210 to
+   attach, report link, and obtain an actual DHCP lease through pd-dhcp.
+   Check routing/resolver interaction with existing Wi-Fi. Port Linux igb
+   only if the existing em/I210 path proves insufficient.
+3. **Dock USB.** Bind the existing PCI-capable Ravyn xHCI/IOUSBFamily stack
+   to the actual controllers, with their correct PCIe DART/MSI and drain
+   lifecycle. Then ask for a USB keyboard in the TS3 Plus **front USB-A
+   rectangular port**; require enumeration and real typing. Follow with a
+   test stick in that same port and an identity-checked read-only mount.
+   Do not route these controllers through the direct USB1 DWC3 DART.
+4. **Samsung through the dock.** Bind the real ACIO DP-IN tunnel/clock and
+   shared crossbar to dcpext/DART/RTKit and the built compositor half.
+   Require HPD, EDID/preferred modes, 3840x2160 scanout on the Samsung and
+   the second connected connector/CRTC under `--outputs`, keeping the
+   panel running. K1–K13 apply; framebuffer DMA and DCP/PHY teardown must
+   drain before a tunnel or backing allocation can disappear.
+5. **Dock hotplug.** After static functionality, request ten controlled
+   unplug/replug cycles of the TS3 cable on left-front Type-C port 1,
+   captured on UART: no panic, stale DMA, stuck link, lost internal panel
+   or permanently missing Ethernet/USB/display after reconnect.
+6. **Later hardware.** Retain direct USB2/3/DWC3, USB-C DP adapter, TS4 and
+   Kensington source paths. Inventory/qualify each only when available;
+   these no longer delay dock bring-up or cause dedicated boots now.
 
 Each kernel install is one logical change on the verified base, using only
 `install/linux/sf-bootbin-install.sh`, with rollback, two-minute coordination
@@ -193,7 +245,7 @@ state in `runs/m1-coord/status-CODEX-TB.md`. Sources/captures/identifiers stay
 outside git. Ported GPL/MIT notices are retained per file and in kext NOTICE.
 
 
-## Next implementation boundary
+## Historical next implementation boundary (tc01; superseded above)
 
 The installed tc01 image is an experimental collection built by
 `m1-typec/build-kc.nix`, not a change to the default rebase collection recipe.
@@ -635,3 +687,50 @@ Read-only USB04 observation at 04:46:51Z still shows TS3-only Thunderbolt,
 and removal not blocked. No direct USB2/3 or DP flag is present. No new boot,
 controller DMA, NHI traffic or external output is claimed. Continuing with
 shared native ATC/PHY ownership and ACIO/external provider integration.
+
+
+## Dock-first replanning and idle comparison (15 November, 05:44Z)
+
+The acceptance order is now dock PCI functions, I210 link/DHCP, dock PCI
+xHCI with physical keyboard/read-only test media, Samsung DP tunnel, then
+ten dock-cable cycles. The existing em personality includes I210, and PCI
+Ravyn xHCI exists; both still need PCIe-C DMA/MSI and lifetime auditing.
+No dock function has yet enumerated in Darwin. Direct-host sources remain
+useful for shared PHY ownership, but require no further direct-only boots.
+
+One announced, UART-captured, gui.lock/bench-controlled k2/USB04 A/B restored
+the exact USB04 kernel through the normal installer. Relevant userland hashes
+were identical across the two boots. The original 120-second k2 probe hit
+its 120-second wrapper timeout: that full run FAILED. Its recovered first
+100 seconds are useful partial evidence; the restored USB04 90-second probe
+completed. Kernel_task used 2.42% of one CPU on k2 and 1.94% on USB04.
+The dominant thread was the same preexisting PDAppleNVMeRW polling worker
+(1.83% versus 1.28%). Stackshot symbolication identified its timed lock sleep;
+NVMe and all kernel modules except the USB/Type-C additions have identical
+module UUIDs. No new NHI/controller DMA was running. Aggregate idle was
+97.87%/98.26%; load near one also existed on k2. A governor-period test did
+not remove the NVMe cost; its original setting was restored.
+
+Warm fixed-work timing was 83.7 ms on both kernels; 100,000 getpid syscalls
+took 14.66 ms on both. The reported AppKit 1.5–2x slowdown was not reproduced
+by those probes and its cause is unresolved. NVMe's unchanged worker explains
+the largest measured kernel idle cost, not that reported application slowdown.
+No NVMe code, write gate or fence was changed. Avoid claiming a regression fix.
+
+A separate read-only 20-second compositor sample found pdhid-reader CPU
+0.361% of one core, main 3.496%, and Shm dropping thread 1.951%. Whole-task
+interrupt wakeups were 8,819 (441/s), platform-idle wakeups 6,650; timer bins
+2,565 and 4,218 are reported separately, not attributed solely to HID.
+DESK5 confirms 1 ms active/2 ms intermediate/4 ms quiet HID polling because
+the queue nodes have eno_select. This is a wakeup reduction opportunity;
+it does not establish the AppKit slowdown's cause. DESK owns that input loop.
+Its SIGSTOP finding is specific: minimal threaded/poll/read tests stop on
+USB04, but the live compositor continues accumulating CPU after STOP.
+The broader claim that all SiliconForest processes ignore STOP is unsupported.
+
+Source hygiene removes the USB lifecycle's redundant 100 ms snapshot poll:
+Type-C publishes a property-change message, the consumer queues a one-shot
+on its own workloop, and stop closes admission before cancelling the timer.
+The Type-C producer retains its slow 1 Hz observation. Both actual SDK kext
+builds pass. This change is uninstalled and is not a claimed cause/fix; fold
+it into the next dock kernel rather than spend a direct-only boot.

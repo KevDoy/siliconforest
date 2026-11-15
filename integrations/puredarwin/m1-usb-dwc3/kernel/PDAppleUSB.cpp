@@ -22,6 +22,7 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
+#include <IOKit/IOMessage.h>
 #include <IOKit/IOTimerEventSource.h>
 #include <pexpert/pexpert.h>
 
@@ -66,6 +67,7 @@ class PDAppleUSB : public IOService {
     IOTimerEventSource *timer;
     bool mapped, active, reversed, superSpeed, quarantined;
     uint32_t session, lastSample;
+    uint32_t acceptingSnapshots,snapshotChecks;
     int lastError;
     pd_atc_io atcIO;
     pd_dwc3_io dwcIO;
@@ -103,6 +105,7 @@ public:
     bool start(IOService *) override;
     void stop(IOService *) override;
     void free() override;
+    IOReturn message(UInt32,IOService *,void *) override;
 };
 OSDefineMetaClassAndStructors(PDAppleUSB, IOService)
 
@@ -322,6 +325,8 @@ bool PDAppleUSB::end()
 
 void PDAppleUSB::sample()
 {
+    if (!__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE)) return;
+    setProperty("snapshot-check-count",++snapshotChecks,32);
     OSObject *object=getProvider()->copyProperty("port-state");
     OSData *data=OSDynamicCast(OSData,object);
     pd_cd321x_snapshot state={};
@@ -358,7 +363,8 @@ void PDAppleUSB::tick(OSObject *owner,IOTimerEventSource *source)
 {
     PDAppleUSB *self=OSDynamicCast(PDAppleUSB,owner);
     if (!self) return;
-    self->sample(); source->setTimeoutMS(100);
+    (void)source;
+    self->sample(); // One-shot; the Type-C producer schedules the next observation.
 }
 IOService *PDAppleUSB::probe(IOService *provider,SInt32 *score)
 {
@@ -379,12 +385,28 @@ bool PDAppleUSB::start(IOService *provider)
     setProperty("super-speed-capable",true);
     loop=IOWorkLoop::workLoop(); timer=IOTimerEventSource::timerEventSource(this,tick);
     if (!loop || !timer || loop->addEventSource(timer)!=kIOReturnSuccess) return false;
+    setProperty("snapshot-event-driven",true);
+    snapshotChecks=0;
+    setProperty("snapshot-check-count",(uint32_t)0,32);
+    __atomic_store_n(&acceptingSnapshots,1,__ATOMIC_RELEASE);
     timer->setTimeoutMS(1); registerService();
     LOG("port 1 host lifecycle enabled; port 0 reserved, DP/TBT/USB4 deferred");
     return true;
 }
+IOReturn PDAppleUSB::message(UInt32 type,IOService *provider,void *argument)
+{
+    if (type==kIOMessageServicePropertyChange && provider==getProvider()) {
+        // Do not perform drain/MMIO on the producer's workloop or under its
+        // client-iteration locks. Coalesce notifications into our one-shot.
+        if (__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE) && timer)
+            timer->setTimeoutMS(1);
+        return kIOReturnSuccess;
+    }
+    return IOService::message(type,provider,argument);
+}
 void PDAppleUSB::stop(IOService *provider)
 {
+    __atomic_store_n(&acceptingSnapshots,0,__ATOMIC_RELEASE);
     if (timer) { timer->cancelTimeout(); timer->disable(); if(loop)loop->removeEventSource(timer); }
     if (!end()) { retain(); quarantined=true; LOG("stop retains failed-drain session"); }
     IOService::stop(provider);
