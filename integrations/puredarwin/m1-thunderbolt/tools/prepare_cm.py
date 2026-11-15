@@ -3,6 +3,17 @@
 """Apply explicit native-only changes to a private copy, never the pin."""
 import pathlib,re,sys
 p=pathlib.Path(sys.argv[1]);names=set()
+# Native has no NVMEM provider ABI. Disable that optional facility before
+# allocating its state; the disabled Linux nvmem_register() otherwise returns
+# EOPNOTSUPP late in tb_switch_add(), which removes an otherwise valid router.
+# Keep DROM, port initialization and every actual enumeration error intact.
+q=p/'switch.c';s=q.read_text();needle='static int tb_switch_nvm_init(struct tb_switch *sw)\n{';assert s.count(needle)==1
+q.write_text(s.replace(needle,needle+'''
+\tif (!IS_ENABLED(CONFIG_NVMEM)) {
+\t\tsw->no_nvm_upgrade = true;
+\t\treturn 0; /* NVM export/upgrade is disabled, not a successful registration. */
+\t}
+'''))
 q=p/'domain.c';s=q.read_text();needle='int tb_domain_init(void)\n{';assert s.count(needle)==1
 q.write_text(s.replace(needle,needle+'\n\tif (!pd_tb_native_ready()) return -EPROBE_DEFER;'))
 # Intel x86 Apple NHI resume device-links do not apply to the ARM platform.

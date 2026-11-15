@@ -2,7 +2,7 @@
 
 Owner: CODEX-TB. Survey started 15 November 2026. **No dock PCI/USB enumeration or external display has been established
 on SiliconForest; ACIO M3, NHI control DMA/IRQs and host-router startup
-are now observed ready.**
+are now observed ready, and both Thunderbolt lanes reach UP/CL0 in CIO25.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
@@ -15,22 +15,24 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** installed non-AVE CIO24, source `2a029b3f2`,
-capsule `91383c471306…`, installed15:13:29Z, qualified15:14:50Z, UART reaped
-15:14:51Z. Standard desktop/injection, Wi-Fi, NHI/RTKit/PHY, catalogue,
-UID and snapshot ABI checks pass. The recorded five firmware-log ACKs succeed;
-native mailbox controls exactly match Linux's active authorized TS3. It still
-stops at Phase2 with both lanes unplugged7/remote0, TS3 approval ENODEV19
-and zero PCI functions. No endpoint mapper/MSI/driver admission, AVE module
-or pdave argument is present in the57-module image. CIO23 is the qualified
-non-AVE rollback. CIO24 adds observation and the presently uninvoked PCI
-scan settling delay; it does not establish a working dock.
+**Observed in Darwin:** installed non-AVE CIO25, source `96ae5be19`,
+capsule `be6732426e81…`, installed15:25:21Z, qualified15:27:43Z, UART reaped
+15:27:45Z. The missing ACIO1 GPIO41 default is now observed fixed:
+`0x0087600e`→`0x0087622f`, matching Linux's full word. Firmware reaches
+Phase3/Connected and both lanes enter CL0/report `TB_PORT_UP=2` for the first
+time. M3 control clears to0 and TBT3/bonded PORT_CS18 becomes0x3710, both
+matching Linux without a guessed control write. The router is still absent:
+remote0, TS3 approval ENODEV19, independent PCI inventory exit2/functions0.
+No dock PCI/USB/Ethernet/display milestone is claimed. Standard desktop/
+injection, Wi-Fi, NHI/RTKit/PHY, catalogue, UID and snapshot ABI checks pass.
+All57 modules are non-AVE, no pdave argument or endpoint mapper/MSI admission;
+only the USB/PHY module changed from CIO24, the qualified non-AVE rollback.
 
-CIO23 reproduced the published USB2 baseline, changing only bit11 to match
-Linux/m1n1; this did not fix training. Its quiet60s measured kernel2.88868%
-of one CPU, aggregate97.71052% idle and24 NHI interrupts including diagnostic
-boundaries. Warm fixed-work timings remain unchanged; the reported AppKit
-slowdown's cause remains unresolved.
+Quiet60s: kernel2.44799% of one CPU, aggregate98.02729% idle,24 NHI IRQs
+including query boundaries (all22 other sources zero); compositor3.85521%
+with cleanup2.60706%, main0.85826%, HID0.38698%. Warm50M83.676–83.769ms,
+100k syscalls14.643ms. No interrupt storm or fixed-work slowdown appears;
+the reported AppKit slowdown's cause remains unresolved.
 
 **Previous CIO22 observation:** kernel source `455ea303f`,
 capsule `8f3800a8bf4c…`, qualified14:31:04Z; UART reaped before lock release
@@ -2218,14 +2220,14 @@ it does not prove firmware progress or handler completion. Training still
 reaches Phase2 only, both lanes7/remote0; actual approval returns ENODEV19
 and independent PCI inventory exit2/functions0, with no native PCI host.
 
-### ACIO1 default pinctrl gap: source, hardware result pending
+### ACIO1 default pinctrl gap: observed fix in CIO25
 
 The pinned Linux T8103 DT assigns ACIO1 `pinctrl-0=<&acio1_pins>` with AOP
 GPIO41/function1; `apple_gpio_pinmux_set` also enables input. The native path
 had no corresponding operation. The actual saved J293 ADT identifies
 `/arm-io/aop-gpio`, compatible `gpio,t8101`,42 pins, physical0x24a820000
 span0x4000, matching Linux's AOP pinctrl. GPIO39 belongs to port0 and remains
-untouched. The pin's actual Linux and Darwin control values are not yet measured.
+untouched. The first candidate's actual measurements and link result follow below.
 
 The candidate applies mask0x260/set0x220 only to GPIO41 at offset0xa4, under
 the broker gate with an actual exclusive PREPARING TBT/USB4 lease and fresh
@@ -2242,5 +2244,48 @@ ASan/UBSan checks pass all mux/input combinations, unrelated-bit preservation,
 locked mismatch/correct idempotence, inaccessible/stuck reads and asynchronous
 DATA changes. The actual native USB SDK (`gdxa8is6…`) and all six repository
 checks pass (274 Python tests,77 C groups,6 mutations). The57-module non-AVE
-collection builds with no overlap; image inspection and the target test remain
-pending. No installed pin change or training fix is claimed.
+collection builds with no overlap; actual image inspection and the target
+qualification described below subsequently pass.
+
+
+CIO25's normal Linux visit measured GPIO41=`0x0087622f`, function1/input1/
+lock0. Native startup measured `0x0087600e`→`0x0087622f`, error0; only
+function bit5/input-enable bit9 and asynchronous DATA bit0 changed. The
+firmware then logs Phase3 at10.625s, Connected10.628s, lane0 CL0 at11.236s
+and lane1 CL0 at11.245s. Both actual lane states become UP2. M3 control
+clears to0 as an outcome; no M3 clear was required. Primary PORT_CS18 now
+matches Linux0x3710; PORT_CS19 remains6 versus Linuxe (configured bit3).
+Both lane remotes remain absent and TS3 authorization returns ENODEV19;
+PCI inventory is still empty. This fixes the observed low-speed/link-start
+prerequisite, not discovery or a PCI tunnel. GPIO41 is also explicitly named
+by the saved actual ADT ACIO1 `gpio-lstx` property. Quiet60/normal desktop
+and all existing ABI/UID checks pass; no endpoint DMA or AVE is admitted.
+
+The next source audit found an optional NVM framework mismatch: native
+CONFIG_NVMEM is disabled, and the actual built `tb_nvm_add_active` returns
+-EOPNOTSUPP102. Pinned `tb_switch_nvm_add` propagates that error after router
+publication and removes the router. This is a concrete possible explanation
+for a trained link with no retained remote, not yet a captured target return.
+The native CM also has no newbus `bsddev` for its Linux device logging calls.
+The next candidate will disable optional NVM export/upgrade explicitly at
+initialization while retaining DROM/normal router setup, and route bounded
+actual CM warnings/errors to IOLog. No fabricated event, forced rescan,
+NVM write, firmware update or raw firmware capture is planned.
+
+
+The optional NVM change now passes ordinary, enumeration and explicit MSI SDK
+builds, plus all six repository checks (274 Python tests,77 C groups,6
+mutations). Native `tb_switch_nvm_init` skips NVM state allocation/version/
+export when CONFIG_NVMEM is disabled and marks upgrades disabled. It retains
+the real DROM parse, port and link setup, publication/error/teardown logic;
+no missing service is replaced with a successful registration. Actual built
+`tb_switch_add` no longer calls NVM allocation/version functions. Retimer
+NVM services remain unsupported and are not falsely registered.
+
+Actual CM warnings/errors/notices/info now use a native IOLog sink rather
+than a newbus device pointer. Its saturating64-message boot budget and
+256-byte formatting bound introduce no timer or periodic work. Upstream
+verbose debug/packet/firmware dumps remain disabled. Actual ARM64 symbols
+confirm mapper/MSI absent ordinary and enumeration, present only in the
+separate uninstalled MSI variant. The installed known-good image remains
+CIO25; no NVM-policy hardware result or retained dock router is claimed yet.

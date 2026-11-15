@@ -24,10 +24,10 @@ Next integration:
   DCP's hardcoded mailbox path; serialize platform initialization;
 - supply real generic-PHY, crossbar and Type-C mux providers to the existing
   Linux DPTX endpoint code, with cable-generation/lifetime checks;
-- extend display DMA beyond its current first-`iommus` binding so internal
-  and external scanout see the same framebuffer IOVA in both DARTs;
-- preserve mappings/backing if a DART invalidate fails; current DCP DMA
-  free paths ignore this failure and are insufficient for external teardown;
+- integrate the SDK-built mirrored display-DART binding (`2cd017c99`) with
+  the real external topology so both scanout paths see one framebuffer IOVA;
+- retain the checked DMA retirement and failure quarantine (`5e3b77534`),
+  and establish actual external producer/IRQ/work quiescence before cleanup;
 - start the M1 external IOMFB pipeline, then observe HPD/training/EDID/mode
   and a connector before DESK4's multi-output compositor integration.
 

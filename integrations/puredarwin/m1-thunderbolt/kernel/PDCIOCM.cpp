@@ -22,6 +22,19 @@
 #include <mach/mach_time.h>
 #include <sys/errno.h>
 extern "C" {
+void pd_tb_native_log(const char *format,...)
+{
+ // A finite count bounds boot-time logging even if a real error repeats.
+ static uint32_t count;
+ if(!format)return;
+ uint32_t previous=__atomic_load_n(&count,__ATOMIC_RELAXED);
+ do {
+  if(previous>=64)return;
+ } while(!__atomic_compare_exchange_n(&count,&previous,previous+1,false,__ATOMIC_RELAXED,__ATOMIC_RELAXED));
+ char text[256];va_list args;va_start(args,format);
+ vsnprintf(text,sizeof(text),format,args);va_end(args);
+ IOLog("PDAppleCIO: CM: %s",text);
+}
 // XNU libkern/sysctl.h private KPI; present in the exact installed kernel.
 int kernel_sysctlbyname(const char *,void *,size_t *,void *,size_t);
 extern char hostname[]; // actual XNU export; no compatibility-layer homonym

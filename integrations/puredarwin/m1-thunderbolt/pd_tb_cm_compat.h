@@ -11,6 +11,18 @@
 #include "pd_tb_cm_helpers.h"
 #include "pd_tb_dma_api.h"
 #include "pd_tb_nhi.h"
+/* These native Linux devices have no FreeBSD newbus bsddev. Keep actual
+ * warnings/errors visible without routing a NULL bsddev through device_printf.
+ * The implementation has a finite boot budget; no debug/payload dump enabled. */
+void pd_tb_native_log(const char *,...) __attribute__((format(printf,1,2)));
+#undef dev_err
+#undef dev_warn
+#undef dev_notice
+#undef dev_info
+#define dev_err(dev,...) do { (void)(dev);pd_tb_native_log(__VA_ARGS__); } while(0)
+#define dev_warn(dev,...) do { (void)(dev);pd_tb_native_log(__VA_ARGS__); } while(0)
+#define dev_notice(dev,...) do { (void)(dev);pd_tb_native_log(__VA_ARGS__); } while(0)
+#define dev_info(dev,...) do { (void)(dev);pd_tb_native_log(__VA_ARGS__); } while(0)
 #define crc32c pd_tb_crc32c
 #define cpu_to_be32_array pd_tb_to_be32_array
 #define be32_to_cpu_array pd_tb_from_be32_array
