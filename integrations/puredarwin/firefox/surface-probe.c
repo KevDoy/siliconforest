@@ -2,6 +2,7 @@
  * Exec-separated global ID pixel sharing; local surfaces must remain private.
  */
 #include <CoreFoundation/CoreFoundation.h>
+#include <dlfcn.h>
 #include <spawn.h>
 #include <signal.h>
 #include <stdint.h>
@@ -35,6 +36,8 @@ int main(int argc,char **argv){
   printf("FXSURFACE child expected_global=%d mapped=%d byte_mismatches=%zu pixels_equal=%d\n",expected,s!=NULL,mismatches,good);
   if(s)CFRelease(s);return good?0:1;
  }
+ int requireGPU=argc==2&&!strcmp(argv[1],"--require-gpu");
+ int (*copyGPUFD)(IOSurfaceRef)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUCopyFD");
  int failures=0;
  for(int global=0;global<=1;global++){
   CFMutableDictionaryRef props=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
@@ -45,6 +48,9 @@ int main(int argc,char **argv){
   }
   CFDictionarySetValue(props,CFSTR("IOSurfaceIsGlobal"),global?kCFBooleanTrue:kCFBooleanFalse);
   IOSurfaceRef s=IOSurfaceCreate(props);CFRelease(props);if(!s)return 2;
+  int gpuFD=copyGPUFD?copyGPUFD(s):-1;
+  printf("FXSURFACE parent global=%d gpu_backing=%d\n",global,gpuFD>=0);
+  if(gpuFD>=0)close(gpuFD);else if(requireGPU){CFRelease(s);return 4;}
   size_t size=IOSurfaceGetAllocSize(s);unsigned char *bytes=IOSurfaceGetBaseAddress(s);
   for(size_t i=0;i<size;i++)bytes[i]=(unsigned char)(i*37+(i>>5));
   char id[32],mode[8],want[32];snprintf(id,sizeof(id),"%u",IOSurfaceGetID(s));snprintf(mode,sizeof(mode),"%d",global);snprintf(want,sizeof(want),"%u",hash(s));

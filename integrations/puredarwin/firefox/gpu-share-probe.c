@@ -12,6 +12,7 @@
 #include <sys/fileport.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <errno.h>
@@ -91,6 +92,8 @@ int main(int argc,char **argv){
  struct {uint64_t size;uint32_t flags,vm_id,handle,pad;} create={.size=16384};
  if(drmIoctl(rfd,DRM_IOWR(DRM_COMMAND_BASE+5,create),&create)){perror("FXGPUSHARE GEM_CREATE");return 3;}
  int fd=-1;if(drmPrimeHandleToFD(rfd,create.handle,DRM_CLOEXEC|DRM_RDWR,&fd)){perror("FXGPUSHARE PRIME_export");return 4;}
+ void *cpu=mmap(NULL,16384,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+ printf("FXGPUSHARE dmabuf_mmap_status=%d errno=%d\n",cpu==MAP_FAILED?-1:0,cpu==MAP_FAILED?errno:0);
  fileport_t port=MACH_PORT_NULL;int fp=fileport_makeport(fd,&port);int fp_errno=errno,roundtrip=-1;
  if(!fp){roundtrip=fileport_makefd(port);if(roundtrip>=0)close(roundtrip);mach_port_deallocate(mach_task_self(),port);}
  printf("FXGPUSHARE fileport_status=%d errno=%d makefd_status=%d\n",fp,fp?fp_errno:0,roundtrip>=0?0:-1);
@@ -102,10 +105,16 @@ int main(int argc,char **argv){
  int good=!send_fd(channels[0],fd);
  for(int revision=0;revision<2&&good;revision++){
   glClearColor(0,revision?0:1,revision?1:0,1);glClear(GL_COLOR_BUFFER_BIT);glFinish();char value='0'+revision,reply=0;
+  if(cpu!=MAP_FAILED){
+   unsigned char *pixels=cpu;unsigned matches=0;
+   for(int i=0;i<SIDE*SIDE;i++)if(pixels[i*4]==(revision?255:0)&&pixels[i*4+1]==(revision?0:255)&&pixels[i*4+2]==0&&pixels[i*4+3]==255)matches++;
+   printf("FXGPUSHARE revision=%d shared_CPU_map_exact=%u/%d\n",revision,matches,SIDE*SIDE);
+  }
   good=write(channels[0],&value,1)==1&&read(channels[0],&reply,1)==1&&reply==value;
  }
  close(channels[0]);int status=0;waitpid(pid,&status,0);
- glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&texture);destroy_image(display,image);close(fd);
+ glDeleteFramebuffers(1,&framebuffer);glDeleteTextures(1,&texture);destroy_image(display,image);
+ if(cpu!=MAP_FAILED)munmap(cpu,16384);close(fd);
  struct drm_gem_close close_bo={.handle=create.handle};drmIoctl(rfd,DRM_IOCTL_GEM_CLOSE,&close_bo);close(rfd);
  printf("FXGPUSHARE transport=%s child_status=%d no_display_access=1\n",good?"SCM_RIGHTS":"failed",status);
  return good&&WIFEXITED(status)&&WEXITSTATUS(status)==0?0:9;

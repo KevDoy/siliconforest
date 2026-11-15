@@ -153,7 +153,7 @@ is0.33/0.51s (**0.99/1.51% of one core**). Summed RSS is2319.86/3487.86MiB
 (2.27/3.41GiB); shared pages are counted in multiple processes, so this is not
 physical footprint. Browser-reported process→firstPaint is3.260/2.748s; this is
 not panel latency. Baseline/Ion and baseline/optimizing Wasm prefs are true;
-actual tier execution and stock benchmark scores remain unproven.
+actual Baseline/Ion frames and initial stock benchmark scores are now recorded below.
 
 A paused-video parent sample spends41/78 samples in layer dispatch/draw,
 including GPU readback and CPU image blending. Optional QuartzCore0205 skips
@@ -193,6 +193,41 @@ Fileport creation/makefd roundtrip also returns0. Readback verifies the pixels;
 it does not transport frames. No primary DRM node, display mode or compositor
 state is touched. This proves a buffer-sharing building block, **not Firefox
 IOSurface GPU backing or zero-copy presentation**.
+
+An opt-in private IOSurface backend now stores BGRA pixels and its metadata in
+one Asahi dma-buf. Its opaque Mach port is a fileport; the existing private
+broker forwards that right without a protocol change. Allocation requires
+`SFFX_IOSURFACE_GPU=1`; default allocation stays CPU-backed. The candidate
+validates imported dma-buf handles/size/header and keeps descriptors scoped to
+the CF object's lifetime. Native M1 controls: old provider truthfully fails the
+GPU-backing requirement; candidate with the flag off preserves exact2048-byte
+global sharing and the local negative; flag on proves actual GPU backing for
+both local and global allocations, exact2048-byte cross-exec global sharing,
+local-ID denial and broker unregister0. A separate GPU/CPU coherence probe
+reads1024/1024 expected pixels through the mapped dma-buf after each green/blue
+GPU update. Firefox's CGL binding and final window presentation still use their
+old copies; the new backend alone is **not zero-copy Firefox**.
+
+Stock Speedometer3.1 completes default ten iterations at**8.39±0.43**, visible
+1280×876@1.5. MotionMark1.3 completes its stock defaults at**589.1401**, bounds
+566.4179–613.1266, fullscreen-window viewport1707×983@1.5, elapsed326.46s.
+These are each one run with the recorded private baseline, not a cross-OS
+comparison. A separate Gecko profile records actual `baseline` and `ion`
+frames in `fxJitArithmetic`. The first parser fails on omitted trailing null
+columns; raw-profile reanalysis with that parser bug fixed finds zero invalid
+rows. The old runner failure remains preserved. JetStream001 starts before its
+stock test rows exist, throws Node.insertBefore and stalls; it is explicitly
+aborted with SIGINT to its PID+start-time-verified owned runner, whose cleanup
+runs. It has no score. The next harness waits for the actual Start Test link.
+
+Native synthetic seat controls prove Command-L focuses the URL bar and
+Command-T adds a tab. Command-W discards the automation's current browsing
+context, so the remaining checks have not passed yet; the harness now switches
+back to the original owned tab before inspecting it. No physical input claim.
+The native menu class/instance geometry control finds a22-point discrepancy;
+first0206 candidate fixes the class conversion but accidentally double-counts
+that space in NSThemeFrame, leaving78px of100px content. That failed candidate
+is preserved and a corrected frame-layout variant is building.
 
 ## Gaps and ownership
 
@@ -328,8 +363,8 @@ pinned application. This routing result does not establish Firefox integration.
 | 3 quality | fonts/colour/input/menu/panels/clipboard/download/fullscreen/multiple-window checks; repeat startup/RSS/idle spread (first1/10tab measurements above); JIT, Speedometer/MotionMark/JetStream; 30-minute crash-free browsing |
 | 4 integration | qualified owner installer, actual bundle-icon dock launcher and Firefox default URL handling (windowless dispatch fixture passes) |
 
-No benchmark scores,30-minute crash-free interval, audible audio/A-V or zero-copy
-claim is made. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
+Initial Speedometer/MotionMark scores are recorded above. No30-minute crash-free
+interval, audible audio/A-V or zero-copy claim is made. Three-codec muted hardware playback is observed as bounded above. DRM/Widevine/EME is outside this assignment. Owner verification remains:
 panel sharpness/colours at 150%, physical trackpad feel and shortcuts, and
 audible output/lip sync. Logs, synthetic input and renderer captures cannot
 establish those physical observations.
