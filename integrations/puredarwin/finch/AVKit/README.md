@@ -96,6 +96,7 @@ A Linux-built metadata/property probe on native M5 observes initial0, all eight
 signed/out-of-range values preserved, intrinsic size(-1,9), and vibrancy true.
 Our property implementation follows those observations. `level-draw-probe.nix`
 checks changed bitmap pixels between quiet/half/full levels without a window.
-The new provider builds; M1 property/bitmap qualification remains pending the
-announced desktop hold. It adds the seventh reviewed QuickTime import at the
-source/export level, not a QuickTime launch or native pixel-style claim.
+M1 media-private-controls-v1 now matches the same-byte native property output
+exactly; quiet-to-half and half-to-full drawings change2916/2754 bitmap bytes.
+It adds the seventh reviewed QuickTime import, with no window, QuickTime launch
+or native pixel-style claim. The61 prior exports remain in the64-export image.
