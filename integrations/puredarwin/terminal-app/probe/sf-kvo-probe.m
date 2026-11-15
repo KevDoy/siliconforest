@@ -16,7 +16,9 @@
 // rangeOfData:options:range:], +[NSCalendar calendarWithIdentifier:], -[NSSet setByAddingObject:],
 // NSIndexPath in this library (it was in the Foundation wrapper);
 // the C map table API keeps working beside them. The eighth (TERM6, 15 November): the indexed and unordered
-// accessors of a to-many key called directly are heard (-insertObject:in<Key>AtIndex: and the others).
+// accessors of a to-many key called directly are heard (-insertObject:in<Key>AtIndex: and the others). The ninth
+// (TERM6): -[NSFileHandle setReadabilityHandler:] calls its handler when a pipe has data, and -availableData gives
+// what one read gives (Activity Monitor reads `sample`'s report so).
 #include <dlfcn.h>
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -250,6 +252,41 @@ static int eighth_build(void)
     @catch (id e) { return 31; }
 }
 
+// the ninth build: a pipe's readability handler hears the data written and the end of the stream
+static int ninth_checks(void)
+{
+    NSPipe *pipe = [NSPipe pipe];
+    NSFileHandle *reader = [pipe fileHandleForReading];
+    __block NSMutableData *got = [[NSMutableData alloc] init];
+    __block int ended = 0;
+
+    if (![reader respondsToSelector:@selector(setReadabilityHandler:)])
+        return 1;
+    [reader setReadabilityHandler:^(NSFileHandle *h) {
+        NSData *d = [h availableData];
+        @synchronized(got) {
+            if ([d length] == 0) { ended = 1; [h setReadabilityHandler:nil]; }
+            else [got appendData:d];
+        }
+    }];
+    [[pipe fileHandleForWriting] writeData:[@"sample report" dataUsingEncoding:NSUTF8StringEncoding]];
+    [[pipe fileHandleForWriting] closeFile];
+    for (int i = 0; i < 200 && !ended; i++)
+        usleep(10000);
+    int bad = 0;
+    @synchronized(got) {
+        if (!ended) bad |= 2;
+        if (![[[[NSString alloc] initWithData:got encoding:NSUTF8StringEncoding] autorelease] isEqualToString:@"sample report"]) bad |= 4;
+    }
+    return bad;
+}
+
+static int ninth_build(void)
+{
+    @try { return ninth_checks(); }
+    @catch (id e) { return 8; }
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -267,9 +304,9 @@ int main(void)
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
     int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16) | (seventh_build() << 25);
-    int eighth = eighth_build();
-    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0;
-    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ok ? "ok" : "FAIL");
+    int eighth = eighth_build(), ninth = ninth_build();
+    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0 && ninth == 0;
+    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0), readability handler %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ninth, ok ? "ok" : "FAIL");
     [pool release];
     return ok ? 0 : 1;
 }
