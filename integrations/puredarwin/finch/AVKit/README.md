@@ -39,7 +39,7 @@ invent frame-number-to-SMPTE conversion. The constructor accepts four colon-
 or semicolon-separated nonnegative components within signed16-bit bounds.
 The native-reference vectors do not establish every private method.
 
-After the audio-level addition below, the remaining 11 imports are the two
+After the audio-level addition below, the then-remaining 11 imports were the two
 media-selection-menu functions, AVCaptureView (+ metaclass), AVPlayerController,
 AVPlayerControllerTimeResolver, AVPlayerControlsViewController (+ metaclass),
 AVTouchBarCaptureInputSourceItem, AVTouchBarRecordingControlsProvider and
@@ -109,3 +109,22 @@ no capture or touch-bar service. See
 [the bounded reference audit](CAPTURE-ITEM-2026-11-15.md); the added import raises
 source coverage to8/18; its same-byte M1 comparison matches native. Existing player
 and transport code is unchanged; all64 old exports are retained.
+
+
+## Capture view explicitly unavailable
+
+`SFUnavailableCaptureView.m` adds the observed NSView subclass and initializer
+ABIs, but every initializer returns nil with one diagnostic per process. There
+is no capture preview or recording backend. This permits class lookup while
+making creation fail; it does not implement QuickTime recording. The M1-only
+probe deliberately never runs the native capture UI on the controller Mac.
+
+M1 `avkit-capture-unavailable-stage-v1` at20:58:27–29Z returned nil for all three
+initializers without a crash; the capture-input value probe still matched every
+raw native-reference row. The private image preserves71 previous exports and
+adds the capture class/metaclass,73 total. Thus10/18 reviewed imports resolve,
+but only8 have implemented behavior and the two capture-view symbols explicitly
+report unavailable. The eight unresolved imports are the two media-selection
+menu functions, AVPlayerController, AVPlayerControllerTimeResolver,
+AVPlayerControlsViewController (+metaclass), AVTouchBarRecordingControlsProvider
+and AVVolumeControlSlider. No canonical AVKit installation or GUI test occurred.

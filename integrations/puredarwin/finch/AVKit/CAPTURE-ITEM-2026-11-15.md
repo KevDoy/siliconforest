@@ -43,3 +43,17 @@ autorelease lifetime. It uses a coherent private AVFoundation/AVKit prefix,
 with all bytes cold-verified before load, under gui.lock and bench. No window,
 input, capture hardware or touch-bar service was used. No canonical AVKit is
 installed.
+
+
+A separate explicit-absence class now supplies `AVCaptureView` and its metaclass.
+The observed NSView inheritance and typed initializers come from the read-only
+metadata probe. Each initializer releases its allocated object, returns nil and
+reports the missing preview/recording backend once. This is unavailable behavior,
+not native capture parity. The M1-only negative probe (SHA-256
+`2400b44d0d49b9ad87e32c6e838a7c274ccc58ef6f715cecc9f107e4a0293eaa`)
+returned all three nil results and one diagnostic at20:58:27–29Z. The original
+capture-input value probe remained byte-identical and all raw results matched.
+No native capture UI or device was invoked. Private provider SHA-256
+`f13c39a4360ed368fab08f802fa5c92199ca523743cca55bb45a11acab464db8`
+retains all71 exports and adds2. Import resolution is10/18, separated into8
+implemented and2 explicitly unavailable symbols; no recording claim follows.
