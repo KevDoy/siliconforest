@@ -80,8 +80,12 @@ bool PDCIOPCIHost::interruptPower(void *context)
     auto s=(PDCIOPCIHost *)context;
     // IRQ-safe predicates only; the retained owner/context cannot be freed
     // while any registered AIC parent can call us. No PCI config or locks.
-    return __atomic_load_n(&s->interruptAdmitted,__ATOMIC_ACQUIRE) &&
-        s->physicalPower() && s->powerProof && s->powerProof(s->powerContext);
+    if(!__atomic_load_n(&s->interruptAdmitted,__ATOMIC_ACQUIRE) ||
+       !s->physicalPower() || !s->powerProof || !s->powerProof(s->powerContext))return false;
+    // Cable loss can precede the CM revocation callback. Never dispatch an
+    // endpoint's ISR through a link which the actual root already lost.
+    UInt32 run=s->port.r32(0x804),link=s->port.r32(0x208);
+    return run!=UINT32_MAX && link!=UINT32_MAX && (run&1) && (link&1);
 }
 IOReturn PDCIOPCIHost::callPlatformFunction(const OSSymbol *name,bool wait,
  void *p1,void *p2,void *p3,void *p4)

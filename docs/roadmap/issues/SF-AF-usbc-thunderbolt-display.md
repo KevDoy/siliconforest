@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 14:34Z)
+## Current target and observed state (owner change; updated 14:52Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,17 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** installed non-AVE CIO22, kernel source `455ea303f`,
+**Observed in Darwin:** installed non-AVE CIO23, shared-PHY source `697d9eaeb`,
+capsule `fba293e054b2…`, qualified14:48:18Z/UART reaped14:48:20Z. It reproduces
+the published USB2 baseline with exact actual readbacks and retains the normal
+desktop/Wi-Fi/NHI/RTKit/PHY and snapshot/UID checks. It still stops at Phase2,
+with both lanes unplugged7/remote0, unchanged USB4 status, ENODEV19 approval
+and zero PCI functions. Matching the USB2 baseline did not fix training.
+Quiet60s: kernel2.88868% of one CPU, aggregate97.71052% idle,24 NHI interrupts
+including diagnostic boundaries; warm fixed-work timings remain unchanged.
+All57 modules are non-AVE, no pdave argument or endpoint mapper/MSI admission.
+
+**Previous CIO22 observation:** kernel source `455ea303f`,
 capsule `8f3800a8bf4c…`, qualified14:31:04Z; UART reaped before lock release
 14:31:06Z. Standard desktop/injection, Wi-Fi, RTKit/NHI/PHY and actual
 catalogue/UID/snapshot checks pass. The new five-control comparison rules out
@@ -2089,7 +2099,7 @@ sample alone proves neither the elevated load nor spinning. The measured
 quiet CPU/NHI and desktop-thread accounting above remain the evidence; the
 reported AppKit slowdown and elevated load have no confirmed common cause.
 
-### T8103 USB2 cold baseline: source/SDK candidate, not observed
+### T8103 USB2 cold baseline: CIO23 observed, training unchanged
 
 The remaining USB2 MISCTUNE bit11 difference has a published bootloader
 initializer: pinned m1n1 `src/usb.c:usb_phy_bringup` writes `0x008c0813` before
@@ -2114,8 +2124,43 @@ No new timer, periodic work, DWC3 host publication or status-bit force is added.
 Focused ASan/UBSan tests pass both baselines/idempotence, every foreign tuning
 bit, all seven inaccessible-register cases, power/reset/isolation/PIPE refusal
 and a failed write/readback. The native USB SDK and all six repository checks
-pass. This code is not installed yet. The prospective CIO23 dock/shared-PHY
-image will keep the installed CIO22 CIO/Type-C/other code fixed, omit endpoint
-mapper/MSI/driver admission, and compare the actual tuning, firmware phase,
-USB4 controls, TS3 authorization and independent PCI inventory. CIO22 is its
-qualified non-AVE rollback. No direct-USB-only or AVE boot is scheduled.
+pass. CIO23 installed this code through the normal installer14:45:56Z, qualified
+14:48:18Z and reaped its UART before lock release14:48:20Z. The actual tuning
+changes `0x608c0013` to `0x608c0813` with both clock gates retained, then reads
+`0x008c0813` after normal mode start. All56 other module UUIDs, including
+CIO/Type-C, are fixed;57 non-AVE modules, four PCI personalities, identical
+605-byte arguments/boot.bin and no overlap. Endpoint mapper/MSI/driver admission
+remain excluded. The observed baseline change did not fix lane training:
+firmware still logs Phase1, cable411 and Phase2 only; both lanes remain7,
+remote0, TBT3/bonded/configured flags clear, TS3 approval ENODEV19 and inventory
+exit2/functions0. It is retained as source-backed bootstrap alignment, with no
+claim about bit11's function. CIO22 remains the qualified non-AVE rollback.
+
+The same slot's quiet60s measured kernel2.88868% of one CPU, aggregate97.71052%
+idle and24 NHI IRQs (12TX0+12RX0, all others zero) including the new query's
+three extra control transactions. Compositor4.37102%: cleanup3.01954%,
+main0.94481%, HID0.40363%; interrupt wakes436.383/s, platform-idle351.333/s,
+timer bins118.967/211.2/s. Warm50M83.677–83.757ms,100k syscalls14.640ms;
+cold118.140ms is separate. No interrupt storm or fixed-work slowdown appears;
+the reported AppKit slowdown and idle-load cause remain unresolved.
+
+### Native PCI scan settling and MSI link gate: SDK only
+
+The native first-enumeration path now waits1000ms after actual PCIe link-up,
+outside the CM domain/controller locks, before blocking endpoint DMA and
+publishing the native host. This ports the pinned `pcie-apple.c`
+`APPLE_PCIE_TUNNEL_READY_MS` requirement: the TS3's FL1100 and ASM1142 respond
+later than its I210/Alpine Ridge, behind switch ports without hotplug support.
+An early first scan can miss those functions permanently. Actual tunnel and
+physical-power/RUN/link checks follow the sleep; elapsed time is not link proof.
+This is a single thread sleep, with no polling loop or periodic timer.
+
+The separate MSI variant also checks actual PCIe-C RUN/link before dispatching
+an endpoint ISR, because cable loss can precede the CM revocation callback.
+It still has no endpoint/BME admission or true interrupt/work/child drain.
+Ordinary, enumeration and MSI native SDKs and all six repository checks pass.
+Neither change is in installed CIO23, and neither has executed against a dock
+on Darwin. No separate hardware boot is justified for this currently uninvoked
+PCI path. The next link investigation first checks whether firmware-log or
+IOReport acknowledgments/mailbox transport are stalled; it will expose control
+metadata only, with no firmware-byte extraction or guessed PHY programming.

@@ -99,8 +99,19 @@ int PDCIOPCIEnumeration::publishAfterApproval()
  ret=controller->coldInit();if(ret)return fail(ret);
  owner->setProperty("pcie-enumeration-stage","link-start");
  ret=controller->linkStart();if(ret)return fail(ret);
+ // Pinned pcie-apple.c APPLE_PCIE_TUNNEL_READY_MS: the TS3's FL1100 and
+ // ASM1142 answer later than its I210/Alpine Ridge, behind switch ports
+ // without hotplug capability. Give functions the specified reset-to-config
+ // interval before the first native scan, or they can be missed forever.
+ // No CM domain/controller lock is held; sleep, never spin or arm a timer.
+ owner->setProperty("pcie-enumeration-stage","endpoint-reset-settle");
+ IOSleep(1000);
+ if(!tunnel(this))return fail(ENODEV);
  owner->setProperty("pcie-enumeration-stage","block-all-endpoint-DMA");
+ // This backend freshly rechecks physical power/RUN/link before each DART
+ // word; the sleep alone is not a claim that the real link stayed up.
  ret=controller->blockEndpointDMA();if(ret)return fail(ret);
+ owner->setProperty("pcie-endpoint-settle-ms",(uint32_t)1000,32);
  ret=catalogueSafe();if(ret)return fail(ret);
  if(!tunnel(this))return fail(ENODEV);
  auto entry=IORegistryEntry::fromPath("/arm-io/apciec1",gIODTPlane);
