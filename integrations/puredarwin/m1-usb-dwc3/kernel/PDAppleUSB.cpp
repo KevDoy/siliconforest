@@ -641,6 +641,14 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
             setProperty("pipe-aon-normalize-error",(uint32_t)ret,32);
             setProperty("pipe-aon-normalize-after",pipe.r32(0x1c),32);
         }
+        if(!ret){
+            setProperty("phy-start-stage","usb2-cold-baseline");
+            setProperty("usb2-bootstrap-before",usb2.r32(0x1c),32);
+            ret=priorACIOOff(); // Physical proof immediately before this write.
+            if(!ret)ret=pd_atc_usb2_bootstrap_t8103(&atcIO,&pipeState,1);
+            setProperty("usb2-bootstrap-error",(uint32_t)ret,32);
+            setProperty("usb2-bootstrap-after",usb2.r32(0x1c),32);
+        }
     }
     if (!ret) {setProperty("phy-start-stage","configure-mode");ret=pd_atc_mode_start(&atcIO,target,flip,&cal);}
     if (!ret && target==PD_ATC_MODE_USB4) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB4_BACKEND);

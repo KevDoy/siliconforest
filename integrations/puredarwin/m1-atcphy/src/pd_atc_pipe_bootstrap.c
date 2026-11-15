@@ -59,3 +59,31 @@ int pd_atc_pipe_bootstrap_aon(const struct pd_atc_io *io,
        (io->read(io->ctx,PD_ATC_PIPE,0x20)&0x900f)!=0x9002)return EIO;
     return 0;
 }
+int pd_atc_usb2_bootstrap_t8103(const struct pd_atc_io *io,
+                               const struct pd_atc_pipe_state *state,int acio_off)
+{
+    if(!io || !io->read || !io->write || !state)return EINVAL;
+    if(!acio_off || state->backend!=PD_ATC_DUMMY || state->dummy_pending)return EBUSY;
+    uint32_t mux=io->read(io->ctx,PD_ATC_PIPE,0xc);
+    uint32_t ack=io->read(io->ctx,PD_ATC_PIPE,0x14);
+    uint32_t aon=io->read(io->ctx,PD_ATC_PIPE,0x1c);
+    uint32_t override=io->read(io->ctx,PD_ATC_PIPE,0x20);
+    uint32_t run=io->read(io->ctx,PD_ATC_USB2,0);
+    uint32_t ctl=io->read(io->ctx,PD_ATC_USB2,4);
+    uint32_t tune=io->read(io->ctx,PD_ATC_USB2,0x1c);
+    if(mux==UINT32_MAX || ack==UINT32_MAX || aon==UINT32_MAX ||
+       override==UINT32_MAX || run==UINT32_MAX || ctl==UINT32_MAX || tune==UINT32_MAX)return EIO;
+    // Native caller freshly proved physical ACIO-off and owns the uncommitted
+    // broker lease. Independently require completed dummy/reset/clamp and
+    // USB2 isolation, SIDDQ, both resets, APB reset and both clock gates.
+    if((mux&0x3f)!=0x22 || (ack&1) || aon!=0x10 ||
+       (override&0x900f)!=0x9002 || (run&7)!=4 || (ctl&0xf)!=0xb ||
+       (tune&0x60000000)!=0x60000000)return EBUSY;
+    const uint32_t bit=1u<<11;
+    if((tune&~bit)!=0x608c0013)return EBUSY;
+    if(tune&bit)return 0;
+    // Published m1n1 whole-word baseline, narrowed to its one measured missing
+    // bit. Keep clock gates asserted until the normal mode-start sequence.
+    io->write(io->ctx,PD_ATC_USB2,0x1c,tune|bit);
+    return io->read(io->ctx,PD_ATC_USB2,0x1c)==(tune|bit)?0:EIO;
+}

@@ -2088,3 +2088,34 @@ NVMe timed wait does not itself count as runnable. Thus the old NVMe stack
 sample alone proves neither the elevated load nor spinning. The measured
 quiet CPU/NHI and desktop-thread accounting above remain the evidence; the
 reported AppKit slowdown and elevated load have no confirmed common cause.
+
+### T8103 USB2 cold baseline: source/SDK candidate, not observed
+
+The remaining USB2 MISCTUNE bit11 difference has a published bootloader
+initializer: pinned m1n1 `src/usb.c:usb_phy_bringup` writes `0x008c0813` before
+Linux, while CIO20/CIO22 actually read `0x008c0013`. Its bit function is still
+unknown. This establishes a concrete bootstrap baseline, not a proved cause
+of the Thunderbolt low-speed failure. The prior compact-tunable hypothesis was
+also checked: all387 records in the saved25-group ADT audit have no set-value
+bits outside the clear mask, so masked versus independent OR-set semantics
+does not explain this machine's observed result. No calibration bytes are
+included here.
+
+The shared PHY now has a TBT-only cold initializer, before normal mode start
+and before publishing an NHI client. The native broker freshly proves ACIO
+physically off while retaining the exclusive uncommitted lease. The helper
+independently checks actual dummy PIPE/ACK, DWC3 reset/clamp, USB2 isolation/
+SIDDQ/reset/APB reset and both clock gates. It accepts only the two known
+MISCTUNE words with gates asserted, sets the one missing bit11, and requires
+exact readback. Other state refuses without writes; the existing cleanup
+retains ownership on failure. Normal mode start still controls clock release.
+No new timer, periodic work, DWC3 host publication or status-bit force is added.
+
+Focused ASan/UBSan tests pass both baselines/idempotence, every foreign tuning
+bit, all seven inaccessible-register cases, power/reset/isolation/PIPE refusal
+and a failed write/readback. The native USB SDK and all six repository checks
+pass. This code is not installed yet. The prospective CIO23 dock/shared-PHY
+image will keep the installed CIO22 CIO/Type-C/other code fixed, omit endpoint
+mapper/MSI/driver admission, and compare the actual tuning, firmware phase,
+USB4 controls, TS3 authorization and independent PCI inventory. CIO22 is its
+qualified non-AVE rollback. No direct-USB-only or AVE boot is scheduled.

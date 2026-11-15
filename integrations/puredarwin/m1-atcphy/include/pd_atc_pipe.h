@@ -29,6 +29,12 @@ int pd_atc_pipe_bootstrap_dummy(const struct pd_atc_io *,const struct pd_atc_pip
  * is not established; this reproduces the published whole-word bootstrap,
  * not a general bit5 control. Reject every other AON state without writes. */
 int pd_atc_pipe_bootstrap_aon(const struct pd_atc_io *,const struct pd_atc_pipe_state *,int acio_off);
+/* m1n1 usb.c initializes T8103 USB2 MISCTUNE to0x008c0813 before Linux.
+ * Native steady state differs only at bit11. Reproduce that explicit cold
+ * baseline while USB2 is isolated/reset/gated and DWC3/ACIO are stopped.
+ * Accept only the two observed words plus both clock-gate bits; no guessed
+ * bit function, other word normalization or live-PHY repair is supported. */
+int pd_atc_usb2_bootstrap_t8103(const struct pd_atc_io *,const struct pd_atc_pipe_state *,int acio_off);
 #ifdef __cplusplus
 }
 #endif
