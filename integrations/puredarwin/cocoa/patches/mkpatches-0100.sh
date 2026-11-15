@@ -9,7 +9,9 @@
 #   am-0109/  = am-0107/ + 0108, 0109 (frozen; COCOA3, evening of 14 November)
 #   am-0115/  = am-0109/ + 0110..0115 (frozen; COCOA3)
 #   am-0119/  = am-0115/ + 0116..0119 (frozen; COCOA4, night of 14 November)
-#   am/       = am-0119/ + 0120 on (the current tree; TERM5)
+#   am-0122/  = am-0119/ + 0120..0122 (frozen; TERM5, night of 14/15 November)
+#   am-0123/  = am-0122/ + 0123, 0124 (frozen; TERM6, night of 15 November)
+#   am/       = am-0123/ + 0125 on (the current tree; TERM6)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -55,10 +57,15 @@ mk am-0115 am-0119 0117-windowserver-cursor-shown-when-the-pointer-moves.patch s
 mk am-0115 am-0119 0118-coregraphics-icc-and-indexed-color-spaces.patch src/Frameworks/CoreGraphics/CGColorSpace.h src/Frameworks/CoreGraphics/CGColorSpace.m
 mk am-0115 am-0119 0119-onyx2d-shading-path-released.patch src/Frameworks/Onyx2D/O2Context_builtin.m
 ( diff -rq am-0115 am-0119 ) | sed 's/^/differs from am-0115: /'
-# 0120 on (TERM5, night of 14 November): am-0119 -> am
-mk am-0119 am 0120-appkit-device-pixels-opaque-default-menu-tracking.patch $A/NSView.m $A/NSView.h $A/NSWindow.m $A/NSWindow.h $A/NSPathControl.m $A/NSImage.m $A/NSColorPanel.m $A/NSViewLayout.m $A/NSTableView.m $A/NSApplication.m $A/NSDisplay.m $A/NSWindowTabbing.m $A/NSButtonCell.m $A/NSStringDrawing.m $A/NSColorWell.m $A/NSLayoutConstraint.m \
+# 0120..0122 (TERM5, night of 14 November): am-0119 -> am-0122
+mk am-0119 am-0122 0120-appkit-device-pixels-opaque-default-menu-tracking.patch $A/NSView.m $A/NSView.h $A/NSWindow.m $A/NSWindow.h $A/NSPathControl.m $A/NSImage.m $A/NSColorPanel.m $A/NSViewLayout.m $A/NSTableView.m $A/NSApplication.m $A/NSDisplay.m $A/NSWindowTabbing.m $A/NSButtonCell.m $A/NSStringDrawing.m $A/NSColorWell.m $A/NSLayoutConstraint.m \
   $A/NSWorkspaceOpenConfiguration.m $A/NSMenu.subproj/NSMenuView.m
-mk am-0119 am 0121-windowserver-opaque-region-blur-query-test-scale.patch src/Frameworks/WindowServer/rpc_wayland.c \
+mk am-0119 am-0122 0121-windowserver-opaque-region-blur-query-test-scale.patch src/Frameworks/WindowServer/rpc_wayland.c \
   src/Frameworks/WindowServer/rpc.h src/Frameworks/WindowServer/message.h
-mk am-0119 am 0122-onyx2d-clip-edges-on-pixels.patch src/Frameworks/Onyx2D/O2Context_builtin.m
-( diff -rq am-0119 am ) | sed 's/^/differs from am-0119: /'
+mk am-0119 am-0122 0122-onyx2d-clip-edges-on-pixels.patch src/Frameworks/Onyx2D/O2Context_builtin.m
+( diff -rq am-0119 am-0122 ) | sed "s/^/differs from am-0119: /"
+# 0123, 0124 (TERM6, night of 15 November): am-0122 -> am-0123
+mk am-0122 am-0123 0123-appkit-menus-fast-crashes-layers-without-egl.patch $A/NSMenu.subproj/NSMenuView.m $A/NSMenu.subproj/NSMenu.m $A/NSColor.subproj/NSColor.m \
+  $A/NSWindow.m $A/NSView.m $A/NSApplication.m $A/NSTableView.m $A/NSProgressIndicator.m $A/NSColorWell.m $A/NSColorPanel.m
+mk am-0122 am-0123 0124-windowserver-popup-role-ahead-idle-frames.patch src/Frameworks/WindowServer/rpc_wayland.c src/Frameworks/WindowServer/message.h
+( diff -rq am-0122 am-0123 ) | sed 's/^/differs from am-0122: /'

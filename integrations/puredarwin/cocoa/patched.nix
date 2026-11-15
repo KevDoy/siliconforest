@@ -282,6 +282,22 @@
 #   0122  Onyx2D: a clip's edges within 1/1024 of a pixel boundary are on it (a dirty rect that went to points
 #         and back took one more row, which the window's clear made transparent and no fill covered);
 #         O2_FILL_TRACE lists the rectangles filled
+#   0123  AppKit (TERM6): a menu's panel (its shadow and rounded body) drawn once small and pieced together for
+#         every size and every highlighted row (it was eight path fills over the whole menu each time;
+#         PD_MENU_VECTOR=1 draws the vectors); the accent colour read from the preferences at most once a
+#         second; a popup's role asked of the window server before it is drawn; the main menu revalidated
+#         four times a second only while a menu bar server takes it; crashes: a table click on a row but beside
+#         every column (column -1 as an index), drawing on a progress indicator's animation thread (all
+#         windows drawn there beside the main thread: SIGBUS in Onyx2D), a view marked for display from another
+#         thread; without EGL a view hosting a layer draws its layer tree on the CPU (background, CGImage /
+#         NSImage / BGRA CVPixelBuffer contents with gravity, border, corner radius, sublayers, opacity) and a
+#         60 Hz check marks it for display when the tree changes; a view's alphaValue fades its drawing;
+#         -[NSMenu performKeyEquivalent:] and -update go over a copy of the items taken after the delegate filled
+#         the menu in (Terminal ended with a CFArray index trap on a Command key); the crash report's directory
+#         is made at every level (a new home had no ~/Library/Logs: no report); PD_COLORPANEL_TRACE
+#   0124  WindowServer: kWSWindowPrepareRole (a popup's xdg_popup asked for before AppKit draws it, the flush
+#         waits for its configure); frames unused for 2 s beyond two per window are let go
+#         (PD_WS_KEEP_FRAMES=1 keeps them); PD_WS_DUMP_ALPHA=1 dumps the alpha too
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -357,6 +373,7 @@ let
     ./patches/0115-appkit-cgevent-autoreleased.patch
     ./patches/0116-appkit-owner-findings-windows-cursor-colors.patch
     ./patches/0120-appkit-device-pixels-opaque-default-menu-tracking.patch
+    ./patches/0123-appkit-menus-fast-crashes-layers-without-egl.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -368,6 +385,7 @@ let
     ./patches/0058-windowserver-activation-configure-timing.patch
     ./patches/0117-windowserver-cursor-shown-when-the-pointer-moves.patch
     ./patches/0121-windowserver-opaque-region-blur-query-test-scale.patch
+    ./patches/0124-windowserver-popup-role-ahead-idle-frames.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch

@@ -202,11 +202,27 @@ static void source_removed(struct sf_manager *m, uint64_t srcref)
 		}
 }
 
+/* SFNS_TRACE=1: every message from the kernel on standard error (type, length, source, provider) */
+static int trace(void)
+{
+	static int on = -1;
+	if (on < 0) on = getenv("SFNS_TRACE") != NULL;
+	return on;
+}
+
 static void handle(struct sf_manager *m, const uint8_t *buf, size_t len)
 {
 	while (len >= sizeof(nstat_msg_hdr)) {
 		const nstat_msg_hdr *h = (const void *)buf;
 		size_t n = h->length;
+		if (trace()) {
+			uint64_t ref = n >= sizeof(nstat_msg_src_description_header) ? ((const nstat_msg_src_description_header *)(const void *)buf)->srcref : 0;
+			uint32_t prov = (h->type == NSTAT_MSG_TYPE_SRC_DESC && n >= sizeof(nstat_msg_src_description_header)) ? ((const nstat_msg_src_description_header *)(const void *)buf)->provider :
+			                (h->type == NSTAT_MSG_TYPE_SRC_UPDATE && n >= sizeof(nstat_msg_src_update_hdr)) ? ((const nstat_msg_src_update_hdr *)(const void *)buf)->provider : 0;
+			fprintf(stderr, "SFNS type=%u len=%zu ctx=%llu src=%llu provider=%u (tcp desc %zu, udp desc %zu, desc hdr %zu, update hdr %zu)\n", h->type, n,
+			        (unsigned long long)h->context, (unsigned long long)ref, prov, sizeof(nstat_tcp_descriptor), sizeof(nstat_udp_descriptor),
+			        sizeof(nstat_msg_src_description_header), sizeof(nstat_msg_src_update_hdr));
+		}
 		if (n < sizeof(*h) || n > len)
 			return;
 		switch (h->type) {
