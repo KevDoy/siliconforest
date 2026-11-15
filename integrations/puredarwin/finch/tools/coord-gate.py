@@ -7,10 +7,11 @@ from pathlib import Path
 import re
 
 
-def pending_hold(text, install_reservation=False, now=None):
+def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
     now = now or datetime.now(timezone.utc)
     active = {}
     desktop_before_reboot = {}
+    offered_until = {}
     owners = '[A-Z][A-Z0-9_-]*'
     agent_names = set(re.findall(r'^\S+\s+('+owners+r')[: ]', text, re.M))
     for line in text.splitlines():
@@ -21,12 +22,29 @@ def pending_hold(text, install_reservation=False, now=None):
             lower_body = body.lower()
             # A kernel owner's dated reservation blocks new work immediately.
             # It is not an actual reboot epoch and has no timeout-based release.
-            if re.match(r'^notice\s+[a-z0-9_-]+\s+earliest\s*\d{2}:\d{2}:\d{2}z\b', lower_body):
+            scheduled = re.match(r'^notice\s+[a-z0-9_-]+\s+earliest\s*(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
+            if scheduled:
                 active[(owner, 'scheduled-reboot')] = (line, [], owner)
+                offered_until.pop(owner, None)
+                # A reservation may explicitly offer bounded work before its
+                # earliest boot. This is permission from that actual notice,
+                # never an inferred expiration or a fabricated completion.
+                compact = re.sub(r'\s+', '', lower_body)
+                offer = re.search(r'(?:^|[.;])otheragentsmayusem1normallybefore(\d{2}):(\d{2})(?::(\d{2}))?z?(?:[.;]|$)', compact)
+                if offer:
+                    try:
+                        announced = datetime.fromisoformat(line.split()[0].replace('Z', '+00:00'))
+                        deadline = announced.replace(hour=int(offer[1]), minute=int(offer[2]), second=int(offer[3] or 0), microsecond=0)
+                        earliest = announced.replace(hour=int(scheduled[1]), minute=int(scheduled[2]), second=int(scheduled[3] or 0), microsecond=0)
+                        if announced <= now and announced < deadline <= earliest:
+                            offered_until[owner] = deadline
+                    except ValueError:
+                        pass
             elif ((owner, 'scheduled-reboot') in active and
                   lower_body.startswith('scheduling correction:') and
-                  re.search(r'earliest\s*[a-z0-9_-]+\s*\d{2}:\d{2}:\d{2}z\b', lower_body)):
+                  re.search(r'earliest\s*[a-z0-9_-]+\s*\d{2}:\d{2}(?::\d{2})?z\b', lower_body)):
                 active[(owner, 'scheduled-reboot')] = (line, [], owner)
+                offered_until.pop(owner, None)
             elif ((owner, 'scheduled-reboot') in active and
                   (owner, 'reboot') not in active and lower_body.startswith('ack ') and
                   'willwaitcoreshbeforeguiex/bench' in re.sub(r'\s+', '', lower_body) and
@@ -143,7 +161,14 @@ def pending_hold(text, install_reservation=False, now=None):
                 active[(owner, 'explicit')] = (line, selected, None)
         if 'CODEX received coordinator M1 SSH hold;' in line:
             active[(None, 'explicit')] = (line, ['M1 back in SiliconForest'], None)
-    return '\n'.join(notice for notice, _, _ in active.values()) or None
+    pending = []
+    for (owner, kind), (notice, _, _) in active.items():
+        if (kind == 'scheduled-reboot' and max_seconds is not None and
+            max_seconds > 0 and owner in offered_until and
+            now + timedelta(seconds=max_seconds) <= offered_until[owner]):
+            continue
+        pending.append(notice)
+    return '\n'.join(pending) or None
 
 
 def main():
@@ -151,8 +176,13 @@ def main():
     ap.add_argument('--log', type=Path, default=Path('runs/m1-coord/log.txt'))
     ap.add_argument('--install-reservation', action='store_true',
                     help='Caller holds gui.lock and may claim an explicitly offered future slot')
+    ap.add_argument('--max-seconds', type=int,
+                    help='Actual caller runtime bound; may use an explicitly offered pre-boot window')
     args = ap.parse_args()
-    pending = pending_hold(args.log.read_text(), install_reservation=args.install_reservation)
+    if args.max_seconds is not None and not 1 <= args.max_seconds <= 600:
+        ap.error('--max-seconds must be between1 and600')
+    pending = pending_hold(args.log.read_text(), install_reservation=args.install_reservation,
+                           max_seconds=args.max_seconds)
     if pending:
         print('M1 SSH hold active; no connection attempted. '+pending)
         return 77

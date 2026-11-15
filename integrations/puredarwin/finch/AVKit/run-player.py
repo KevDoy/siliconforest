@@ -8,7 +8,7 @@ def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('stage',type=Path);a=p.parse_args()
  if not os.environ.get('BENCH_OWNER'):raise ValueError('Run under gui.lock then tools/bench.sh')
  repo=Path(__file__).resolve().parents[4]
- subprocess.run(['python3',str(repo/'integrations/puredarwin/finch/tools/coord-gate.py')],check=True,cwd=repo)
+ subprocess.run(['python3',str(repo/'integrations/puredarwin/finch/tools/coord-gate.py'),'--max-seconds','120'],check=True,cwd=repo)
  if not a.stage.name.startswith('avkit-real-player-stage-'):raise ValueError('Fresh owned player stage required')
  for name in ['manifest.json','compare-tests.py','cold-hashes.json']:
   if not (a.stage/name).is_file():raise ValueError('Incomplete stage: '+name)

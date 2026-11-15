@@ -8,6 +8,46 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_explicit_preboot_offer_requires_runtime_to_fit(self):
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
+        text='2026-11-15T21:20:57Z CODEX-TB NOTICE nextCIO40TX earliest21:34Z AFTER GUI release. Otheragents mayuseM1normallybefore21:34; no TBSSH whiletheyholdGUI.\n'
+        self.assertIsNotNone(gate.pending_hold(text,now=now))
+        self.assertIsNone(gate.pending_hold(text,now=now,max_seconds=240))
+        self.assertIsNotNone(gate.pending_hold(text,now=now,max_seconds=241))
+        self.assertIsNotNone(gate.pending_hold(text,now=now,max_seconds=0))
+        self.assertIsNotNone(gate.pending_hold(text,now=now,max_seconds=-1))
+
+    def test_preboot_offer_never_clears_other_holds(self):
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
+        text='2026-11-15T21:20:57Z CODEX-TB NOTICE nextCIO40TX earliest21:34:00Z. Otheragents mayuseM1normallybefore21:34; idle required.\n'
+        for added in ['U TERM8 core.lock: GUARDED INSTALL now\n','U CODEX-TB M1 REBOOT now\n','U GFX2 risky GPU test over SSH\n','U DESK7 gui.lock: install compositor now\n']:
+            with self.subTest(added=added):
+                self.assertIsNotNone(gate.pending_hold(text+added,now=now,max_seconds=120))
+
+    def test_new_notice_revokes_previous_offer(self):
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
+        text='2026-11-15T21:20:57Z CODEX-TB NOTICE nextCIO40TX earliest21:34:00Z. Otheragents mayuseM1normallybefore21:34; idle required.\n'
+        text+='2026-11-15T21:25:57Z CODEX-TB NOTICE nextCIO41 earliest21:35:00Z reserved\n'
+        self.assertIsNotNone(gate.pending_hold(text,now=now,max_seconds=120))
+
+    def test_scheduling_correction_revokes_previous_offer(self):
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
+        text='2026-11-15T21:20:57Z CODEX-TB NOTICE nextCIO40TX earliest21:34Z. Otheragents mayuseM1normallybefore21:34; idle required.\n'
+        text+='2026-11-15T21:25:57Z CODEX-TB Scheduling correction: earliestCIO40TX21:31Z reserved\n'
+        self.assertIsNotNone(gate.pending_hold(text,now=now,max_seconds=60))
+
+    def test_expired_unoffered_or_quoted_window_stays_reserved(self):
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,21,30,tzinfo=timezone.utc)
+        prefix='2026-11-15T21:20:57Z CODEX-TB NOTICE nextCIO40TX earliest21:34:00Z. '
+        for suffix in ['No offered window.','Otheragents mayuseM1normallybefore21:29; idle required.', 'Otheragents mayuseM1normallybefore21:35; idle required.', 'Someone said "Otheragents mayuseM1normallybefore21:34;".']:
+            with self.subTest(suffix=suffix):
+                self.assertIsNotNone(gate.pending_hold(prefix+suffix,now=now,max_seconds=120))
+
     def test_quoted_marker_is_not_completion(self):
         text = "T VK M1 back in SiliconForest\nU VK Please stay off the M1 until 'VK kernel test done'.\n"
         self.assertIsNotNone(gate.pending_hold(text))
