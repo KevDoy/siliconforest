@@ -231,6 +231,49 @@ first: the kit rebuilt from the tree gave the installed `56759b9f…` byte for b
 - Revert: `sf-bootbin-install.sh <SFBOOT> --rollback` gives k1 (`35044741…`); the kits are in
   `runs/gfx2/kit-{base,k1,k2}` and the one before in `runs/m1-desktop-010/install-out-before-gfx2-avd-wifi/`.
 
+### Graphics in the default install (agent GFX2, 15 November)
+
+`m1-vulkan/system.nix` + `tools/sf-gpu-install.sh` (also the userland installer's part `gpu`,
+`m1-storage/tools/sf_userland_push.sh push gpu`; INSTALL.md says so). On the M1 since 00:19Z:
+
+| Path | What | Before |
+|---|---|---|
+| `/usr/local/lib/mesa-asahi/libEGL.1.dylib`, `libGLESv2.2.dylib`, `libgallium-26.3.0-devel.dylib` | GL Mesa b7b03c5 (clock + `ETIME` fixes, Wayland EGL platform) | 147a62f, kept as `<name>.old-b7b03c5` |
+| `/usr/local/lib/mesa-asahi/libvulkan_asahi.dylib`, `libwayland-client.0.dylib` | Honeykrisp, the client library the new EGL links | new |
+| `/usr/local/lib/libvulkan.1.dylib` (+ `libvulkan.dylib`) | Khronos loader 1.4.341 | new |
+| `/etc/vulkan/icd.d/asahi_icd.json` | the ICD (the M1's `XDG_DATA_DIRS` is `/usr/share:/share`, so `/usr/local/share` is not searched; the first install put it there and the loader found no driver) | new |
+| `/usr/local/bin/vulkaninfo`, `vkcube` (with `SFVK_CUBE_INSTANCES`), `vkcubepp` | tools | new |
+
+`libdrm.2.dylib` stays the installed one (same 212 exports). Records: `/private/var/db/sfgpu/installed-<tag>.txt`
+(tags `b7b03c5`, `b7b03c5-etc`, `b7b03c5-cube`); revert: `sf-gpu-install.sh revert <tag>` in reverse order, then
+relaunch the compositor.
+
+Observed on the M1 (gui.lock, UART captured, no Vulkan environment variable set):
+- the compositor relaunched on the new GL (`WMSTAT selected renderer=gl output=kms width=2560 height=1600`)
+  and has run on it since, through a recovery boot; the GL off-screen test passes with the same exact hash
+  as with 147a62f (`8fee6b41…`); other agents have run Terminal and Activity Monitor on it since (their holds);
+  no Firefox or other GL application is installed on the disk system;
+- `vulkaninfo --summary`: Apple M1 (G13G B1), `DRIVER_ID_MESA_HONEYKRISP`, API 1.4.363;
+- vkcube in a window: FIFO 300 frames in 6.3 s (with start-up), **MAILBOX 600 frames in 4.5 s** (about
+  134 fps), **IMMEDIATE: "Present mode specified is not supported"** (Mesa's Wayland WSI offers no
+  immediate mode); the compositor's own check (composited window against the client's buffer at commits
+  30 and 150) 4 of 4 identical;
+- present race: the cube drawn 1, 300 and 3000 times per frame (`SFVK_CUBE_INSTANCES`), 200 frames each:
+  6 of 6 compositor checks identical, 0 differing pixels; but 3000 instances still ran at about 50 fps,
+  so these frames were not heavy enough to show a missing fence (heavier runs: below). The compositor's
+  counters at the end of a session with 900 dma-buf commits: `fence_waits=0 fence_wait_max_us=27515
+  fence_timeouts=0 fence_poll_errors=0` (implicit sync, `poll-dmabuf-before-render`);
+- explicit sync: not tried (the compositor has no `wp_linux_drm_syncobj_v1`; not cheap).
+- The Vulkan DRM properties do not match the device node: Honeykrisp reports `renderMajor 31,
+  renderMinor 22913`, `hasPrimary false`; `/dev/dri/renderD129` is `31, 22657` (card0 `31, 24832`,
+  card1 `31, 24577`). Anything that matches a DRM fd to a VkPhysicalDevice by device number (zink on an
+  EGL DRM screen, dma-buf feedback) finds none: a lead for "zink does not start", not established.
+
+The drop of 00:53Z (M1 restarted into Linux during a GFX2 hold; recovered at 00:56Z): no panic and no GPU
+message; the compositor ended with `PDHID sequence discontinuity: queue overflow or competing reader`
+after input at the seat (menus, a window closed; not the inject module, not another agent), then the
+session's end restarted the machine. After it `e2fsck -fn` lists new orphan/bitmap findings (not repaired).
+
 ### GL, zink, conformance, Metal (after the milestones)
 
 **Native GL vs zink on Honeykrisp** (`m1-vulkan/test/gl-bench.c`: surfaceless EGL, 1024x1024 FBO, 64
@@ -249,10 +292,38 @@ no recipe; it builds). On the M1, `MESA_LOADER_DRIVER_OVERRIDE=zink` makes EGL's
 why zink refuses the device was not established. So the comparison is native GL only for now; no
 change to the compositor's renderer was considered.
 
-**Conformance:** no dEQP-VK / CTS run. Building VK-GL-CTS for arm64 Darwin needs a non-Cocoa platform
-target (Vulkan-only, no WSI) and its third-party tree (glslang, SPIRV-Tools, amber) in the cross
-toolchain; not attempted in this session. The driver reports conformance 1.4.6.2, which is Omacom's
-claim for its own Linux build, not a result on this system.
+**Conformance (agent GFX2, 15 November):** dEQP-VK of VK-GL-CTS 1.4.5.3 cross-built for arm64 Darwin
+(`m1-vulkan/cts.nix`: target `vulkan_headless` on the CTS's Unix platform code; two seds) and run on the
+M1 by `tools/sfvk-cts.sh` against the system install (no environment), UART captured, each group capped:
+
+| Group | Cases | Pass | Not supported | Fail | Crash / hang |
+|---|---|---|---|---|---|
+| info | 19 | 17 | 2 (memory budget, device groups) | 0 | 0 |
+| api.smoke | 6 | 6 | 0 | 0 | 0 |
+| api.object_management.single | 47 | 47 | 0 | 0 | 0 |
+| memory.allocation.basic | 102 | 102 | 0 | 0 | 0 |
+| synchronization.basic (incl. timeline semaphores) | 29 | 21 | 8 (no exclusive compute queue; one queue only) | 0 | 0 |
+| compute.pipeline.basic | 78 | 73 | 5 | 0 | 0 |
+| draw.renderpass.simple_draw | 4 | 4 | 0 | 0 | 0 |
+| api.copy_and_blit.core.image_to_image.simple_tests | 23 | 15 | 8 | 0 | 0 |
+| glsl.arrays.constructor | 28 | 28 | 0 | 0 | 0 |
+| texture.filtering.2d.formats.r8g8b8a8_unorm | 9 | 6 | 3 | 0 | 0 |
+| api.external.memory.dma_buf | 50 (33 reached) | 16 | 15 (no image export; the CTS's Darwin build has no dup()/fd passing) | 1: `dedicated.device_only.export_multiple_times`, `vkEnumeratePhysicalDevices` -> `VK_ERROR_INITIALIZATION_FAILED` | **1 hang: `dedicated.device_only.fd_properties`** (below) |
+
+Groups `api.external.semaphore.sync_fd` and `api.external.fence.sync_fd` were not run: the dma-buf
+group hung the device first. Totals: 377 cases ran to a result (335 pass, 41 not supported, 1 fail), 1 hung; no fail outside the dma-buf group,
+the fail and the hang in it.
+
+**The hang (01:22Z):** in `fd_properties` (export a dma-buf, then `vkGetMemoryFdPropertiesKHR` on it,
+which in Honeykrisp is a PRIME import of the device's own buffer) deqp-vk went into an uninterruptible
+wait in the kernel and stayed there (`kill -9` no effect); from then on a new `vulkaninfo` also blocked
+uninterruptibly while opening the device. No kernel message, no GPU timeout; the running compositor kept
+working. The test before it had failed already at device enumeration, after exporting one memory
+object many times. Cleared only by a reboot (01:37Z). Not analysed further: a kernel item (LinuxKPI
+PRIME/dma-buf import of an own buffer, or a lock left held after the failed enumeration), for the next
+kernel round, announced against CODEX-TB's base first. These are smoke groups chosen by hand, not a conformance submission;
+"Not supported" is what the driver reports for this device, not a failure.
+The CTS build is ours; the driver's reported conformance 1.4.6.2 is still Omacom's claim for Linux.
 
 **What the Metal experiment (Darling's Indium: Vulkan 1.3, timeline semaphores, dma-buf import)
 would find here:** Vulkan 1.4.363 reported; `timelineSemaphore` and `VK_KHR_timeline_semaphore`
@@ -265,12 +336,11 @@ was not tested. Those two tests are what to write first.
 ### Open items
 
 - ~~`/dev/pdavd` absent on the disk kernel~~: done (kit k1, see "Kernel round of agent GFX2").
-- Install the GL Mesa with the clock and `ETIME` fixes (147a62f + 0011 + `pd-etime.h`); not done.
+- ~~Install the GL Mesa with the clock and `ETIME` fixes~~: b7b03c5 installed (see "Graphics in the default install").
 - A test that would catch a missing implicit-sync fence (a heavy frame per present), and the
   compositor's fence counters; `wp_linux_drm_syncobj_v1` in Chonkstep (explicit sync) would be the
   better protocol, request to DESK3 when wanted.
-- vkcube's pacing at 60 Hz is FIFO through frame callbacks; `VK_PRESENT_MODE_MAILBOX/IMMEDIATE`
-  not tried.
+- MAILBOX works (about 134 fps); IMMEDIATE is not offered by Mesa's Wayland WSI here.
 - Conformance: no CTS run (see above).
 - Zink on Honeykrisp does not start (EGL falls back to swrast); patch 0201 is experimental.
 - Mappings dropped under in-flight jobs on G13 (GPU faults + recovery when a client dies with work

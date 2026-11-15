@@ -34,10 +34,10 @@ D=/private/var/db/sfcts; g=$1; cap=$2; cd $D
 rm -f out/$g.qpa out/$g.txt; mkdir -p out
 ./deqp-vk --deqp-archive-dir=$D/archive --deqp-caselist-file=lists/$g.txt --deqp-log-filename=out/$g.qpa \
   --deqp-log-images=disable --deqp-log-shader-sources=disable > out/$g.txt 2>&1 & p=$!
-t=0; while kill -0 $p 2>/dev/null; do sleep 1; t=$((t+1)); [ $t -ge $cap ] && { kill -9 $p; echo "CTS_GROUP $g HIT_CAP ${cap}s"; break; }; done
-wait $p; rc=$?
-n=$(grep -c "^  \(Pass\|Fail\|NotSupported\|QualityWarning\|CompatibilityWarning\|InternalError\|Crash\|Timeout\|ResourceError\)" out/$g.txt)
-echo "CTS_GROUP $g rc=$rc seconds=$t results=$n $(grep -E 'Passed:|Failed:|Not supported:|Warnings:|Waived:' out/$g.txt | tr -s ' ' | tr '\n' ' ')"
+t=0; hit=0; while kill -0 $p 2>/dev/null; do sleep 1; t=$((t+1)); [ $t -ge $cap ] && { kill -9 $p; echo "CTS_GROUP $g HIT_CAP ${cap}s"; hit=1; break; }; done
+# a process stuck in the kernel does not die of kill -9 (15 November: dma_buf fd_properties): no wait then
+if [ $hit = 0 ]; then wait $p; rc=$?; else rc=124; echo "CTS_GROUP $g last case: $(grep '^Test case' out/$g.txt | tail -1)"; fi
+echo "CTS_GROUP $g rc=$rc seconds=$t $(grep -E 'Passed:|Failed:|Not supported:|Warnings:|Waived:' out/$g.txt | tr -s ' ' | tr '\n' ' ')"
 grep -B1 -E "^  (Fail|Crash|InternalError|Timeout|ResourceError)" out/$g.txt | grep -o "dEQP-VK[^ ]*\|  [A-Z][A-Za-z]* (.*" | paste - - | head -12 | sed "s/^/CTS_BAD /"
 EOF
     chmod +x "$W/run-group.sh"
