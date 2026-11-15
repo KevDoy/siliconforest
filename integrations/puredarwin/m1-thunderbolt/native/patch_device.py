@@ -18,7 +18,7 @@ change('struct device_type {\n\tconst char\t*name;\n};','''struct device_type {
 };''')
 change('struct device {','''struct device {
  const struct bus_type *bus;
- bool pd_uevent_suppress,pd_wakeup_enabled,pd_registered,pd_parent_held;
+ bool pd_uevent_suppress,pd_wakeup_enabled,pd_wakeup_capable,pd_registered,pd_parent_held;
  void *pd_native_token;''')
 change('\tint (*suspend_noirq)(struct device *dev);','''\tint (*suspend_noirq)(struct device *dev);
  int (*resume_noirq)(struct device *dev);

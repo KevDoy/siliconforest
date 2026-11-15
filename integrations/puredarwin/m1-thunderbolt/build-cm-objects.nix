@@ -13,6 +13,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     dest="$out/src/Kernel/Extensions/PDThunderboltCM"
     mkdir -p "$dest"
     cp -R ${./upstream/family} "$dest/driver"
+    cp -R ${./upstream/lib} "$dest/lib"
     cp -R ${./pininc} "$dest/pininc"
     chmod -R u+w "$dest/pininc"
     cp -R ${./nativeinc}/. "$dest/pininc/"
@@ -25,20 +26,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     chmod -R u+w "$dest"
     # Tracepoints are instrumentation only; the native port has no Linux
     # tracepoint subscribers. Keep every protocol/control operation intact.
-    python3 - "$dest/driver" <<'PY'
-import pathlib,re,sys
-p=pathlib.Path(sys.argv[1]);names=set()
-q=p/'domain.c';s=q.read_text();needle='int tb_domain_init(void)\n{';assert s.count(needle)==1
-q.write_text(s.replace(needle,needle+'\n\tif (!pd_tb_native_ready()) return -EPROBE_DEFER;'))
-# Intel x86 Apple NHI resume device-links do not apply to the ARM platform.
-q=p/'tb.c';s=q.read_text();a=s.index('static bool tb_apple_add_links(struct tb_nhi *nhi)\n{');b=s.index('\nstruct tb *tb_probe',a)
-s=s[:a]+'#ifdef CONFIG_X86\n'+s[a:b]+'\n#else\nstatic bool tb_apple_add_links(struct tb_nhi *nhi) { return false; }\n#endif\n'+s[b:];q.write_text(s)
-for source in p.glob('*.c'):
- names.update(re.findall(r'\b(trace_tb_\w+)\s*\(',source.read_text()))
-with (p/'trace.h').open('w') as f:
- f.write('/* SPDX-License-Identifier: GPL-2.0 */\n/* Linux tracepoint instrumentation disabled in the native port. */\n')
- for name in sorted(names):f.write('#define '+name+'(...) '+('false' if name.endswith('_enabled') else '((void)0)')+'\n')
-PY
+    python3 ${./tools/prepare_cm.py} "$dest/driver"
     cp ${./cm-CMakeLists.txt} "$dest/CMakeLists.txt"
     printf '\nadd_subdirectory(PDThunderboltCM)\n' >> "$out/src/Kernel/Extensions/CMakeLists.txt"
   '';
@@ -57,7 +45,7 @@ PY
   installPhase = ''
     mkdir -p "$out/objects"
     find build-nix/src/Kernel/Extensions/PDThunderboltCM/CMakeFiles/PDThunderboltCM.dir -name '*.o' -exec cp {} "$out/objects/" \;
-    expected=${if full then "21" else "12"}
+    expected=${if full then "27" else "12"}
     test "$(find "$out/objects" -name '*.o' | wc -l)" -eq "$expected"
     ${if full then "test -f \"$out/objects/domain.c.o\"" else "test ! -f \"$out/objects/domain.c.o\""}
     mkdir -p "$out/nix-support"

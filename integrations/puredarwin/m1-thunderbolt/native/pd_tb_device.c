@@ -40,11 +40,16 @@ int pd_tb_runtime(struct device *dev,enum pd_tb_pm_op op,int argument)
 int pd_tb_device_init_wakeup(struct device *dev,bool enabled)
 {
  int err=pd_tb_runtime(dev,PD_TB_PM_WAKE_POLICY,enabled);
- if(err>=0)dev->pd_wakeup_enabled=enabled;
+ if(err>=0){dev->pd_wakeup_enabled=enabled;dev->pd_wakeup_capable=enabled;}
  return err;
 }
+void pd_tb_device_set_wakeup_capable(struct device *dev,bool capable)
+{
+ int err=pd_tb_runtime(dev,PD_TB_PM_WAKE_CAPABILITY,capable);
+ if(err>=0){dev->pd_wakeup_capable=capable;if(!capable)dev->pd_wakeup_enabled=false;}
+}
 bool pd_tb_device_may_wakeup(struct device *dev)
-{ return dev && pd_tb_native_ready() && dev->pd_wakeup_enabled; }
+{ return dev && pd_tb_native_ready() && dev->pd_wakeup_capable && dev->pd_wakeup_enabled; }
 static void final_release(struct kobject *kobj)
 {
  struct device *dev=kobj_to_dev(kobj);
@@ -108,7 +113,9 @@ int pd_tb_device_add(struct device *dev)
  if(dev->pd_registered)return -EEXIST;
  /* Re-adding a deleted object could change its retained parent. Refuse it. */
  if(dev->pd_parent_held)return -EALREADY;
- if(!dev->bus || dev->bus!=registered_bus || !dev_name(dev))return -EINVAL;
+ if(!dev_name(dev))return -EINVAL;
+ if(dev->bus) { if(dev->bus!=registered_bus)return -EINVAL; }
+ else if(!dev->parent || !dev->parent->pd_registered)return -EINVAL;
  if(dev->kobj.ktype!=&native_type)return -EINVAL;
  if(dev->parent && !retain(NULL,dev->parent))return -ENODEV;
  dev->pd_parent_held=dev->parent!=NULL;

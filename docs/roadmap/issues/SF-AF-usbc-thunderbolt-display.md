@@ -561,3 +561,40 @@ NHI control DMA/interrupts, ACIO M3/RTKit/DART and PCIe-C remain. No ACIO
 writes or tunnels have run. USB04 is still the installed capsule and TS3
 remains deferred; no hardware milestone is marked complete. Continuing
 native attachment and external provider work without another reboot yet.
+
+### Manager source dependencies and crypto, 2026-11-15 04:43Z
+
+The pinned source set now includes USB4 port devices, dock quirks, SHA224/
+256/HMAC, constant-time comparison, UUID/GUID helpers and Linux component
+handling. The full SDK target verifies 27 objects (21 manager, four library,
+two native), and no manager/USB4/crypto/UUID functions remain unresolved
+between those objects. Kernel services and four transactional devres group
+APIs remain required. In particular, the existing DCP group compatibility
+functions report success without rolling back failed-bind resources; they
+are not used as implementations here. No native aggregate binding or full
+kext/link closure is claimed.
+
+Full object build:
+`/nix/store/ksda3m9pgimr6chc4600i8b6xnrimfjc-puredarwin-thunderbolt-cm-objects-0.1`.
+Core build: `/nix/store/953fygchfy63lh2rqz7mc4g3hsihrajq-puredarwin-thunderbolt-cm-objects-0.1`.
+The byte-exact source/header hashes and original notices are retained;
+SDK/host preparation now shares `tools/prepare_cm.py`. It fixes an upstream
+USB4 registration error path which otherwise unregisters/frees the device
+and continues with PM calls. A host test compiles that actual staged add
+function against the production native registry/device adapter: component
+failure returns the error, frees once, restores parent references and makes
+no later PM calls. Busless USB4 port children and separate wake capability/
+wake policy are covered too.
+
+ASan/UBSan also passes 1000 independent Python hashlib/hmac comparisons of
+the unchanged C crypto bodies, including SHA224/256, both HMACs, empty and
+long keys, padding/block boundaries, unaligned buffers, incremental updates
+and context clearing. Comparison tests vary differing positions/lengths/
+alignment; UUID tests cover order and malformed text. This is functional
+and memory evidence, not timing/FIPS validation or dock authorization.
+All six repository checks pass; failed initial compile receipts are kept.
+
+USB04 remains installed, without a new boot or direct device attachment.
+The TS3 is still deferred and no NHI/tunnel/external display milestone has
+been demonstrated. Continuing resource-group rollback, shared native ATC/
+PHY ownership, ACIO and external provider integration.

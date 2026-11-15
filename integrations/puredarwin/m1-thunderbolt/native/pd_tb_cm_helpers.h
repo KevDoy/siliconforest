@@ -40,4 +40,36 @@ static inline int device_property_read_u8(struct device *dev,const char *name,u8
 #ifndef PCI_EXT_CAP_ID_VNDR
 #define PCI_EXT_CAP_ID_VNDR 0x0b
 #endif
+/* Preserve constant-time comparison's optimizer barrier. */
+#ifndef OPTIMIZER_HIDE_VAR
+#define OPTIMIZER_HIDE_VAR(v) __asm__ __volatile__("" : "+r" (v))
+#endif
+static inline void pd_tb_put_be32(u32 value,void *p)
+{ __be32 wire=cpu_to_be32(value);memcpy(p,&wire,sizeof(wire)); }
+#define put_unaligned_be32 pd_tb_put_be32
+static inline int hex_to_bin(unsigned char c) { return _h2b(c); }
+static inline bool device_match_fwnode(struct device *dev,const struct fwnode_handle *fw)
+{ return fw && dev_fwnode(dev)==fw; }
+static inline int fwnode_property_read_u8(const struct fwnode_handle *fw,const char *name,u8 *value)
+{ return fwnode_property_read_u8_array(fw,name,value,1); }
+static inline struct fwnode_handle *fwnode_find_reference(const struct fwnode_handle *fw,const char *name,unsigned index)
+{
+ struct fwnode_reference_args args={0};
+ int err=fwnode_property_get_reference_args(fw,name,NULL,0,index,&args);
+ return err?ERR_PTR(err):args.fwnode;
+}
+DEFINE_FREE(fwnode_handle,struct fwnode_handle *,if(!IS_ERR_OR_NULL(_T)) fwnode_handle_put(_T))
+static inline int device_match_name(struct device *dev,const void *name)
+{ return dev && name && dev_name(dev) && !strcmp(dev_name(dev),name); }
+static inline int device_match_of_node(struct device *dev,const void *node)
+{ return dev && node && dev->of_node==node; }
+/* Component aggregate binding needs real transactional devres groups. These
+ * required native APIs deliberately have no successful no-op implementation. */
+void *devres_open_group(struct device *,void *,gfp_t);
+void devres_close_group(struct device *,void *);
+int devres_release_group(struct device *,void *);
+void devres_remove_group(struct device *,void *);
+/* Repair the private SDK macro's single-argument size_mul call. */
+#undef kmalloc_objs
+#define kmalloc_objs(p,n,...) kmalloc_array((n),sizeof(p),default_gfp(__VA_ARGS__))
 #endif

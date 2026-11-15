@@ -23,7 +23,7 @@ struct device_type { const char *name;void (*release)(struct device *);int (*uev
 struct device_driver { int unused; };
 struct class { int unused; };
 struct device {
- const struct bus_type *bus;bool pd_uevent_suppress,pd_wakeup_enabled,pd_registered,pd_parent_held;
+ const struct bus_type *bus;bool pd_uevent_suppress,pd_wakeup_enabled,pd_wakeup_capable,pd_registered,pd_parent_held;
  void *pd_native_token;struct device *parent;struct device_type *type;
  void (*release)(struct device *);struct class *class;struct kobject kobj;
  int devres_lock;struct list_head devres_head,irqents;

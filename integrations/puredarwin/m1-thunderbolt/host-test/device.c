@@ -4,6 +4,7 @@
 #include <linux/utsname.h>
 #include <assert.h>
 #include <pthread.h>
+#include <stdint.h>
 struct node { struct device dev;unsigned index; };
 static bool destroyed[16];static unsigned published,unpublished,events,pm_calls;
 static bool fail_publish,fail_event,bad_os;static int pm_result;
@@ -28,6 +29,23 @@ static void destroy(struct device *dev)
 }
 static int uevent(const struct device *dev,struct kobj_uevent_env *env) { (void)dev;return add_uevent_var(env,"TYPE=%s","router"); }
 static struct device_type type={.name="router",.release=destroy,.uevent=uevent};
+/* Host-only topology/publication fixture for the actual staged Linux function. */
+struct tb_switch { struct device dev; };
+struct tb_port { struct tb_switch *sw;int port;bool upstream; };
+struct usb4_port { struct device dev;struct tb_port *port; };
+static unsigned usb4_released,component_calls;
+static void usb4_release(struct device *dev) { ++usb4_released;free(container_of(dev,struct usb4_port,dev)); }
+static struct device_type usb4_port_device_type={.name="usb4_port",.release=usb4_release,.uevent=uevent};
+static const int connector_ops;
+static int component_add(struct device *dev,const int *ops) { assert(dev && ops==&connector_ops);++component_calls;return -EIO; }
+static bool tb_is_upstream_port(struct tb_port *port) { return port->upstream; }
+static void set_name(struct device *dev,int port) { char name[64];snprintf(name,sizeof(name),"usb4_port%d",port);dev->kobj.name=strdup(name); }
+#define dev_set_name(dev,fmt,port) set_name((dev),(port))
+#define dev_err(dev,...) ((void)(dev))
+#define kzalloc_obj(obj) calloc(1,sizeof(obj))
+#define TB_AUTOSUSPEND_DELAY 15000 /* actual tb.h constant, fixture only */
+#define ERR_PTR(err) ((void *)(intptr_t)(err))
+#include "usb4_port_add.inc"
 static struct device *node(unsigned index,struct device *parent)
 {
  struct node *n=calloc(1,sizeof(*n));assert(n);n->index=index;
@@ -51,12 +69,21 @@ int main(int argc,char **argv)
  assert(!strcmp(utsname()->sysname,"host-test"));assert(!bus_register(&bus));assert(bus_register(&bus)==-EBUSY);
  assert(driver_register(NULL)==-EOPNOTSUPP);
  struct device *parent=node(0,NULL);assert(!device_add(parent));
+ struct tb_port port={(struct tb_switch *)parent,1,false};
+ unsigned before_pm=pm_calls,before_refs=parent->kobj.kref.refcount;
+ assert(usb4_port_device_add(&port)==ERR_PTR(-EIO));
+ assert(usb4_released==1 && component_calls==1 && pm_calls==before_pm);
+ assert(parent->kobj.kref.refcount==before_refs);
  struct device *child=node(1,parent);
  fail_publish=true;assert(device_add(child)==-EIO);assert(parent->kobj.kref.refcount==2);fail_publish=false;
  fail_event=true;assert(device_add(child)==-EIO);assert(!child->pd_registered && !child->pd_parent_held);fail_event=false;
+ child->bus=NULL; /* USB4 port children have no bus. */
  assert(!device_add(child));assert(device_add(child)==-EEXIST);assert(parent->kobj.kref.refcount==4);
- struct device *found=bus_find_device(&bus,NULL,child,match);assert(found==child);put_device(found);
+ struct device *found=device_find_child(parent,child,match);assert(found==child);put_device(found);
  unsigned count=0;assert(!device_for_each_child_reverse(parent,&count,count_child));assert(count==1);
+ assert(!device_init_wakeup(child,true));assert(device_may_wakeup(child));
+ device_set_wakeup_capable(child,false);assert(!device_may_wakeup(child));
+ device_set_wakeup_capable(child,true);assert(!device_may_wakeup(child));
  assert(!device_init_wakeup(child,true));assert(device_may_wakeup(child));
  pm_result=1;assert(pm_runtime_suspended(child));pm_result=0;assert(!pm_runtime_suspended(child));
  struct kobj_uevent_env env={0};char big[2049];memset(big,'x',sizeof(big));big[2048]=0;

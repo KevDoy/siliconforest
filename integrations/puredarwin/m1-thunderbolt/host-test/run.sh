@@ -23,8 +23,16 @@ ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/include" "$here
 ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/include" -c "$here/src/pd_tb_registry.c" -o "$tmp/registry.o"
 ${CXX:-c++} -std=c++14 -O1 -g -pthread -fsanitize=address,undefined -I "$here/include" "$here/host-test/registry.cpp" "$tmp/registry.o" -o "$tmp/registry"
 "$tmp/registry"
+cp -R "$here/upstream/family" "$tmp/family"
+python3 "$here/tools/prepare_cm.py" "$tmp/family"
+python3 - "$tmp/family/usb4_port.c" "$tmp/usb4_port_add.inc" <<'PYEXTRACT'
+import pathlib,sys
+s=pathlib.Path(sys.argv[1]).read_text();a=s.index('struct usb4_port *usb4_port_device_add(');b=s.index('\n/**',a)
+pathlib.Path(sys.argv[2]).write_text('/* GPL-2.0: actual staged Linux usb4_port.c add function. */\n'+s[a:b])
+PYEXTRACT
 ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined \
-  -I "$here/host-test/device-linux" -I "$here/native" -I "$here/nativeinc" -I "$here/pininc" -I "$here/include" \
+  -I "$tmp" -I "$here/host-test/device-linux" -I "$here/native" -I "$here/nativeinc" -I "$here/pininc" -I "$here/include" \
   "$here/native/pd_tb_device.c" "$here/src/pd_tb_registry.c" "$here/host-test/device.c" -pthread -o "$tmp/device"
 "$tmp/device"
 "$tmp/device" fault
+"$here/host-test/crypto.sh"

@@ -59,3 +59,12 @@ The native registry/device adapters, staged-layout patch script, compatibility
 helpers and host-only reference fixtures are new MIT code. patch_device.py
 retains the private LinuxKPI header's original BSD notices. Combining the
 adapters with the upstream manager does not change the GPL-2.0 port license.
+
+upstream/lib/crypto/sha256.c and fips.h retain GPL-2.0-or-later notices;
+SHA authors are Jean-Luc Cooke, Andrew McDonald, James Morris, Red Hat and
+Google. upstream/lib/crypto/memneq.c retains both original BSD/GPLv2 notices
+(OpenVPN Technologies, James Yonan and Daniel Borkmann); this port selects
+GPLv2. upstream/lib/uuid.c is GPL-2.0-only (Intel, Huang Ying), and
+upstream/lib/component.c is GPL-2.0. Headers and source hashes are recorded
+in family-provenance.json. The SHA/FIPS source inclusion does not claim
+FIPS mode or validation. New host-only scalar/reference fixtures are MIT.

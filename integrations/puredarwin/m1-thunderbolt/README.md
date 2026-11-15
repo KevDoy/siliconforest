@@ -56,16 +56,16 @@ No calibration bytes are included, and no native ACIO callback is wired yet.
 
 `upstream/family/` and `pininc/` retain the pinned Linux software CM and its
 protocol headers byte for byte; hashes are in `family-provenance.json`.
-`build-cm-objects.nix` SDK-compiles nineteen upstream translation units and
-our two native device/registry objects. `--arg full false` selects ten core
-units plus the same adapters. The recipe verifies both the object count and
+`build-cm-objects.nix` SDK-compiles twenty-one upstream manager files,
+four upstream library files and two native device/registry objects. `--arg full false` selects ten core
+units plus the same adapters. The recipe verifies both the object count (27/12) and
 domain object's presence; the inherited configure phase does not consume
 `cmakeFlags`, so the option is passed explicitly. Earlier purported full
 object results contained only the ten core files and are not full-build
 proof. `nix-support/required-external` records symbols still needed after
 subtracting definitions in these objects. This target neither links a kext
-nor proves the complete dependency closure (USB4 port devices, crypto and
-other kernel/native dependencies still need binding).
+nor proves the complete kernel/native dependency closure (transactional devres groups
+and native ACIO/PHY/PM backends still need binding).
 
 Staged-only adaptations disable trace instrumentation, guard domain init
 until native callbacks are installed, and exclude the Intel x86 Apple PCI
@@ -101,3 +101,31 @@ parent lifetime, eight concurrent iterators, capacity and reference failure,
 watermark/reverse traversal, partial-publication cleanup, bounded events,
 and power failure followed by cleanup. These fixtures establish no actual
 IORegistry, RTKit, DMA, controller power, authorization or tunnel facts.
+
+
+USB4 port-device and dock-quirk bodies, SHA224/256/HMAC, constant-time memneq,
+UUID/GUID helpers and the component framework now come directly from the
+same pin (`upstream/lib/`, hashes in family-provenance.json). Fwnode byte
+reads and zero-argument references use the actual native OF readers.
+USB4 children can register without a bus under a registered parent; wake
+capability and wake policy stay separate and both reach the real backend.
+`tools/prepare_cm.py` applies the documented staged changes in both SDK
+and host tests. It also returns immediately after failed USB4 component
+registration; upstream otherwise continues after freeing the port device.
+The host test compiles that exact staged add function and verifies the
+error, final release, parent's references and absence of later PM calls.
+
+The unchanged crypto/UUID source is tested under ASan/UBSan against 1000
+independent Python hashlib/hmac cases, including empty data/keys, block and
+padding boundaries, long keys, unaligned input/output, incremental HMAC and
+context clearing. Memneq tests vary differing bytes/length/alignment and
+UUID tests cover byte order and malformed text. This checks function results
+and memory behavior, without claiming timing certification or dock auth.
+No firmware write paths or device captures are enabled by these tests.
+
+Component aggregate binding still requires four real devres group APIs.
+Their required declarations stay unresolved in the object manifest: this
+port does not use the existing DCP success/no-op group compatibility
+functions, which retain failed-bind resources until device teardown. A
+native shared component/provider binding and proper group rollback must
+exist before enabling USB4/Type-C connector aggregates.

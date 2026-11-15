@@ -35,6 +35,7 @@ void pd_tb_device_unregister(struct device *);
 int pd_tb_runtime(struct device *,enum pd_tb_pm_op,int);
 int pd_tb_device_init_wakeup(struct device *,bool);
 bool pd_tb_device_may_wakeup(struct device *);
+void pd_tb_device_set_wakeup_capable(struct device *,bool);
 #define device_initialize pd_tb_device_initialize
 #define device_add pd_tb_device_add
 #define device_del pd_tb_device_del
@@ -42,6 +43,7 @@ bool pd_tb_device_may_wakeup(struct device *);
 #define device_unregister pd_tb_device_unregister
 #define device_init_wakeup pd_tb_device_init_wakeup
 #define device_may_wakeup pd_tb_device_may_wakeup
+#define device_set_wakeup_capable pd_tb_device_set_wakeup_capable
 #undef KOBJ_CHANGE
 #define KOBJ_ADD 0
 #define KOBJ_REMOVE 1
