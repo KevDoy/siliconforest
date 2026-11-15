@@ -15,7 +15,7 @@ in pd.packages.x86_64-linux.kexts-arm64.overrideAttrs (old: {
     cp -R ${./include} "$dest/include"
     cp -R ${./src} "$dest/src"
     cat > "$dest/CMakeLists.txt" <<'CMAKE'
-add_library(PDThunderboltLogic OBJECT upstream/apple-dpin-state.c src/pd_apple_nhi.c src/pd_cio_lifecycle.c)
+add_library(PDThunderboltLogic OBJECT upstream/apple-dpin-state.c src/pd_apple_nhi.c src/pd_cio_lifecycle.c src/pd_cio_tunables.c)
 target_include_directories(PDThunderboltLogic PRIVATE "''${CMAKE_CURRENT_SOURCE_DIR}/include" "''${CMAKE_CURRENT_SOURCE_DIR}/upstream" "''${CMAKE_CURRENT_SOURCE_DIR}/portable")
 target_link_libraries(PDThunderboltLogic PRIVATE xnu_kernel_private_headers)
 target_compile_options(PDThunderboltLogic PRIVATE -Os -Wall)

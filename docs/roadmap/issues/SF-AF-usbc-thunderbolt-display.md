@@ -381,3 +381,33 @@ all 11 kit checks and six repository checks pass. Installation is announced
 for after PERF's measurement (no earlier 03:31Z), subject to a fresh log
 check inside gui.lock. USB03 remains installed at this checkpoint; neither
 controller DMA nor direct-device enumeration has been observed.
+
+### ACIO tunables, CM core and native RTKit source, 2026-11-15 03:28Z
+
+ACIO's runtime decoder now validates the actual 24-byte records and all
+eleven RC/NHI/PCIe-adapter groups before any write. It preserves Linux's
+independent clear/OR-set semantics and skips unchanged registers. ASan/UBSan
+passes 110 late missing/malformed refusals and all eleven base mappings;
+SDK objects are `/nix/store/qkqxcpbyg4npxmfqn7caial2hvihzjbp-puredarwin-thunderbolt-objects-0.1`.
+No firmware/calibration/device-identity bytes are committed.
+
+The actual pinned Linux CM core (ten control/path/tunnel translation units)
+SDK-compiles against LinuxKPI, with endian-array/CRC32C wire helpers and
+tracepoint instrumentation disabled in the staged copy. Output:
+`/nix/store/mk0abkh7l44yl8alnnn2pwx3hy7akzy7-puredarwin-thunderbolt-cm-objects-0.1`.
+This is not linked or attached. Full-CM compile attempts remain failures:
+LinuxKPI router bus/device/PM/uevent/property/crypto/cleanup APIs still need
+native implementation. Logs remain private; no missing backend is replaced
+with a success stub. The known wire vector and 514 array cases pass.
+
+Native RTKit platform initialization now serializes allocation/publication
+and retains its host anchor; failed allocation cleans up and permits retry.
+The resolver supports ACIO1's M3v2 mailbox directly at reg0 (no ASC 0x8000
+offset), while preserving ASCv4 for internal/external DCP. Port0 M3 remains
+refused. Layout tests pass 48 IRQ permutations, every undersized window,
+overflow and malformed IRQs. The complete PDDcp bundle SDK-builds as
+`/nix/store/6wjx0zwiv0h2nbcf2cp05yw0nz8h5vfv-puredarwin-dcp-0.1`.
+These newer RTKit/DCP changes are not part of USB04 and establish no M3
+boot, external DCP, trained link or scanout. DESK4's K1-K12 interface request
+has been read and answered; actual connector evidence must precede its
+second scanout integration request.

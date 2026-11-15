@@ -45,3 +45,29 @@ PCIe-attached xHCI/Intel I210 (the existing em driver supports it), DP-IN /
 dcpext tunnel binding and real dock hotplug. Never map or read ACIO children
 before power/RTKit readiness, or after shutdown (the Linux driver documents
 SError/watchdog resets on that ordering violation). Port 0 stays reserved.
+
+The runtime ACIO calibration adapter decodes the distinct 24-byte ADT
+records and maps all eleven RC/NHI/PCIe-adapter groups to m1n1's offsets.
+It validates every record before writes, rechecks the entire retained
+bundle on application, and preserves Linux's independent clear/OR-set
+semantics and skip-unchanged behavior. ASan/UBSan tests cover all group
+bases and 110 late malformed/missing-record refusals. SDK objects build.
+No calibration bytes are included, and no native ACIO callback is wired yet.
+
+`upstream/family/` and `pininc/` retain the pinned Linux software CM and its
+protocol headers byte for byte; hashes are in `family-provenance.json`.
+`build-cm-objects.nix --arg full false` SDK-compiles ten original translation
+units: cap, clx, ctl, dma_port, lc, path, property, tmu, tunnel and usb4.
+Only tracepoint instrumentation is disabled in the staged copy. Wire
+helpers supply LinuxKPI's missing endian-array conversion and CRC32C;
+completion-on-stack uses the existing LinuxKPI counter initialization.
+Tests include the Castagnoli check vector, split seeds, unaligned/in-place
+conversions and bounds. These are objects, with unresolved native/kernel
+references; no linked/loaded CM is claimed.
+
+The default full target still FAILS: the LinuxKPI lacks router bus/device
+traversal and release/type fields, runtime-PM/uevent/property APIs, crypto
+bindings, and newer cleanup variants. These remain implementation work.
+`device_may_wakeup` is explicitly a required native declaration, without
+a dummy definition. A successful core-object build does not resolve the
+router model, NHI control DMA/interrupts, ACIO RTKit/DART or PCIe-C bridge.

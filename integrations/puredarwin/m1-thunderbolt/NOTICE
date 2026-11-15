@@ -21,3 +21,36 @@ GPL-2.0 notice and the nhi.h/tb.h copyright attribution above.
 New portability type/errno/bit headers and host assertion/OF fixtures are MIT;
 they implement no hardware or connection manager. The OF, KUnit and topology
 fixtures are only used by host tests, not by the SDK object target.
+
+upstream/family/ and pininc/ are unmodified Omacom linux-aurora sources
+at the full revision and per-file SHA256 in family-provenance.json. They
+retain all original SPDX/copyright notices. These are the connection-manager,
+control-channel, topology, path and tunnel implementations; no native
+Thunderbolt attachment is implied by their inclusion.
+
+src/pd_cio_tunables.c and include/pd_cio_tunables.h adapt the raw 24-byte
+ACIO format and eleven T8103 group mappings from m1n1 src/kboot.c at
+121fcbf35d4501814b58ca5347926a4173b6a512 (MIT), and register clear/OR-set
+semantics from Linux drivers/soc/apple/tunable.c (GPL-2.0-only OR MIT).
+This adapter selects MIT. Copyright The Asahi Linux Contributors.
+
+Copyright The Asahi Linux Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining
+ a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
