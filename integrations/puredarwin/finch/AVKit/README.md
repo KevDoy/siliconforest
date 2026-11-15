@@ -10,6 +10,8 @@ M1 reports no OpenGL context and uses ordinary view fallback; this test proves
 no video rendering, audio, fullscreen presentation or picture-in-picture.
 The first M1 probe overlapped a newly announced TERM6 idle measurement; this
 was disclosed. Its functional result is retained, not uncontended timing.
+A fresh07:26Z rerun under gui.lock repeats the functional pass; neither run
+establishes rendering or a timing benchmark.
 
 Finch's player here provides clock/state and JPEG/ImageIO handling. It has no
 H264 VideoToolbox or AudioToolbox output backend. It is therefore staged only;

@@ -31,7 +31,9 @@ cache stores/looks up/purges5bytes. A first native test used a noncacheable
 response and too small a cache; its failure remains recorded. A rebuilt binary
 initially missed portable Foundation load names; that dyld failure is also
 retained. The corrected portable binary is used for both systems; M1 model
-comparison is pending.
+comparison now passes with the same cookie flags/dates/header and5-byte cache
+accounting. The port removes Finch's arbitrary256-byte per-entry overhead to
+match native accounting. Prefixv4 also repeats HTTPS and missing-CA checks.
 
 For TERM6: canonical-objects.nix compiles the SAME implementation with native
 class names, without linking Foundation itself. Its archive builds and has no
@@ -53,4 +55,5 @@ link/QEMU/installation have not been performed by this stream.
 
 Evidence: runs/sffinch/networking-prefix-v1/candidate.json,
 avkit-network-native-v1-reference.json, m5-network-models-v3-reference.json,
-foundation-networking-canonical-v3, foundation-networking-integration.drv.
+foundation-networking-canonical-v4, foundation-networking-integration.drv,
+networking-prefix-v4/candidate.json.

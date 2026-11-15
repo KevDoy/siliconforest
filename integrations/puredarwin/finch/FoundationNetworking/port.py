@@ -53,3 +53,6 @@ a=s.index('        NSDateFormatter *f = [[NSDateFormatter new] autorelease];');b
 s=s[:a]+'        NSDate *d=sfHTTPDate(expires,@[@"EEE, dd MMM yyyy HH:mm:ss zzz"]);\n'+s[b:];p.write_text(s)
 
 p=root/'NSURLCredential.m';s=p.read_text().replace('_credentials[space].count','[(NSDictionary *)_credentials[space] count]');p.write_text(s)
+
+# Native M5 counts payload bytes, not Finch's arbitrary per-entry overhead.
+p=root/'NSURLCache.m';s=p.read_text();old='return r.data.length + 256;';assert s.count(old)==1;s=s.replace(old,'return r.data.length;');p.write_text(s)

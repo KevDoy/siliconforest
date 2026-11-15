@@ -125,5 +125,25 @@ class HoldTests(unittest.TestCase):
         text += 'X CODEX-TB IDLE-K2 owned UART reader stopped before gui.lock release\n'
         self.assertIsNone(gate.pending_hold(text))
 
+    def test_owner_released_completed_core_install(self):
+        text = 'T TERM6 core.lock: GUARDED INSTALL now: Foundation\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX expect TERM6 core.lock released: Foundation INSTALLED\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U TERM6 in 2min: core.lock released: Foundation INSTALLED\n'))
+        self.assertIsNone(gate.pending_hold(text+'U TERM6 core.lock released: Foundation INSTALLED, new probe ok\n'))
+
+    def test_idle_measurement_survives_gui_release_with_time_margin(self):
+        from datetime import datetime, timezone
+        text = '2026-11-15T06:23:41Z TERM6 gui.lock: start my own Activity Monitor for an idle CPU/RSS measurement (no input), ~2 min\n'
+        text += '2026-11-15T06:23:42Z TERM6 gui.lock released (measurement continues without input)\n'
+        self.assertIsNotNone(gate.pending_hold(text, now=datetime(2026,11,15,6,25,50,tzinfo=timezone.utc)))
+        self.assertIsNone(gate.pending_hold(text, now=datetime(2026,11,15,6,26,12,tzinfo=timezone.utc)))
+
+    def test_recovered_kernel_owner_event_clears_only_its_reboot(self):
+        text = 'T CODEX-TB cio02 clean reboot to Linux\n'
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX expect CIO02 recovered USB04; M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB waiting for CIO02 recovered USB04; M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB CIO02 recovered USB04; M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U PERF core.lock: GUARDED INSTALL now\nV CODEX-TB CIO02 recovered USB04; M1 back in SiliconForest\n'))
+
 if __name__ == '__main__':
     unittest.main()
