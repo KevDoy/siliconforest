@@ -435,3 +435,18 @@ attempts remain retained until reboot; stop revokes and pins, without claiming
 a child-DMA drain. BME stays blocked and no endpoint personality is added.
 The ordinary and enumeration builds exclude this factory. All four SDK
 variants and the CLI compile; no target mapper request or DMA is yet observed.
+
+
+`build-dock-network-tools.nix` builds separate `pd-dock-dhcp` and
+`pd-dock-netsetup` executables from the existing ISC DHCP source and pinned
+native netsetup source. The generator checks the exact input hashes and
+preserves their notices. It leaves shared Wi-Fi tools unchanged. Install
+the two explicit tools under `/private/var/db/sftb/` before using the DHCP
+client; there is no fallback to `/bin/netsetup`. Supply the actual I210
+interface name: no default interface is accepted. The helper configures
+only that interface, without loopback, default-route or resolver writes.
+The lease client refuses pre-existing IPv4 configuration, scopes UDP
+renewals with the real IP_BOUND_IF option, uses a separate lease filename,
+and retires only a successfully applied address on daemon exit/lease loss.
+An EEXIST address is refused rather than acquired for later cleanup. The
+tools compile for the native SDK; target DHCP and cleanup remain untested.
