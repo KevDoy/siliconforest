@@ -85,6 +85,9 @@ def main():
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
+    ap.add_argument('--font-config', help='private process fontconfig file')
+    ap.add_argument('--gpu-dirty-frames', action='store_true', help='experimental generation-based GPU frame reuse')
+    ap.add_argument('--presentation-seat', action='store_true', help='admit/focus/wake the owned fixture before presentation timing')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
@@ -96,6 +99,8 @@ def main():
         raise ValueError('Drag/clipboard seat checks require --native-ui admission')
     if args.profile_fixture and (not args.measure_fixture or not args.sample_path):
         raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
+    if args.presentation_seat and not args.measure_fixture:
+        raise ValueError('Presentation seat admission requires --measure-fixture')
     args.run.mkdir(parents=True, exist_ok=False)
     profile = args.run / 'profile'
     profile.mkdir()
@@ -113,9 +118,17 @@ def main():
         if not name or not separator:
             raise ValueError('Expected --pref NAME=JSON')
         prefs[name] = json.loads(value)
+    if args.render_quality is not None:
+        prefs['gfx.color_management.mode'] = args.render_quality
     (profile / 'user.js').write_text(''.join('user_pref(%s, %s);\n' % (json.dumps(k), json.dumps(v))
                                           for k, v in prefs.items()))
     env = os.environ.copy()
+    if args.font_config:
+        if not args.font_config.startswith('/private/var/db/sffx/') or '..' in Path(args.font_config).parts:
+            raise ValueError('Font configuration must be inside the private prefix')
+        env['FONTCONFIG_FILE'] = args.font_config
+    else:
+        env.pop('FONTCONFIG_FILE', None)
     env.update(HOME=str(home), CFFIXED_USER_HOME=str(home), XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',
                WAYLAND_DISPLAY='wayland-0', MOZ_CRASHREPORTER_DISABLE='1', MOZ_NO_REMOTE='1',
                MOZ_LOG='PlatformDecoderModule:5,AppleMedia:5,DMABuf:4',
@@ -131,7 +144,7 @@ def main():
         env['SFFX_GPU_PRESENT'] = '1'
     else:
         env.pop('SFFX_GPU_PRESENT', None)
-    for active, name in [(args.gpu_vector_compare, 'SFFX_GPU_VECTOR_COMPARE'), (args.gpu_cache_lookups, 'SFFX_GPU_CACHE_LOOKUPS')]:
+    for active, name in [(args.gpu_vector_compare, 'SFFX_GPU_VECTOR_COMPARE'), (args.gpu_cache_lookups, 'SFFX_GPU_CACHE_LOOKUPS'), (args.gpu_dirty_frames, 'SFFX_GPU_DIRTY_FRAMES')]:
         if active:
             env[name] = '1'
         else:
@@ -173,7 +186,8 @@ def main():
     result = dict(command=cmd, seconds=args.seconds, software_requested=args.software,
                   sandbox_disabled=args.no_sandbox, gpu_surfaces=args.gpu_surfaces, gpu_presentation=args.gpu_presentation,
                   gpu_vector_compare=args.gpu_vector_compare,gpu_cache_lookups=args.gpu_cache_lookups,
-                  synthetic_input=args.scroll_fixture or bool(args.benchmark) or args.native_ui or args.panels, prefs=prefs,
+                  gpu_dirty_frames=args.gpu_dirty_frames, font_config=args.font_config,
+                  synthetic_input=args.presentation_seat or args.scroll_fixture or bool(args.benchmark) or args.native_ui or args.panels, prefs=prefs,
                   diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
                   io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
@@ -220,7 +234,7 @@ def main():
                         command = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True).stdout
                         browser_command = str((args.bundle.parent / 'original/Firefox.app/Contents/MacOS/firefox')
                                               if args.executable == 'firefox-sf' else args.bundle / 'Contents/MacOS/firefox')
-                        is_parent = args.sample_parent and command.startswith(browser_command)
+                        is_parent = args.sample_parent and command.strip().startswith(browser_command)
                         if pid != p.pid and (is_parent or 'gpu-helper.app/Contents/MacOS/Firefox GPU Helper' in command):
                             sample = subprocess.run([args.sample_path, str(pid), '2', '20', '-file',
                                                      str(args.run / ('gpu-sample-%d.txt' % pid))],
@@ -310,6 +324,9 @@ def main():
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
+                                if args.presentation_seat:
+                                    from presentation_seat import admit
+                                    result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json')
                                 client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
                                 profiler = None
                                 if args.profile_fixture:

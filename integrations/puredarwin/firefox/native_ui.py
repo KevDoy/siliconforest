@@ -101,13 +101,13 @@ def measure(client, output, deadline, clipboard_guard=None, native_drag=False, c
     window_id = int(re.match(r'window (\d+) ', owned_line)[1])
     result['admitted_window_id'] = window_id
     from renderer_capture import capture as capture_renderer
-    result['admission_capture'] = capture_renderer(output.with_name('native-admission-renderer.ppm'))
-    save()
     tx, ty = x + width // 2, y + 10
     if tx > 2559 or ty > 1599:
         raise RuntimeError('Owned titlebar outside panel')
     request('abs %d %d\nwait 60\nbuttons 1\nwait 60\nbuttons 0\nwait 250' %
             (round(tx * 65535 / 2559), round(ty * 65535 / 1599)))
+    result['admission_capture'] = capture_renderer(output.with_name('native-admission-renderer.ppm'))
+    save()
 
     def state():
         return chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");

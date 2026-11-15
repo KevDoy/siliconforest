@@ -25,9 +25,14 @@ def main():
     ap.add_argument('--output', type=Path, required=True, help='new ignored host staging directory')
     ap.add_argument('--nix', default=str(Path.home() / '.nix-profile/bin/nix'))
     ap.add_argument('--build', action='store_true')
+    ap.add_argument('--gpu-presentation', action='store_true')
+    ap.add_argument('--gpu-dirty-frames', action='store_true')
+    ap.add_argument('--font-quality', action='store_true', help='private fontconfig and face-preserving CoreText')
     ap.add_argument('--provider-overrides', type=Path,
                     help='JSON map of provider names to retained, qualified Nix output directories')
     args = ap.parse_args()
+    if args.gpu_dirty_frames and not args.gpu_presentation:
+        raise ValueError('GPU frame reuse requires GPU presentation')
     release = PurePosixPath(args.release)
     if release.parent != PurePosixPath('/private/var/db/sffx') or not release.name.replace('-', '').isalnum():
         raise ValueError('Expected one new simple release directory under /private/var/db/sffx')
@@ -60,11 +65,20 @@ def main():
         'avfoundation': 'import ./avfoundation.nix', 'compat': 'import ./compat.nix {}',
         'io': 'import ./io-policy.nix', 'open': 'import ./open-url.nix',
     }
+    if args.gpu_presentation:
+        recipes.update(gl='import ./cgl-gpu.nix {prefix=' + json.dumps(str(release / 'gl')) + ';}',
+            surface='import ./surface-gpu.nix', quartz='import ./quartzcore.nix {gpuPresentation=true;}',
+            windowserver='import ./windowserver-ui.nix',
+            appkit='import ./appkit-ui.nix {menuGeometry=true;preciseScroll=true;gpuPresentation=true;pasteboardProvider=true;}')
+    if args.font_quality:
+        recipes.update(fonts='import ./fontconfig.nix {prefix=' + json.dumps(str(release / 'fonts')) + ';}',
+            coretext='import ./coretext.nix', onyx='import ./onyx-font.nix')
+        recipes['sandbox'] = 'import ./sandbox.nix {prefix=' + json.dumps(str(release / 'sandbox')) + ';coldAVDFirmware=true;fontDirectory=' + json.dumps(str(release / 'fonts')) + ';}'
     overrides = json.loads(args.provider_overrides.read_text()) if args.provider_overrides else {}
     if not isinstance(overrides, dict) or set(overrides) - set(recipes):
         raise ValueError('Provider overrides must name providers in the plan')
-    if set(overrides) & {'gl', 'sandbox'}:
-        raise ValueError('CGL and sandbox must be built for this exact target prefix')
+    if set(overrides) & {'gl', 'sandbox', 'fonts'}:
+        raise ValueError('CGL, sandbox and font configuration must be built for this exact target prefix')
     for name, value in overrides.items():
         if not isinstance(value, str) or not re.fullmatch(r'/nix/store/[a-z0-9]{32}-[^/]+', value):
             raise ValueError('Expected a direct Nix output directory for ' + name)
@@ -74,13 +88,15 @@ def main():
                     mozilla_sha512=checksum_line[0], recipes=recipes,
                     state='candidate: requires qualification at this exact prefix',
                     installed_media=True, skip_unchanged_transactions=False, provider_overrides=overrides,
-                    known_limits=['native-layer readback; no zero-copy',
-                                  'single-tab first paint', 'cold AVD sandbox mitigation native-qualified; Firefox cold first-open pending',
+                    gpu_presentation=args.gpu_presentation, gpu_vector_compare=args.gpu_presentation,
+                    gpu_cache_lookups=args.gpu_presentation, gpu_dirty_frames=args.gpu_dirty_frames,
+                    private_fonts=args.font_quality, precise_scroll=args.gpu_presentation,
+                    known_limits=['video NV12 upload remains; no end-to-end zero-copy claim',
+                                  'this exact prefix requires launcher, URL and quality qualification',
                                   'physical audio/A-V/trackpad unverified',
                                   'private bundle Command-W intercepted by desktop until catalogued',
-                                  'menu geometry0206 is excluded after browser startup stall',
-                                  'software H264/HEVC callback fix is separate experimental candidate',
-                                  'running-instance URL delivery unqualified'])
+                                  'compositor-clock 60fps and GPU-path sustained browsing require qualification',
+                                  'software H264/HEVC callback fix is separate experimental candidate'])
     if not args.build:
         print(json.dumps(manifest, indent=2))
         return
@@ -101,7 +117,7 @@ def main():
             result.check_returncode()
             source = Path(result.stdout.strip().splitlines()[-1])
         builds[name] = str(source)
-        if name in ['appkit', 'onyx']:
+        if name in ['appkit', 'onyx', 'coretext']:
             shutil.copytree(source / 'System/Library/Frameworks', args.output / name / 'Frameworks', symlinks=True)
         else:
             shutil.copytree(source, args.output / name, symlinks=True)

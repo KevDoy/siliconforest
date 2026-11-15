@@ -4,14 +4,14 @@ Work in progress, 15 November 2026. The goal is the official, unmodified macOS
 Firefox on SiliconForest with hardware WebRender, AVD decode and responsive,
 correct presentation at the owner's 150% scale. M0 is qualified; actual GPU presentation, hardware decode, streaming and installer URL delivery are now observed. Rendering pace and several quality gaps still prevent a daily-use recommendation.
 
-## Current checkpoint (13:56 UTC)
+## Current checkpoint (14:53 UTC)
 
 | Area | Latest real-M1 evidence | Remaining |
 |---|---|---|
-| Rendering | actualFirefoxGPU006 correct renderer capture, private AppKit in parent/GPU dyld lists; dma-buf600frames/base upload once11MB/0failures | first10s paired scroll11.53→39.79actualflips/s, p95160→50ms, familyCPU123.69→109.38%onecore; below60, repeats/optimization pending |
+| Rendering | actualFirefoxGPU006 correct renderer capture, private AppKit in parent/GPU dyld lists; dma-buf600frames/base upload once11MB/0failures | same-provider repeated10s scroll: scalar/uncached37.60,39.00fps at105.21,104.95%onecore; NEON/cached50.96,53.48fps at70.64,67.45%; p95 ON33–34ms; laterawake/admitted fullfontstackOFF17=54.68fps/65.06%onecore; stillbelow60 |
 | Native GPU | CGL3.2/4.1 ×2D/RECT4/4; asymmetric144×96 opaqueleft6912/6912identicalCPU eachphase, correct premultalpha and CPUfallback | fullbrowser video still uploads NV12; no end-to-end zero-copy claim |
-| Decode/stream | cold3codec300/0 and900AVDdone/noerrors; pairedSWexact; DASH002 publicclear1080pH264/AAC-LC375/0 in15.004s wall/14.974media, AVDdone+375 | acoustic output/lip sync; fullGPUvideo001 all3ended300/0+900AVDdone, but stale autoplay AbortError fails firstclip; corrected repeat pending |
-| Quality | ICCoff/on128/188exact; nativeOpen/Save39exactbytes; fullscreen251/0/native2560×1600/exit; nativecontextmenu+Escape; trustedfingerpixel37→DOMdeltaMode0/deltaY37/scrollTop100→137 | canvasemoji wrong, Devanagari absent; drag/clipboard harness correction; physical trackpad/momentum; private-bundle CmdW desktop classification |
+| Decode/stream | cold3codec300/0 and900AVDdone/noerrors; pairedSWexact; DASH002 publicclear1080pH264/AAC-LC375/0 in15.004s wall/14.974media, AVDdone+375 | acoustic output/lip sync; optimized fullGPUvideo002PASS: eachcodec300/0,900AVDdone/errors0/timeouts0, all finalpixelhashes match; prior001 staleautoplay harnessfailure retained |
+| Quality | ICCoff/on128/188exact; nativeOpen/Save39exactbytes; fullscreen251/0/native2560×1600/exit; nativecontextmenu+Escape; trustedfingerpixel37→DOMdeltaMode0/deltaY37/scrollTop100→137; empty-onlyclipboard UTF8copy/write/paste/conditionalclear; trusteddrag/dropmatchingtext | 0214nativeA/B andactual017 trusteddrag/dropmatchingtextPASS; correctbrowser.tabs.inTitlebar=0 removesclipping; privateOFLfontconfig008 correctDevanagari; 0215actualrender-quality010PASS: correctcanvasemoji plusDevanagari, matchedprivateCoreTextimages; collectionfaceindexOnyxcandidatebuilt/notyetM1qualified; physical trackpad/momentum; private-bundle CmdW desktop classification |
 | Speed/stability | Speedometer8.39±.43; MotionMark589.14[566.42,613.13]; JetStream94.079one run;30minCPU-path99/99visits/0abnormalcontentexits | GPU-path repeat/stability; idle/startup spreads |
 | Integration | r4outerlauncher +realopen defaultURL creates unique HTTPS thirdtab in SAMEparentPID, intendedprivateAppKit parent/GPU verified; integration004PASS | finalartifact must include context-menu fix; owner pins/defaults untouched, no activation |
 
@@ -27,10 +27,9 @@ Contextmenu011 deliberately crashes on missing `-[GeckoNSMenu setAppearance:]`.
 Private0212 supplies retained appearance and submenu/popup inheritance;
 actualnative012 opens its owned popup and closes it with Escape. Its first
 native deallocation assertion is premature because associated getters
-retain/autorelease; a nested-pool correction is pending. Clipboard012 crashes
+retain/autorelease; a nested-pool correction passes all native inheritance/retention/clear/popup/destruction controls in native-ui-probes-v2. Clipboard012 crashes
 in our ctypes bridge because its MIME NSString was not retained between
-command pools; this is a harness failure, not attributed to AppKit. An empty
-backend was observed before any copy and no existing clipboard data replaced.
+command pools; this is a harness failure, not attributed to AppKit. Corrected native013 proves UTF-8 copy, native pasteboard write and trusted paste, followed by conditional clearing of only its own selection. An empty, observed Wayland backend was required before any copy; no existing clipboard data was replaced.
 
 ## Observed on the real M1
 
@@ -533,3 +532,21 @@ Onyx lock and Quartz lifetime builds used in successful browser controls;
 CGL and sandbox are rebuilt for its new prefix. `--provider-overrides` records
 these selections and refuses overriding the prefix-sensitive components.
 Native Open/Save and fullscreen controls now pass. Clipboard/drag retries and context-menu-fixed final artifact remain; no owner activation.
+
+## Font and input checkpoint, 14:32 UTC
+
+`0214-pasteboard-item-provider-receives-destination-board.patch` passes the actual destination pasteboard to NSPasteboardItem's provider. Firefox writes its text to that board; the old nil argument produced an empty offered type list. Native controls distinguish item-style and board-style providers; both pass with the candidate, while both old correct-board checks fail. Actual native-ui-017 records one trusted drag start, one enter, nine over events, one trusted matching text drop and a copy completion. Its remaining overall failure is the separately tracked desktop Command-W behavior.
+
+The correct Firefox160 preference is `browser.tabs.inTitlebar=0`, an integer. The former `browser.tabs.drawInTitlebar=false` name was unused. With the correct preference, the child and content heights both measure960 points and the frame982; a capture shows the complete tab strip. Daily launch applies this only when creating its own fresh profile.
+
+An official, pinned, OFL1.1 Noto Sans Devanagari font and a process-private fontconfig file give both font resolvers the same font list. No owner font/config directory is changed; caches remain under the private font prefix. The private sandbox optionally maps the existing explicit font-service capability to read that exact prefix. Native controls prove service-read, no-service denial, font-write denial and unrelated-file-read denial. Actual render-quality-008 shows Devanagari text instead of tofu. Earlier constructor-only registration reached CoreText's separate font database but not AppKit's and is not promoted.
+
+The canvas emoji defect is a distinct CoreText copy bug. Native old/new controls show NotoEmoji and an unregistered in-memory font changing to Inter on a descriptor copy; private0215 preserves the graphics face, glyphs, requested size and matrix when only rendering attributes change. The first Firefox trial against private CoreText stalls at startup (009 live, no qualification). Repeat010 passes after the coordinated CIO22 reboot: actual parent/GPU image lists select private CoreText, content-process glyph traces use Noto Emoji and the captured canvas has correct smiley/tree/rocket forms alongside Devanagari. The prior stall remains a failure; no reboot/Foundation cause is inferred. The first Foundation install attempt made no change, and later Foundation installs/reversion are separate coordination events.
+
+## Presentation controls and release preparation, 14:53 UTC
+
+New frame-reuse work remains opt-in and unqualified. The first tree-generation candidate passes native asymmetric/mutable-pixel controls, but browser014 loses all presentation callbacks; importantly, subsequent cache-disabled015 does too. Both renderer captures report no current frame, consistent with the shared display sleeping. Neither is a valid pacing comparison, and no cache-caused freeze is established. `presentation_seat.py` now admits the fixture through its unique owned-session native title, moves/clicks within that frame, confirms focus and captures a live renderer before timing. Awake017 passes at54.68 unique presented flips/s and65.06%onecore; a new same-boot OFF/ON/OFF/ON trial is queued. The revised cache compares all layer/content identities and IOSurface revisions, and declines reuse for unknown content. Completion barriers remain in place.
+
+Native font-copy timings, three trials of256 descriptor copies of the same memory font, are5.987/6.038/6.014ms old versus2.006/2.020/2.010ms with0215. The original copies incorrectly substitute Inter; new copies preserve identity, glyph42, requested41-point size and1.25×.75matrix. Collection-font diagnostics separately show CJK named-face lookups selecting face zero. An initial AppKit-only experiment has no effect because the active graphics resolver lives in Onyx; revised0217 carries fontconfig FC_INDEX through Onyx's FreeType initializer. It is built, not yet M1-qualified, and must pass actual named-face controls before promotion.
+
+The next reviewable private release is prepared with `prepare-install.py --gpu-presentation --font-quality`; optional `--gpu-dirty-frames` remains off. Prefix-specific CGL, sandbox and private fonts are rebuilt for the exact target. Retained provider overrides record the qualified source outputs. Daily launch supplies the private WindowServer/CoreText/fontconfig paths, proven GPU equality/lookup flags, precise scrolling and fresh-profile `browser.tabs.inTitlebar=0`; original Firefox files stay unchanged. The prepared release still requires cold transfer, actual launch/URL delivery, final quality and sustained GPU browsing. Default owner-install mode prints a concrete plan; the work agent never applies it to owner paths. Six required repository checks v8 pass; publication check is plan-only, with no `--execute` and no push.

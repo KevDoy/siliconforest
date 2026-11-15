@@ -30,7 +30,7 @@ def inspect(sample, output, identities, parent_pid, expected_appkit):
         text = destination.read_text() if destination.exists() else ''
         images = text.partition('\nBinary Images:\n')[2].splitlines()
         selected = [line.strip() for line in images if re.search(
-            r'\s(?:AppKit|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
+            r'\s(?:AppKit|CoreText|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
         appkit = [line.rsplit('> ', 1)[-1] for line in selected if re.search(r'\sAppKit\s+<', line)]
         result['processes'].append(dict(pid=pid, role='gpu' if gpu else 'parent', status=sampled.returncode,
             images=selected, appkit=appkit, passed=sampled.returncode == 0 and len(appkit) == 1 and

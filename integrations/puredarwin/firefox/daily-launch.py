@@ -30,16 +30,25 @@ def plan(root, args):
     if str(root) != manifest['target']:
         raise RuntimeError('Runtime moved: rebuild its CGL/sandbox paths for the new prefix')
     env = os.environ.copy()
-    if not manifest.get('gpu_presentation', False):
-        for name in ['SFFX_IOSURFACE_GPU', 'SFFX_GPU_PRESENT']:
+    for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
+                        ('gpu_vector_compare', 'SFFX_GPU_VECTOR_COMPARE'), ('gpu_cache_lookups', 'SFFX_GPU_CACHE_LOOKUPS'),
+                        ('gpu_dirty_frames', 'SFFX_GPU_DIRTY_FRAMES'), ('precise_scroll', 'SFFX_PRECISE_SCROLL')]:
+        if manifest.get(field, False):
+            env[name] = '1'
+        else:
             env.pop(name, None)
     frames = [root / (name + '/Frameworks') for name in
               ['surface', 'avfoundation', 'appkit', 'quartz', 'onyx', 'gl']]
     frames.append(root / 'compat/System/Library/Frameworks')
+    if manifest.get('private_fonts', False):
+        frames.insert(0, root / 'coretext/Frameworks')
+        env['FONTCONFIG_FILE'] = str(root / 'fonts/fonts.conf')
+    libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
+        root / 'quartz/Frameworks/QuartzCore.framework/Versions/A', root / 'gl/lib', root / 'compat/usr/lib']
+    if manifest.get('gpu_presentation', False):
+        libraries.insert(0, root / 'windowserver/usr/lib')
     env.update(DYLD_FRAMEWORK_PATH=':'.join(map(str, frames)),
-        DYLD_LIBRARY_PATH=':'.join(map(str, [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
-            root / 'quartz/Frameworks/QuartzCore.framework/Versions/A', root / 'gl/lib',
-            root / 'compat/usr/lib'])) + ':/usr/local/lib/mesa-asahi',
+        DYLD_LIBRARY_PATH=':'.join(map(str, libraries)) + ':/usr/local/lib/mesa-asahi',
         DYLD_INSERT_LIBRARIES=str(root / 'sandbox/libsffx-sandbox.dylib') + ':' + str(root / 'io/libsffx-io-policy.dylib'),
         XDG_RUNTIME_DIR=env.get('XDG_RUNTIME_DIR', '/private/var/run/gpu-desktop'),
         WAYLAND_DISPLAY=env.get('WAYLAND_DISPLAY', 'wayland-0'), SFFX_IO_POLICY='default',
@@ -69,7 +78,7 @@ def main():
     profile = selected_profile(arguments) or root / 'profile'
     profile.mkdir(mode=0o700, exist_ok=True)
     preferences = {'browser.shell.checkDefaultBrowser': False, 'app.update.auto': False,
-                   'webgl.disable-angle': True}
+                   'webgl.disable-angle': True, 'browser.tabs.inTitlebar': 0}
     settings = profile / 'user.js'
     if not settings.exists():
         settings.write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v))

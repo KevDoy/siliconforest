@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Private interposition of only sandbox_init APIs, never a libSystem replacement.
 # Reuse the exact compiler and permission translation proven by SF-U in QEMU.
-{ prefix ? "/private/var/db/sffx/sandbox-v4", coldAVDFirmware ? false }:
+{ prefix ? "/private/var/db/sffx/sandbox-v4", coldAVDFirmware ? false, fontDirectory ? null }:
 let
   a = import ../cocoa/arm64.nix;
   inherit (a) pkgs pd;
@@ -33,7 +33,7 @@ in pkgs.stdenv.mkDerivation {
     CC=${tc}/bin/${triple}-clang
     CFLAGS="-O2 -g -fPIC -fvisibility=hidden -isysroot ${sdk} -I${system}/usr/include -Isrc/Libraries/libsandbox/include -Isrc/Libraries/libsandbox"
     for name in sandbox sbpl; do
-      $CC $CFLAGS -Dsandbox_init=sffx_sandbox_init \
+      $CC $CFLAGS ${pkgs.lib.optionalString (fontDirectory != null) "-DSFFX_FONT_DIRECTORY='\"${fontDirectory}\"'"} -Dsandbox_init=sffx_sandbox_init \
         -Dsandbox_init_with_parameters=sffx_sandbox_init_with_parameters \
         -Dsandbox_free_error=sffx_sandbox_free_error \
         -c src/Libraries/libsandbox/$name.c -o $name.o
