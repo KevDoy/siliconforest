@@ -63,6 +63,7 @@ public:
 #endif
 #if PD_CIO_I210_NETWORK
     int bindI210Access(IOPCIDevice *);
+    int publishI210Resources(IOPCIDevice *);
 #endif
     IOReturn blockConfiguration();
     bool configure(IOService *) override;

@@ -2549,3 +2549,39 @@ Partial/ambiguous startup retains IRQ/context/backing until reboot; this is
 not hot-remove support. Interface-only DHCP tools `8d6775a26` also compile,
 with no shared Wi-Fi tool changes. These network variants remain uninstalled
 and await the first link/DHCP hardware test.
+
+
+### 2026-11-15: CIO30 driver match reached; BAR resource publication missing
+
+CIO30/source `737adc701`, capsule
+`aa1572a6efe1c43906c8376d363250cd8f43e5429a04540741bd1d7638d10b06`,
+booted without a panic. Real TS3 authorization, independent12-function PCI
+inventory, MSI setup and actual I210 mapper binding passed again. The exact
+private PDFBSDem driver matched, then refused startup with
+`PDCIOI210StartError=BAR0-resource-refused`, BAR0 physical0/bytes0. Bus
+mastering was not admitted; no Ethernet interface, link, DHCP packet or USB
+input was observed. Quiet60 was not run after this failure. Captures retain
+actual post-authorization, mapper, driver and failure-before-recovery states.
+
+Pinned IOPCIFamily source explains this refusal: `isDTNub()` is always true,
+`getNubAddressing()` is a stub, and `getDTNubAddressing()` returns success
+without constructing device memory when `assigned-addresses` is absent.
+The dynamic dock nubs have enumeration size tuples in `reg` but no assigned
+address property. The next correction publishes actual memory descriptors
+from live BAR values and those native sizes, translated through the exact
+apciec1 address windows; it must refuse unassigned or out-of-window BARs.
+This draft is not yet built or observed and performs no BAR/config writes.
+
+Normal recovery restored qualified non-AVE CIO29 at17:49:01Z; its reader
+was reaped before lock release17:49:03Z. Current recovery boot has not
+repeated authorization. The installed57-module manifest contains no AVE
+kext, and its unchanged605-byte configuration has no pdave argument.
+AVE remains paused: no AVE build, boot, probe or extraction.
+
+CIO30 also validates the collection capacity solution at boot:58 modules
+(old57 plus PDFBSDem), only the old CIO code UUID changed, all other56 fixed,
+all57 input bundles retain non-debug section bytes/addresses/sizes, unchanged
+boot.bin/configuration, zero overlaps and five actual PCI personalities.
+Prelink metadata was reduced160790 to137330 bytes solely by removing XML
+structural whitespace: parsed values and every other file byte are identical.
+Earlier rejected capacity/tool attempts remain failures.

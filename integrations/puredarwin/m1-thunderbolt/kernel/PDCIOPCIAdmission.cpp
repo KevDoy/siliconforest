@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Actual I210/ancestor admission, separate from the inventory-only profile.
 #include "pd_cio_pcie_host.h"
+#include "pd_pciec_bar.h"
 #include <IOKit/IOMapper.h>
 #include <IOKit/IORegistryEntry.h>
 #include <machine/machine_routines.h>
@@ -110,4 +111,55 @@ IOReturn PDCIOPCIHost::admitI210(IOPCIDevice *device)
     leaseOwner->setProperty("pcie-i210-BME-ancestor-count",count-1,32);
     leaseOwner->setProperty("pcie-endpoint-DMA-admitted",true);
     return kIOReturnSuccess;
+}
+
+int PDCIOPCIHost::publishI210Resources(IOPCIDevice *device)
+{
+ auto fail=[this](int error){leaseOwner->setProperty("pcie-i210-resource-error",(UInt32)error,32);return error;};
+ if(!device || ml_at_interrupt_context() || !interruptPower(this) ||
+    device->configRead32(0)!=0x15338086 || (device->configRead32(8)>>8)!=0x020000)return fail(ENODEV);
+ IORegistryEntry *parent=device;unsigned depth=0;
+ while(parent && parent!=this && depth++<64)parent=parent->getParentEntry(gIOServicePlane);
+ if(parent!=this)return fail(ENODEV);
+ UInt32 bars[6];for(unsigned n=0;n<6;++n)bars[n]=device->configRead32(0x10+4*n);
+ leaseOwner->setProperty("pcie-i210-resource-BARs",bars,sizeof(bars));
+ auto existing=device->getDeviceMemoryWithRegister(0x10);
+ if(existing){
+  IOByteCount span=0;UInt64 physical=existing->getPhysicalSegment(0,&span,kIOMemoryMapperNone),wanted=0;
+  UInt64 bytes=existing->getLength();
+  if((bars[0]&7) || pd_pciec_bar_cpu(bars[0]&~0xfu,bytes,&wanted) || physical!=wanted || span<bytes)return fail(EIO);
+  leaseOwner->setProperty("pcie-i210-resource-stage","existing-BAR0-verified");return fail(0);
+ }
+ auto property=device->copyProperty("reg");
+ struct Release {OSObject *value;~Release(){if(value)value->release();}} releaseProperty={property};
+ auto reg=OSDynamicCast(OSData,property);
+ if(!reg || !reg->getLength() || reg->getLength()%20 || reg->getLength()>8*20)return fail(EPROTO);
+ auto array=OSArray::withCapacity(6);Release releaseArray={array};if(!array)return fail(ENOMEM);
+ bool bar0=false;UInt32 seen=0;
+ for(unsigned offset=0;offset<reg->getLength();offset+=20){
+  UInt32 row[5];memcpy(row,(const UInt8 *)reg->getBytesNoCopy()+offset,20);
+  unsigned space=(row[0]>>24)&3,registerNumber=row[0]&0xff;
+  if(space!=2 && space!=3)continue; // Config and unsupported I/O-port space are not memory.
+  if(registerNumber<0x10 || registerNumber>0x24 || (registerNumber&3))return fail(EPROTO);
+  unsigned index=(registerNumber-0x10)/4;
+  if(seen&(1u<<index))return fail(EPROTO);seen|=1u<<index;
+  UInt64 bytes=((UInt64)row[3]<<32)|row[4],bus=bars[index]&~0xfu,cpu=0;
+  UInt32 low=bars[index];if(low==UINT32_MAX || (low&1) || !bytes)return fail(ENXIO);
+  unsigned kind=(low>>1)&3;
+  if(kind==2){if(index==5 || bars[index+1]==UINT32_MAX)return fail(EPROTO);bus|=(UInt64)bars[index+1]<<32;}
+  else if(kind)return fail(EPROTO);
+  if(!bus)return fail(ENXIO);
+  int error=pd_pciec_bar_cpu(bus,bytes,&cpu);if(error)return fail(error);
+  auto memory=IOMemoryDescriptor::withAddressRange(cpu,bytes,kIODirectionNone|kIOMemoryMapperNone,NULL);
+  if(!memory)return fail(ENOMEM);memory->setTag(row[0]);
+  bool added=array->setObject(memory);memory->release();if(!added)return fail(ENOMEM);
+  if(!index)bar0=true;
+ }
+ if(!bar0 || !interruptPower(this))return fail(ENODEV);
+ // All addresses come from actual live BARs and native enumeration sizes.
+ // No BAR, bridge window, BME, or PCI configuration write is performed here.
+ device->setDeviceMemory(array);
+ if(!device->getDeviceMemoryWithRegister(0x10))return fail(EIO);
+ leaseOwner->setProperty("pcie-i210-resource-stage","live-BAR-descriptors-published");
+ leaseOwner->setProperty("pcie-i210-resource-memory-count",array->getCount(),32);return fail(0);
 }

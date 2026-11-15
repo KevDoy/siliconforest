@@ -219,6 +219,8 @@ int PDCIOPCIEnumeration::prepareI210Mapper()
 #if PD_CIO_I210_NETWORK
  // Initial matching refused before the mapper existed. Retry the exact
  // endpoint only after binding and fresh native readiness checks above.
+ int resources=host->publishI210Resources(endpoint);
+ if(resources){endpoint->release();return fail(resources);}
  if(host->bindI210Access(endpoint)){endpoint->release();return fail(ENODEV);}
  endpoint->registerService(kIOServiceSynchronous);
  owner->setProperty("pcie-i210-mapper-stage","mapper-bound-network-match-requested");

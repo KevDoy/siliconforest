@@ -66,3 +66,5 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I 
 "$tmp/ida-range"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/msi-setup.c" -o "$tmp/msi-setup"
 "$tmp/msi-setup"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/bar.c" -o "$tmp/bar"
+"$tmp/bar"
