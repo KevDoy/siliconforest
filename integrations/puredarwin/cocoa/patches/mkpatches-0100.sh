@@ -12,7 +12,9 @@
 #   am-0122/  = am-0119/ + 0120..0122 (frozen; TERM5, night of 14/15 November)
 #   am-0123/  = am-0122/ + 0123, 0124 (frozen; TERM6, night of 15 November)
 #   am-0126/  = am-0123/ + 0125, 0126 (frozen; TERM6)
-#   am/       = am-0126/ + 0127 on (the current tree; TERM6)
+#   am-0127/  = am-0126/ + 0127 (frozen; TERM6)
+#   am-0128/  = am-0127/ + 0128 (frozen; TERM6)
+#   am/       = am-0128/ + 0129 on (the current tree; TERM6)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -75,3 +77,11 @@ mk am-0123 am-0126 0125-appkit-menu-panel-seams-translucency-choice-split-view.p
   $A/NSColorPanel.m $A/NSWorkspaceOpenConfiguration.m $A/NSStringDrawer.m $A/NSSplitView.m
 mk am-0123 am-0126 0126-windowserver-popup-configure-wait-timing.patch src/Frameworks/WindowServer/rpc_wayland.c
 ( diff -rq am-0123 am-0126 ) | sed 's/^/differs from am-0123: /'
+# 0127 (TERM6): am-0126 -> am-0127
+mk am-0126 am-0127 0127-appkit-float-value-abi-colour-well-click-opaque-menus.patch $A/NSCell.h $A/NSCell.m $A/NSControl.h $A/NSControl.m \
+  $A/NSActionCell.m $A/NSScroller.h $A/NSScroller.m $A/NSColorWell.m $A/NSSliderCell.m $A/NSMenu.subproj/NSMenuView.m \
+  $A/NSAlert.m $A/NSButton.m $A/NSTextFinder.m $A/NSView.m
+( diff -rq am-0126 am-0127 ) | sed 's/^/differs from am-0126: /'
+# 0128 (TERM6): am-0127 -> am-0128
+mk am-0127 am-0128 0128-appkit-table-header-sort-indicator-slot.patch $A/NSTableHeaderCell.m $A/NSTableHeaderView.m
+( diff -rq am-0127 am-0128 ) | sed 's/^/differs from am-0127: /'

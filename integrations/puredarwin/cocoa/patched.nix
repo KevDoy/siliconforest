@@ -307,6 +307,21 @@
 #         NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification); tail truncation by halving; a split
 #         view's missing divider moves nothing (Terminal's exception) and its min/max divider positions
 #   0126  WindowServer: PD_WS_TIMING says how long a flush waited for a popup's configure
+#   0127  AppKit (TERM6): -floatValue and -setFloatValue: of NSCell, NSControl (NSActionCell, NSScroller) take and
+#         answer float, as in macOS's API (CGFloat answered in d0: an application built for macOS read s0, the
+#         colour panel's opacity read 0 and set it, every slider's value set from Terminal was garbage; code
+#         built against the old header must be built again); a colour well's click is a click unless the
+#         pointer moves three points (the compositor's motion at the press started a colour drag: Terminal's
+#         background well never opened the panel); menus opaque where the compositor cannot blur;
+#         PD_SLIDER_TRACE; crashes found by the robustness pass under MallocScribble: an alert's button ending its
+#         sheet let the alert go (and its window) before -_alertButton: was done (Terminal, SIGSEGV on a freed
+#         target after Escape on a sheet's Cancel); a button clicked by its key equivalent stays until its action
+#         is done (PD_KEYEQ_TRACE); the find bar's controls stop messaging a finder that is gone; PD_CA_TRACE
+#         says when a hosted layer is drawn on the CPU
+#   0128  AppKit (TERM6, the owner's finding): a table column's sort indicator has its own slot at the header
+#         cell's trailing edge (-sortIndicatorRectForBounds:, -drawSortIndicatorWithFrame:inView:ascending:
+#         priority:), the title's rect excludes it while the column shows one (Activity Monitor's chevron was
+#         drawn on top of "% CPU"), and a title too wide is cut with an ellipsis
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -384,6 +399,8 @@ let
     ./patches/0120-appkit-device-pixels-opaque-default-menu-tracking.patch
     ./patches/0123-appkit-menus-fast-crashes-layers-without-egl.patch
     ./patches/0125-appkit-menu-panel-seams-translucency-choice-split-view.patch
+    ./patches/0127-appkit-float-value-abi-colour-well-click-opaque-menus.patch
+    ./patches/0128-appkit-table-header-sort-indicator-slot.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
