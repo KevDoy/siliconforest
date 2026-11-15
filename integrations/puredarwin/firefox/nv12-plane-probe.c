@@ -37,16 +37,17 @@ static void number(CFMutableDictionaryRef p,const char *name,int64_t value){
  CFStringRef key=CFStringCreateWithCString(NULL,name,kCFStringEncodingUTF8);CFNumberRef n=CFNumberCreate(NULL,kCFNumberSInt64Type,&value);
  CFDictionarySetValue(p,key,n);CFRelease(n);CFRelease(key);
 }
-static IOSurfaceRef make(uint32_t format,int bad){
+static IOSurfaceRef make(uint32_t format,int bad,int layout){
  CFMutableDictionaryRef d=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
- number(d,"IOSurfaceWidth",W);number(d,"IOSurfaceHeight",H);number(d,"IOSurfaceBytesPerRow",STRIDE);number(d,"IOSurfaceBytesPerElement",1);
+ number(d,"IOSurfaceWidth",W);number(d,"IOSurfaceHeight",H);number(d,"IOSurfaceBytesPerRow",layout?192:STRIDE);number(d,"IOSurfaceBytesPerElement",1);
  number(d,"IOSurfacePixelFormat",format);number(d,"IOSurfaceAllocSize",ALLOC);CFDictionarySetValue(d,CFSTR("IOSurfaceIsGlobal"),kCFBooleanTrue);
  CFMutableArrayRef planes=CFArrayCreateMutable(NULL,0,&kCFTypeArrayCallBacks);
  for(int p=0;p<2;p++){
   CFMutableDictionaryRef q=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
   number(q,"IOSurfacePlaneWidth",width(p));number(q,"IOSurfacePlaneHeight",height(p));
   number(q,"IOSurfacePlaneBytesPerRow",bad==2&&p?1:STRIDE);number(q,"IOSurfacePlaneBytesPerElement",p?2:1);
-  number(q,"IOSurfacePlaneOffset",p?(bad==1?0:UVOFF):0);number(q,"IOSurfacePlaneSize",bad==3&&p?1:STRIDE*height(p));
+  number(q,"IOSurfacePlaneOffset",p?(bad==1?0:bad==4?512+STRIDE*(H+7)-1:UVOFF):(layout?512:0));
+  number(q,"IOSurfacePlaneSize",bad==3&&p?1:STRIDE*(height(p)+(layout?7:0)));
   CFArrayAppendValue(planes,q);CFRelease(q);
  }
  CFDictionarySetValue(d,CFSTR("IOSurfacePlaneInfo"),planes);CFRelease(planes);
@@ -106,9 +107,9 @@ int main(int argc,char **argv){
  setvbuf(stdout,NULL,_IOLBF,0);alarm(40);
  if(argc==5&&!strcmp(argv[1],"child"))return child(atoi(argv[2]),(uint32_t)strtoul(argv[3],NULL,10),(int)strtol(argv[4],NULL,0));
  size_t (*offset)(IOSurfaceRef,size_t)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUGetPlaneOffset");REQUIRE(offset);
- for(int bad=1;bad<=3;bad++){IOSurfaceRef s=make(0x34323076,bad);REQUIRE(!s);}
- for(int p=0;p<2;p++)for(int range=0;range<2;range++){
-  IOSurfaceRef s=make(range?0x34323066:0x34323076,0);REQUIRE(s&&offset(s,0)==16384&&offset(s,1)==16384+UVOFF&&offset(s,2)==0);
+ for(int bad=1;bad<=4;bad++){IOSurfaceRef s=make(0x34323076,bad,bad==4);REQUIRE(!s);}
+ for(int layout=0;layout<2;layout++)for(int p=0;p<2;p++)for(int range=0;range<2;range++){
+  IOSurfaceRef s=make(range?0x34323066:0x34323076,0,layout);REQUIRE(s&&offset(s,0)==16384+(layout?512:0)&&offset(s,1)==16384+UVOFF&&offset(s,2)==0);
   int channel[2];REQUIRE(!socketpair(AF_UNIX,SOCK_STREAM,0,channel));
   char fd[20],id[20],profile[20];snprintf(fd,sizeof(fd),"%d",channel[1]);snprintf(id,sizeof(id),"%u",IOSurfaceGetID(s));snprintf(profile,sizeof(profile),"%d",p?0x4100:0x3200);
   fill(s,0);IOSurfaceIncrementUseCount(s);
@@ -122,8 +123,8 @@ int main(int argc,char **argv){
    if(revision==0)IOSurfaceIncrementUseCount(s);
   }
   close(channel[0]);int status=0;REQUIRE(waitpid(pid,&status,0)==pid&&WIFEXITED(status)&&WEXITSTATUS(status)==0);
-  printf("FXNV12 parent profile=%s range=%s odd_visible=%dx%d stride=%d uv_offset=%d padded_allocation=%d cross_exec=1 local_use=0 global_in_use=0 pass=1\n",profile,range?"full":"video",W,H,STRIDE,UVOFF,ALLOC);
+  printf("FXNV12 parent profile=%s range=%s odd_visible=%dx%d stride=%d y_offset=%d top_stride=%d uv_offset=%d padded_allocation=%d cross_exec=1 local_use=0 global_in_use=0 pass=1\n",profile,range?"full":"video",W,H,STRIDE,layout?512:0,layout?192:STRIDE,UVOFF,ALLOC);
   CFRelease(s);
  }
- printf("FXNV12 malformed_layouts_rejected=3 cases=4 pass=1\n");return 0;
+ printf("FXNV12 malformed_layouts_rejected=4 cases=8 pass=1\n");return 0;
 }

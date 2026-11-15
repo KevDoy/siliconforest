@@ -34,8 +34,8 @@
 +           p->size<p->bytesPerRow*ht||p->offset>h->allocSize||
 +           p->size>h->allocSize-p->offset)return 0;
 +    }
-+    return y->offset==0&&h->bytesPerRow==y->bytesPerRow&&
-+      uv->offset>=y->size;
++    return h->bytesPerRow>0&&h->bytesPerRow<=1048576&&
++      uv->offset>=y->offset+y->size;
 +}
  static int validGPUHeader(const struct shared_header *h,uint64_t size) {
 -    return h->magic==HEADER_MAGIC&&h->version==HEADER_VERSION&&
