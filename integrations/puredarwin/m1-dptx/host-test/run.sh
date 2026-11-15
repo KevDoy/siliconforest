@@ -10,3 +10,5 @@ ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/include" "$
 ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/include" -I "$here/upstream" -c "$here/src/pd_dpxbar.c" -o "$tmp/xbar.o"
 ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/xbar.cpp" "$tmp/xbar.o" -o "$tmp/xbar"
 "$tmp/xbar"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../m1-dcp/include" "$here/host-test/mailbox.cpp" -o "$tmp/mailbox"
+"$tmp/mailbox"

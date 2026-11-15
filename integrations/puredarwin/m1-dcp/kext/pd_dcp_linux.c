@@ -24,6 +24,7 @@
 
 #include "pd_rtkit_platform.h"
 #include "pd_rtkit_compat.h"
+#include "pd_dcp_mailbox_plan.h"
 
 void kprintf(const char *, ...);
 extern int (*pd_platform_pre_probe)(struct platform_device *pdev);
@@ -36,8 +37,6 @@ int pd_dcp_gem_dma_mmap_pages(struct linux_file *filp, off_t offset, size_t size
     uint32_t *pages, unsigned int *wimg, void (**release)(void *), void **release_arg);
 void *pd_dcp_host_of_nub(void *nub);		/* PDDcpHost.cpp */
 extern struct device_node *of_root;
-
-#define PD_DCP_MBOX	"/arm-io/dcp"
 
 /* boot-arg pddcp: 0 off, 1 bind and start the coprocessor, 2 the same with KMS for clients */
 int pd_dcp_mode;
@@ -78,6 +77,9 @@ pd_dcp_pre_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	void *host;
 	int ret;
+	struct pd_dcp_mailbox_plan plan;
+	struct pd_rtkit_mbox_res actual = {0};
+	struct resource *coproc;
 
 	if (np == NULL)
 		return (0);
@@ -99,8 +101,26 @@ pd_dcp_pre_probe(struct platform_device *pdev)
 		return (ret);
 	}
 	pd_rtkit_platform_set_log_prefix("PDDcp: rtkit: ");
-	ret = pd_apple_mbox_bind(&pdev->dev, 0, PD_DCP_MBOX);
-	kprintf("PDDcp: dcp %s: mailbox 0 is %s (%d), probing\n", dev_name(&pdev->dev), PD_DCP_MBOX, ret);
+	// Bind this actual consumer's coprocessor, never route dcpext through
+	// the panel's hardcoded mailbox. Resolving validates native ADT resources
+	// and IRQs before any mailbox startup. It does not power or start DCP.
+	coproc = platform_get_resource_byname(pdev, IORESOURCE_MEM, "coproc");
+	if (coproc == NULL)
+		return -ENODEV;
+	ret = pd_dcp_mailbox_plan_t8103(coproc->start, resource_size(coproc), &plan);
+	if (ret)
+		return ret;
+	ret = pd_rtkit_platform_mbox_resolve(plan.path, &actual);
+	if (ret)
+		return ret;
+	if (!actual.linux_compatible || strcmp(actual.linux_compatible, "apple,asc-mailbox-v4"))
+		return -ENODEV;
+	ret = pd_dcp_mailbox_check_t8103(&plan, actual.asc_phys, actual.asc_size,
+	    actual.mbox_phys, actual.mbox_size, actual.aic_send_empty, actual.aic_recv_not_empty);
+	if (ret)
+		return ret;
+	ret = pd_apple_mbox_bind(&pdev->dev, 0, plan.path);
+	kprintf("PDDcp: dcp %s: mailbox 0 is %s (%d), probing\n", dev_name(&pdev->dev), plan.path, ret);
 	return (ret);
 }
 

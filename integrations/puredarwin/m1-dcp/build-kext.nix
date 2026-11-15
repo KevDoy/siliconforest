@@ -14,6 +14,7 @@ let
     mkdir -p $out/pin $out/pininc $out/include
     cp ${k}/CMakeLists.txt ${k}/Info.plist ${k}/glue.c ${k}/pd_dcp_linux.c ${k}/pd_dcp_mmap.c ${k}/pd_dcp_prime.c ${k}/pd_dcp_drm72.c ${k}/PDDcpHost.cpp ${k}/pd_dcp_backlight.c ${k}/pd_dcp_hotplug.c ${k}/PDDcpSysctl.cpp $out/
     cp ${./include/pd_dcp_compat.h} $out/include/pd_dcp_compat.h
+    cp ${./include/pd_dcp_mailbox_plan.h} $out/include/pd_dcp_mailbox_plan.h
     cp -r ${driver} $out/driver; chmod -R u+w $out/driver
     for p in ${./patches}/*.patch; do patch -d $out/driver -p1 -F0 --no-backup-if-mismatch < $p; done
     ${pkgs.lib.concatMapStrings (f: "cp ${pinFile f} $out/pin/${builtins.baseNameOf f}\n") [

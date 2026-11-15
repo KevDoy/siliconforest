@@ -15,6 +15,14 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
+**Latest partial CIO26:** the actual TS3 Plus router (vendor003d/device0011)
+was retained on both UP lanes after disabling the unavailable optional NVMEM
+switch service. Administrator approval then returned ENOMEM12 before the
+native PCI preparation hook. The candidate failed qualification; the normal
+installer restored CIO25 at15:43:53Z and UART was reaped15:43:54Z. No independent
+PCI inventory ran after that failure. The separate remaining NVM-102 message
+is from optional retimer setup. No PCI tunnel/peripheral result is claimed.
+
 **Observed in Darwin:** installed non-AVE CIO25, source `96ae5be19`,
 capsule `be6732426e81…`, installed15:25:21Z, qualified15:27:43Z, UART reaped
 15:27:45Z. The missing ACIO1 GPIO41 default is now observed fixed:
@@ -2289,3 +2297,148 @@ verbose debug/packet/firmware dumps remain disabled. Actual ARM64 symbols
 confirm mapper/MSI absent ordinary and enumeration, present only in the
 separate uninstalled MSI variant. The installed known-good image remains
 CIO25; no NVM-policy hardware result or retained dock router is claimed yet.
+
+
+### CIO26 partial discovery and IDA range audit, 15:45Z
+
+CIO26/source383d9724a/capsule583f99d4c95e… installed15:39:59Z and booted
+normally with standard desktop/Wi-Fi/NHI/RTKit/PHY/catalogue/UID/snapshot
+checks. At11.407s the actual CM logged CalDigit TS3 Plus, vendor003d/device0011.
+Both live physical ports report UP2, remote1, matching vendor/device and
+remote-authorized0. Thus the dock router was really discovered and retained;
+this is distinct from the prior host-only registry. The root authorization
+request advanced0→1 but returned ENOMEM12. No native PCI preparation stage
+was published, and independent PCI inventory was not run after the strict
+qualification gate failed. No new quiet60 result exists for CIO26.
+
+The later `failed to add NVM devices: -102` message matches retimer.c's
+optional retimer NVM path, not switch.c's distinct message. Retimer NVM remains
+unsupported and does not explain the retained TS3 router's authorization
+failure. Existing standard rollback ran immediately: CIO25 capsulebe6732426e81…
+was installed and verified through the normal installer; standard.next was
+restored15:43:53Z and owned UART reaped15:43:54Z before lock release. Both
+candidate and rollback contain57 non-AVE modules and no pdave argument.
+CIO26's only changed code UUID was CIO; its other56 stayed fixed, including
+CIO25's GPIO41 change. Failed qualification is preserved, not relabeled.
+
+The next source audit found a separate ABI defect: pinned Linux
+`ida_alloc_range` includes its maximum, but the frozen native wrapper passes
+that maximum unchanged to `ida_simple_get`, whose end is exclusive. Thus a
+fixed PCI HopID request8–8 cannot succeed. Upstream `tb_path_alloc` returns
+NULL for any HopID allocation failure; `tb_tunnel_pci` reports that as ENOMEM,
+so the top-level error does not by itself establish exhausted memory. Actual
+CIO26 ARM64 code confirms the unadjusted `ida_simple_get` call. The individual
+runtime HopID return was not captured, so this remains the next source-backed
+candidate rather than a claimed hardware fix.
+
+A private CM-only range adapter and boundary tests are drafted, covering
+inclusive maxima, singleton8/0, signed-ID limits, invalid ranges and output
+preservation. The shared LinuxKPI is unchanged. Actual HopID failure logs
+will retain direction/minimum/maximum/port limit/error. These changes are
+UNBUILT/UNTESTED/uncommitted and not installed. Builds and target probes are
+deferred during FX's actual GPU stability hold starting15:45:10Z, until its
+actual release; source preparation continues. The next cycle must also save
+post-authorization dmesg before any rollback, since CIO26's ordinary dmesg
+capture preceded the failed approval call. No fabricated hotplug/rescan or
+forced status/credit setting is proposed.
+
+
+### Explicit I210 mapper factory draft during the stability hold
+
+Source now drafts a one-attempt administrator request in the explicit mapper
+variant only. After actual host publication it finds a unique real I210,
+refuses an existing iommu-parent, attaches/starts the concrete mapper, and
+requires actual retained DART readiness. The mapper start already revalidates
+all four xHCI plus one I210, every BME clear, real host ancestry/RID→SID0,
+power/RUN/link and owned table pages. It binds the actual IOMapper object in
+iommu-parent and verifies that the kernel's copyMapperForDevice returns that
+same object; no fabricated phandle or registry-marker proof is used. A fresh
+readiness query follows binding. Partial attempts retain/revoke/pin until
+reboot; CM revocation synchronizes the retained mapper pointer under the existing lock;
+it revokes/pins and does not establish work/IRQ/DMA drain.
+There is no bus-master grant, endpoint personality or driver admission.
+
+The command remains excluded from ordinary/enumeration-only builds by an
+explicit compile-time feature. Its native CLI includes the same real UID
+negative control as authorization. This factory/CLI is UNBUILT/UNTESTED,
+uncommitted and not installed. The existing SDK builds preceded this draft;
+no actual mapper, native PCI inventory, MSI/DMA or Ethernet claim follows.
+
+I210 source audit also corrected a call-order assumption: iflib's bus-master
+request appears later in the source file but occurs at attach entry, before
+the registration/IRQ setup path it calls. PDFBSDEthernet makes another early
+BME request. Both must stay refused or be removed in the private driver,
+with a checked request only after actual mapper and registered/enabled/armed
+MSI readiness. A vector allocation alone is insufficient. Native interface
+publication happens after FreeBSD attach returns, which gives a possible
+late admission point; em_reset/admin work still needs a DMA-enable audit.
+No BME admission implementation or target change was made from this plan.
+
+
+### Actual-resource external mailbox association draft
+
+The DCP pre-probe path is drafted to select `/arm-io/dcp` or `/arm-io/dcpext`
+from the consumer's actual named coproc resource, using T8103's two fixed
+physical bases. Before binding, it resolves the native ADT mailbox and checks
+ASC/mailbox base and span, ASC-v4 type and real send/receive AIC roles against
+that selected instance. It refuses a mismatch instead of binding external
+DCP to the hardcoded internal mailbox. The existing shared RTKit platform
+initialization and per-mailbox IRQ/resource records remain in use; no firmware
+bytes, power change, crossbar operation, output publication or new poll is added.
+
+Host metadata tests are drafted for both resources and wrong base/span/IRQ,
+overflow and unchanged-on-error cases. This is UNBUILT/UNTESTED/uncommitted,
+not installed and not a native external DCP bind. Future hardware use still
+requires actual external power/topology, mirrored DART integration and DPTX/
+DP-IN/shared-TBT-clock providers. The pinned tunnel path keeps ATC in TBT mode;
+it must not fall through to a direct-DP PHY mode request. Its pixel-clock
+callback needs the live CIO-owned lease and actual DP tunnel generation.
+The next CIO kernel continues to freeze the previous DCP artifact and excludes
+this independent display draft.
+
+
+The next CM draft also logs actual unreachable path endpoints and PCI credit
+shortage values, because those refusals are otherwise collapsed to the same
+NULL/ENOMEM result. No path walk, credit limit, allocation/cleanup or status
+programming changes accompany these diagnostics. They remain unbuilt during
+the stability hold. A source-only K5 audit confirms the current DRM atomic
+core already writes the real CRTC ID into flip events and IOMFB keeps its
+swap state per DCP; this is not a two-output hardware result or a reason to
+change the shared DRM core.
+
+
+I210 admission must also account for actual ancestor PCI bridge bus mastering:
+the current inventory profile strips BME everywhere. That forwarding chain
+must be derived from real PCI topology and verified before permitting the
+I210, with every xHCI endpoint still blocked. No bridge/endpoint BME grant
+is implemented or executed by the mapper draft. The next hardware priority
+remains the real PCI inventory after the IDA correction.
+
+
+Ethernet userland audit: pd-dhcp already accepts an interface name and uses
+that device's BPF path; pd-netd is Wi-Fi-specific. Its unmodified lease daemon
+is unsuitable as a second-interface supervisor: deconfigure deletes the
+lease gateway's default route even if netsetup had found the pre-existing
+Wi-Fi route (EEXIST). A dock-specific interface-only configuration/cleanup
+path or actual scoped-route ownership is needed before persistent Ethernet
+and cable cycles. No DHCP exchange, address, route, resolver or target
+network configuration changed during this source audit.
+
+
+### 2026-11-15 16:22Z: source validation after the stability hold
+
+The private CM inclusive IDA correction is committed as `16293a7f0` and
+the explicitly separate I210 mapper factory as `5842e5b46`. The previously
+drafted source is now SDK-built: ordinary, inventory-only, mapper-only,
+and mapper+MSI CIO variants, the administrator mapper CLI, and full DCP.
+TB ASAN/UBSAN tests include 98,432 IDA range cases; DP ASAN/UBSAN includes
+the internal/external mailbox association cases. All six required repository
+checks pass (274 Python tests, 77 C groups, six mutation detections). These
+results supersede the earlier UNBUILT/UNTESTED labels for these source drafts;
+none is installed or a hardware mapper/external-display result.
+
+CIO27 will carry the private CM range correction and bounded refusal
+diagnostics only, with the qualified CIO25 USB/Type-C/DCP artifacts frozen.
+The mapper factory is absent from that profile. CIO25 remains installed
+without AVE or a pdave argument, following CIO26's failed authorization and
+normal rollback. Hardware retry and post-authorization diagnostics are next.
