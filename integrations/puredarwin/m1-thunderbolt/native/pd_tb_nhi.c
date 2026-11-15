@@ -87,6 +87,10 @@ static void configure(struct tb_ring *r,u32 flags,u32 e2e)
   writel(pdf,options+4);writel(pdf,s->config.pdf_base+r->hop*STRIDE);
  }
  writel(flags|e2e,options); // VALID and E2E sampled together by firmware.
+ if(!r->hop)
+  pr_info("PDAppleCIO: control ring %s%u dma=%#llx size=%u flags=%#x readback=%#x\n",
+          r->is_tx?"TX":"RX",r->hop,(unsigned long long)r->descriptors_dma,
+          r->size,flags|e2e,readl(options));
  if(readl(options)!=(flags|e2e))fail(s);
 }
 static int no_pcie(struct tb_nhi *nhi){(void)nhi;return -EOPNOTSUPP;}

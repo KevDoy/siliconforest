@@ -27,6 +27,7 @@ class PDCIODart {
     static uint64_t *table(void *ctx, uint64_t pa);
     static uint64_t allocTable(void *ctx);
     int invalidate();
+    void snapshot(const char *stage); // bounded startup/fault evidence, caller holds lock
 public:
     PDCIODart();
     int prepare();

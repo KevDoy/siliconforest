@@ -1026,3 +1026,30 @@ ring that interrupts after the latch. Metadata teardown remains available;
 a failed controller drain retains backing and the PHY lease. This closes a
 source gap between the previously tested metadata fault latch and the new
 native ring engine; it is pending hardware qualification with that engine.
+
+### CIO05 hardware result (15 November, 08:23–24Z)
+
+Capsule `6768dfa61566…`, source `7109a8243` + `6d50a5fe6`, boots the
+internal desktop and passes actual native connection-manager creation
+(`cm-create-stage=complete`, errno 0). All three CIO power gates read `0x3ff`;
+NHI fabric tuning and DART preparation complete, and the control TX/RX
+interrupts register. Domain startup then returns errno 12 alongside DART
+fault `0x8f0f0001`. The pinned Linux decoder identifies SID15/no-TTBR; the
+NHI device tree assigns SID1. This is evidence of a failed hardware DMA
+startup, not dock enumeration. Fault admission closes, NHI readiness stays
+false, and the owner retains PHY/power in quarantine. The guarded cycle
+restored the known firmware-only CIO03 at 08:26:52Z; its UART reader was
+reaped at 08:26:54Z. Next work captures DART state and
+fault address and compares Linux before changing stream ownership.
+
+The Linux SSH lock-out removal also persisted at this normal Linux visit;
+see the exact before/after and rollback in SF-R. No further SSH policy edits
+were made.
+
+The follow-up diagnostic capsule `d3aeebc0f120…` adds bounded before/after/fault
+DART register snapshots and control-ring DMA/configuration evidence. It changes
+no stream assignments and adds no timer. The native SDK/collection build has
+zero overlaps, the other 56 module UUIDs are unchanged from CIO05, boot.bin is
+identical to CIO03, and its 605-byte command line fits the native 608-byte
+capacity. All six required repository checks pass (274 Python tests, 77 C
+groups, six mutation checks). Hardware outcome remains pending.

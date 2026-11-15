@@ -33,6 +33,22 @@
 
 static void visible() { __asm__ volatile("dsb sy" ::: "memory"); }
 
+void PDCIODart::snapshot(const char *stage)
+{
+    // Read only this powered NHI DART. No error acknowledgement, stream
+    // reassignment or polling: preserve the first fault for diagnosis.
+    LOG("%s params=%08x/%08x config=%08x enable=%08x error=%08x va=%08x:%08x remap=%08x/%08x/%08x/%08x",
+        stage, regs[0].r32(PARAMS1), regs[0].r32(4), regs[0].r32(CONFIG),
+        regs[0].r32(STREAMS_ENABLE), regs[0].r32(ERROR),
+        regs[0].r32(0x54), regs[0].r32(0x50),
+        regs[0].r32(0x80), regs[0].r32(0x84), regs[0].r32(0x88), regs[0].r32(0x8c));
+    for (unsigned sid = 0; sid < 16; ++sid)
+        LOG("%s SID%u tcr=%08x ttbr=%08x/%08x/%08x/%08x", stage, sid,
+            regs[0].r32(TCR(sid)), regs[0].r32(TTBR(sid, 0)),
+            regs[0].r32(TTBR(sid, 1)), regs[0].r32(TTBR(sid, 2)),
+            regs[0].r32(TTBR(sid, 3)));
+}
+
 PDCIODart::PDCIODart() : lock(NULL), ntables(0), busy(NULL), ready(false), poisoned(false)
 {
     bzero(tables, sizeof(tables));
@@ -119,6 +135,7 @@ int PDCIODart::prepare()
         if (pa) pt.l1 = table(this, pa);
     }
     if (!busy || !pt.l1) { IOLockUnlock(lock); return ENOMEM; }
+    snapshot("before-prepare");
     visible();
     // Reset/attach only NHI SID1. Every other stream and all PCIe-C DART
     // state remain untouched. Reprogram the retained root after a power cycle.
@@ -137,6 +154,7 @@ int PDCIODart::prepare()
         ret = invalidate();
     }
     ready = !ret;
+    snapshot("after-prepare");
     LOG("ACIO1 SID1 prepare=%d root=0x%llx (no NHI DMA tested)", ret, tables[0].pa);
     IOLockUnlock(lock);
     return ret;
@@ -194,7 +212,11 @@ uint32_t PDCIODart::faults()
     if (regs[0].va)
         for (unsigned i = 0; i < 1; ++i) {
             uint32_t e = regs[i].r32(ERROR);
-            if (e & (1u << 31)) { LOG("bank %u fault %08x", i, e); value |= e; }
+            if (e & (1u << 31)) {
+                LOG("bank %u fault %08x SID%u code=%03x", i, e, (e >> 24) & 15, e & 0xfff);
+                snapshot("fault");
+                value |= e;
+            }
         }
     IOLockUnlock(lock);
     return value;
