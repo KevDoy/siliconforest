@@ -211,12 +211,12 @@ Each row was looked at in the crops named (`runs/sf-term6/shots/`, not committed
 | Column reordered (header drag) | values and chevron move with the column | pass (`co29-*`) |
 | Window resized | layout follows | pass by the probe (69 ms a step, was 335); not by a person's corner drag |
 | Text after minutes of refreshes | no garbled strings | pass with 0131 (the 0130 failure, above); stress with the cache forced small |
-| Inspector header | parent, group, %CPU, user, hangs | pass; Executable Path empty: FAIL |
+| Inspector header | parent, group, %CPU, user, hangs | pass; Executable Path empty: FAIL (TERM7, 0133: pass, `vi6`) |
 | Inspector Memory | four rows, values on one line | pass after 0132 (`vc42-vis-insp-mem`); before: rows overlapping |
 | Inspector Statistics | twelve rows | pass after 0132 but "Context Switches:" cut; Mach Messages In/Out empty |
 | Inspector Open Files and Ports | the process's files | pass with `/usr/sbin/lsof` |
 | Sample | report shown, status on one line | pass with the new Foundation from a prefix (`ai8`, `ai9`) and installed (`ai10`) |
-| CPU Usage / CPU History windows | graph drawn | FAIL, not worked on this round (item 4c) |
+| CPU Usage / CPU History windows | graph drawn | FAIL, not worked on this round (item 4c). TERM7 (0133): pass, meters and per-core history live (`agp3-graphs.png`); GPU History opens, empty: FAIL |
 | Terminal window, tab, Shell menu, Preferences | as before | pass (diff 0.00, Preferences 1.64: a test prefix has no AppKit resources, so no radio and check box images; installed: as before) |
 
 What it was, from `sf-prof` profiles of the drag (`shots/cr1`, `crp25`..`crp32`):
@@ -247,6 +247,49 @@ Still wrong: the target was the divider at most one frame behind the pointer; it
 32-34 ms). What is left of a step: the resized column's cells and the header drawn, the layout pass over the visible
 rows, the commit. A window resize still draws the whole window at each step (its backing store is made again at the
 new size).
+
+## TERM7 round (15 November, midday)
+Synthetic input to my own instances only; captures and the windows' own pictures; tools in `runs/sf-term7` (not committed).
+
+### CPU Usage, CPU History and GPU History windows (cocoa 0133, 0134)
+Traced on the M1 (`PD_CA_TRACE=1`, `PD_VIEW_DUMP=1`, `PD_CV_TRACE=1`, my own Activity Monitor, Cmd-2/3/4):
+- **CPU Usage was empty**: its collection view's items were plain empty views. Activity Monitor makes them with
+  `makeItemWithIdentifier:` and no registration; the item class's view is in a nib named after the class
+  (`SMCPUUsageCollectionViewItem.nib`), which macOS (10.10 on) loads for a view controller made without a nib name.
+  This AppKit gave such a controller an empty view. 0133: `-[NSViewController nibName]` answers the class-named nib
+  when the bundle has one. The eight meters then appeared, every segment lit: the segments are image views whose
+  `alphaValue` Activity Monitor sets, and `-[NSImage drawInRect:...fraction:]` replaced the faded view's alpha with
+  the fraction. 0133: the fraction multiplies it. Observed: lit segments only for the CPU in use (`agp3-graphs.png`).
+- **CPU History was empty**: its layout is `NSCollectionViewCompositionalLayout` (built in code), which this AppKit
+  kept as data and never laid out. 0133 lays out what Activity Monitor uses (a section provider with an environment,
+  a horizontal group of a subitem with a count, fractional and absolute dimensions): eight per-core graphs, live.
+- **GPU History raised** `-[NSSplitView arrangedSubviews]: unrecognized selector`. 0133 adds the arranged-subviews API
+  (macOS 10.11). The window opens; it shows nothing: its split view gets no graph (no GPU is listed to it here).
+  Still wrong: GPU History empty.
+
+### Inspector
+- **Executable Path** is drawn (0133): a text container lower than one line kept no line at all; it now keeps its
+  first line, raised by what the glyphs' extent lacks (at most the space above the capitals), clipped by its view.
+  First version raised every fragment of the line again and garbled table text in one capture (`vcc2`); caught by
+  the visual check, fixed before anything was installed (`vcd4`, `vcd5`: tables right after 1 and 3 minutes with the
+  layout cache forced small).
+- Still wrong: "Context Switches:" cut ("Context Sv"), Mach Messages In/Out empty, per-process network bytes 0.
+
+### Installed (13:12Z, direct; the files of before kept as `<path>.pre-t7`)
+AppKit e61d2001 (0133, with CODEX-FX's 0201/0203/0204; `.pre-t7` = ab15ee51), Onyx2D cd851066 (CODEX-FX's 0200;
+ad21e344), CoreGraphics e6ecc5ba (0135; b5a1f9b4), `QuartzCore.framework/Versions/A/QuartzCore.pd` 935c21d6 (0134 and
+CODEX-FX's 0202/0207; ae393493, which the pin's recipe reproduces byte for byte). The nix builds of the committed
+series, byte-equal to the gated test prefix `c4`. Gates (my own instances; synthetic input): before, the visual check
+of `c4` against the installed build (`vrd6`/`vcd6`) and my own Activity Monitor left 3 minutes with the layout cache
+forced small (`PD_TYPESET_LIMIT=30`, `MallocScribble=1`: text right after 1, 2, 3 minutes), the random-input pass
+(Activity Monitor 252 actions, Terminal 240, `MallocScribble=1`, cache forced small, under `sf-catch`: alive, no
+report); after, the same visual check on the installed files (`vi6` against `vrd6`): Terminal's window, tab, Shell menu
+and Preferences identical (mean difference 0.00), Activity Monitor's views the same but for the changing figures and
+the Executable Path now shown. Activity Monitor's own CPU over 40 s at the default 5 s interval (`amcpu7.sh`): 5.8 %
+before the install, 5.9 % after. Revert: `ln -f <path>.pre-t7 <path>.back && mv -f <path>.back <path>`.
+The first candidates were not installed: `c1` garbled table text in one capture (the line raise above, applied to
+every fragment), `c3` moved Terminal's radio-button titles 2 pixels (the raise reached cells' string drawing; now only
+a text view's container).
 
 ## Installed on the M1's disk, seventh round (14 November, night; COCOA4)
 - Core files by the guarded installer after QEMU `c4c`/`c4c-2` (failed=0, QDDESK_PASS both; `c4a` and `c4b` before them

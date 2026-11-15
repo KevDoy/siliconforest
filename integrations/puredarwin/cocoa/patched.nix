@@ -348,6 +348,38 @@
 #         the sample window's status one word per line); the control's NSControlLineBreakMode and
 #         NSControlUsesSingleLineMode from the nib (-usesSingleLineMode); PD_VIEW_DUMP=1 + SIGUSR2: every window's
 #         view tree on stderr
+#   0200-0207 (CODEX-FX, found with Firefox; merged by TERM7 from integrations/puredarwin/firefox/cocoa-patches,
+#         numbers kept; applied after 0132):
+#   0200  Onyx2D: shared FreeType faces and the process-wide glyph bitmap cache are used under one lock (Firefox's
+#         threads drew different glyphs of one face at once: SIGSEGV in ft_smooth_render)
+#   0201  AppKit: an application without a display (a sandboxed helper) runs its run loop instead of spinning on a
+#         nil display (its CFRunLoop sources and timers starved, a core busy)
+#   0202  QuartzCore: CALayerContext renders at the window's pixel scale (-setBackingScale:; at 150 % the layer tree
+#         was drawn at 1x and stretched)
+#   0203  AppKit: a view's layer context gets its window's backing scale before it renders
+#   0204  AppKit: -setLayer: on a view without a superview (a window's root) also gives its layer context the new
+#         layer (it kept drawing the old one)
+#   0207  QuartzCore: a layer context invalidated, freed or given another layer clears the context pointer of the
+#         tree it held (a tree kept by the application messaged a freed context: Firefox's close-tab crash)
+#   (0205, 0206 of that series are not merged: 0205 is an opt-in experiment, 0206 not yet qualified)
+#   0133  AppKit (TERM7): without OpenGL a view with a layer draws into its window (its own bitmap was drawn and
+#         never shown: a hosted layer's contents, a movie's frames, stayed the window's grey) and what a view put
+#         in its layer through -updateLayer/-displayLayer: is drawn there too; CVPixelBuffer contents are drawn (a
+#         CF object's class is the bridge's, not Nil); layers marked -setNeedsDisplay are displayed before the tree is
+#         drawn; a view controller made without a nib name uses the nib named after its class (macOS 10.10;
+#         Activity Monitor's CPU Usage and CPU History items were empty views); -[NSImage drawInRect:...fraction:]
+#         multiplies the alpha already set (a faded view's: CPU Usage's segments were all lit);
+#         NSCollectionViewCompositionalLayout lays out (sections from a provider, groups of a subitem with a count,
+#         fractional and absolute dimensions: CPU History); NSSplitView's arranged subviews (macOS 10.11; GPU History
+#         raised); a text view's container lower than one line keeps its first line, raised by what the glyphs
+#         lack (the inspector's Executable Path was not drawn); the standard NSImageName names and the AppKit names
+#         VLC's interface imports
+#   0134  QuartzCore (TERM7): CALayer -display draws -drawInContext: into a bitmap at the layer's pixel size and
+#         makes it the contents, -displayIfNeeded, -setNeedsDisplay asks for a render, CALayerContext displays the
+#         marked layers before it renders; CAOpenGLLayer (CGL: a
+#         context of the layer's pixel format, its offscreen surface read back as the contents; without OpenGL
+#         it draws nothing and says so)
+#   0135  CoreGraphics (TERM7): CGDisplayUsesOpenGLAcceleration; display fade reservations (none available)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -430,6 +462,10 @@ let
     ./patches/0130-appkit-column-drag-scroll-copy-split-panes.patch
     ./patches/0131-appkit-typeset-cache-generation-kept.patch
     ./patches/0132-appkit-inspector-tab-content-window-fits-single-line-values.patch
+    ./patches/0201-appkit-headless-run-loop.patch
+    ./patches/0203-appkit-layer-context-window-scale.patch
+    ./patches/0204-appkit-replace-hosted-layer-root.patch
+    ./patches/0133-appkit-hosted-layers-cpu-class-named-nibs-arranged-subviews-names.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -457,6 +493,7 @@ let
     ./patches/0054-onyx2d-rectangles-without-edges.patch
     ./patches/0119-onyx2d-shading-path-released.patch
     ./patches/0122-onyx2d-clip-edges-on-pixels.patch
+    ./patches/0200-onyx2d-serialize-shared-freetype-raster.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
@@ -474,8 +511,17 @@ let
     ./patches/0102-coregraphics-activity-monitor-cgs.patch
     ./patches/0109-coregraphics-imageio-thumbnail-metadata.patch
     ./patches/0118-coregraphics-icc-and-indexed-color-spaces.patch
+    ./patches/0135-coregraphics-display-fade-opengl-acceleration.patch
   ];
   coregraphics = optimised (pd."coregraphics-arm64".override { src = coregraphicsSrc; });
+  # QuartzCore: upstream's recipe (not optimised, as installed; its library is the root's QuartzCore.pd, beside the
+  # compatibility wrapper of ../terminal-app/compat)
+  quartzcoreSrc = patchedDir "src/Frameworks/QuartzCore" [
+    ./patches/0202-layer-context-backing-pixel-scale.patch
+    ./patches/0207-layer-context-detaches-retained-tree.patch
+    ./patches/0134-quartzcore-layer-display-opengl-layer.patch
+  ];
+  quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
   # upstream's recipe names every protocol and object file; the three protocols the patch
   # uses are generated and linked the same way
@@ -510,5 +556,5 @@ let
   });
 in {
   inherit appkitSrc windowserverSrc authenticationServicesSrc onyx2dSrc windowserver appkit appFrameworks onyx2d security;
-  inherit coretextSrc coretext coregraphicsSrc coregraphics;
+  inherit coretextSrc coretext coregraphicsSrc coregraphics quartzcoreSrc quartzcore;
 }

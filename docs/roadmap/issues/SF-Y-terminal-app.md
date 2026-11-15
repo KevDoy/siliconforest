@@ -340,6 +340,61 @@ Item 5 (prompt marks, the title-bar menu's invoke, multi-line labels, Preference
 the owner's Activity Monitor findings came first. Terminal's figures with 0130 (SF-AA): launch 300-424 ms, echo 4-9
 ms, `seq 1 300000` 0.98-1.04 s, a wheel step 14-23 ms (14-16 before).
 
+## TERM7 round (15 November, midday)
+Synthetic input to my own instances only; tools in `runs/sf-term7` (not committed). Activity Monitor's side is in SF-AA,
+"TERM7 round".
+
+### Firefox's Cocoa patches in the main series (CODEX-FX's 0200-0207)
+Merged unchanged with their numbers (`cocoa/patched.nix`, after 0132): 0200 (Onyx2D: FreeType faces and the glyph cache
+under one lock), 0201 (a run loop without a display), 0202/0203 (layer context at the window's pixel scale), 0204 (a
+root view's layer replacement reaches its context), 0207 (a context lets go of the tree it held: Firefox's close-tab
+crash). QuartzCore is now built by `patched.nix` (`-A quartzcore`; upstream's recipe, not optimised; the installed
+`QuartzCore.pd` ae393493 reproduces from the pin byte for byte) and installs as `QuartzCore.pd` behind the compat
+wrapper. Not merged: 0205 (opt-in; its tree walk reads layer properties other threads change), 0206 (not yet
+qualified; it changes `+frameRectForContentRect:styleMask:` for every application). For Terminal and Activity Monitor
+0201-0204 and 0207 are not reached (no OpenGL on the M1: they draw on the CPU); 0200 adds an uncontended lock per glyph
+run. Terminal's figures, the installed build and the candidate alternating in one hold (`term-fig.py`, two rounds):
+launch 318-419 / 318-540 ms (first runs 1762 cold / 540), echo 5-14 / 3-10 ms, `seq 1 300000` 0.96, 1.04 / 0.98, 1.06 s,
+wheel step 6-43 / 6-17 ms: no difference beyond the spread of either.
+
+### Layers on the CPU, CAOpenGLLayer, the names VLC imports (cocoa 0133-0135)
+- TERM6's hosted-layer probe stayed the window's grey because a view with a layer drew into a bitmap of its own
+  (`graphicsContextForView`), which only the OpenGL layer renderer composites; without OpenGL it was drawn and never
+  shown. 0133: without OpenGL such a view draws into its window; what `-updateLayer`/`-displayLayer:` put in its layer
+  is drawn too; CVPixelBuffer contents are drawn (a CF object's class is not Nil, so that branch was never taken).
+  Observed in the window's own picture (`PD_WS_DUMP_DIR`): the probe's red/green/blue frames, its rounded badge and its
+  magenta CVPixelBuffer sublayer (all window grey before).
+- 0134: CALayer `-display` draws `-drawInContext:` (or the delegate's `-drawLayer:inContext:`) into a bitmap at the
+  layer's pixel size and makes it the contents; `-displayIfNeeded`; layers marked `-setNeedsDisplay` are displayed
+  before a tree is drawn, on the CPU path and by CALayerContext. `CAOpenGLLayer`: one OpenGL path, CGL (whatever
+  OpenGL.framework is loaded): a context of the layer's pixel format, its offscreen surface at the layer's pixel size,
+  read back as the contents. Where CGL cannot run (the installed CGL without `/usr/lib/libEGL.1.dylib` calls a null EGL
+  pointer) it makes no context and says so once. Observed with `probe/sf-gllayer-probe.m` (my own window, no input):
+  without OpenGL the message, no crash, the delegate-drawn layer shown; with CODEX-FX's private CGL and the Asahi EGL
+  in the DYLD paths, 44 frames drawn by the layer's subclass and the delegate-drawn layer both in the window picture.
+- Names VLC 3 imports: `NSImageNameNetwork` with the other standard image names, `NSAccessibilityFullScreenButtonAttribute`,
+  `NSCharacterEncodingDocumentOption`, `NSWorkspaceApplicationKey`, `NSWorkspaceDidActivateApplicationNotification`,
+  `NSWorkspaceWillSleepNotification` (AppKit); `CGDisplayUsesOpenGLAcceleration`, the display fade reservation calls (none
+  available) (0135, CoreGraphics). Not done: VLC's window needs CGL working system-wide (its video output is an
+  NSOpenGLView): CODEX-FX's `cgl-patches/0001`, not yet qualified for installation; NSAppleScript, AddressBook,
+  ScriptingBridge, WebKit (requests-for-CODEX.md).
+Installed 13:12Z with Activity Monitor's fixes (SF-AA, "TERM7 round": hashes, gates, revert). After the install:
+Terminal's window, tab, Shell menu and Preferences identical to the build before (visual check, mean difference 0.00).
+
+### Foundation networking (prepared, not installed)
+`terminal-app/build-foundation-networking.nix` puts CODEX's networking (Finch's NSURLSession, NSURLSessionSockets,
+NSURLCache, NSHTTPCookie, NSURLCredential, public names) into libFoundation. CODEX's proposal did not link (the error
+domain and two keys lived in the file it emptied), would have exported OpenSSL's ~9400 symbols, linked CFNetwork (which
+re-exports libFoundation and loads SystemConfiguration: every Foundation program would load both, in a cycle) and put
+the CA bundle where the TLS code does not look. This recipe keeps the three constants, hides OpenSSL (`-load_hidden`),
+takes CFNetwork's four CFHTTPMessage functions when the first request is written
+(`foundation-networking/cfnetwork-lazy.c`) and ships the CA bundle as `/usr/share/certs/ca-bundle.crt`. From a prefix
+on the M1: `networking-probe --native https://example.com` HTTP 200, 577 bytes (with the CA file named:
+the library reports its install path, so the CA is found at `/usr/share/certs` once installed); missing CA -1202, 0
+bytes. Cost: libFoundation 2.5 -> 9.7 MB, load-time fixups 12.4k -> 39.5k; a tiny Foundation program 40.3/41.4 ms ->
+42.2/42.2 ms a run (40 runs each, the new one with `DYLD_LIBRARY_PATH`). Not rehearsed or installed (QEMU rehearsal and
+the guarded installer still to do).
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default

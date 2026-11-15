@@ -18,7 +18,9 @@
 #   am-0130/  = am-0129/ + 0130 (frozen; TERM6; 0130 diffs from am-0128: am-0129 changed NSView.m too)
 #   am-0131/  = am-0130/ + 0131 (frozen; TERM6)
 #   am-0132/  = am-0131/ + 0132 (frozen; TERM6)
-#   am/       = am-0132/ + 0133 on (the current tree; TERM6)
+#   am-0207/  = am-0132/ + the Firefox patches 0200, 0201, 0202, 0203, 0204, 0207 (CODEX-FX's, applied as they are;
+#               QuartzCore and Onyx2D/O2Font_freetype.m added from the pin; TERM7)
+#   am/       = am-0207/ + 0133 on (the current tree; TERM7)
 # Each patch diffs two trees for its files; a file belongs to one patch of a set. They apply after 0059
 # (../patched.nix).
 cd /home/chrisk/src/darwin-lab/runs/sf-actmon/pw; P=/home/chrisk/src/darwin-lab/integrations/puredarwin/cocoa/patches
@@ -104,3 +106,10 @@ mk am-0130 am-0131 0131-appkit-typeset-cache-generation-kept.patch $A/NSStringDr
 mk am-0131 am-0132 0132-appkit-inspector-tab-content-window-fits-single-line-values.patch $A/NSLayoutConstraint.m $A/NSWindow.m \
   $A/NSTabView.m $A/NSViewLayout.m $A/NSControl.m $A/NSCell.h $A/NSCell.m $A/NSApplication.m
 ( diff -rq am-0131 am-0132 ) | sed 's/^/differs from am-0131: /'
+# 0133-0135 (TERM7): am-0207 -> am (the Firefox patches 0200-0207 are CODEX-FX's files, not generated here)
+Q=src/Frameworks/QuartzCore
+mk am-0207 am 0133-appkit-hosted-layers-cpu-class-named-nibs-arranged-subviews-names.patch $A/NSView.m $A/NSViewController.m \
+  $A/NSSplitView.h $A/NSSplitView.m $A/NSSystemNamesAdditions.m $A/NSTextView.subproj/NSTypesetter_concrete.m $A/NSImage.m $A/NSActivityMonitorAdditions.m
+mk am-0207 am 0134-quartzcore-layer-display-opengl-layer.patch $Q/CALayer.m $Q/CALayerContext.m $Q/CAOpenGLLayer.h $Q/CAOpenGLLayer.m $Q/CoreAnimation.h
+mk am-0207 am 0135-coregraphics-display-fade-opengl-acceleration.patch src/Frameworks/CoreGraphics/CGDirectDisplay_puredarwin.m
+( diff -rq am-0207 am ) | sed 's/^/differs from am-0207: /'
