@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SF-FX video fixture</title>
+<style>
+body{font:18px/1.5 system-ui;margin:20px;background:#101a20;color:#f0f7f4}
+video{display:block;max-width:90vw;width:960px;max-height:70vh;background:#000}
+pre{white-space:pre-wrap;font-size:14px}
+</style>
+<h1>Firefox video measurement</h1>
+<video id="video" controls playsinline muted></video>
+<pre id="result"></pre>
+<script>
+const video=document.querySelector('#video'), output=document.querySelector('#result');
+const parameters=new URLSearchParams(location.search);
+const source=parameters.get('src') || 'media/bbb-1080p-h264-10s.mp4';
+window.fxVideoResult={source,muted:true,events:[],presented:[],quality:[],canPlay:{
+  h264:video.canPlayType('video/mp4; codecs="avc1.640028"'),
+  hevc:video.canPlayType('video/mp4; codecs="hvc1.1.6.L120.B0"'),
+  vp9:video.canPlayType('video/webm; codecs="vp9"')
+}};
+function update(){
+  fxVideoResult.currentTime=video.currentTime;
+  fxVideoResult.duration=Number.isFinite(video.duration)?video.duration:null;
+  fxVideoResult.readyState=video.readyState;
+  fxVideoResult.ended=video.ended;
+  fxVideoResult.error=video.error?{code:video.error.code,message:video.error.message}:null;
+  if(video.getVideoPlaybackQuality){
+    const quality=video.getVideoPlaybackQuality();
+    fxVideoResult.quality.push({wall:performance.now(),mediaTime:video.currentTime,
+      total:quality.totalVideoFrames,dropped:quality.droppedVideoFrames,
+      corrupted:quality.corruptedVideoFrames});
+  }
+  const latest=fxVideoResult.quality.at(-1);
+  output.textContent=JSON.stringify({...fxVideoResult,presented:fxVideoResult.presented.length},null,2);
+  document.title=`SF-FX video t=${video.currentTime.toFixed(2)} frames=${latest?.total??0} dropped=${latest?.dropped??0} error=${video.error?.code??0}`;
+}
+for(const name of ['loadedmetadata','canplay','playing','waiting','stalled','ended','error'])
+  video.addEventListener(name,()=>{fxVideoResult.events.push({name,wall:performance.now(),mediaTime:video.currentTime});update()});
+if(video.requestVideoFrameCallback){
+  const presented=(now,metadata)=>{
+    fxVideoResult.presented.push({wall:now,mediaTime:metadata.mediaTime,
+      presentedFrames:metadata.presentedFrames,expectedDisplayTime:metadata.expectedDisplayTime,
+      presentationTime:metadata.presentationTime,processingDuration:metadata.processingDuration});
+    video.requestVideoFrameCallback(presented);
+  };
+  video.requestVideoFrameCallback(presented);
+}
+video.src=source;
+video.play().catch(error=>{fxVideoResult.playError=String(error);update()});
+setInterval(update,1000);
+</script>

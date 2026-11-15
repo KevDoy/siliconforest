@@ -2,6 +2,7 @@
 # Build the public desktop GL dispatch API against EXACTLY the installed Asahi
 # Mesa source. It uses Mesa's generated C entries and its live dispatch table;
 # it neither mixes another Mesa version's slot numbers nor brings in GLX/X11.
+{ prefix ? "/private/var/db/sffx/gl-v1" }:
 let
   c = import ../m1-vulkan/common.nix;
   inherit (c) pkgs p triple sdkRoot;
@@ -35,7 +36,7 @@ in pkgs.stdenv.mkDerivation {
       -L${system}/usr/lib -L${mesa}/usr/lib -lgallium-26.3.0-devel -lSystem \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 \
-      -Wl,-install_name,/private/var/db/sffx/gl-v1/lib/libGL.1.dylib \
+      -Wl,-install_name,${prefix}/lib/libGL.1.dylib \
       -Wl,-current_version,4.0.0 -Wl,-compatibility_version,4.0.0 -o libGL.1.dylib
     ${tc}/bin/${triple}-install_name_tool -change \
       /usr/lib/libgallium-26.3.0-devel.dylib \

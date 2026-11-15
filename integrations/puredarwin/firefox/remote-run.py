@@ -39,6 +39,12 @@ def main():
     ap.add_argument('--library-path')
     ap.add_argument('--software', action='store_true')
     ap.add_argument('--no-sandbox', action='store_true', help='diagnosis only; labelled in result')
+    ap.add_argument('--insert-library', help='private diagnostic DSO (e.g. the real SBPL compiler)')
+    ap.add_argument('--pref', action='append', default=[], help='NAME=JSON diagnostic preference')
+    ap.add_argument('--catcher', help='external Mach exception catcher for this launch only')
+    ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
+    ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
+    ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
@@ -54,28 +60,43 @@ def main():
              'app.update.auto': False, 'marionette.port': 28290}
     if args.software:
         prefs.update({'gfx.webrender.software': True, 'layers.gpu-process.enabled': False})
+    for setting in args.pref:
+        name, separator, value = setting.partition('=')
+        if not name or not separator:
+            raise ValueError('Expected --pref NAME=JSON')
+        prefs[name] = json.loads(value)
     (profile / 'user.js').write_text(''.join('user_pref(%s, %s);\n' % (json.dumps(k), json.dumps(v))
                                           for k, v in prefs.items()))
     env = os.environ.copy()
     env.update(HOME=str(home), CFFIXED_USER_HOME=str(home), XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',
                WAYLAND_DISPLAY='wayland-0', MOZ_CRASHREPORTER_DISABLE='1', MOZ_NO_REMOTE='1',
                MOZ_LOG='PlatformDecoderModule:5,AppleMedia:5,DMABuf:4',
-               PD_WS_TIMING='1', PD_CGL_TRACE='1', PD_SANDBOX_TRACE='1')
+               PD_WS_TIMING='1', PD_CGL_TRACE='1', PD_SANDBOX_TRACE='1', PD_CA_TRACE='1',
+               MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1')
     if args.framework_path:
         env['DYLD_FRAMEWORK_PATH'] = args.framework_path
     if args.library_path:
         env['DYLD_LIBRARY_PATH'] = args.library_path
+    if args.insert_library:
+        env['DYLD_INSERT_LIBRARIES'] = args.insert_library
+    if args.catcher:
+        env['PD_NO_CRASH_REPORT'] = '1'
     if args.no_sandbox:
         for kind in ['CONTENT', 'GPU', 'RDD', 'SOCKET_PROCESS', 'UTILITY', 'GMP']:
             env['MOZ_DISABLE_' + kind + '_SANDBOX'] = '1'
     cmd = [str(args.bundle / 'Contents/MacOS/firefox'), '--no-remote', '--profile', str(profile),
            '--marionette', '--remote-allow-system-access'] + (args.url or ['about:support'])
     result = dict(command=cmd, seconds=args.seconds, software_requested=args.software,
-                  sandbox_disabled=args.no_sandbox, synthetic_input=False, prefs=prefs)
+                  sandbox_disabled=args.no_sandbox, synthetic_input=False, prefs=prefs,
+                  diagnostic_library=args.insert_library)
     owned = {}
     start = time.monotonic()
+    early_captured = False
+    gpu_sampled = False
     with (args.run / 'firefox.log').open('w') as log:
-        p = subprocess.Popen(cmd, env=env, cwd=args.bundle / 'Contents/MacOS',
+        launch = ([args.catcher] if args.catcher else []) + cmd
+        result['launcher'] = launch
+        p = subprocess.Popen(launch, env=env, cwd=args.bundle / 'Contents/MacOS',
                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         result['pid'] = p.pid
         support_attempted = False
@@ -90,22 +111,49 @@ def main():
                                     ps=subprocess.run(['ps', '-p', ','.join(map(str, sorted(owned))),
                                                        '-o', 'pid,ppid,time,rss,stat,command'],
                                                       capture_output=True, text=True).stdout))
+                if args.capture_after is not None and not early_captured and time.monotonic() - start >= args.capture_after:
+                    early_captured = True
+                    capture = subprocess.run(['/usr/bin/chonkstep-darwin-desktop', '--screencapture',
+                                              str(args.run / 'screen-early.png')],
+                                             capture_output=True, text=True, timeout=15, env=env)
+                    result['early_capture'] = dict(status=capture.returncode, stdout=capture.stdout,
+                                                   stderr=capture.stderr, elapsed=time.monotonic() - start)
+                if args.sample_path and not gpu_sampled and time.monotonic() - start > 18:
+                    gpu_sampled = True
+                    current_ids = process_identities()
+                    for pid in sorted(owned):
+                        if pid not in current_ids or current_ids[pid][1] != owned[pid]:
+                            continue
+                        command = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True).stdout
+                        browser_command = str(args.bundle / 'Contents/MacOS/firefox')
+                        is_parent = args.sample_parent and command.startswith(browser_command)
+                        if pid != p.pid and (is_parent or 'gpu-helper.app/Contents/MacOS/Firefox GPU Helper' in command):
+                            sample = subprocess.run([args.sample_path, str(pid), '2', '20', '-file',
+                                                     str(args.run / ('gpu-sample-%d.txt' % pid))],
+                                                    capture_output=True, text=True, timeout=12)
+                            result['gpu_sample'] = dict(pid=pid, status=sample.returncode, stderr=sample.stderr)
                 if not support_attempted and time.monotonic() - start > 8:
                     try:
                         from marionette import Marionette
                         client = Marionette(timeout=1)
-                    except (OSError, ImportError):
+                    except (OSError, EOFError, ValueError, ImportError):
                         pass
                     else:
                         support_attempted = True
                         try:
-                            client.socket.settimeout(15)
+                            client.socket.settimeout(max(1, min(10, deadline - time.monotonic())))
                             result['marionette'] = client.start()
                             result['automation'] = 'Marionette read-only diagnostics'
+                            client.socket.settimeout(max(1, min(10, deadline - time.monotonic())))
                             (args.run / 'support.json').write_text(json.dumps(client.support(), indent=2) + '\n')
                         except Exception as error:
                             result['marionette_error'] = str(error)
                         finally:
+                            try:
+                                client.socket.settimeout(5)
+                                (args.run / 'pages.json').write_text(json.dumps(client.pages(), indent=2) + '\n')
+                            except Exception as error:
+                                result['page_diagnostics_error'] = str(error)
                             client.close()
                 time.sleep(1)
             result['exit_before_cleanup'] = p.poll()

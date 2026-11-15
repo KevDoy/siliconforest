@@ -18,8 +18,29 @@ in pkgs.stdenv.mkDerivation {
       -L${system}/usr/lib -lSystem \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 cgl-probe.o -o cgl-probe
+    ${tc}/bin/${triple}-clang -O2 -g -isysroot ${sdk} \
+      -I${system}/usr/include -I${a.src}/src/Libraries/libsandbox/include \
+      -c ${./sandbox-probe.c} -o sandbox-probe.o
+    ${tc}/bin/${triple}-clang -isysroot ${sdk} \
+      -fuse-ld=${pd.native-ld}/bin/ld -nostdlib \
+      -L${system}/usr/lib -lSystem \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 sandbox-probe.o -o sandbox-probe
+    ${tc}/bin/${triple}-clang -O2 -g -isysroot ${sdk} \
+      -I${system}/usr/include -I${a.src}/src/Libraries/libsandbox/include \
+      -c ${./avd-sandbox-probe.c} -o avd-sandbox-probe.o
+    ${tc}/bin/${triple}-clang -isysroot ${sdk} \
+      -fuse-ld=${pd.native-ld}/bin/ld -nostdlib \
+      -L${system}/usr/lib -lSystem \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 avd-sandbox-probe.o -o avd-sandbox-probe
+    ${tc}/bin/${triple}-clang -O2 -isysroot ${sdk} \
+      -I${system}/usr/include -fuse-ld=${pd.native-ld}/bin/ld -nostdlib \
+      -L${system}/usr/lib -lSystem \
+      -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
+      -Wl,-platform_version,macos,26.5,26.5 ${./url-argv-probe.c} -o url-argv-probe
   '';
-  installPhase = ''mkdir -p $out/bin; cp cgl-probe $out/bin/'';
+  installPhase = ''mkdir -p $out/bin; cp cgl-probe sandbox-probe avd-sandbox-probe url-argv-probe $out/bin/'';
   dontFixup = true;
   dontStrip = true;
 }

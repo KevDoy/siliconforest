@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Private CGL using the installed Asahi EGL and a matching desktop GL dispatch.
+{ prefix ? "/private/var/db/sffx/gl-v1" }:
 let
   a = import ../cocoa/arm64.nix;
   inherit (a) pkgs pd;
-  gl = import ./gl-api.nix;
+  gl = import ./gl-api.nix { inherit prefix; };
   mesa = import ../m1-vulkan/mesa-darwin.nix;
   system = pd.libsystem-arm64;
   tc = pd.arm64-cross-toolchain;
@@ -12,7 +13,10 @@ let
 in pkgs.stdenv.mkDerivation {
   pname = "siliconforest-firefox-cgl-asahi-arm64";
   version = "1";
-  src = a.src;
+  src = pkgs.runCommand "siliconforest-firefox-cgl-source" {} ''
+    mkdir -p $out/src/Frameworks
+    cp -r ${a.src}/src/Frameworks/OpenGL $out/src/Frameworks/
+  '';
   patches = [ ./cgl-patches/0001-native-asahi-egl.patch ];
   dontConfigure = true;
   buildPhase = ''
@@ -29,15 +33,26 @@ in pkgs.stdenv.mkDerivation {
       -Wl,-reexport_library,${a.glu}/usr/lib/libGLU.1.dylib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 \
-      -Wl,-install_name,/private/var/db/sffx/gl-v1/Frameworks/OpenGL.framework/Versions/A/OpenGL \
+      -Wl,-install_name,${prefix}/Frameworks/OpenGL.framework/Versions/A/OpenGL \
       -o OpenGL
   '';
   installPhase = ''
     F=$out/Frameworks/OpenGL.framework
-    mkdir -p $F/Versions/A $out/lib
+    mkdir -p $F/Versions/A/Resources $out/lib
     cp OpenGL $F/Versions/A/
+    cat > $F/Versions/A/Resources/Info.plist <<'EOF'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <plist version="1.0"><dict>
+    <key>CFBundleExecutable</key><string>OpenGL</string>
+    <key>CFBundleIdentifier</key><string>com.apple.opengl</string>
+    <key>CFBundleName</key><string>OpenGL</string>
+    <key>CFBundlePackageType</key><string>FMWK</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    </dict></plist>
+    EOF
     ln -s A $F/Versions/Current
     ln -s Versions/Current/OpenGL $F/OpenGL
+    ln -s Versions/Current/Resources $F/Resources
     cp -L ${gl}/lib/libGL.1.dylib $out/lib/
     ln -s libGL.1.dylib $out/lib/libGL.dylib
     cp -L ${a.glu}/usr/lib/libGLU.1.dylib $out/lib/

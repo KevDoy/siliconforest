@@ -60,5 +60,19 @@ class Marionette:
             'args': [], 'scriptTimeout': 15000, 'newSandbox': True,
         })
 
+    def pages(self):
+        self.command('Marionette:SetContext', {'value': 'content'})
+        handles = self.command('WebDriver:GetWindowHandles')
+        if isinstance(handles, dict):
+            handles = handles['value']
+        result = []
+        for handle in handles:
+            self.command('WebDriver:SwitchToWindow', {'handle': handle})
+            result.append(self.command('WebDriver:ExecuteScript', {
+                'script': "return {url:location.href,title:document.title,body:document.body.innerText.slice(0,4000),fixture:window.fxResult||null,video:window.fxVideoResult||null};",
+                'args': [], 'newSandbox': False,
+            }))
+        return result
+
     def close(self):
         self.socket.close()

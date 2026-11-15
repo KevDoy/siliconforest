@@ -24,3 +24,22 @@
  	if (getenv("GALLIUM_DRIVER") != NULL || getenv("LIBGL_ALWAYS_SOFTWARE") != NULL)
  		return 0;
  	if (r != NULL && strcmp(r, "default") == 0)
+@@ -231,6 +239,18 @@
+ {
+ #ifdef PD_CGL_USE_EGL
+ 	int zink = pd_cgl_pick_renderer();
++
++	pthread_once(&pd_egl_once, pd_egl_open);
++	/* A missing EGL library is an unavailable CGL renderer, never a call
++	 * through a null function pointer. Check every entry this backend uses. */
++	int complete = 1;
++#define PD_EGL_CHECK(f) complete = complete && pd_##f != NULL;
++	PD_EGL_FUNCS(PD_EGL_CHECK)
++#undef PD_EGL_CHECK
++	if (!complete) {
++		pd_cgl_display = EGL_NO_DISPLAY;
++		return;
++	}
+ 
+ 	/* Surfaceless first: it is the only platform that is guaranteed to exist
+ 	 * with no display server running at all. eglGetDisplay is the fallback for
