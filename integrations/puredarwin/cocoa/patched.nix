@@ -275,6 +275,8 @@
 #         SIGSEGV when its inspector closed); tab accessory views in a slot of their own; one-line strings
 #         truncated head/middle/tail with an ellipsis; the help button's question mark; crash reports in
 #         ~/Library/Logs/DiagnosticReports/<name>-<pid>.crash (PD_NO_CRASH_REPORT=1: none)
+#         a view taken out of the hierarchy takes the constraints above that refer to it (Activity Monitor's
+#         tab switch messaged a freed view); a colour well without a border activates on a click
 #   0121  WindowServer: the opaque region of an opaque toplevel; _windowServerCanBlurBehind; PD_WS_SCALE (a test
 #         instrument: one application's backing stores at a chosen scale); pointer motion in PD_WS_TIMING
 #   0122  Onyx2D: a clip's edges within 1/1024 of a pixel boundary are on it (a dirty rect that went to points

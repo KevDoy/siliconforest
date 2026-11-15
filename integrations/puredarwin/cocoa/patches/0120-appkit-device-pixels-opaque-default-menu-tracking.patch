@@ -112,7 +112,25 @@
  }
  
  // as on macOS, a frame change goes through -setFrameOrigin: and -setFrameSize:, so a
-@@ -2083,12 +2168,14 @@
+@@ -1374,6 +1459,9 @@
+    [[self subviews] makeObjectsPerformSelector:_cmd];
+ }
+ 
++// the constraints above that refer to a view taken out (NSLayoutConstraint.m)
++extern void _NSViewRemoveConstraintsReferringTo(NSView *above, NSView *removed);
++
+ -(void)removeFromSuperview {
+    [_superview setNeedsDisplayInRect:[self frame]];
+    [self removeFromSuperviewWithoutNeedingDisplay];
+@@ -1388,6 +1476,7 @@
+    NSWindow *window=[self window];
+ 
+    [removeFrom willRemoveSubview:self];
++   _NSViewRemoveConstraintsReferringTo(removeFrom,self);
+    [self _deepResignFirstResponder];
+    [self _setSuperview:nil];
+    [self _setWindow:nil];
+@@ -2083,12 +2172,14 @@
             // here else we might get some artifact on clipping borders
             // in device pixels: at a scale of 1.5 a rect of whole points ends inside a pixel, which the
             // views behind fill (the clip is rounded out) and the view itself only partly covers
@@ -331,7 +349,7 @@
  }
  
  -(void)setColorButtonClicked:sender {
-@@ -228,8 +230,36 @@
+@@ -228,8 +230,49 @@
     _continuous=flag;
  }
  
@@ -344,6 +362,19 @@
 +
 +   if(old==view)
 +    return;
++   // an accessory laid out from a nib without its window can come with no size or an absurd one (a layout's
++   // 10000-point stand-ins): it is given its fitting size, within what a panel can show
++   if(view!=nil){
++    NSSize size=[view frame].size;
++
++    if(getenv("PD_COLORPANEL_TRACE")!=NULL)
++     fprintf(stderr,"NSColorPanel: accessory %s %gx%g\n",object_getClassName(view),size.width,size.height);
++    if(size.width<=1 || size.height<=1 || size.width>600 || size.height>500){
++     NSSize fit=[view fittingSize];
++
++     [view setFrameSize:NSMakeSize(MIN(MAX(fit.width,200),600),MIN(MAX(fit.height,40),500))];
++    }
++   }
 +   CGFloat delta=(view!=nil ? NSHeight([view frame]) : 0)-(old!=nil ? NSHeight([old frame]) : 0);
 +   NSRect frame=[self frame];
 +
@@ -833,7 +864,27 @@
  
 --- a/src/Frameworks/AppKit/NSColorWell.m
 +++ b/src/Frameworks/AppKit/NSColorWell.m
-@@ -292,8 +292,10 @@
+@@ -240,7 +240,9 @@
+                 return;
+         }
+ 
+-        if ([self isBordered]) {
++        // a well without a border (macOS 26's wells, Terminal's) is clicked the same way: a click activates it,
++        // a drag from it drags its colour; it only dragged, and Terminal's background well never opened the panel
++        {
+                 /*
+                  * Bordered color wells have interesting logic:
+ 
+@@ -256,7 +258,7 @@
+                  */
+                 BOOL    wasActive=[self isActive];
+                 NSPoint point=[self convertPoint:[event locationInWindow] fromView:nil];
+-                BOOL    mouseInBorder=!NSMouseInRect(point,NSInsetRect(_bounds,8,8),[self isFlipped]);
++                BOOL    mouseInBorder=[self isBordered] && !NSMouseInRect(point,NSInsetRect(_bounds,8,8),[self isFlipped]);
+                 BOOL canStartDrag = !mouseInBorder;
+                 if (mouseInBorder) {
+                         // Toggle the initial state
+@@ -292,8 +294,10 @@
                                                  }
                                          }
                                  }
@@ -846,6 +897,42 @@
                                  if (wasActive) {
                                          [self deactivate];
                                  } else {
+--- a/src/Frameworks/AppKit/NSLayoutConstraint.m
++++ b/src/Frameworks/AppKit/NSLayoutConstraint.m
+@@ -240,6 +240,33 @@
+     return view;
+ }
+ 
++// an item of a constraint that is the view taken out or a view inside it
++static BOOL pdIsWithin(id item, NSView *removed) {
++    return item == removed || ([item isKindOfClass:[NSView class]] && [(NSView *)item isDescendantOf:removed]);
++}
++
++/* As on macOS, a view taken out of the hierarchy takes with it the constraints held above it that tie it, or a
++ * view inside it, to the rest: they stayed, holding the view unretained, and a later layout messaged it after it
++ * was freed (Activity Monitor ended with SIGSEGV switching its tabs, in -_pdLayoutTreeFitting:apply:). */
++void _NSViewRemoveConstraintsReferringTo(NSView *above, NSView *removed) {
++    for (; above != nil; above = [above superview]) {
++        NSArray *held = objc_getAssociatedObject(above, &constraintsKey);
++        NSMutableArray *gone = nil;
++
++        for (NSLayoutConstraint *c in held) {
++            id a = [c firstItem], b = [c secondItem];
++
++            if ((a != nil && pdIsWithin(a, removed)) || (b != nil && pdIsWithin(b, removed))) {
++                if (gone == nil)
++                    gone = [NSMutableArray array];
++                [gone addObject:c];
++            }
++        }
++        if (gone != nil)
++            [above removeConstraints:gone];
++    }
++}
++
+ static void collectConstraints(NSView *view, NSMutableArray *into) {
+     NSArray *held = objc_getAssociatedObject(view, &constraintsKey);
+ 
 --- a/src/Frameworks/AppKit/NSWorkspaceOpenConfiguration.m
 +++ b/src/Frameworks/AppKit/NSWorkspaceOpenConfiguration.m
 @@ -144,9 +144,21 @@
