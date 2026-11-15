@@ -34,6 +34,7 @@ public:
  int deactivate();
  int publishAfterApproval();
  bool blocksStop() const;
+ bool pristineForRetrain(); // No reserved controller or attempted host.
  void free() override;
 };
 #endif

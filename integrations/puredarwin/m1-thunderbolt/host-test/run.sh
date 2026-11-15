@@ -60,3 +60,5 @@ ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I 
 "$tmp/pciec-dart-block"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/kernel" "$here/host-test/pciec-dart-sid0.c" -o "$tmp/pciec-dart-sid0"
 "$tmp/pciec-dart-sid0"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/native" "$here/host-test/retrain-policy.c" -o "$tmp/retrain-policy"
+"$tmp/retrain-policy"

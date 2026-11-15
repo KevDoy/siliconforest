@@ -1889,3 +1889,33 @@ The controller refuses its whole-bank blocker while a real mapper owns the
 bank. The object has no personality, no automatic registration, no BME/MSI
 admission and no caller in the installed CM. Source/SDK and required repository
 checks pass; native mapping, I210 DMA/link/DHCP and teardown remain unobserved.
+
+### Bounded peerless retry: source/SDK, target test pending
+
+The explicit enumeration CM now accepts one exact administrator-requested
+peerless retrain per boot. It first reads the real domain-locked NHI snapshot,
+requires both actual physical lanes1/2 UNPLUGGED with valid/unlocked/enabled
+controls, no remote, and the captured TBT cable word411. The native PCI owner
+must have no reserved controller, host or attempted publication. A live broker
+lease/unchanged cable epoch is required. The ordinary CM variant refuses the
+operation. No arbitrary register/address/cable-word input or automatic retry
+is exposed; UID65534 denial occurs before any counter/action.
+
+The accepted action uses the existing real stop path: Linux domain/worker/ring
+removal, joined native IRQs, NHI DMA drain and DART suspension, RTKit poweroff,
+physical ACIO poweroff, and broker-verified PHY release. Only after success does
+it query the same cable epoch, reacquire/calibrate the PHY and restart the same
+pinned RTKit/CM owner. Any failed stop quarantines and preserves resources;
+a failed restart attempts the same real cleanup and cannot retry its epoch.
+The existing startup snapshot remains a single timer event, not a poll loop.
+A second root request is denied without changing the accepted count. New
+bounded M3 control observations retain the initial and most recent values
+around the existing preserve-bits START operation, without changing its value.
+
+The CLI, ordinary/explicit native CM SDKs, read-policy ASAN/UBSAN checks and
+all six required repository checks pass. This is not yet installed or exercised;
+no positive drain/restart, dock discovery or physical hotplug claim is made.
+The target slot will capture both UART startups, require actual stop/reacquire/
+NHI checkpoints and an unchanged desktop, test UID/budget denial, rerun actual
+TS3 approval/inventory if a peer appears, and restore qualified CIO20 on failure.
+The separate I210 mapper remains excluded from that candidate image.

@@ -148,6 +148,16 @@ int PDCIOPCIEnumeration::deactivate()
 }
 bool PDCIOPCIEnumeration::blocksStop() const
 {return __atomic_load_n(&attempted,__ATOMIC_ACQUIRE)!=0;}
+bool PDCIOPCIEnumeration::pristineForRetrain()
+{
+ if(!lock)return false;
+ IOLockLock(lock);
+ bool ok=!preparing && !controller && !host && !nub &&
+  !__atomic_load_n(&attempted,__ATOMIC_ACQUIRE) &&
+  !__atomic_load_n(&posted,__ATOMIC_ACQUIRE) &&
+  !__atomic_load_n(&revoked,__ATOMIC_ACQUIRE);
+ IOLockUnlock(lock);return ok;
+}
 void PDCIOPCIEnumeration::free()
 {
  if(controller || host || nub)return; // pinned experimental context, no drain claim

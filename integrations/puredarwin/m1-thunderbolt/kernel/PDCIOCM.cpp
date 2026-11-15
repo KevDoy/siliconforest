@@ -10,6 +10,7 @@
 #include "pd_tb_pm.h"
 #include "pd_tb_dma.h"
 #include "pd_tb_nhi.h"
+#include "pd_tb_retrain_policy.h"
 #include "pd_rtkit_platform.h"
 #ifdef PD_CIO_PCIE_ENUMERATION
 #include "pd_cio_pci_enumeration.h"
@@ -225,6 +226,18 @@ int pd_cio_cm_start(PDCIOCM *s,void *nhi,void *pdf,uint32_t cable)
  s->owner->setProperty("cm-start-error",(uint32_t)(ret<0?-ret:ret),32);
  if(!ret)s->owner->setProperty("cm-start-stage","complete");
  return ret<0?-ret:ret;
+}
+int pd_cio_cm_can_retrain(PDCIOCM *s)
+{
+#ifdef PD_CIO_PCIE_ENUMERATION
+ if(!s || !s->live() || !s->nhi || !s->pci)return ENODEV;
+ if(!s->pci->pristineForRetrain())return EBUSY;
+ pd_tb_nhi_status actual={};int ret=pd_tb_nhi_snapshot(s->nhi,&actual);
+ if(ret)return ret<0?-ret:ret;
+ return pd_tb_retrain_peerless(&actual);
+#else
+ (void)s;return EOPNOTSUPP;
+#endif
 }
 int pd_cio_cm_stop(PDCIOCM *s)
 {

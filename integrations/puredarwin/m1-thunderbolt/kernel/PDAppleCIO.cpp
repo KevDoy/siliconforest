@@ -40,6 +40,7 @@ class PDAppleCIO: public IOService {
  uint64_t leaseToken,attemptedEpoch;
  uint64_t drainToken,revokeToken;
  uint32_t accepting,drained;
+ uint32_t firmwareStarts;
  bool power,rtkitTouched,firmwareReady,quarantined,stopping;
 #ifdef PD_CIO_CM
  PDCIOCM *cm;
@@ -47,9 +48,11 @@ class PDAppleCIO: public IOService {
  IOTimerEventSource *diagnosticTimer;
  uint32_t diagnosticCount;
  uint32_t authorizationCount;
+ uint32_t retrainCount;
  static void diagnosticTick(OSObject *,IOTimerEventSource *);
  static IOReturn snapshotAction(OSObject *,void *,void *,void *,void *);
  static IOReturn authorizationAction(OSObject *,void *,void *,void *,void *);
+ static IOReturn retrainAction(OSObject *,void *,void *,void *,void *);
  int readSnapshot();
  static bool cmPowered(void *);
  int startCM();
@@ -184,6 +187,7 @@ int PDAppleCIO::deassertReset()
 }
 int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
 {
+ if(firmwareStarts==UINT32_MAX)return EOVERFLOW;
  int ret=mapResources();if(ret)return ret;
  q.command=PD_USBC_PHY_ACQUIRE;q.mode=(q.eligible&PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT))?PD_USBC_PHY_TBT:PD_USBC_PHY_USB4;
  ret=phy(q);
@@ -198,12 +202,17 @@ int PDAppleCIO::startFirmware(pd_usbc_phy_request &q)
  power=true; // Also unwind a partially failed enable.
  ret=pd_pmgr_enable_node("/arm-io/acio1",-1,0,true);if(ret)return ret;
  ret=deassertReset();if(ret)return ret;
+ uint32_t before=rc.r32(0x0c);
  rc.mask32(0x0c,0,2); // preserve undocumented iBoot bits; request M3 startup
+ uint32_t after=rc.r32(0x0c);++firmwareStarts;
  rtkitTouched=true;
  ret=pd_cio_rtkit_boot(rtkit);if(ret)return ret<0?-ret:ret;
  for(unsigned i=0;i<5000;++i){
   uint32_t state=rc.r32(0xa8);
   if(state!=UINT32_MAX && (state&0x7f000000)){
+   setProperty("firmware-start-count",firmwareStarts,32);
+   setProperty("m3-before-start",before,32);setProperty("m3-after-start",after,32);
+   if(firmwareStarts==1){setProperty("m3-initial-before-start",before,32);setProperty("m3-initial-after-start",after,32);}
    firmwareReady=true;setProperty("m3-firmware-state",state,32);
    ret=pd_cio_tunables_apply(&tunables,&tuning,PD_CIO_RC);
    if(!ret)ret=pd_cio_tunables_apply(&tunables,&tuning,PD_CIO_PCIE_ADAPTER);
@@ -287,8 +296,10 @@ bool PDAppleCIO::start(IOService *p)
 #ifdef PD_CIO_CM
  diagnosticTimer=IOTimerEventSource::timerEventSource(this,diagnosticTick);
  if(!diagnosticTimer || loop->addEventSource(diagnosticTimer)!=kIOReturnSuccess)return false;
- authorizationCount=0;setProperty("authorization-request-count",(uint32_t)0,32);
+ authorizationCount=retrainCount=0;setProperty("authorization-request-count",(uint32_t)0,32);
+ setProperty("retrain-request-count",(uint32_t)0,32);
 #endif
+ firmwareStarts=0;setProperty("firmware-start-count",(uint32_t)0,32);
  setProperty("port-index",1,32);setProperty("rtkit-ready",false);setProperty("nhi-ready",false);
  __atomic_store_n(&accepting,1,__ATOMIC_RELEASE);__atomic_store_n(&drained,1,__ATOMIC_RELEASE);
  registerService();timer->setTimeoutMS(1);return true;
@@ -297,13 +308,15 @@ IOReturn PDAppleCIO::setProperties(OSObject *properties)
 {
 #ifdef PD_CIO_CM
  // Same actual calling-task privilege check as IOPCIFamily. This endpoint
- // accepts only a bounded read request, never addresses or register writes.
+ // accepts exact snapshot/TS3 approval/one peerless retrain commands, never
+ // arbitrary addresses, cable words or register values.
  if(IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)return kIOReturnNotPrivileged;
  auto dict=OSDynamicCast(OSDictionary,properties);
  if(!dict || dict->getCount()!=1)return kIOReturnBadArgument;
  if(!gate || !__atomic_load_n(&accepting,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
  if(dict->getObject("pd-cio-read-snapshot")==kOSBooleanTrue)return gate->runAction(snapshotAction);
  if(dict->getObject("pd-cio-authorize-ts3")==kOSBooleanTrue)return gate->runAction(authorizationAction);
+ if(dict->getObject("pd-cio-retrain-peerless")==kOSBooleanTrue)return gate->runAction(retrainAction);
  return kIOReturnBadArgument;
 #else
  (void)properties;return kIOReturnUnsupported;
@@ -407,6 +420,40 @@ IOReturn PDAppleCIO::authorizationAction(OSObject *owner,void *,void *,void *,vo
  int ret=pd_cio_cm_authorize_ts3(s->cm);
  s->setProperty("authorization-request-error",(uint32_t)ret,32);
  return !ret?kIOReturnSuccess:ret==EOPNOTSUPP?kIOReturnUnsupported:kIOReturnIOError;
+}
+IOReturn PDAppleCIO::retrainAction(OSObject *owner,void *,void *,void *,void *)
+{
+ auto s=OSDynamicCast(PDAppleCIO,owner);
+ if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined ||
+    !s->cm || !s->leaseToken || !cmPowered(s))return kIOReturnNotReady;
+ if(s->retrainCount)return kIOReturnNoResources; // One explicit attempt per boot.
+ int ret=pd_cio_cm_can_retrain(s->cm);
+ auto q=s->request(PD_USBC_PHY_QUERY);
+ if(!ret)ret=s->phy(q);
+ // QUERY returns phase/eligibility/token; mode is an ACQUIRE input, not a
+ // QUERY output. A live CM has already validated its actual TBT cable word.
+ if(!ret && (q.phase!=PD_USBC_PHY_LIVE ||
+    !(q.eligible&PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT))))ret=EBUSY;
+ s->setProperty("retrain-precheck-error",(uint32_t)ret,32);
+ if(ret)return ret==EOPNOTSUPP?kIOReturnUnsupported:kIOReturnNotReady;
+ uint64_t epoch=q.epoch;
+ s->setProperty("retrain-request-count",++s->retrainCount,32);
+ s->setProperty("retrain-stage","stop-drain-poweroff-release");
+ // Actual Linux domain/ring/worker/IRQ/DART drain, then RTKit poweroff,
+ // physical ACIO power-off and broker-verified PHY release, in that order.
+ ret=s->stopFirmware();
+ if(ret){s->quarantined=true;s->report(ret);s->setProperty("retrain-error",(uint32_t)ret,32);return kIOReturnIOError;}
+ s->setProperty("retrain-stop-complete",true);
+ q=s->request(PD_USBC_PHY_QUERY);ret=s->phy(q);
+ if(!ret && (q.epoch!=epoch || !(q.eligible&PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT))))ret=ESTALE;
+ if(!ret){
+  s->attemptedEpoch=q.epoch; // No automatic retry of this same cable epoch.
+  s->setProperty("retrain-stage","reacquire-phy-and-start");ret=s->startFirmware(q);
+ }
+ if(ret){int cleanup=s->stopFirmware();if(cleanup)s->quarantined=true;}
+ s->report(ret);s->setProperty("retrain-error",(uint32_t)ret,32);
+ s->setProperty("retrain-stage",ret?"failed-no-retry":"restart-complete");
+ return ret?kIOReturnIOError:kIOReturnSuccess;
 }
 bool PDAppleCIO::cmPowered(void *ctx)
 {

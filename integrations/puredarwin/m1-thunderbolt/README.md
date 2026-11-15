@@ -415,3 +415,11 @@ provide no router, approval, tunnel, PCI enumeration or hot-remove evidence.
 denial mode. It accepts no arbitrary route/address/key. Its successful return
 means the actual approval and native host startup returned successfully;
 Ethernet, USB and even the complete PCI inventory are separate checks.
+
+The explicit enumeration profile also has a one-per-boot administrator
+`pd-cio-retrain-peerless` command, separately built by `build-retrain-tool.nix`.
+Its real snapshot must show both port1 lanes unplugged, no remote and no PCI
+resources reserved. It performs the existing NHI/IRQ/DMA/RTKit/PHY stop and
+restart sequence; it is not a generic register interface or a polling retry.
+Native SDK and policy checks pass; target drain/restart evidence is pending.
+The `build-pci-dma-kext.nix` mapper variant is separate and uninstalled.
