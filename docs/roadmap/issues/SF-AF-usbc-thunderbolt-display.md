@@ -2743,3 +2743,36 @@ incorrectly expected a failed rewrite of already enabled BME to clear it;
 that failed receipt remains and the corrected fixture explicitly faults new
 grants. All six repository checks pass. No driver calls the late request yet;
 no USB controller was started and CIO35 excludes this source entirely.
+
+### CIO35 first interface-up panic and IRQ-safe fix, 2026-11-15
+
+CIO35 reused CIO33's exact non-AVE kernel. TS3 authorisation,12 PCI functions,
+actual mapper/MSI/BME, FreeBSD I210 attach and root interface naming repeated.
+Native status observed en1 down/not running, link inactive, zero packets.
+The first interface-up request at19:04:01Z caused a kernel panic before DHCP:
+"Attempt to take mutex ... with preemption disabled (2)". The original UART
+and stackshot remain private; this is a real failed hardware check.
+
+Exact collection layout plus the unstripped matching CIO SDK symbolise the
+chain as MSI primaryInterrupt -> ready -> interruptPower -> enumeration
+tunnel/power -> CM power -> PDCIODart::healthy. healthy took IOLockLock,
+which is a sleeping mutex and cannot run in the primary interrupt context.
+The reported module base is its TEXT_EXEC base; SDK symbolisation includes
+that segment's actual offset. No DMA/link/packet success follows from this
+first interrupt, and DHCP was never attempted.
+
+The fix publishes DART ready/poison transitions atomically and reads the
+cached health predicate without a mutex or MMIO. Suspend revokes readiness
+before disabling translation. It preserves the existing physical PMGR,
+RUN/link, CM fault and generation checks through the rest of the chain.
+Native SDK mh7ph2a8qqdb5pw5zirrrhd2sfnzpbwm was built from CIO35's exact frozen
+source tree with only the DART cpp/header delta; USB/DP/HID preparations are
+excluded. Actual healthy/suspend methods pass ASan/UBSan host fixtures for
+hard-IRQ calls, atomic poison, busy refusal, and revoke-before-disable on
+success/failure. All six repository checks pass; a new hardware trial is
+still required. This panic is separate from the earlier unresolved idle-load
+and AppKit timing report.
+
+Qualified non-AVE CIO29 was restored19:06:17Z; UART was reaped19:06:18Z before
+lock release, and the standard desktop/inject check passed. Default boot
+remains Linux. No AVE module, boot argument, probe or extraction was added.

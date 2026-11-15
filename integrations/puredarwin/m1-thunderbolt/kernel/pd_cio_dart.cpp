@@ -94,7 +94,7 @@ int PDCIODart::invalidate(uint32_t streams)
             IODelay(1);
         }
         if (poll == 10000) {
-            poisoned = true;
+            __atomic_store_n(&poisoned,true,__ATOMIC_RELEASE);
             LOG("bank %u streams %04x invalidate timed out; mappings quarantined", i, streams);
             return ETIMEDOUT;
         }
@@ -152,7 +152,7 @@ int PDCIODart::prepare()
         [](void *ctx,uint32_t streams)->int {return ((PDCIODart *)ctx)->invalidate(streams);}
     };
     ret = pd_cio_dart_reset(&io);
-    if (ret) poisoned = true; // retain bank/table ownership on uncertain reset
+    if (ret) __atomic_store_n(&poisoned,true,__ATOMIC_RELEASE); // retain bank/table ownership on uncertain reset
     if (!ret) {
         for (unsigned i = 0; i < 1; ++i) {
             regs[i].w32(TTBR(1, 0), TTBR_VALID | (uint32_t)(tables[0].pa >> 12));
@@ -160,7 +160,7 @@ int PDCIODart::prepare()
         }
         ret = invalidate();
     }
-    ready = !ret;
+    __atomic_store_n(&ready,!ret,__ATOMIC_RELEASE);
     snapshot("after-prepare");
     LOG("ACIO1 SID1 prepare=%d root=0x%llx (no NHI DMA tested)", ret, tables[0].pa);
     IOLockUnlock(lock);
@@ -201,7 +201,7 @@ int PDCIODart::unmap(uint64_t dva, size_t bytes)
     if (!ready || poisoned) { IOLockUnlock(lock); return EIO; }
     int ret = 0;
     if (pd_dart_table_unmap(&pt, dva, bytes) != bytes) {
-        poisoned = true;
+        __atomic_store_n(&poisoned,true,__ATOMIC_RELEASE);
         ret = EIO;
     } else {
         ret = invalidate();
@@ -277,11 +277,11 @@ void PDCIODMABuffer::free()
 
 bool PDCIODart::healthy()
 {
-    if (!lock) return false;
-    IOLockLock(lock);
-    bool ok=ready && !poisoned;
-    IOLockUnlock(lock);
-    return ok;
+    // Also reached by the real PCI MSI primary handler through CM power.
+    // Every publication is atomic; never take a sleeping mutex here. This
+    // remains a cached ownership predicate, not a new hardware fault read.
+    return __atomic_load_n(&ready,__ATOMIC_ACQUIRE) &&
+           !__atomic_load_n(&poisoned,__ATOMIC_ACQUIRE);
 }
 
 int PDCIODart::suspend()
@@ -295,8 +295,8 @@ int PDCIODart::suspend()
     }
     // Caller has already drained NHI. Retire translations before power-off;
     // retain all tables/backing if the invalidation cannot be established.
+    __atomic_store_n(&ready,false,__ATOMIC_RELEASE);
     regs[0].w32(TCR(1),0);
     int ret=invalidate();
-    if (!ret) ready=false;
     IOLockUnlock(lock);return ret;
 }
