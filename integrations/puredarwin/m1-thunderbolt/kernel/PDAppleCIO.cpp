@@ -52,6 +52,10 @@ class PDAppleCIO: public IOService {
 #ifdef PD_CIO_ENDPOINT_MAPPER
  uint32_t mapperCount;
  static IOReturn mapperAction(OSObject *,void *,void *,void *,void *);
+#if PD_CIO_DOCK_USB
+ uint32_t usbMapperCount;
+ static IOReturn usbMapperAction(OSObject *,void *,void *,void *,void *);
+#endif
 #endif
  static void diagnosticTick(OSObject *,IOTimerEventSource *);
  static IOReturn snapshotAction(OSObject *,void *,void *,void *,void *);
@@ -303,6 +307,9 @@ bool PDAppleCIO::start(IOService *p)
  authorizationCount=retrainCount=0;setProperty("authorization-request-count",(uint32_t)0,32);
 #ifdef PD_CIO_ENDPOINT_MAPPER
  mapperCount=0;setProperty("i210-mapper-request-count",(uint32_t)0,32);
+#if PD_CIO_DOCK_USB
+ usbMapperCount=0;setProperty("dock-usb-mapper-request-count",(uint32_t)0,32);
+#endif
 #endif
  setProperty("retrain-request-count",(uint32_t)0,32);
 #endif
@@ -325,6 +332,9 @@ IOReturn PDAppleCIO::setProperties(OSObject *properties)
  if(dict->getObject("pd-cio-authorize-ts3")==kOSBooleanTrue)return gate->runAction(authorizationAction);
 #ifdef PD_CIO_ENDPOINT_MAPPER
  if(dict->getObject("pd-cio-prepare-i210-mapper")==kOSBooleanTrue)return gate->runAction(mapperAction);
+#if PD_CIO_DOCK_USB
+ if(dict->getObject("pd-cio-prepare-dock-usb")==kOSBooleanTrue)return gate->runAction(usbMapperAction);
+#endif
 #endif
  if(dict->getObject("pd-cio-retrain-peerless")==kOSBooleanTrue)return gate->runAction(retrainAction);
  return kIOReturnBadArgument;
@@ -467,6 +477,18 @@ IOReturn PDAppleCIO::mapperAction(OSObject *owner,void *,void *,void *,void *)
  s->setProperty("i210-mapper-request-error",(uint32_t)ret,32);
  return ret?kIOReturnIOError:kIOReturnSuccess;
 }
+#if PD_CIO_DOCK_USB
+IOReturn PDAppleCIO::usbMapperAction(OSObject *owner,void *,void *,void *,void *)
+{
+ auto s=OSDynamicCast(PDAppleCIO,owner);
+ if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return kIOReturnNotReady;
+ if(s->usbMapperCount)return kIOReturnNotPermitted;
+ s->setProperty("dock-usb-mapper-request-count",++s->usbMapperCount,32);
+ int ret=pd_cio_cm_prepare_dock_usb(s->cm);
+ s->setProperty("dock-usb-mapper-request-error",(uint32_t)ret,32);
+ return ret?kIOReturnIOError:kIOReturnSuccess;
+}
+#endif
 #endif
 IOReturn PDAppleCIO::retrainAction(OSObject *owner,void *,void *,void *,void *)
 {

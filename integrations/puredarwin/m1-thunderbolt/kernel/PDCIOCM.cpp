@@ -284,6 +284,13 @@ int pd_cio_cm_prepare_i210_dma(PDCIOCM *s)
  if(!s || !s->pci || !s->nhi || !s->live())return ENODEV;
  return s->pci->prepareI210Mapper();
 }
+#if PD_CIO_DOCK_USB
+int pd_cio_cm_prepare_dock_usb(PDCIOCM *s)
+{
+ if(!s || !s->pci || !s->nhi || !s->live())return ENODEV;
+ return s->pci->prepareDockUSBMapper();
+}
+#endif
 #endif
 int pd_cio_cm_snapshot(PDCIOCM *s)
 {

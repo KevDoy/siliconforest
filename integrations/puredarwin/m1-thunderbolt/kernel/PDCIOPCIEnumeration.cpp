@@ -49,6 +49,9 @@ int PDCIOPCIEnumeration::catalogueSafe()
 #if PD_CIO_I210_NETWORK
  unsigned ethernet=0;
 #endif
+#if PD_CIO_DOCK_USB
+ unsigned usb=0;
+#endif
  for(unsigned i=0;i<drivers->getCount();++i){
   auto dict=OSDynamicCast(OSDictionary,drivers->getObject(i));
   auto cls=dict?OSDynamicCast(OSString,dict->getObject("IOClass")):NULL;
@@ -61,11 +64,18 @@ int PDCIOPCIEnumeration::catalogueSafe()
   if(cls && cls->isEqualTo("PDFBSDem") && bundle && bundle->isEqualTo("org.puredarwin.driver.PDFBSDem") && id && id->isEqualTo("0x15338086") &&
      !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch") && dict->getObject("IOPCITunnelCompatible")==kOSBooleanTrue){++ethernet;continue;}
 #endif
+#if PD_CIO_DOCK_USB
+  if(cls && cls->isEqualTo("RavynXHCIPort") && bundle && bundle->isEqualTo("com.ravynos.driver.RavynXHCIPort") && id && id->isEqualTo("0x11001b73") &&
+     !dict->getObject("IOPCIMatch") && !dict->getObject("IOPCIClassMatch") && dict->getObject("IOPCITunnelCompatible")==kOSBooleanTrue){++usb;continue;}
+#endif
   ret=EOPNOTSUPP;break; // No generic endpoint personality, including PCI xHCI.
  }
  if(!ret && (!bridges || !wifi))ret=ENODEV;
 #if PD_CIO_I210_NETWORK
  if(!ret && ethernet!=1)ret=ENODEV;
+#endif
+#if PD_CIO_DOCK_USB
+ if(!ret && usb!=1)ret=ENODEV;
 #endif
  owner->setProperty("pcie-catalogue-error",(uint32_t)ret,32);
  owner->setProperty("pcie-catalogue-count",drivers->getCount(),32);
@@ -233,8 +243,8 @@ int PDCIOPCIEnumeration::prepareI210Mapper()
 #if PD_CIO_I210_NETWORK
 int PDCIOPCIEnumeration::prepareDockUSBMapper()
 {
- // Explicit owner command gate only, after the real I210 is active. No
- // caller/profile exposes this factory yet, and no USB matching is retried.
+ // Explicit owner command gate only, after the real I210 is active.
+ // Only the dedicated dock profile retries matching after all bindings.
  if(!i210Mapper || !host || !controller || !tunnel(this) || host->isInactive())return ENODEV;
  auto ethernet=OSDynamicCast(IOPCIDevice,i210Mapper->getProvider());
  if(!ethernet || ethernet->configRead32(0)!=0x15338086 ||
@@ -279,7 +289,12 @@ int PDCIOPCIEnumeration::prepareDockUSBMapper()
  ret=host->resolveDockUSBInterrupt(endpoint);if(ret)return fail(ret);
  ret=host->bindDockUSBAccess(endpoint);if(ret)return fail(ret);
  owner->setProperty("pcie-usb-mapper-stage","actual-shared-root-resources-MSI-no-driver-no-BME");
- owner->setProperty("pcie-usb-mapper-created",true);return 0;
+ owner->setProperty("pcie-usb-mapper-created",true);
+#if PD_CIO_DOCK_USB
+ endpoint->registerService(kIOServiceSynchronous);
+ owner->setProperty("pcie-usb-mapper-stage","mapper-bound-FL1100-match-requested");
+#endif
+ return 0;
 }
 #endif
 #endif

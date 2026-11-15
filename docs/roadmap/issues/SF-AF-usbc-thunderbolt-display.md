@@ -2802,3 +2802,22 @@ parsing, BIOS handoff, inaccessible status, active worker/operation and reset
 timeouts, and partial mapping-retirement failure. No real IRQ/work joining,
 hardware halt, USB enumeration, physical typing or storage result is claimed.
 Factory/catalogue command wiring remains; this driver is excluded from CIO36.
+
+### Opt-in FL1100 profile and administrator request — source only
+
+The separate build-pci-usb-kext.nix profile now accepts exactly one native
+FL1100 PCI personality and exposes pd-cio-prepare-dock-usb through the existing
+administrator-only serialised command gate. It requires the active I210,
+selects the actual keyboard branch, binds mapper/resources/MSI/access, and
+retries matching for that endpoint. The driver then requests checked late BME.
+The request counter and binding checkpoint are historical request evidence;
+CLI success alone cannot establish controller startup, USB/HID enumeration or
+physical input. Default/network-only profiles continue rejecting PCI USB.
+
+Native CIO SDK cr0yv2h4lnn4wrg6ygh5vk3xba589f7s and command SDK
+xf37dpx3f4plpiflx7ch2mjjf1s97hrj pass. Actual catalogueSafe runs under
+ASan/UBSan in both build modes: network-only rejects the USB personality;
+the opt-in profile requires exactly one correct FL1100/tunnel match and
+refuses broad, duplicate, wrong-ID or extra personalities. All six repository
+checks pass. No collection selects this pair; CIO36 remains frozen with only
+the interrupt-context health fix, and real Ethernet qualification comes first.

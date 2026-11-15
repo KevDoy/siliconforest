@@ -14,6 +14,9 @@ int pd_cio_cm_snapshot(PDCIOCM *); // one read-only actual PHY/link query
 int pd_cio_cm_authorize_ts3(PDCIOCM *); // explicit private enum profile only
 #ifdef PD_CIO_ENDPOINT_MAPPER
 int pd_cio_cm_prepare_i210_dma(PDCIOCM *); // Actual mapper; BME remains stripped.
+#if PD_CIO_DOCK_USB
+int pd_cio_cm_prepare_dock_usb(PDCIOCM *); // Explicit FL1100 binding/matching.
+#endif
 #endif
 int pd_cio_cm_can_retrain(PDCIOCM *); // Actual two unplugged lanes, pristine PCI owner.
 #endif

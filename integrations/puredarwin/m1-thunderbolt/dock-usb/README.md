@@ -35,11 +35,19 @@ Alpine Ridge port0 ancestry, registers its real SID0 requester without
 resetting the active I210 root/allocator, binds the native mapper/resources,
 allocates MSI, and binds retained host access. The host's late USB admission
 preserves actual I210 grants and admits only the selected USB ancestry after
-mapper/MSI/physical checks. No owner command or catalogue profile calls the
-factory yet. Every current boot profile still excludes USB admission.
+mapper/MSI/physical checks. The separate build-pci-usb-kext.nix profile accepts exactly this FL1100
+personality and exposes one administrator command, pd-cio-prepare-dock-usb,
+through the existing serialised command gate. It binds the selected endpoint
+then retries matching; driver startup requests checked late DMA admission.
+Default/network-only profiles still reject PCI USB matching. No boot
+collection selects this opt-in pair yet.
 
 Actual transformed guard, extended-capability/BIOS-handoff, quiesce and
 retirement methods pass ASan/UBSan host fixtures, including inaccessible
 status, worker/operation/reset timeouts and completion failures. These are
 host fixtures, not native IRQ joining or hardware producer-drain evidence.
-Factory/profile wiring and real M1 qualification remain before inclusion.
+Both opt-in native profiles and the separate command tool build. Actual
+catalogue policy fixtures exercise network-only rejection, exact unique USB
+matching, and refusal of broad/extra personalities. Real M1 qualification,
+including controller startup and IRQ/work retirement, remains before support
+can be reported.

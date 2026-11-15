@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Native ACIO1 firmware stage. No NHI/domain/PCI enumeration is implied.
-{ connectionManager ? false, pciEnumeration ? false, endpointMapper ? false, pciMSI ? false, i210Network ? false }:
+{ connectionManager ? false, pciEnumeration ? false, endpointMapper ? false, pciMSI ? false, i210Network ? false, dockUSB ? false }:
 assert !pciEnumeration || connectionManager;
 assert !endpointMapper || pciEnumeration;
 assert !pciMSI || (pciEnumeration && endpointMapper);
 assert !i210Network || pciMSI;
+assert !dockUSB || i210Network;
 let
   lkpi=import ../m1-rust-kext/lkpi;
   inherit (import ../m1-rust-kext/pins.nix) pkgs;
@@ -32,6 +33,9 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     ''}
     ${pkgs.lib.optionalString i210Network ''
       printf '\ntarget_sources(PDAppleCIO.kext PRIVATE PDCIOPCIAdmission.cpp)\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_I210_NETWORK=1)\n' >> "$dest/CMakeLists.txt"
+    ''}
+    ${pkgs.lib.optionalString dockUSB ''
+      printf '\ntarget_compile_definitions(PDAppleCIO.kext PRIVATE PD_CIO_DOCK_USB=1)\n' >> "$dest/CMakeLists.txt"
     ''}
     cp ${./include}/* "$dest/"
     cp ${./src}/pd_apple_nhi.c ${./src}/pd_cio_tunables.c ${./src}/pd_pciec_config.c ${./src}/pd_pciec_port.c ${./src}/pd_pciec_tunables.c "$dest/"
