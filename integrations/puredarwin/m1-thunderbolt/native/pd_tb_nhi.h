@@ -24,6 +24,15 @@ struct pd_tb_nhi_config {
  int (*pci_prepare)(void *);
  int (*pci_activated)(void *);
  int (*pci_deactivate)(void *);
+ /* Optional all-or-none T8103 APPLE_DPIN_CHANGED handoff, not the M2
+  * pre/post flow. Called with the real CM domain lock held. changed must
+  * publish/revoke the actual generation and retire powered DP-IN access
+  * synchronously on false, then queue provider/DCP work OUTSIDE that lock.
+  * No DCP provider may be called synchronously from these callbacks.
+  * waiting reports actual pipeline-capacity state, never a success stub.
+  * Owner/context/resources remain retained through teardown and failures. */
+ int (*dp_changed)(void *,unsigned dpin,uint32_t port,uint64_t generation,bool active);
+ bool (*dp_waiting)(void *,unsigned dpin);
 };
 #ifdef __cplusplus
 extern "C" {

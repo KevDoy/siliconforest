@@ -118,6 +118,40 @@ static int pci_deactivate(struct tb_nhi *nhi)
 }
 static int no_dp(struct tb_nhi *nhi,struct tb_port *in,struct tb_port *out)
 {(void)nhi;(void)in;(void)out;return -EOPNOTSUPP;}
+/* T8103 mapping and notification flow from pinned apple.c:
+ * apple_dpin_index_for_port/apple_nhi_dp_tunnel_changed. Root DP-IN order
+ * is the physical crossbar index; a guessed port number is not that index. */
+static int dp_index(struct pd_tb_nhi *s,struct tb_port *in)
+{
+ if(!s->domain || !s->domain->root_switch || !in ||
+    in->sw!=s->domain->root_switch || !tb_port_is_dpin(in))return -ENODEV;
+ struct tb_port *port;unsigned index=0;
+ tb_switch_for_each_port(s->domain->root_switch,port){
+  if(!tb_port_is_dpin(port))continue;
+  if(port==in)return index<2?(int)index:-ERANGE;
+  ++index;
+ }
+ return -ENODEV;
+}
+static void dp_changed(struct tb_nhi *nhi,u8 in_port,u64 generation,bool yes)
+{
+ struct pd_tb_nhi *s=owner(nhi);struct tb_port *port,*in=NULL;
+ if(s->domain && s->domain->root_switch)
+  tb_switch_for_each_port(s->domain->root_switch,port)
+   if(port->port==in_port){in=port;break;}
+ int index=dp_index(s,in);
+ if(index<0 || !s->config.dp_changed || (yes && !present(nhi))){fail(s);return;}
+ // Preserve the CM's full token. An old notification is an expected
+ // refusal; other owner failures quarantine rather than assert a drain.
+ int ret=s->config.dp_changed(s->config.ctx,index,in_port,generation,yes);
+ if(ret && ret!=-ESTALE)fail(s);
+}
+static bool dp_waiting(struct tb_nhi *nhi,struct tb_port *in)
+{
+ struct pd_tb_nhi *s=owner(nhi);int index=dp_index(s,in);
+ return index>=0 && present(nhi) && s->config.dp_waiting &&
+        s->config.dp_waiting(s->config.ctx,index);
+}
 static const struct tb_nhi_ops operations={
  .request_ring_irq=request_ring_irq,.release_ring_irq=release_irq,
  .ring_interrupt_active=active,.ring_interrupt_mask=mask,.ring_configure=configure,
@@ -125,11 +159,18 @@ static const struct tb_nhi_ops operations={
  .pci_tunnel_post_activate=pci_activated,.pci_tunnel_deactivate=pci_deactivate,
  .dp_tunnel_pre_activate=no_dp,
 };
+static const struct tb_nhi_ops display_operations={
+ .request_ring_irq=request_ring_irq,.release_ring_irq=release_irq,
+ .ring_interrupt_active=active,.ring_interrupt_mask=mask,.ring_configure=configure,
+ .is_present=present,.pci_tunnel_pre_activate=pci_prepare,
+ .pci_tunnel_post_activate=pci_activated,.pci_tunnel_deactivate=pci_deactivate,
+ .dp_tunnel_changed=dp_changed,.dp_tunnel_awaits_display=dp_waiting,
+};
 static const struct tb_nhi_ring_layout layout={TX_BASE,RX_BASE,STRIDE,TX_BASE+0x10,RX_BASE+0x10,STRIDE};
 int pd_tb_nhi_check_stopped(void *opaque)
 {
  struct tb_ring *r=opaque;
- if(!r || r->nhi->ops!=&operations)return -EOPNOTSUPP;
+ if(!r || (r->nhi->ops!=&operations && r->nhi->ops!=&display_operations))return -EOPNOTSUPP;
  struct pd_tb_nhi *s=owner(r->nhi);
  if(!s->config.powered(s->config.ctx) ||
     (readl(s->config.nhi_base+(r->is_tx?TX_BASE:RX_BASE)+r->hop*STRIDE+0x10)&RING_FLAG_ENABLE) ||
@@ -145,6 +186,8 @@ int pd_tb_nhi_create(const struct pd_tb_nhi_config *c,void **out)
  if(!pd_tb_native_ready() || !c->powered(c->ctx))return -ENODEV;
  unsigned pci_callbacks=!!c->pci_prepare+!!c->pci_activated+!!c->pci_deactivate;
  if(pci_callbacks && pci_callbacks!=3)return -EINVAL;
+ unsigned dp_callbacks=!!c->dp_changed+!!c->dp_waiting;
+ if(dp_callbacks && dp_callbacks!=2)return -EINVAL;
  if((readl(c->nhi_base)&0x3ff)!=12 || readl(c->nhi_base+IRQ_ENABLE))return -EBUSY;
  for(unsigned i=0;i<12;++i){
   if(c->rx_irq[i]<=0 || c->tx_irq[i]<=0)return -EINVAL;
@@ -156,8 +199,9 @@ int pd_tb_nhi_create(const struct pd_tb_nhi_config *c,void **out)
  int ret=pd_tb_dma_drain_status();if(ret)return ret;
  struct pd_tb_nhi *s=kzalloc(sizeof(*s),GFP_KERNEL);if(!s)return -ENOMEM;
  s->config=*c;s->nhi.dev=c->device;s->nhi.iobase=c->nhi_base;s->nhi.hop_count=12;
- s->nhi.ops=&operations;s->nhi.ring_layout=&layout;s->nhi.tx_rings=s->tx;s->nhi.rx_rings=s->rx;
+ s->nhi.ops=dp_callbacks?&display_operations:&operations;s->nhi.ring_layout=&layout;s->nhi.tx_rings=s->tx;s->nhi.rx_rings=s->rx;
  s->nhi.quirks=QUIRK_NO_DMA_PORT|QUIRK_NO_USB3_BW_ALLOC;
+ if(dp_callbacks){s->nhi.host_dp_policy=TB_HOST_DP_NOTIFY;s->nhi.quirks|=QUIRK_HOST_DP_NFC_CREDITS;}
  spin_lock_init(&s->nhi.lock);init_completion(&s->nhi.domain_released);
  *out=s;return 0;
 }
