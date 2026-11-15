@@ -110,3 +110,33 @@ Use the private producer, not the default decoder preserved by the separate
 QuickTime query wrapper. The six host policy tests use explicitly synthetic
 receipts and prove only classifier behavior; no hardware event is inferred.
 Actual shared-capture results and browser1080p60 still require owner trials.
+
+The subsequent M1 `media-private-controls-v3` establishes actual exportable GPU
+storage in both parent and looked-up child (valid copied FD and16KiB data
+offset), explicit cross-process H/R lifetime controls and exact byte transport.
+The process-exit control remains rawFAIL: a child exiting without decrement
+leaves its global count held and the decoder frame quarantined. Native clears
+that count after reap. This is a real implementation limit, not a successful
+automatic-cleanup or GPU-fence result.
+
+The first `gpu-nv12-one-copy-v1` run completed600 AVD jobs with no new faults,
+but all output GPU-storage checks failed. The old FX validator required Y0;
+our same-byte native CoreVideo probe proves standard NV12 IOSurfaces have a
+512-byte planar header and top-level row2884 distinct from plane stride1920 at
+1920x1080. Do not remove the header or reinterpret the flattened row as Y stride.
+FX's bounded-offset admission fix is independent of a CoreVideo allocation bug:
+the last plane ends at3110912, but row rounding advertises3114720 bytes. The
+private CV override now reserves the advertised size+64 and publishes the
+correct flattened IOSurface row, preserving every plane offset. Corrected M1
+CPU/GPU allocation metadata now matches all required native layout fields;
+the optional-getter differences remain raw. Actual600-frame corrected output
+also passes every independent NV12 hash/PTS and retained-picture check, with
+600AVD jobs/done, no new faults and contexts0. It still copies1866240000 bytes.
+The failed first run remains retained; see
+`../../CoreVideo/SURFACE-LAYOUT-2026-11-15.md` for exact scope and receipts.
+
+This current-kernel fallback is explicitly **one CPU copy** from AVD into
+GPU-backed NV12 storage. A successful correctness control could remove a
+second CPU texture upload through FX's GPU rectangle blit, but would not prove
+direct hardware capture import, IPC/fence ordering, browser60fps or end-to-end
+zero-copy. `qualify-capture.py` continues to reject every copied capture run.

@@ -16,6 +16,7 @@ uint32_t IOSurfaceGetPixelFormat(IOSurfaceRef);
 int IOSurfaceLock(IOSurfaceRef,IOSurfaceLockOptions,uint32_t*);
 int IOSurfaceUnlock(IOSurfaceRef,IOSurfaceLockOptions,uint32_t*);
 extern const CFStringRef kIOSurfaceBytesPerElement;
+extern const CFStringRef kIOSurfaceAllocSize;
 extern const CFStringRef kIOSurfaceBytesPerRow;
 extern const CFStringRef kIOSurfaceElementWidth;
 extern const CFStringRef kIOSurfaceHeight;
