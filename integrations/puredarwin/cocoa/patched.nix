@@ -298,6 +298,15 @@
 #   0124  WindowServer: kWSWindowPrepareRole (a popup's xdg_popup asked for before AppKit draws it, the flush
 #         waits for its configure); frames unused for 2 s beyond two per window are let go
 #         (PD_WS_KEEP_FRAMES=1 keeps them); PD_WS_DUMP_ALPHA=1 dumps the alpha too
+#   0125  AppKit (TERM6): the menu panel's pieces drawn without antialiasing (0123's pieces left half-transparent
+#         lines where they met) and the shadow rings' hole the panel's own rounded shape (a plain hole left a
+#         darker band down the inside edges); a menu of a window's strip draws the strip alone and does not
+#         validate the whole main menu first; the accent colour read again only when the global preferences
+#         file changed; Reduce Transparency: NO in an application whose user chose an opacity below 100 % in
+#         the colour panel (PDTranslucencyChosen in its defaults, announced with
+#         NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification); tail truncation by halving; a split
+#         view's missing divider moves nothing (Terminal's exception) and its min/max divider positions
+#   0126  WindowServer: PD_WS_TIMING says how long a flush waited for a popup's configure
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -374,6 +383,7 @@ let
     ./patches/0116-appkit-owner-findings-windows-cursor-colors.patch
     ./patches/0120-appkit-device-pixels-opaque-default-menu-tracking.patch
     ./patches/0123-appkit-menus-fast-crashes-layers-without-egl.patch
+    ./patches/0125-appkit-menu-panel-seams-translucency-choice-split-view.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -386,6 +396,7 @@ let
     ./patches/0117-windowserver-cursor-shown-when-the-pointer-moves.patch
     ./patches/0121-windowserver-opaque-region-blur-query-test-scale.patch
     ./patches/0124-windowserver-popup-role-ahead-idle-frames.patch
+    ./patches/0126-windowserver-popup-configure-wait-timing.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
