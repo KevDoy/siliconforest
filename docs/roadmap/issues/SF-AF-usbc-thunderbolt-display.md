@@ -2508,3 +2508,44 @@ Removing CIO's local symbols alone recovered space: all17 non-debug section
 addresses, sizes and contents matched the input exactly, other56 code UUIDs
 were fixed, and the final installed trial had zero overlaps. No kernel
 address change or protected code change was used. AVE remains paused.
+
+
+### 2026-11-15 16:56Z: real I210 mapper and MSI parent setup observed
+
+CIO29/source `4c99f7cce`, capsule
+`a149e487218ba3e37b2300c9c0762c837de5a010a3d022ad21df836085a33d31`,
+is installed and qualified. The actual MSI words were all zero before setup
+and config/base/address became `0x51 / 0 / 0xfffff000` afterward, with both
+counts3/error0. This confirms the source-identified missing restore step
+behind CIO28's host failure. Native parent setup completed with32 masked
+AIC lines beginning818. TS3 authorization and independent inventory again
+returned success:12 functions/four xHCI/one I210.
+
+The administrator mapper request returned success/count0 to1/error0; its
+real UID-denial control left count0 unchanged. The owned native SID0 domain
+setup returned error0, bound the actual IOMapper object to the actual I210,
+verified native lookup identity and freshly checked owned TTBR/TCR/gate and
+physical power/link. No endpoint BME or driver was admitted, and there is
+no Ethernet packet, IRQ delivery, USB input or external display result.
+
+The collection has57 modules/no AVE/no pdave, only CIO's code UUID changed,
+other56 artifacts fixed, unchanged605-byte configuration and boot.bin, four
+PCI personalities and zero overlaps. Standard.next/inject/Wi-Fi restored;
+UART reaped before release16:50:56Z. CIO27 remains the qualified rollback.
+Quiet60: kernel2.25162% one CPU/host98.25875% idle/NHI24=12TX0+12RX0,
+other22 zero; compositor3.68258% (cleanup2.31785/main0.93868/HID0.42307).
+The first50M CPU-work sample was157.034ms with156.951ms CPU time; three
+warm samples were83.677–83.687ms.100k syscalls14.682ms. This cold/warm
+anomaly is retained as a possible scheduling/clock clue, not diagnosed or
+fixed. The reported AppKit slowdown remains unresolved.
+
+A separate I210 network admission and private FreeBSD driver variant now
+compile: exact I210 personality only; real mapper required before attach;
+three early BME requests removed (native wrapper, iflib entry and PCI BAR
+helper); late admission requires the actual armed MSI route, owned mapper,
+complete blocked inventory and live physical link. It derives and enables
+only the I210's real bridge ancestry and endpoint, keeping four xHCI blocked.
+Partial/ambiguous startup retains IRQ/context/backing until reboot; this is
+not hot-remove support. Interface-only DHCP tools `8d6775a26` also compile,
+with no shared Wi-Fi tool changes. These network variants remain uninstalled
+and await the first link/DHCP hardware test.
