@@ -33,3 +33,9 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The parked PIPE dummy-PHY enable in src/pd_atc_pipe_bootstrap.c follows
+m1n1 src/usb.c at121fcbf35d4501814b58ca5347926a4173b6a512 (MIT,
+Copyright The Asahi Linux Contributors), followed by the held-reset/clamp
+state from Linux atc.c. The MIT permission and warranty notice above applies.
+The native adapter never releases an uninitialized DWC3 core here.

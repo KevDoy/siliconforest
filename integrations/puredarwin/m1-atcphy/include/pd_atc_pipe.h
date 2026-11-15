@@ -16,6 +16,13 @@ int pd_atc_pipe_route(const struct pd_atc_io *,struct pd_atc_pipe_state *,enum p
  * A stopped PIPE may lack a lock clock. A live USB3 handoff must ACK; if
  * completion fails after moving the mux, retain ownership and retry it. */
 int pd_atc_pipe_park(const struct pd_atc_io *,struct pd_atc_pipe_state *,bool stopped);
+/* Enable the dummy-PHY bit from Linux's m1n1-established baseline,
+ * preserving all other PIPE fields, without releasing DWC3
+ * reset. acio_off must be actual native power-state proof, held through
+ * this exclusive broker transition; old DWC3 producers must be joined.
+ * The function separately verifies actual dummy/ACK/reset/clamp state.
+ * No direct host or NHI client may be published before it succeeds. */
+int pd_atc_pipe_bootstrap_dummy(const struct pd_atc_io *,const struct pd_atc_pipe_state *,int acio_off);
 #ifdef __cplusplus
 }
 #endif

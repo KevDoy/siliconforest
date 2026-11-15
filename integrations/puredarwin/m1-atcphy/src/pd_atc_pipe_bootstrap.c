@@ -1,0 +1,36 @@
+/* SPDX-License-Identifier: MIT */
+/* Parked T8103 PIPE baseline: m1n1 src/usb.c at121fcbf35d45 (MIT,
+ * Copyright The Asahi Linux Contributors), combined with Linux atc.c
+ * reset_assert's held-reset/clamp state. T8103 parked-state initialization; native caller supplies actual ACIO-off
+ * and controller-drain proof before starting a client.
+ * Unlike the bootloader, this never releases an uninitialized DWC3 core.
+ */
+#include "pd_atc_pipe.h"
+#include <errno.h>
+#include <stdint.h>
+/* acio_off is the native broker's physical power-state proof, established
+ * before PHY clocks rise and held by its exclusive uncommitted lease.
+ * Caller must already have joined the old DWC3 producers and parked PIPE.
+ */
+int pd_atc_pipe_bootstrap_dummy(const struct pd_atc_io *io,
+                               const struct pd_atc_pipe_state *state,int acio_off)
+{
+    if(!io || !io->read || !io->write || !state)return EINVAL;
+    if(!acio_off || state->backend!=PD_ATC_DUMMY || state->dummy_pending)return EBUSY;
+    uint32_t mux=io->read(io->ctx,PD_ATC_PIPE,0xc);
+    uint32_t ack=io->read(io->ctx,PD_ATC_PIPE,0x14);
+    uint32_t aon=io->read(io->ctx,PD_ATC_PIPE,0x1c);
+    uint32_t override=io->read(io->ctx,PD_ATC_PIPE,0x20);
+    if(mux==UINT32_MAX || ack==UINT32_MAX || aon==UINT32_MAX || override==UINT32_MAX)return EIO;
+    /* Hardware proof of reset asserted, clamp active, completed park. */
+    if((mux&0x3f)!=0x22 || (ack&1) || (aon&0x11)!=0x10)return EBUSY;
+    if((override&0x100f)!=0x1002)return EBUSY;
+    /* m1n1's 0x9332 baseline enables the documented dummy PHY (bit15).
+     * The native parked state already has the reset/power fields. Enable
+     * only that missing clock backend, preserving every other PIPE bit. */
+    if(override&(1u<<15))return 0;
+    io->write(io->ctx,PD_ATC_PIPE,0x20,override|(1u<<15));
+    if((io->read(io->ctx,PD_ATC_PIPE,0x20)&0x900f)!=0x9002 ||
+       (io->read(io->ctx,PD_ATC_PIPE,0x1c)&0x11)!=0x10)return EIO;
+    return 0;
+}

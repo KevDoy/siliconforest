@@ -21,3 +21,7 @@ ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../include"
 "$tmp/pipe"
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/../include" "$here/observation.c" -o "$tmp/observation"
 "$tmp/observation"
+
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/../include" -c "$here/../src/pd_atc_pipe_bootstrap.c" -o "$tmp/bootstrap.o"
+${CXX:-c++} -std=c++14 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/../include" "$here/bootstrap.cpp" "$tmp/bootstrap.o" -o "$tmp/bootstrap"
+"$tmp/bootstrap"

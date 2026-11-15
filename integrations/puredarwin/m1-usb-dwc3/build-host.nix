@@ -14,7 +14,7 @@ in base.overrideAttrs (old: {
     cp ${./kernel}/PDAppleUSB.cpp ${./kernel}/pd_dwc3_host.* ${./kernel}/pd_usbc_phy_lease.h "$dest/"
     cp ${../m1-atcphy/include}/* ${../m1-atcphy/src}/*.c ${../m1-atcphy/upstream}/*.inc "$dest/"
     cp ${../m1-typec/kernel/pd_cd321x.h} "$dest/pd_cd321x.h"
-    printf '\ntarget_sources(RavynXHCIPort.kext PRIVATE PDAppleUSB.cpp pd_atc_usb2.c pd_atc_dp.c pd_atc_modes.c pd_atc_calibration.c pd_atc_pipe.c pd_dwc3_host.c)\n' >> "$dest/CMakeLists.txt"
+    printf '\ntarget_sources(RavynXHCIPort.kext PRIVATE PDAppleUSB.cpp pd_atc_usb2.c pd_atc_dp.c pd_atc_modes.c pd_atc_calibration.c pd_atc_pipe.c pd_atc_pipe_bootstrap.c pd_dwc3_host.c)\n' >> "$dest/CMakeLists.txt"
     python3 - "$dest/Info.plist" <<'PY'
 import plistlib, sys
 p=sys.argv[1]

@@ -622,6 +622,19 @@ int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
     tunnel={};tunnel.io=&atcIO;
     setProperty("phy-start-stage","park-prior-phy");
     ret=stopPHY();
+    if(!ret && target==PD_ATC_MODE_TBT){
+        // priorACIOOff() proved this physical domain off before clocks rose.
+        // The exclusive uncommitted lease still has no NHI producer, and
+        // stopPHY() has completed the old DWC3/PIPE halt and reset.
+        setProperty("phy-start-stage","pipe-bootstrap");
+        setProperty("pipe-bootstrap-before-aon",pipe.r32(0x1c),32);
+        setProperty("pipe-bootstrap-before-override",pipe.r32(0x20),32);
+        ret=priorACIOOff(); // Fresh physical power proof immediately before writes.
+        if(!ret)ret=pd_atc_pipe_bootstrap_dummy(&atcIO,&pipeState,1);
+        setProperty("pipe-bootstrap-error",(uint32_t)ret,32);
+        setProperty("pipe-bootstrap-after-aon",pipe.r32(0x1c),32);
+        setProperty("pipe-bootstrap-after-override",pipe.r32(0x20),32);
+    }
     if (!ret) {setProperty("phy-start-stage","configure-mode");ret=pd_atc_mode_start(&atcIO,target,flip,&cal);}
     if (!ret && target==PD_ATC_MODE_USB4) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB4_BACKEND);
     if (!ret && target==PD_ATC_MODE_DP) {

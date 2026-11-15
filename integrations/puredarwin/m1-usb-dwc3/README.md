@@ -138,3 +138,14 @@ The pre-ACIO and later properties have independent error/count fields. No
 mode/rate write or timer is added. Values are live device calibration evidence
 and must remain in ignored private captures. Native SDK/collection builds and
 host ATC suites pass; this readback extension is not installed yet.
+
+
+CIO12B qualifies the calibration readback on the M1:250 records/174 unique
+addresses, matching the active Linux address set; all programmed masks match
+expected values. NHI remains healthy but no dock router is discovered.
+
+The next TBT-only startup step enables the documented dummy-PHY bit inherited
+from m1n1's Linux boot baseline. Fresh ACIO-off and actual stopped/reset/
+clamped DWC3/park readback precede it; every other PIPE/AON field is preserved.
+No direct USB host starts. The helper and native collection build/test pass;
+this initialization is not yet installed or hardware-qualified.
