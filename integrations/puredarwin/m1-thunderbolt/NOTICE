@@ -125,3 +125,9 @@ sequence from drivers/iommu/apple-dart.c at the same pin (native/provenance.json
 with native readback/error propagation. It retains the source copyright and
 GPL-2.0 notice. Host tests exercise the actual reset helper; the native
 owner must first establish the powered, unlocked, drained NHI DART.
+
+src/pd_pciec_config.c and include/pd_pciec_config.h adapt the ECAM layout
+and root/subordinate access shape from the existing GPL-2.0
+m1-apcie-host/PDApcieT8103Host and Linux pcie-apple.c. The original
+Alyssa Rosenzweig/Google/Corellium/Mark Kettenis notices are retained.
+These are source/host helpers for a future native tunnel bridge.

@@ -268,3 +268,14 @@ with count1->1; root succeeds with count1->2. The late real read still shows
 both physical ports UNPLUGGED/state7 and no remote router. NHI/RTKit and the
 standard desktop remain healthy, with quarantine clear. This is a diagnostic interface,
 not evidence of a trained link or a dock router.
+
+PCIe-C source preparation also includes `pd_pciec_config`: ECAM validation
+accepts subordinate device numbers1..31 required by Thunderbolt bridges,
+limits the root to device0/function0, checks aligned byte/word/dword accesses
+against both bus and aperture bounds, and refuses a revoked view. A separate
+command-write filter strips bus-master enable until the future native mapper
+and lifetime adapter admit it. Sanitizer host tests cover full subordinate
+BDF ranges, exact aperture edges, unaligned/overflow/refused views and command
+widths. These helpers are **not linked into an installed host bridge** and
+supply no physical power, synchronization, IRQ or DMA-drain proof. No native
+PCI enumeration or endpoint-DMA protection is claimed from their tests.
