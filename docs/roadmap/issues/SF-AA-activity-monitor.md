@@ -300,6 +300,53 @@ The first candidates were not installed: `c1` garbled table text in one capture 
 every fragment), `c3` moved Terminal's radio-button titles 2 pixels (the raise reached cells' string drawing; now only
 a text view's container).
 
+## TERM8 round (15 November, evening)
+Synthetic input to my own instances only; details of the install and the gates are in SF-Y, "TERM8 round".
+- **Minimise**: Activity Monitor's main window 6/6 and its inspector 4/4 (installed 3/4: one Window-menu click of the
+  test missed) minimised by Command-M or Window > Minimize and restored from the miniwindow, alive throughout.
+- **"Context Switches:" cut** - found: the inspector's nib gives its labels horizontal hugging 749 and compression
+  resistance 750 (`PD_LAYOUT_TRACE=1`: `h749,749 c750,750`) and ties every label of the column to "Threads:"'s leading
+  and trailing edges. Apple's engine orders priorities strictly; ours summed weights of 1000^(p/250-1), in which 749
+  and 750 are nearly equal, so five labels' hugging (each 0.986e6) outweighed one compression (1e6) and the column
+  took the width of "Assertions:" (58.7 + its margins = 59.3). Fix (cocoa 0140, installed 22:21Z in c14): one
+  objective row per priority, compared in order (a higher priority wins over any number of lower ones);
+  the same six labels solve to 94.67 (old 55.33); a 300-variable benchmark takes the same time (265-391 ms old,
+  292-319 new for 20 solves on the workstation).
+- **Mach Messages In/Out empty** - found: Activity Monitor reads attributes 31/32 (messages sent/received) from the rows of
+  its inspector request without asking for them (my libsysmon now says so with `SYSMON_DEBUG=1`: "read of attribute
+  31/32, not in the request"); it asks only for 28 29 33 34 35 36 of that group. libsysmon now treats the task statistics
+  as one group (31/32 come with any of them; same proc_taskinfo call). Installed 22:21Z (libsysmon 321c6718).
+- **Per-process network bytes 0**: the installed NetworkStatistics (ae69904a) is not the build of the committed source
+  (770e059a, whose query completion runs after the kernel's updates). With 770e059a (candidate c14, my own AM, Network
+  tab sorted by Rcvd Bytes, synthetic clicks on the virtual seat; `runs/sf-term8/amnet.sh`): 16 MiB sent to my own SSH
+  session showed 16.8 MB / 11,685 packets for its sshd-session and stayed so while the connection idled (`an14i`);
+  12 x 4 MiB a second apart showed 8.4 MB at +8 s and 42.0 MB at +16 s (`an14s`): counts right while the socket is
+  open. One run (64 MiB, captured 4 s after the connection closed, `an14`) showed 179.9 MB / 124,539 packets, 2.7x
+  the bytes sent: what a closed source adds is not settled (`hold12`: a connection seen open, then closed).
+- **Memory and CPU of the candidate** (`m1-measure9.sh`, four of my own AMs side by side, 6 min, no input, the owner's
+  input counters unchanged throughout): installed / AppKit 0140 alone / libsysmon + NetworkStatistics alone / all of
+  c14: RSS +0.80 / +0.76 / +0.76 / +0.76 MB/min after 120 s (each flat from ~210 s: 95, 89, 95, 89 MB), CPU 5.1 / 4.0 /
+  4.2 / 4.8 % of one core at the 5 s interval. An earlier 10-minute run that showed the candidate growing +3.4 MB/min
+  overlapped the owner's own use of the M1 (21:17-21:24:30Z) and is discarded.
+- **Inspector Statistics with c14** (`ai14-stat.png`): "Context Switches:" whole, Mach Messages In 10 / Out 20 for my
+  sfsleeper: both FAIL rows pass, before (`vcg14`) and after the install (`vig14`, the installed files).
+- **Installed 22:21Z (candidate c14, direct, the file of before kept as `<path>.pre-c14`)**: AppKit 18573adf (0140;
+  `.pre-c14` = c12's 0c3fa810), CoreText af448fdd (CODEX-FX's 0220; 4413922a), `/usr/lib/libsysmon.dylib` 321c6718
+  (21dd531f), NetworkStatistics 770e059a (ae69904a). Gates before (c14 from a prefix, owner idle): visual check (only
+  the inspector's Statistics changed, as intended; Terminal identical), 3 minutes of late views, random input Activity
+  Monitor 216 actions (stopped by the owner's arrival) and Terminal 204 actions, alive, no report. After: visual check
+  of the installed files (the inspector as above; Terminal's content identical, the frames differ because DESK7's
+  compositor drew new title bars in between), minimise: every Command-M round passed (Terminal 5/5, tabs, split,
+  Preferences 2/2 each, Activity Monitor 3/3, inspector 2/2), every Window > Minimize round failed to open the item
+  (the test's keyboard walk of the menu does not reach the menu on DESK7's virtual seat: a test fault, being redone with
+  clicks), random input Activity Monitor 240 actions alive, `sf_compat_push.sh check` 18/18. Terminal's random input on
+  the installed files was stopped by the owner's arrival (22:35:45Z). Revert: `ln -f <path>.pre-c14 <path>.back &&
+  mv -f <path>.back <path>` for the four paths.
+- **GPU History empty**: Activity Monitor finds GPUs through Metal (`MTLCopyAllDevicesWithObserver`), IORegistry and
+  IOReport; the canonical Metal answers no device unless `SF_METAL_ENABLE_REAL_DEVICE=1`, and the AGX driver exposes no
+  utilisation counter to user space (no IOAccelerator PerformanceStatistics, no sysctl, no busy time in the DRM port).
+  An empty GPU History is the truthful state; real utilisation needs counters from the GPU driver first.
+
 ## Installed on the M1's disk, seventh round (14 November, night; COCOA4)
 - Core files by the guarded installer after QEMU `c4c`/`c4c-2` (failed=0, QDDESK_PASS both; `c4a` and `c4b` before them
   failed on staging and on their own probes, see SF-Y): `/usr/lib/libCoreFoundation.dylib` 82638edd (the first

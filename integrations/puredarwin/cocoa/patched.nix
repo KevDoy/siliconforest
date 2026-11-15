@@ -398,6 +398,9 @@
 #   0217  Onyx2D: a font of a collection keeps fontconfig's face index (CJK fonts drew their first, Japanese, face)
 #   0219  QuartzCore: a layer context releases its renderer, root layer and CGL context and pixel format (adapted:
 #         the main series has no 0208)
+#   0220  CoreText (CODEX-FX, merged by TERM8 unchanged): a font descriptor made from data holds its own graphics font
+#         (every face of a collection) and is not registered by name, as on macOS; no file in /tmp (Firefox's GPU
+#         process may not write files, so every web font drew no text)
 #   0137  AppKit (TERM8, VLC 3's interface): +[NSColor currentControlTint] and +colorForControlTint: (macOS's
 #         AppleAquaColorVariant/AppleAccentColor), the NSControlTint values; the standard template images
 #         (NSImageNameActionTemplate, ...Add, ...Remove, ...Refresh, ...) drawn as the symbols they stand for;
@@ -416,6 +419,9 @@
 #         (Terminal draws its miniwindow's title with it), -[NSAttributedString drawWithRect:options:] (raised)
 #   0139  AppKit, 0139w WindowServer (TERM8): a pinch (zwp_pointer_gestures_v1, when the compositor offers it) is an
 #         NSEventTypeMagnify event with -magnification (the change of scale) and -phase, sent to -magnifyWithEvent:
+#   0140  AppKit (TERM8): the layout solver meets constraints in priority order (one objective per priority,
+#         a higher priority first, as Cocoa's solver does) instead of a weighted sum: a label hugging at 750 no
+#         longer loses to six compression resistances of 749 (Activity Monitor's "Context Switches:" got 59 of 95 pt)
 #   0138  QuartzCore (TERM8): CALayer -needsDisplayOnBoundsChange, -autoresizingMask (sublayers follow their
 #         superlayer by their masks, as with no layout manager on macOS) -visibleRect and -layoutSublayers/-setNeedsLayout/-layoutIfNeeded (VLC's CAOpenGLLayer raised on them)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
@@ -510,6 +516,7 @@ let
     ./patches/0214-pasteboard-item-provider-receives-destination-board.patch
     ./patches/0137-appkit-vlc-interface-modal-events-minimise-crash.patch
     ./patches/0139-appkit-pinch-magnify.patch
+    ./patches/0140-appkit-layout-priorities-in-order.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -552,6 +559,7 @@ let
     ./patches/0034-coretext-graphics-font-cache-font-directories.patch
     ./patches/0053-coretext-lines-and-fonts-remembered.patch
     ./patches/0215-coretext-copy-keeps-graphics-font-for-rendering-attributes.patch
+    ./patches/0220-coretext-memory-font-descriptors-without-filesystem.patch
   ];
   coretext = optimised (pd."coretext-arm64".override { src = coretextSrc; });
   coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [

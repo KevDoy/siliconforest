@@ -141,3 +141,6 @@ mk am-0210 am-0137 0138-quartzcore-layer-autoresizing-visible-rect-display-on-re
 mk am-0137 am-0139 0139-appkit-pinch-magnify.patch $A/NSApplication.m $A/NSEvent.subproj/NSEvent_mouse.h $A/NSEvent.subproj/NSEvent_mouse.m
 mk am-0137 am-0139 0139w-windowserver-pinch-gestures.patch src/Frameworks/WindowServer/rpc_wayland.c
 ( diff -rq am-0137 am-0139 ) | sed 's/^/differs from am-0137: /'
+# 0140 (TERM8): am-0139 -> am-0140 (am-0139 = am-0137 + 0139, 0139w; frozen)
+mk am-0139 am-0140 0140-appkit-layout-priorities-in-order.patch $A/PDLayoutSolver.m
+( diff -rq am-0139 am-0140 ) | sed 's/^/differs from am-0139: /'

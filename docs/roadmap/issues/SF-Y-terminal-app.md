@@ -488,6 +488,15 @@ what it is given and is shown nowhere (said once). Templates (NSActionTemplate a
 - `/usr/bin/open` opens http(s) URLs with LaunchServices' handler (CODEX-FX's system-patches/0001, merged; CoreServices
   loaded only when a URL is opened).
 
+### What Foundation's networking costs every process (item 4)
+`runs/sf-term8/probe/fndcost.c` (a C program linked to libFoundation; exec to main from the kernel's start time,
+footprint and resident size at main), 30 runs each, alternating, on the M1: the installed libFoundation 43a5fc1b (9.7 MB,
+networking and hidden OpenSSL inside) against the one before it, d7fe3c48 (2.5 MB, from a prefix): exec to main
+median/min/p90 21.36/20.95/22.36 ms against 21.30/21.12/22.44 ms; footprint 4176 against 3632 KB (+544 KB), resident
+5712 against 5184 KB, internal (dirty) 4064 against 3536 KB (+528 KB). Under the ~1 ms / ~1 MB per process at which the
+networking was to move into an image loaded on first use of NSURLSession: not split. (The +0.5 MB is per process: about
+15 MB over the 30 Objective-C processes of a desktop session; OpenSSL's relocated data and Finch's classes.)
+
 ### Installed (20:2xZ, direct, the files of before kept as `<path>.pre-t8`)
 AppKit 0c3fa810 (0137, 0139, FX 0210/0212/0214; before 96afb830), Onyx2D 2db9aa17 (0217; cd851066), CoreText 4413922a
 (0215; 348df207), `QuartzCore.pd` 738ae322 (0138, FX 0219; 935c21d6), libWindowServer 691d0ec6 (0139w, FX 0210w;
@@ -503,6 +512,37 @@ menu; nothing crashed); Activity Monitor's random-input pass alive, no report. D
 20:15-20:25Z, when my Terminal random-input pass on the candidate, Terminal's figures and the visual check of the
 installed files ran (he fought the injected pointer): those three are to be repeated with DESK7's virtual seat.
 Revert: `ln -f <path>.pre-t8 <path>.back && mv -f <path>.back <path>` for the six paths.
+
+### Foundation for VLC (core; installed 20:56Z by the guarded installer)
+`terminal-app/patches/foundation-macos-applications.patch`: the NIB allocation hook (CODEX's), NSUserDefaults
+`-addSuiteNamed:`/`-removeSuiteNamed:`, `-[NSCalendar ordinalityOfUnit:inUnit:forDate:]`, NSLocale
+`+characterDirectionForLanguage:`/`+lineDirectionForLanguage:`, `+[NSThread sleepForTimeInterval:]`/`sleepUntilDate:`,
+`-[NSURL getFileSystemRepresentation:maxLength:]`, `-[NSFileManager displayNameAtPath:]`, NSData's 10.6 base64 pair,
+NSProxy `-allowsWeakReference`/`-retainWeakReference` (VLC's data-source proxy registered as an observer raised in
+libobjc's weak store), `-[NSArray initWithArray:copyItems:]`. `sf-kvo-probe` checks each ("VLC additions 0 (wanted 0)").
+QEMU rehearsal t8a and its second boot: libFoundation replaced, sf-kvo-probe ok, the only failed verdict sf-objc-probe on
+a rehearsal root without PERF's libobjc (as in TERM6's t6f/t6g and TERM7's t7b). Guarded install (lifeline SSH open):
+the probe failed with the file in use (status 134) and passed with the new one, programs status 0, installed
+libFoundation a17bce22 (before 43a5fc1b, kept as `/usr/lib/libFoundation.dylib.old12`); `sf_compat_push.sh check` 18/18.
+Revert: `macos-compat/sf-lib-install.sh` with `.old12` as the new file (core.lock, announced, lifeline open).
+
+### Performance pass (item 4; on the M1, my own instances, owner idle unless said)
+Figures from runs judged by DESK7's real-input counters before and after (unchanged = the owner was idle).
+- Activity Monitor, launch to its first commit (`m1-am-launch.py`, fresh home, 3 runs each, installed then c14):
+  1588 (cold), 484, 477 ms and 663, 570, 484 ms; to the fifth commit (window, toolbar, the table's first fill) 866-1970
+  and 865-1056 ms.
+- Activity Monitor at its 5 s interval, no input, four instances side by side for 6 minutes (`m1-measure9.sh`): CPU 4.0
+  to 5.1 % of one core (SF-AA's seventh round: 10.6-14.7 %, sixth 13 %); RSS +0.76 to +0.80 MB/min between 120 and
+  210 s, then flat (95 MB installed, 89 MB with AppKit 0140).
+- Column drag (`colres.sh`, TERM6's method: the divider right of "% CPU" 200 px right in 1 s and back, then 400 px in
+  0.25 s; synthetic on the virtual seat; installed and c14 alternating, two each): motion -> frame median 35.3 / 33.9 ms
+  installed, 33.9 / 34.1 ms c14 (2.0-2.1 frames; p95 52-60 ms); AppKit taking a position to its commit 21.1-21.8 ms;
+  Activity Monitor CPU over the drags 21-22 %. Not at one frame: the step itself (cells of the column redrawn and laid
+  out, the commit) takes longer than a frame. 0140's ordered objective costs nothing measurable here.
+- Idle (CODEX-TB's owner-guarded 60 s sample, 21:14Z, kernel CIO29): machine 98.3 % idle, kernel 2.2 % of one CPU,
+  the compositor 3.4 % (its shared-memory drop path 2.0 %).
+- Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
+  the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's

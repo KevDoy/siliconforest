@@ -237,6 +237,15 @@ sysmon_request_add_attribute(OS_sysmon_request *r, uint32_t attribute)
 	if (attribute / 8 >= r->attribute_bytes)
 		return;   /* Apple's logs this and ignores it */
 	r->attributes->data[attribute / 8] |= (uint8_t)(1u << (attribute % 8));
+	/* (TERM8) the task statistics come as one group: Activity Monitor's inspector asks for faults, page-ins, system
+	 * calls, context switches and threads (28 29 33 34 35 36) and then reads the Mach messages sent and received
+	 * (31 32) from the same rows without asking for them (SYSMON_DEBUG: "read of attribute 31/32, not in the
+	 * request"); they come from the same proc_taskinfo call, so a row that has the group has them too */
+	if (r->type == 1 && (attribute == ATTR_FAULTS || attribute == ATTR_PAGEINS || attribute == ATTR_MACH_CALLS ||
+	                     attribute == ATTR_UNIX_CALLS || attribute == ATTR_CSW) && ATTR_MSGS_RCVD / 8 < r->attribute_bytes) {
+		r->attributes->data[ATTR_MSGS_SENT / 8] |= (uint8_t)(1u << (ATTR_MSGS_SENT % 8));
+		r->attributes->data[ATTR_MSGS_RCVD / 8] |= (uint8_t)(1u << (ATTR_MSGS_RCVD % 8));
+	}
 }
 
 API void
@@ -960,8 +969,15 @@ sysmon_row_get_value(OS_sysmon_row *row, uint32_t attribute)
 	size_t rank = 0;
 	xpc_object_t v;
 
-	if (!has(row->attributes, attribute))
+	if (!has(row->attributes, attribute)) {
+		/* (TERM8) SYSMON_DEBUG: each attribute the application reads that its request did not ask for, once */
+		static uint64_t told[4];
+		if (debugging() && attribute < 256 && !(told[attribute / 64] & (1ull << (attribute % 64)))) {
+			told[attribute / 64] |= 1ull << (attribute % 64);
+			fprintf(stderr, "sysmon: read of attribute %u, not in the request\n", attribute);
+		}
 		return NULL;
+	}
 	for (uint32_t a = 0; a < attribute; a++)
 		rank += has(row->attributes, a);
 	v = rank < row->nvalues ? row->values[rank] : NULL;
