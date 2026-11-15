@@ -6,7 +6,7 @@ are now observed ready.**
 The acceptance milestones below require the actual M1; source and build results
 are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
 
-## Current target and observed state (owner change; updated 09:20Z)
+## Current target and observed state (owner change; updated 09:44Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -15,7 +15,7 @@ no further direct-USB-only boots are planned. The TS3 is Thunderbolt 3-only:
 its USB ports cannot exercise the M1's direct DWC3 host before a PCIe tunnel
 and PCI xHCI are operating.
 
-**Observed in Darwin:** non-AVE CIO08, source `f7e2d645a`, capsule `c63179b7b9f2…`,
+**Observed in Darwin:** non-AVE CIO10, source `052169534`, capsule `ae6f7b5af0de…`,
 boots the internal desktop/Wi-Fi and reports RTKit/NHI ready, connection-manager
 startup complete with errno0, PHY owned and no quarantine. TX0/RX0 options
 read `0xc0000000`; IRQ enable is `0x1001`, matching the live Linux control
@@ -24,7 +24,8 @@ beneath the native domain. Full-bank DART reset removed the early SID15 fault;
 Linux and Darwin now have SID1 translating and unused streams disabled.
 The one-shot link query reports both physical lanes UNPLUGGED (state7),
 no remote router, count1/error0. The owned UART reader was reaped before
-lock release at09:08:36Z. AVE is paused; this collection has no AVE module
+lock release at09:44:05Z. CD321x power7 was changed to S0 with the bounded
+SSPS task (two checks, readback/error0). AVE is paused; this collection has no AVE module
 or `pdave` argument.
 
 **Not observed in Darwin:** the dock router, authorization, any dock PCI
@@ -1259,3 +1260,28 @@ admission. Host ASan/UBSan exercises the actual helper, including every I/O
 failure and frozen-clock bound. Native SDK/collection and all six repository checks pass, zero overlaps,
 only TypeC UUID changed and other56 fixed; this step is not yet installed and is not claimed as the missing
 link's cause. The next collection freezes every CIO09 module except TypeC.
+
+
+### CIO10 S0 hardware observation; explicit late read candidate (09:44Z)
+
+CIO10 is installed/verified09:44:03Z, UART reaped09:44:05Z. The real
+CD321x power register starts at7, the bounded SSPS task completes in two
+checks, and final readback is S0/0 with error0. NHI/RTKit and the internal
+desktop remain healthy, quarantine clear. Both physical ports are still
+UNPLUGGED/state7 with no remote router in the startup snapshot; no dock
+router or endpoint appeared. Thus S0 initialization is a real missing step
+now corrected, not a claim that the remaining link failure is fixed.
+
+The next source/SDK candidate permits one explicit read-only snapshot via
+`IORegistryEntrySetCFProperty`, using the actual calling-task administrator
+check and existing CIO command gate. Only the one-key boolean
+`pd-cio-read-snapshot=true` is accepted. No addresses, register writes,
+authorization commands, timer or worker are added; the existing startup
+snapshot still runs once, and subsequent reads require an explicit request.
+Stop/admission/power/quarantine checks precede hardware access. The native
+CLI also has a privilege-drop negative test requiring rejection and an
+unchanged query count; a root request must complete and increment the count
+exactly once. This will distinguish a later trained link from the early
+startup state without ongoing polling. Native driver/tool/collection builds,
+zero overlaps and all six repository checks pass; only CIO UUID changes
+against CIO10, other56 fixed. Hardware qualification is pending.

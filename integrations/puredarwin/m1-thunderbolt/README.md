@@ -253,3 +253,16 @@ link sequence. Its host test injects every I/O failure, a stale RID2SID entry,
 and bounded RUN/busy/reset/link timeouts. Native ordered access, the PCI bridge,
 endpoint DMA/MSI and cable teardown remain required; it is not linked into the
 CIO06 diagnostic candidate. No endpoint-driver admission follows these helpers.
+
+
+The next diagnostic candidate supports an explicit administrator-only
+read request through `IORegistryEntrySetCFProperty` with the single key
+`pd-cio-read-snapshot=true`. It runs the existing bounded NHI/leased-PHY
+snapshot under the native command gate after admission/power checks, with no
+new timer, worker, register write or authorization. `link-query-count` counts
+the one startup query plus accepted explicit queries; errors remain in the
+existing query properties. Build `build-snapshot-tool.nix` for the native
+`pd-cio-snapshot` CLI; `--deny-unprivileged` drops credentials and requires
+rejection with no count change. Driver/tool SDK builds pass; hardware and
+privilege-boundary qualification are pending. This is a diagnostic interface,
+not evidence of a trained link or a dock router.

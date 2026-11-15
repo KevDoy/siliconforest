@@ -21,6 +21,7 @@
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOMessage.h>
+#include <IOKit/IOUserClient.h>
 #include <pexpert/pexpert.h>
 int pd_cio_power_off();
 int pd_cio_pcie_reset();
@@ -46,6 +47,8 @@ class PDAppleCIO: public IOService {
  IOTimerEventSource *diagnosticTimer;
  uint32_t diagnosticCount;
  static void diagnosticTick(OSObject *,IOTimerEventSource *);
+ static IOReturn snapshotAction(OSObject *,void *,void *,void *,void *);
+ int readSnapshot();
  static bool cmPowered(void *);
  int startCM();
 #endif
@@ -76,6 +79,7 @@ public:
  void stop(IOService *) override;
  void free() override;
  IOReturn message(UInt32,IOService *,void *) override;
+ IOReturn setProperties(OSObject *) override;
  IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
 };
 OSDefineMetaClassAndStructors(PDAppleCIO,IOService)
@@ -286,6 +290,20 @@ bool PDAppleCIO::start(IOService *p)
  __atomic_store_n(&accepting,1,__ATOMIC_RELEASE);__atomic_store_n(&drained,1,__ATOMIC_RELEASE);
  registerService();timer->setTimeoutMS(1);return true;
 }
+IOReturn PDAppleCIO::setProperties(OSObject *properties)
+{
+#ifdef PD_CIO_CM
+ // Same actual calling-task privilege check as IOPCIFamily. This endpoint
+ // accepts only a bounded read request, never addresses or register writes.
+ if(IOUserClient::clientHasPrivilege(current_task(),kIOClientPrivilegeAdministrator)!=kIOReturnSuccess)return kIOReturnNotPrivileged;
+ auto dict=OSDynamicCast(OSDictionary,properties);
+ if(!dict || dict->getCount()!=1 || dict->getObject("pd-cio-read-snapshot")!=kOSBooleanTrue)return kIOReturnBadArgument;
+ if(!gate || !__atomic_load_n(&accepting,__ATOMIC_ACQUIRE))return kIOReturnNotReady;
+ return gate->runAction(snapshotAction);
+#else
+ (void)properties;return kIOReturnUnsupported;
+#endif
+}
 IOReturn PDAppleCIO::message(UInt32 type,IOService *p,void *a)
 {
  if(type==kIOMessageServicePropertyChange && p==getProvider()){
@@ -338,16 +356,27 @@ void PDAppleCIO::free()
 }
 
 #ifdef PD_CIO_CM
+int PDAppleCIO::readSnapshot()
+{
+ if(stopping || quarantined || !cm || !cmPowered(this))return ENODEV;
+ if(diagnosticCount==UINT32_MAX)return EOVERFLOW;
+ ++diagnosticCount;setProperty("link-query-count",(uint64_t)diagnosticCount,32);
+ auto req=request(PD_USBC_PHY_SNAPSHOT);int phyRet=phy(req);
+ setProperty("phy-query-error",(uint64_t)phyRet,32);
+ int ret=pd_cio_cm_snapshot(cm);
+ setProperty("link-query-error",(uint64_t)ret,32);
+ return phyRet?phyRet:ret;
+}
 void PDAppleCIO::diagnosticTick(OSObject *owner,IOTimerEventSource *)
 {
+ auto s=OSDynamicCast(PDAppleCIO,owner);if(s)s->readSnapshot();
+ // No rearm: one startup query, plus explicit privileged requests below.
+}
+IOReturn PDAppleCIO::snapshotAction(OSObject *owner,void *,void *,void *,void *)
+{
  auto s=OSDynamicCast(PDAppleCIO,owner);
- if(!s || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return;
- ++s->diagnosticCount;s->setProperty("link-query-count",(uint64_t)s->diagnosticCount,32);
- auto request=s->request(PD_USBC_PHY_SNAPSHOT);int phyRet=s->phy(request);
- s->setProperty("phy-query-error",(uint64_t)phyRet,32);
- int ret=pd_cio_cm_snapshot(s->cm);
- s->setProperty("link-query-error",(uint64_t)ret,32);
- // Deliberately no rearm: one delayed query per successful CM start.
+ if(!s || !__atomic_load_n(&s->accepting,__ATOMIC_ACQUIRE) || s->stopping || s->quarantined || !s->cm || !cmPowered(s))return kIOReturnNotReady;
+ return s->readSnapshot()?kIOReturnIOError:kIOReturnSuccess;
 }
 bool PDAppleCIO::cmPowered(void *ctx)
 {

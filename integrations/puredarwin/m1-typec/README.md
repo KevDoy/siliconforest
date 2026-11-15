@@ -11,7 +11,7 @@ This provider reports the negotiated Type-C state; PHY/DWC3/ACIO consumers
 own their respective hardware startup. Published USB/TB/DP bits alone do not
 establish a working host, tunnel or display.
 
-The next source candidate adds Linux's initial S0 check on the preserved
+The provider includes Linux's initial S0 check on the preserved
 port1. It requires APP firmware, reads SYSTEM_POWER_STATE and sends `SSPS`
 with a one-byte S0 payload only when the controller is not already in S0.
 It refuses a busy foreign command, bounds completion by one second and an
@@ -20,8 +20,9 @@ an actual S0 readback before publishing a service or cable snapshot. It makes
 no periodic command retry. No role swap, mux write, interrupt acknowledge,
 firmware update or transaction to port0 is added. The command transport uses
 the existing serialized I2C engine and Linux's length-prefixed framing.
-This initialization is source/host-tested, **not hardware-qualified yet**.
-CIO09 remains the installed non-AVE kernel while the candidate builds.
+CIO10 hardware qualification observes initial state7, SSPS completion in two
+checks, final S0 and error0. NHI and the desktop remain healthy; the dock
+router is still absent, so this is not a complete link fix.
 
 Build: `nix-build build-kext.nix --no-out-link`. The experimental collection
 is `build-kc.nix`; it retains the disk/reboot base and adds one kext. Pack
