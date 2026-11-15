@@ -9,5 +9,6 @@ let
    chmod -R u+w $out
    cd $out
    ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0201-appkit-headless-run-loop.patch}
+   ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0203-appkit-layer-context-window-scale.patch}
  '';
 in p.appkit.override { src = "${src}/src/Frameworks/AppKit"; }
