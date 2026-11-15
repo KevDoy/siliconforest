@@ -108,3 +108,14 @@ Peter, The Asahi Linux Contributors; Copyright (c) 2014 Andreas Noever;
 Copyright (C) 2018 Intel Corporation. GPL-2.0 is selected for this bridge.
 The Type-C cable inputs correspond to TIPD's Intel status parser and Linux
 TBT alternate-mode definitions at that pin; no captured cable bytes ship.
+
+src/pd_pciec_port.c and include/pd_pciec_port.h adapt the T8103 PCIe-C
+cold-reset/RID2SID clear/startup and post-tunnel link sequence from
+drivers/pci/controller/pcie-apple.c at the same Linux pin (SHA256 in
+native/provenance.json). GPL-2.0:
+  Copyright (C) 2021 Alyssa Rosenzweig <alyssa@rosenzweig.io>
+  Copyright (C) 2021 Google LLC
+  Copyright (C) 2021 Corellium LLC
+  Copyright (C) 2021 Mark Kettenis <kettenis@openbsd.org>
+The native ordered MMIO, PHY/power ownership, bridge, MSI, DMA and hotplug
+adapters are still required. Host register models are not hardware evidence.

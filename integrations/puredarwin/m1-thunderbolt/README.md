@@ -4,7 +4,10 @@
 It is **objects only**, not a loaded driver, NHI, connection manager or
 working tunnel. CIO02 panicked in an SRAM I/O copy. Corrected CIO03D is observed on M1
 with RTKit ready, M3 state 0x01000000 and twelve inactive NHI rings. The
-NHI ring engine/software manager has not run.
+CIO05 reached native CM creation, DART setup and control-ring allocation, but
+domain startup failed with DART fault `0x8f0f0001` (SID15/no-TTBR) and errno12.
+The native fault latch quarantined the path; CIO03 was restored. NHI readiness
+and successful control DMA remain unobserved.
 The owner-attached TS3 Plus remains a Thunderbolt-only Type-C cable flag in
 Darwin; its USB/PCIe/Ethernet/display are not enumerated there.
 
@@ -32,16 +35,16 @@ experimental MODE_A/MODE_B handshake.
 callbacks: configured PHY, unbound PCIe-C reset, power/reset, RTKit and
 firmware readiness, tunables, children/domain and cable programming. Failed
 child/RTKit/power drains retain the session and prohibit PHY power-off.
-These callbacks are not implemented by a native ACIO service yet; success
-from a fixture does not establish any of those hardware facts.
+The separate native `PDAppleCIO` service now owns actual power, shared PHY,
+RTKit and CM adapters. This portable helper's fixtures do not establish
+hardware facts; CIO03 firmware readiness and CIO05 failure are recorded above.
 
 Host ASan/UBSan checks add 64 ring/E2E cases, descriptor wire bytes and DMA
 bounds, SRAM bounds, M1 DP-IN timing/error cases, failure at every startup
 step, failed teardown retention and changed-cable full-OFF ordering.
 
-Still required: ATC TBT/USB4 mode/calibration and ACIO reset provider; native
-M3 mailbox/RTKit parent and power ownership; ACIO tunables and runtime DROM;
-SID1 DART DMA mappings; Linux NHI control channel/software connection
+Still required: qualify the implemented SID1 DART/ring DMA path and Linux NHI
+control channel/software connection
 manager and authorization; apciec1 tunneled host + MSI/DART/lifetime;
 PCIe-attached xHCI/Intel I210 (the existing em driver supports it), DP-IN /
 dcpext tunnel binding and real dock hotplug. Never map or read ACIO children
@@ -54,7 +57,8 @@ It validates every record before writes, rechecks the entire retained
 bundle on application, and preserves Linux's independent clear/OR-set
 semantics and skip-unchanged behavior. ASan/UBSan tests cover all group
 bases and 110 late malformed/missing-record refusals. SDK objects build.
-No calibration bytes are included, and no native ACIO callback is wired yet.
+No calibration bytes are included. Native RC/adapter tuning is firmware-stage
+qualified; CIO05 also reached NHI tuning, then failed at DMA/domain startup.
 
 `upstream/family/` and `pininc/` retain the pinned Linux software CM and its
 protocol headers byte for byte; hashes are in `family-provenance.json`.
@@ -240,3 +244,9 @@ C++ initializers and metaclasses are retained; the frozen collection now fits
 its existing reservation. This does not change boot.bin or other modules.
 The firmware-stage CIO03D is observed ready on M1; the combined CM kext is
 built only. PCIe/DP hooks still refuse until native tunnel providers exist.
+
+`src/pd_pciec_port.c` is a source-only T8103 PCIe-C cold-init and post-tunnel
+link sequence. Its host test injects every I/O failure, a stale RID2SID entry,
+and bounded RUN/busy/reset/link timeouts. Native ordered access, the PCI bridge,
+endpoint DMA/MSI and cable teardown remain required; it is not linked into the
+CIO06 diagnostic candidate. No endpoint-driver admission follows these helpers.

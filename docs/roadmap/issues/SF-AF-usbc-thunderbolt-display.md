@@ -1053,3 +1053,16 @@ zero overlaps, the other 56 module UUIDs are unchanged from CIO05, boot.bin is
 identical to CIO03, and its 605-byte command line fits the native 608-byte
 capacity. All six required repository checks pass (274 Python tests, 77 C
 groups, six mutation checks). Hardware outcome remains pending.
+
+### PCIe-C port sequence, source only
+
+`m1-thunderbolt/src/pd_pciec_port.c` now adapts the pinned Linux T8103 cold
+reset table, all 64 RID2SID clears with readback, debug/fabric/port/OE/root
+tuning order, bounded RUN/link-idle waits, and post-tunnel reset release and
+LTSSM/link-up wait. Its access callbacks must enforce live ownership and
+ordered nonposted root mappings; endpoint BAR mappings must be posted on
+T8103. Failed accesses stop immediately, stale requester entries fail closed,
+and timeout tests cover RUN, busy, tunnel reset and link-up under ASan/UBSan.
+These are host register-model results. The source is not in the installed
+kernel, has no IOPCIFamily bridge or SID15 endpoint DMA mapper, and does not
+enumerate a dock. Cable reprobe/removal and ten-cycle evidence remain open.
