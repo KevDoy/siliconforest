@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-# Private CGL using the installed Asahi EGL and a matching desktop GL dispatch.
-{ prefix ? "/private/var/db/sffx/gl-v1" }:
+# Asahi CGL and matching desktop GL; canonical install name is explicit opt-in.
+{ prefix ? "/private/var/db/sffx/gl-v1", canonical ? false }:
 let
   a = import ../cocoa/arm64.nix;
   inherit (a) pkgs pd;
@@ -33,7 +33,7 @@ in pkgs.stdenv.mkDerivation {
       -Wl,-reexport_library,${a.glu}/usr/lib/libGLU.1.dylib \
       -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${system}/usr/lib/system/libdyld.dylib \
       -Wl,-platform_version,macos,26.5,26.5 \
-      -Wl,-install_name,${prefix}/Frameworks/OpenGL.framework/Versions/A/OpenGL \
+      -Wl,-install_name,${if canonical then "/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL" else "${prefix}/Frameworks/OpenGL.framework/Versions/A/OpenGL"} \
       -o OpenGL
   '';
   installPhase = ''
