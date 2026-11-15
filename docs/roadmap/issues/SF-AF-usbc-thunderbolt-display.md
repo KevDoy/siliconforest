@@ -1954,3 +1954,25 @@ The I210 interrupt audit confirms the existing private fbsdkpi path counts real
 IOPCIFamily interrupt indexes marked PCIMessaged. It must be supplied an actual
 AIC-backed MSI route; the Wi-Fi bridge's custom MSI function alone is not that
 integration. No fabricated interrupt index or successful MSI stub is supplied.
+
+### Focused USB4 control observation: source/SDK, target pending
+
+The existing root/physical-port snapshot now also reads exactly ROUTER_CS5/6/26
+(sleep, TBT3 capability and router-operation status) and the actual primary
+port's USB4-capability-relative PORT_CS18/19 (link mode/configuration). These
+five public control words are already in the saved Linux debugfs trace. UID
+registers7/8, operation payload9..24 and sideband payload windows are excluded.
+The secondary lane legitimately has no USB4 capability and reports unsupported
+for that optional section, rather than fabricated data. Reads use actual NHI
+config requests under the existing domain lock; there are no new writes,
+thread or timer, only three additional packets per explicit/startup snapshot.
+
+Ordinary/enum native SDKs and all six required repository checks pass. The first
+SDK attempt failed because the native setProperty data overload takes a mutable
+pointer; the local offsets array was corrected, the failed receipt retained,
+and the second build passes. These controls are not yet observed on Darwin.
+Linux's root sleep/TBT3-disable flags are clear; its primary port reports TBT3,
+bonded/configured, no reset or initialization-disable request and no training
+in progress. Differences will be interpreted against source, not forced blindly.
+The prospective image includes the separate PCIe-C host power guard and excludes
+the endpoint mapper. CIO21 remains the installed non-AVE rollback baseline.

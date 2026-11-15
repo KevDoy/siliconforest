@@ -277,21 +277,33 @@ int pd_cio_cm_snapshot(PDCIOCM *s)
  bool headerOk=s->owner->setProperty("host-router-header",status.root_header,sizeof(status.root_header)) &&
   s->owner->setProperty("host-router-header-valid",status.root_header_valid!=0) &&
   s->owner->setProperty("nhi-irq-counts",status.irq_count,sizeof(status.irq_count));
+ uint32_t controlOffsets[]={5,6,26};
+ headerOk=headerOk &&
+  s->owner->setProperty("host-router-control-offsets",controlOffsets,sizeof(controlOffsets)) &&
+  s->owner->setProperty("host-router-controls",status.root_controls,sizeof(status.root_controls)) &&
+  s->owner->setProperty("host-router-controls-valid",status.root_controls_valid!=0) &&
+  s->owner->setProperty("host-router-controls-error",status.root_controls_error,32);
  auto ports=OSArray::withCapacity(status.port_count);
  if(!ports)return ENOMEM;
  bool ok=headerOk;
  for(unsigned i=0;i<status.port_count && ok;++i){
-  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(13);
+  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(17);
   if(!item){ok=false;break;}
   const char *keys[]={"port","state","error","remote","remote-vendor","remote-device",
-   "phy-capability","flags-valid","lane-disabled","adapter-locked","remote-authorized"};
+   "phy-capability","flags-valid","lane-disabled","adapter-locked","remote-authorized",
+   "usb4-capability","usb4-controls-valid","usb4-controls-error"};
   const uint32_t values[]={p.port,p.state,p.error,p.remote,p.remote_vendor,p.remote_device,
-   p.cap_phy,p.flags_valid,p.lane_disabled,p.adapter_locked,p.remote_authorized};
-  for(unsigned n=0;n<11 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
+   p.cap_phy,p.flags_valid,p.lane_disabled,p.adapter_locked,p.remote_authorized,
+   p.cap_usb4,p.usb4_controls_valid,p.usb4_controls_error};
+  for(unsigned n=0;n<14 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
   if(ok && p.flags_valid){
    auto phy=OSData::withBytes(p.phy,sizeof(p.phy));auto header=OSData::withBytes(p.header,sizeof(p.header));
    ok=phy && header && item->setObject("phy-registers",phy) && item->setObject("adapter-header",header);
    OSSafeReleaseNULL(phy);OSSafeReleaseNULL(header);
+  }
+  if(ok && p.usb4_controls_valid){
+   auto value=OSData::withBytes(p.usb4_controls,sizeof(p.usb4_controls));
+   ok=value && item->setObject("usb4-controls",value);OSSafeReleaseNULL(value);
   }
   if(ok)ok=ports->setObject(item);item->release();
  }

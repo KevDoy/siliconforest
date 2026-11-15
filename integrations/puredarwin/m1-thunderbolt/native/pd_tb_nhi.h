@@ -39,11 +39,15 @@ struct pd_tb_nhi_port_status {
  uint32_t cap_phy,flags_valid,lane_disabled,adapter_locked;
  uint32_t remote_authorized;
  uint32_t phy[2],header[8];
+ uint32_t cap_usb4,usb4_controls_valid,usb4_controls_error;
+ uint32_t usb4_controls[2]; // PORT_CS_18/19 only; no sideband data window.
 };
 struct pd_tb_nhi_status {
  uint32_t root_vendor,root_device,max_port,port_count,cable_info;
  uint32_t root_header[5];
  uint32_t root_header_valid;
+ uint32_t root_controls[3]; // ROUTER_CS_5/6/26; exclude UID7/8 and op data9..24.
+ uint32_t root_controls_valid,root_controls_error;
  uint32_t irq_count[24];
  struct pd_tb_nhi_port_status ports[16];
 };

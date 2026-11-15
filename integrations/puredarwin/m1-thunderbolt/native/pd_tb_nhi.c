@@ -201,18 +201,35 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
  if(cap<0){ret=cap;goto done;}
  ret=tb_sw_read(root,&out->cable_info,TB_CFG_SWITCH,cap+1,1);
  if(ret)goto done;
+ out->root_controls_error=EOPNOTSUPP;
+ if(tb_switch_is_usb4(root)){
+  // These public power/TBT/operation status words are also read by Linux
+  // usb4.c/debugfs. Deliberately skip UID and operation payload registers.
+  ret=tb_sw_read(root,out->root_controls,TB_CFG_SWITCH,ROUTER_CS_5,2);
+  if(!ret)ret=tb_sw_read(root,out->root_controls+2,TB_CFG_SWITCH,ROUTER_CS_26,1);
+  out->root_controls_error=ret?-ret:0;
+  if(ret)goto done;
+  out->root_controls_valid=1;
+ }
  struct tb_port *port;
  tb_switch_for_each_port(root,port)if(tb_port_is_null(port)){
   if(out->port_count==ARRAY_SIZE(out->ports)){ret=-EOVERFLOW;break;}
   struct pd_tb_nhi_port_status *p=&out->ports[out->port_count++];p->port=port->port;
   struct pd_tb_lane_observation lane;
   p->cap_phy=port->cap_phy;
+  p->cap_usb4=port->cap_usb4;p->usb4_controls_error=EOPNOTSUPP;
   int error=pd_tb_lane_observe(port,lane_read,port->cap_phy,&lane);
   if(error){p->error=-error;if(!ret)ret=error;}
   else{
    p->state=lane.state;p->lane_disabled=lane.disabled;
    p->adapter_locked=lane.locked;p->flags_valid=1;
    memcpy(p->phy,lane.phy,sizeof(p->phy));memcpy(p->header,lane.header,sizeof(p->header));
+  }
+  if(port->cap_usb4){
+   int extra=port->cap_usb4<0 || port->cap_usb4>0xfff-PORT_CS_19?-EINVAL:
+    tb_port_read(port,p->usb4_controls,TB_CFG_PORT,port->cap_usb4+PORT_CS_18,2);
+   p->usb4_controls_error=extra?-extra:0;p->usb4_controls_valid=!extra;
+   if(extra && !ret)ret=extra;
   }
   if(port->remote){
    p->remote=1;p->remote_vendor=port->remote->sw->vendor;p->remote_device=port->remote->sw->device;
