@@ -287,6 +287,30 @@ static int ninth_build(void)
     @catch (id e) { return 8; }
 }
 
+// the tenth build (TERM7): Foundation's networking is in the library: the cookie, cache and WebSocket classes,
+// a cookie made from its properties (no network is used)
+static int tenth_checks(void)
+{
+    int bad = 0;
+    Class cookie = NSClassFromString(@"NSHTTPCookie"), cache = NSClassFromString(@"NSURLCache");
+
+    if (cookie == Nil || NSClassFromString(@"NSHTTPCookieStorage") == Nil) bad |= 1;
+    if (cache == Nil || NSClassFromString(@"NSURLSessionWebSocketTask") == Nil) bad |= 2;
+    if (bad)
+        return bad;
+    id c = [cookie cookieWithProperties:[NSDictionary dictionaryWithObjectsAndKeys:@"probe", @"Name", @"1", @"Value",
+                                         @"example.com", @"Domain", @"/", @"Path", nil]];
+    if (![[c name] isEqualToString:@"probe"] || ![[c value] isEqualToString:@"1"]) bad |= 4;
+    if ([cache sharedURLCache] == nil) bad |= 8;
+    return bad;
+}
+
+static int tenth_build(void)
+{
+    @try { return tenth_checks(); }
+    @catch (id e) { return 16; }
+}
+
 int main(void)
 {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
@@ -304,9 +328,9 @@ int main(void)
     [root removeObserver:root forKeyPath:@"leaf.name"];
     [second setName:@"d"];
     int more = second_build() | (third_build() << 4) | (fourth_build() << 8) | (fifth_build() << 12) | (sixth_build() << 16) | (seventh_build() << 25);
-    int eighth = eighth_build(), ninth = ninth_build();
-    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0 && ninth == 0;
-    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0), readability handler %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ninth, ok ? "ok" : "FAIL");
+    int eighth = eighth_build(), ninth = ninth_build(), tenth = tenth_build();
+    BOOL ok = afterLeaf == 1 && afterSwap == 2 && end == 3 && root->heard == 3 && more == 0 && eighth == 0 && ninth == 0 && tenth == 0;
+    printf("sf-kvo-probe: notifications %d, %d, %d, %d (wanted 1, 2, 3, 3), key-value coding and subclasses %d (wanted 0), to-many accessors %d (wanted 0), readability handler %d (wanted 0), networking classes %d (wanted 0): %s\n", afterLeaf, afterSwap, end, root->heard, more, eighth, ninth, tenth, ok ? "ok" : "FAIL");
     [pool release];
     return ok ? 0 : 1;
 }

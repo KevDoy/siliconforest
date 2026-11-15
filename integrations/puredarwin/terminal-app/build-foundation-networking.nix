@@ -3,13 +3,15 @@
 # ../finch/FoundationNetworking/integration.nix): Finch's NSURLSession, NSURLSessionSockets, NSURLCache, NSHTTPCookie
 # and NSURLCredential under their public names (../finch/FoundationNetworking/canonical-objects.nix, MIT OR
 # Apache-2.0 notices kept), TLS through a private static OpenSSL (peer-chain verification, host name matching,
-# the Mozilla CA bundle at /usr/share/certs/ca-bundle.crt). Differences from the proposal:
+# the Mozilla CA bundle in Foundation's Resources, where the code reads it). Differences from the proposal:
 #   - NSURLErrorDomain, NSURLErrorFailingURLErrorKey and NSURLErrorFailingURLStringErrorKey stay defined (they were
 #     in the emptied NSURLSession.m; the archive uses them and the proposal did not link);
 #   - OpenSSL's symbols are hidden in libFoundation (-load_hidden: linked plainly, its ~9400 symbols were exported);
 #   - CFNetwork is not linked: the four CFHTTPMessage functions the archive uses are taken from it when a request is
 #     first written (./foundation-networking/cfnetwork-lazy.c, hidden). CFNetwork re-exports libFoundation and loads
 #     SystemConfiguration: linked, every program that uses Foundation would load both, in a cycle.
+#   (The CA bundle goes where the proposal put it: /System/Library/Frameworks/Foundation.framework/Versions/A/Resources/
+#   ca-bundle.crt is compiled in. A first install with it in /usr/share/certs failed closed and was reverted.)
 # A file every Objective-C program loads: QEMU rehearsal and the guarded installer (SF-Y, "Installing").
 #
 #   nix-build --extra-experimental-features 'nix-command flakes' --no-out-link build-foundation-networking.nix
@@ -44,12 +46,13 @@ in foundation.overrideAttrs (old: assert pkgs.lib.hasInfix marker old.buildPhase
   '';
   buildPhase = builtins.replaceStrings [ marker ] [ "-o libFoundation.dylib $objs ${extra}" ] old.buildPhase;
   postInstall = (old.postInstall or "") + ''
-    # the CA bundle where the TLS code looks for it: <the library's directory>/../share/certs (sf-tls.h), here
-    # /usr/share/certs/ca-bundle.crt (a new file; the Mozilla bundle from nixpkgs' cacert, its notice beside it)
-    mkdir -p $out/usr/share/certs $out/usr/share/licenses/FoundationNetworking
-    cp ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt $out/usr/share/certs/
-    cp ${../finch/FoundationNetworking/CA-NOTICE} $out/usr/share/certs/NOTICE
-    cp ${e.finch}/LICENSE* $out/usr/share/licenses/FoundationNetworking/
-    tar -xOf ${ssl.src} openssl-${ssl.version}/LICENSE.txt > $out/usr/share/licenses/FoundationNetworking/OpenSSL-LICENSE.txt
+    # the CA bundle where the system build's TLS code reads it (canonical-objects.nix compiles SF_NETWORKING_CA_FILE as
+    # Foundation's Resources/ca-bundle.crt; the Mozilla bundle from nixpkgs' cacert), its notices beside it
+    resources=$out/System/Library/Frameworks/Foundation.framework/Versions/A/Resources
+    mkdir -p $resources/Licenses/FoundationNetworking
+    cp ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt $resources/
+    cp ${../finch/FoundationNetworking/CA-NOTICE} $resources/Licenses/FoundationNetworking/CA-NOTICE
+    cp ${e.finch}/LICENSE* $resources/Licenses/FoundationNetworking/
+    tar -xOf ${ssl.src} openssl-${ssl.version}/LICENSE.txt > $resources/Licenses/FoundationNetworking/OpenSSL-LICENSE.txt
   '';
 })

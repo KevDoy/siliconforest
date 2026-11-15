@@ -356,6 +356,8 @@ qualified; it changes `+frameRectForContentRect:styleMask:` for every applicatio
 run. Terminal's figures, the installed build and the candidate alternating in one hold (`term-fig.py`, two rounds):
 launch 318-419 / 318-540 ms (first runs 1762 cold / 540), echo 5-14 / 3-10 ms, `seq 1 300000` 0.96, 1.04 / 0.98, 1.06 s,
 wheel step 6-43 / 6-17 ms: no difference beyond the spread of either.
+`build-compat.nix` takes QuartzCore's library from `patched.nix`, so a later `sf_terminal.sh install direct` does not
+put the unpatched QuartzCore back.
 
 ### Layers on the CPU, CAOpenGLLayer, the names VLC imports (cocoa 0133-0135)
 - TERM6's hosted-layer probe stayed the window's grey because a view with a layer drew into a bitmap of its own
@@ -401,21 +403,37 @@ Terminal's window, tab, Shell menu and Preferences identical to the build before
   14-23). The median is 14-15 ms in every round measured; single steps of 23-43 ms appear in both the build before and
   this one (43 in the build before, 35 in this): no regression found, the spread is not explained.
 
-### Foundation networking (prepared, not installed)
+### Foundation networking (installed 14:5xZ through the rehearsal and the guarded installer)
 `terminal-app/build-foundation-networking.nix` puts CODEX's networking (Finch's NSURLSession, NSURLSessionSockets,
-NSURLCache, NSHTTPCookie, NSURLCredential, public names) into libFoundation. CODEX's proposal did not link (the error
-domain and two keys lived in the file it emptied), would have exported OpenSSL's ~9400 symbols, linked CFNetwork (which
-re-exports libFoundation and loads SystemConfiguration: every Foundation program would load both, in a cycle) and put
-the CA bundle where the TLS code does not look. This recipe keeps the three constants, hides OpenSSL (`-load_hidden`),
-takes CFNetwork's four CFHTTPMessage functions when the first request is written
-(`foundation-networking/cfnetwork-lazy.c`) and ships the CA bundle as `/usr/share/certs/ca-bundle.crt`. From a prefix
-on the M1: `networking-probe --native https://example.com` HTTP 200, 577 bytes (with the CA file named:
-the library reports its install path, so the CA is found at `/usr/share/certs` once installed); missing CA -1202, 0
-bytes. Cost: libFoundation 2.5 -> 9.7 MB, load-time fixups 12.4k -> 39.5k; a tiny Foundation program 40.3/41.4 ms ->
-42.2/42.2 ms a run (40 runs each, the new one with `DYLD_LIBRARY_PATH`). Not rehearsed or installed (QEMU rehearsal and
-the guarded installer still to do). The install stage (`build-macos-apps-root.nix`) carries it with
-`SF_FOUNDATION=networking` (the default stays the Foundation without it until it is installed) and `build-compat.nix` takes QuartzCore's library from `patched.nix`, so a
-later `sf_terminal.sh install direct` does not put the unpatched QuartzCore back.
+NSURLCache, NSHTTPCookie, NSURLCredential, WebSocket tasks; public names) into libFoundation. CODEX's proposal did not
+link (the error domain and two keys lived in the file it emptied), would have exported OpenSSL's ~9400 symbols and
+linked CFNetwork (which re-exports libFoundation and loads SystemConfiguration: every Foundation program would load
+both, in a cycle). This recipe keeps the three constants, hides OpenSSL (`-load_hidden`) and takes CFNetwork's four
+CFHTTPMessage functions when the first request is written (`foundation-networking/cfnetwork-lazy.c`). The CA bundle
+(nixpkgs' Mozilla bundle) is where the system build reads it, as CODEX had it:
+`/System/Library/Frameworks/Foundation.framework/Versions/A/Resources/ca-bundle.crt` (new file, with the licences in
+`Resources/Licenses/FoundationNetworking`). `build-macos-apps-root.nix` carries it (`SF_FOUNDATION=plain`: the one without).
+- Rehearsal: QEMU `t7b` failed=2 and `t7b-2` failed=1, only the known libobjc probe (as TERM6's `t6h`); libFoundation
+  replaced in both. `probe/sf-kvo-probe.m` now also checks the networking classes (cookie, cache, WebSocket; status 1
+  with the file of before, 0 with the new one), so the guarded installer has something to prove.
+- A first guarded install (14:37Z) put the CA bundle in `/usr/share/certs`, where I wrongly thought the code looked:
+  HTTPS failed closed (-1202) for every program while the file of before answered it. Reverted at 14:40Z (`.old10`).
+  Installed again after the CA bundle was put in Foundation's Resources: libFoundation 43a5fc1b, the file of before
+  `/usr/lib/libFoundation.dylib.old11` (d7fe3c48). Proven by the installer with /bin/ls, /bin/sh, node, claude, python3,
+  bash, git, vim, nvim (tmux status 1 with both, as before). On the installed files, no environment:
+  `networking-probe --native https://example.com` HTTP 200, 577 bytes; with `SF_URLSESSION_CA_FILE=/nonexistent` -1202,
+  0 bytes. `sf_compat_push.sh check`: failed=0. (The file of before also answered HTTPS 200, but ignored a missing CA
+  file: it did not verify the peer by the bundle.)
+- Cost: libFoundation 2.5 -> 9.7 MB on disk, load-time fixups 12.4k -> 39.5k; a small Foundation program 39.0-42.0 ->
+  40.7-44.4 ms a run (40 runs each, both from a prefix; +0.9 to +2.6 ms); its resident memory 9.8 -> 6.3 MB (it no
+  longer starts what the old NSURLSession did). The M1 then rebooted (CODEX-TB's kernel cycle, 14:45Z) and came up
+  with it (desktop, dock, terminals). After the install (my own instances): the visual check identical for Terminal
+  (all four views 0.00) and Activity Monitor (figures only); Terminal launch 317-440 ms, echo 4-9 ms, `seq 1 300000`
+  1.029/1.052 s, wheel 5-25 ms (median 14-15); before it, the same day: 308-433 ms, 3-10 ms, 1.011/1.023 s, 6-35 ms.
+  Activity Monitor's CPU 5.8 % (40 s at the 5 s interval). Random input on the installed files afterwards: Activity
+  Monitor 252 and Terminal 240 actions, `MallocScribble=1`, layout cache forced small: alive, no report.
+- Revert: `ln -f /usr/lib/libFoundation.dylib.old11 /usr/lib/libFoundation.dylib.back && mv -f
+  /usr/lib/libFoundation.dylib.back /usr/lib/libFoundation.dylib` (and remove `Resources/ca-bundle.crt`, `Resources/Licenses`).
 
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
