@@ -20,7 +20,8 @@
 //                                   compositor starts no program itself: it writes the path, the
 //                                   session's listener starts the application. Only bundles in the
 //                                   application directories are opened this way.
-// Not macOS's: URLs, a running instance taking the documents (there are no Apple Events), -b, -e,
+// HTTP(S) URLs use LaunchServices' selected handler, passed as literal argv.
+// Not macOS's: other URL schemes, a running instance taking the documents (there are no Apple Events), -b, -e,
 // -t, -W, -g.
 #include <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
@@ -35,6 +36,39 @@
 #include <unistd.h>
 
 extern char **environ;
+// (CODEX-FX's system-patches/0001, merged by TERM8) HTTP(S) URLs go to LaunchServices' handler for the scheme,
+// LSCopyDefaultApplicationURLForURL of SiliconForest's CoreServices; CoreServices is loaded only when a URL is
+// opened, so every other use of open (the session's listener, open -a) loads what it did before.
+#include <dlfcn.h>
+typedef CFURLRef (*LSCopyDefaultApplicationURLForURLFn)(CFURLRef, UInt32, CFErrorRef *);
+
+static CFURLRef copy_default_application(CFURLRef url)
+{
+    static LSCopyDefaultApplicationURLForURLFn fn;
+    if (fn == NULL) {
+        void *cs = dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_LAZY | RTLD_LOCAL);
+        fn = cs ? (LSCopyDefaultApplicationURLForURLFn)dlsym(cs, "LSCopyDefaultApplicationURLForURL") : NULL;
+        if (fn == NULL) { fprintf(stderr, "open: CoreServices' LSCopyDefaultApplicationURLForURL is not available\n"); return NULL; }
+    }
+    return fn(url, (UInt32)-1, NULL);
+}
+
+static int is_web_url(const char *value)
+{
+    return strncasecmp(value, "https://", 8) == 0 || strncasecmp(value, "http://", 7) == 0;
+}
+
+static int app_for_web_url(const char *text, char *out, size_t size)
+{
+    CFStringRef value = CFStringCreateWithCString(NULL, text, kCFStringEncodingUTF8);
+    CFURLRef url = value ? CFURLCreateWithString(NULL, value, NULL) : NULL;
+    CFURLRef app = url ? copy_default_application(url) : NULL;
+    int found = app && CFURLGetFileSystemRepresentation(app, true, (UInt8 *)out, size);
+    if (app) CFRelease(app);
+    if (url) CFRelease(url);
+    if (value) CFRelease(value);
+    return found;
+}
 
 static int is_dir(const char *p) { struct stat st; return stat(p, &st) == 0 && S_ISDIR(st.st_mode); }
 
@@ -145,12 +179,14 @@ int main(int argc, char **argv)
 {
     const char *target = NULL; char **args = NULL; int nargs = 0;
     char **docs = calloc((size_t)argc, sizeof(char *)); int ndocs = 0;
+    char **urls = calloc((size_t)argc, sizeof(char *)); int nurls = 0;
     if (argc == 3 && strcmp(argv[1], "--listen") == 0) return listen_on(argv[2]);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--args") == 0) { args = argv + i + 1; nargs = argc - i - 1; break; }
         else if (strcmp(argv[i], "-a") == 0 && i + 1 < argc) target = argv[++i];
         else if (strcmp(argv[i], "-n") == 0) continue;
         else if (argv[i][0] == '-') { fprintf(stderr, "open: option %s is not supported here\n", argv[i]); return 1; }
+        else if (is_web_url(argv[i])) urls[nurls++] = argv[i];
         else if (target == NULL && ndocs == 0 && is_bundle(argv[i])) target = argv[i];
         else {
             char real[PATH_MAX];
@@ -159,6 +195,19 @@ int main(int argc, char **argv)
         }
     }
     static char app[PATH_MAX];
+    if (target == NULL && nurls > 0) {
+        if (ndocs > 0) { fprintf(stderr, "open: use -a when mixing documents and URLs\n"); return 1; }
+        if (!app_for_web_url(urls[0], app, sizeof(app))) {
+            fprintf(stderr, "open: no registered browser for %s (use open -a <application> ...)\n", urls[0]); return 1;
+        }
+        for (int i = 1; i < nurls; i++) {
+            char other[PATH_MAX];
+            if (!app_for_web_url(urls[i], other, sizeof(other)) || strcmp(app, other) != 0) {
+                fprintf(stderr, "open: URLs have different handlers; use -a\n"); return 1;
+            }
+        }
+        target = app;
+    }
     if (target == NULL && ndocs > 0) {
         if (!app_for_document(docs[0], app, sizeof(app))) { fprintf(stderr, "open: no application here opens %s (use open -a <application> ...)\n", docs[0]); return 1; }
         target = app;
@@ -182,6 +231,13 @@ int main(int argc, char **argv)
         }
         for (int i = 0; i < nargs; i++) all[i + 2] = args[i];
         args = all; nargs += 2;
+    }
+    if (nurls > 0) {
+        char **all = calloc((size_t)(nargs + nurls), sizeof(char *));
+        if (!all) return 1;
+        for (int i = 0; i < nargs; i++) all[i] = args[i];
+        for (int i = 0; i < nurls; i++) all[nargs + i] = urls[i];
+        args = all; nargs += nurls;
     }
     return open_bundle(target, args, nargs);
 }

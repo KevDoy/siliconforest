@@ -361,7 +361,10 @@
 #         layer (it kept drawing the old one)
 #   0207  QuartzCore: a layer context invalidated, freed or given another layer clears the context pointer of the
 #         tree it held (a tree kept by the application messaged a freed context: Firefox's close-tab crash)
-#   (0205, 0206 of that series are not merged: 0205 is an opt-in experiment, 0206 not yet qualified)
+#   (0205 and 0206 of that series are not merged, and CODEX-FX withdrew both: 0205 is an opt-in experiment with no
+#   measured gain whose walk of the tree at each commit reads the context's root without holding it; 0206 changes the
+#   class frame/content conversions, which Terminal and Activity Monitor never call, and Firefox's tab strip is right
+#   without it; SF-Y "TERM8 round")
 #   0133  AppKit (TERM7): without OpenGL a view with a layer draws into its window (its own bitmap was drawn and
 #         never shown: a hosted layer's contents, a movie's frames, stayed the window's grey) and what a view put
 #         in its layer through -updateLayer/-displayLayer: is drawn there too; CVPixelBuffer contents are drawn (a
@@ -382,6 +385,39 @@
 #   0136  AppKit (TERM7): a wrapping label keeps its whole height for its lines (a two-line explanation sized for
 #         two lines lost the second to the point the text is moved down: Terminal's Preferences > Window Groups)
 #   0135  CoreGraphics (TERM7): CGDisplayUsesOpenGLAcceleration; display fade reservations (none available)
+#   0210, 0210w, 0212, 0214, 0215, 0217, 0219 (CODEX-FX, found with Firefox; merged by TERM8, numbers kept,
+#         regenerated against this tree; applied after 0136):
+#   0210  AppKit, 0210w WindowServer: finger scrolling in pixels with its phases, only with SFFX_PRECISE_SCROLL=1 and a
+#         compositor that reports a finger axis source (the M1's trackpad reports wheel steps: inert there)
+#   0212  AppKit: NSMenu -appearance/-setAppearance:/-effectiveAppearance, inherited by its popups (Firefox's context
+#         menu raised on the missing selector)
+#   0214  AppKit: an NSPasteboardItem's data provider is given the destination pasteboard (Firefox's drags offered
+#         no types)
+#   0215  CoreText: a copy of a font with attributes keeps its graphics font (CTFontCreateCopyWithAttributes drew a
+#         Noto Emoji copy with Inter)
+#   0217  Onyx2D: a font of a collection keeps fontconfig's face index (CJK fonts drew their first, Japanese, face)
+#   0219  QuartzCore: a layer context releases its renderer, root layer and CGL context and pixel format (adapted:
+#         the main series has no 0208)
+#   0137  AppKit (TERM8, VLC 3's interface): +[NSColor currentControlTint] and +colorForControlTint: (macOS's
+#         AppleAquaColorVariant/AppleAccentColor), the NSControlTint values; the standard template images
+#         (NSImageNameActionTemplate, ...Add, ...Remove, ...Refresh, ...) drawn as the symbols they stand for;
+#         -[NSStatusItem _update] (no status bar on this desktop: items kept, shown nowhere, said once);
+#         -[NSCell/NSTextField allowsEditingTextAttributes/importsGraphics] and their setters;
+#         -[NSMutableAttributedString setAlignment:range:], -[NSTextView setAlignment:range:];
+#         -[NSSegmentedCell rectForSegment:inFrame:]; NSOutlineView -setDropItem:dropChildIndex:, NSSliderCell -trackRect,
+#         NSClipView -documentRect, NSBox -sizeToFit, NSButtonCell -mouseEntered:/-mouseExited:, NSBrowserCell
+#         -setImage:, NSAnimationNonblockingThreaded (timed on the main run loop), NSView
+#         -wantsExtendedDynamicRangeOpenGLSurface (all raised "not implemented" or were missing); a modal panel's
+#         wait now includes the window server's events (a click woke -runModalForWindow: only when a timer fired:
+#         VLC's first-run alert never answered); the first NSDocumentController made stays the shared one (one a nib
+#         made and released left it dangling); -[NSImage drawInRect:...] and NSString drawing with no current graphics
+#         context draw nothing (0133's alpha read crashed there: Terminal ended at every minimise, the owner's report),
+#         -[NSString drawWithRect:options:attributes:(context:)] and -boundingRectWithSize:options:attributes:context:
+#         (Terminal draws its miniwindow's title with it), -[NSAttributedString drawWithRect:options:] (raised)
+#   0139  AppKit, 0139w WindowServer (TERM8): a pinch (zwp_pointer_gestures_v1, when the compositor offers it) is an
+#         NSEventTypeMagnify event with -magnification (the change of scale) and -phase, sent to -magnifyWithEvent:
+#   0138  QuartzCore (TERM8): CALayer -needsDisplayOnBoundsChange, -autoresizingMask (sublayers follow their
+#         superlayer by their masks, as with no layout manager on macOS) -visibleRect and -layoutSublayers/-setNeedsLayout/-layoutIfNeeded (VLC's CAOpenGLLayer raised on them)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -469,6 +505,11 @@ let
     ./patches/0204-appkit-replace-hosted-layer-root.patch
     ./patches/0133-appkit-hosted-layers-cpu-class-named-nibs-arranged-subviews-names.patch
     ./patches/0136-appkit-wrapped-label-keeps-its-last-line.patch
+    ./patches/0210-precise-scroll-deltas-and-gesture-phase.patch
+    ./patches/0212-menu-appearance-and-popup-inheritance.patch
+    ./patches/0214-pasteboard-item-provider-receives-destination-board.patch
+    ./patches/0137-appkit-vlc-interface-modal-events-minimise-crash.patch
+    ./patches/0139-appkit-pinch-magnify.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -483,6 +524,8 @@ let
     ./patches/0124-windowserver-popup-role-ahead-idle-frames.patch
     ./patches/0126-windowserver-popup-configure-wait-timing.patch
     ./patches/0129-windowserver-frames-kept-by-default.patch
+    ./patches/0210w-windowserver-finger-pixels-and-scroll-phase.patch
+    ./patches/0139w-windowserver-pinch-gestures.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -497,6 +540,7 @@ let
     ./patches/0119-onyx2d-shading-path-released.patch
     ./patches/0122-onyx2d-clip-edges-on-pixels.patch
     ./patches/0200-onyx2d-serialize-shared-freetype-raster.patch
+    ./patches/0217-graphics-font-keeps-fontconfig-collection-face-index.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
@@ -507,6 +551,7 @@ let
     ./patches/0023-coretext-fixed-pitch-families-private-draw.patch
     ./patches/0034-coretext-graphics-font-cache-font-directories.patch
     ./patches/0053-coretext-lines-and-fonts-remembered.patch
+    ./patches/0215-coretext-copy-keeps-graphics-font-for-rendering-attributes.patch
   ];
   coretext = optimised (pd."coretext-arm64".override { src = coretextSrc; });
   coregraphicsSrc = patchedDir "src/Frameworks/CoreGraphics" [
@@ -523,6 +568,8 @@ let
     ./patches/0202-layer-context-backing-pixel-scale.patch
     ./patches/0207-layer-context-detaches-retained-tree.patch
     ./patches/0134-quartzcore-layer-display-opengl-layer.patch
+    ./patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch
+    ./patches/0138-quartzcore-layer-autoresizing-visible-rect-display-on-resize.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
@@ -532,18 +579,18 @@ let
     buildPhase = builtins.replaceStrings
       [ "cc=\"" "rpc_wayland.o xdg-shell-protocol.o" ]
       [ ''
-        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1; do
+        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1 unstable/pointer-gestures/pointer-gestures-unstable-v1; do
           n=$(basename $x)
           wayland-scanner client-header ${wp}/$x.xml $n-client-protocol.h
           wayland-scanner private-code ${wp}/$x.xml $n-protocol.c
         done
         cc="''
-        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o xdg-shell-protocol.o" ]
+        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o pointer-gestures-unstable-v1-protocol.o xdg-shell-protocol.o" ]
       (builtins.replaceStrings
         [ "$cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o" ]
         [ ''
           $cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o
-              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
+              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1 pointer-gestures-unstable-v1; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
   }));
   # (0110) against the libFoundation the root has (NSIndexPath is in it), not upstream's

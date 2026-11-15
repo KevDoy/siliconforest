@@ -435,6 +435,75 @@ CFHTTPMessage functions when the first request is written (`foundation-networkin
 - Revert: `ln -f /usr/lib/libFoundation.dylib.old11 /usr/lib/libFoundation.dylib.back && mv -f
   /usr/lib/libFoundation.dylib.back /usr/lib/libFoundation.dylib` (and remove `Resources/ca-bundle.crt`, `Resources/Licenses`).
 
+## TERM8 round (15 November, evening)
+Synthetic input to my own instances only (the compositor's inject module); tools in `runs/sf-term8` (not committed).
+Activity Monitor's side is in SF-AA, "TERM8 round".
+
+### Terminal ended at every minimise (the owner's report, via DESK6)
+Crash report (`~/Library/Logs/DiagnosticReports/Terminal-651.crash`): SIGSEGV at 0x30 in `O2ContextCurrentGState` under
+`-[NSImage drawInRect:fromRect:operation:fraction:]`, called by Terminal from the miniaturise notification that
+`-[NSWindow _serverDidSetState:]` posts. Terminal draws its miniwindow's picture there with no current graphics context;
+TERM7's 0133 read the context's alpha without checking for one (a regression of 13:12Z). Fixed in 0137: with no current
+context an image or a string draws nothing, as on macOS (CoreGraphics logs an invalid context). The next run ended on
+`-[NSString drawWithRect:options:attributes:]`, which this AppKit lacked: now there, with its 10.11 `context:` form and
+`-boundingRectWithSize:options:attributes:context:`; NSAttributedString's `-drawWithRect:options:` no longer raises.
+The miniwindow shows Terminal's title. Minimise/restore matrix (`runs/sf-term8/minitest.sh`, desk6 .next, restore by a
+click on the miniwindow, the compositor's shell surface that appears): candidate c11/c12 and installed: Terminal alone
+10/10 (Command-M and Window > Minimize alternating), with tabs 4/4, split 4/4, Preferences open 4/4; Activity Monitor
+6/6, its inspector 4/4. Before (installed 96afb830): 1 of 1 ended (SIGSEGV), as DESK6 saw. Found on the way: with a
+sheet open, Command-M miniaturises the sheet's own toplevel and leaves its window (macOS takes the window with it); not
+fixed. The frame has no minimise button (Close and Maximize): its title-bar menu and the dock were not tried.
+
+### VLC 3.0.24 shows its window (item 1)
+With CODEX's v18 stage copied to `/private/var/db/sft8/vlc`, my AppKit candidate, my Foundation candidate and a
+MediaPlayer test fixture in front: the first-run alert ("Check for album art and metadata?", answered No, Thanks by a
+synthetic click), then the "movie.mov" window with VLC's menu strip, control bar (time advancing, volume) and the
+Fullscreen Controls panel; playback ran (videotoolbox, auhal, vout "caopengllayer") until ended. The picture is black:
+`CGLTexImageIOSurface2D error ... invalid numerical value` for every frame (CGL, CODEX-FX's). What was in the way, in
+order: `+[NSColor currentControlTint]`; NSProxy without `-allowsWeakReference` (NSNotificationCenter keeps observers
+weakly; libobjc forwarded the question into the proxy) - Foundation; `-[NSOutlineView setDropItem:dropChildIndex:]`
+raised "not implemented"; a modal panel's wait had no window-server event source, so the first-run alert never
+answered a click (it woke only when a timer fired: Terminal's alerts had one, VLC has none before -run); the shared
+NSDocumentController kept unretained (a nib's instance, released: SIGSEGV in `_openUntitledFile:`); MediaPlayer
+missing (weak import used behind @available: a NULL constant read); `-[NSArray initWithArray:copyItems:]`; CALayer
+`needsDisplayOnBoundsChange`, `autoresizingMask`, `visibleRect`, `layoutSublayers`. Static scans
+(`runs/sf-term8/selscan.py`, `unimpl.py`: selectors VLC's plugins send that nothing implements, or that AppKit implements
+with NSUnimplementedMethod) found the rest of 0137 at once. Status items: this desktop has no status bar; an item keeps
+what it is given and is shown nowhere (said once). Templates (NSActionTemplate and others) are AppKit's symbol drawings.
+
+### Firefox (CODEX-FX's patches, Command-W, pinch, open)
+- 0205 and 0206 not merged; CODEX-FX withdrew both. 0205: its fingerprint walk at each commit reads the layer context's
+  root without holding it (the tree's own reads are safe: retained copies under the tree lock) and showed no gain.
+  0206: Terminal and Activity Monitor never send the class conversions (`+frameRectForContentRect:styleMask:`; checked in
+  their selector references and method lists), so it would change only Firefox, whose tab strip is right without it.
+- Merged (numbers kept): 0210 + windowserver 0002 (`0210w`; finger scrolling in pixels, opt-in), 0212 (NSMenu
+  appearance), 0214 (pasteboard provider), 0215 (CoreText copy keeps its graphics font), 0217 (font collection index),
+  0219 (layer context releases its renderer, root and CGL resources; adapted: no 0208 here).
+- Pinch: DESK6's compositor sends `zwp_pointer_gesture_pinch_v1` (inject `pinch`, trackpad ring v2). 0139/0139w:
+  libWindowServer binds pointer gestures; AppKit makes NSEventTypeMagnify with `-magnification` and `-phase`. My probe
+  window, inject pinch to 1.2 then 1.5: `-magnifyWithEvent:` four times, 0 / 0.1992 / 0.3008 / 0, began, changed,
+  changed, ended. Synthetic; the physical two-finger pinch depends on the trackpad driver's ring.
+- Command-W for a Mac application outside the application directories is the compositor's (its catalogue decides):
+  `runs/m1-coord/requests-for-DESK6.md`.
+- `/usr/bin/open` opens http(s) URLs with LaunchServices' handler (CODEX-FX's system-patches/0001, merged; CoreServices
+  loaded only when a URL is opened).
+
+### Installed (20:2xZ, direct, the files of before kept as `<path>.pre-t8`)
+AppKit 0c3fa810 (0137, 0139, FX 0210/0212/0214; before 96afb830), Onyx2D 2db9aa17 (0217; cd851066), CoreText 4413922a
+(0215; 348df207), `QuartzCore.pd` 738ae322 (0138, FX 0219; 935c21d6), libWindowServer 691d0ec6 (0139w, FX 0210w;
+6ee1bfd2), `/usr/bin/open` dc5a66bc (84e2f58d): the nix builds of the committed series, hashed on the M1 before anything
+ran them. Gates before, on the same files from a prefix (c12): visual check identical for Terminal's window, tab, menu
+and Preferences, Activity Monitor's views the same but for the figures; Activity Monitor 3 minutes with the layout cache
+forced small (text right at 1 and 3 minutes); random input Activity Monitor 252 / Terminal 216 actions
+(MallocScribble, cache forced small, sf-catch): alive, no report; Terminal's figures installed/c12 alternating:
+launch 303-416 / 313-424 ms, echo 2-7 / 2-21 ms (21 once, the first key), `seq 1 300000` 0.99, 1.09 / 1.11, 1.02 s,
+wheel 14-29 / 5-17 ms; minimise matrix and pinch as above. `sf_compat_push.sh check` 18/18 before and after. After the install: minimise matrix Terminal 10/10,
+tabs 4/4, split 4/4, Preferences 4/4, Activity Monitor 6/6, inspector 3/4 (one Window-menu click of the test missed the
+menu; nothing crashed); Activity Monitor's random-input pass alive, no report. Discarded: the owner was using the M1 at
+20:15-20:25Z, when my Terminal random-input pass on the candidate, Terminal's figures and the visual check of the
+installed files ran (he fought the injected pointer): those three are to be repeated with DESK7's virtual seat.
+Revert: `ln -f <path>.pre-t8 <path>.back && mv -f <path>.back <path>` for the six paths.
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default

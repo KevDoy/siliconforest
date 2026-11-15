@@ -117,3 +117,27 @@ mk am-0207 am 0135-coregraphics-display-fade-opengl-acceleration.patch src/Frame
 # 0136 (TERM7): am-0135 -> am
 mk am-0135 am 0136-appkit-wrapped-label-keeps-its-last-line.patch $A/NSTextFieldCell.m
 ( diff -rq am-0135 am ) | sed 's/^/differs from am-0135: /'
+# 0137 (TERM8) and CODEX-FX's 0210, 0210w, 0212, 0214, 0215, 0217, 0219 merged (0219 adapted: the main series has no
+# 0208, whose GPU frame export it also released; 0210w is CODEX-FX's windowserver-patches/0002 at this tree's paths).
+#   am-0136/  = am-0135/ + 0136 (frozen; Onyx2D/O2Font_freetype.h added from the pin)
+#   am-0210/  = am-0136/ + CODEX-FX's patches above (frozen; TERM8)
+#   am/       = am-0210/ + 0137 on (the current tree; TERM8)
+O=src/Frameworks/Onyx2D
+mk am-0136 am-0210 0210-precise-scroll-deltas-and-gesture-phase.patch $A/NSEvent.subproj/NSEvent_mouse.h $A/NSEvent.subproj/NSEvent_mouse.m $A/NSApplication.m $A/NSView.m
+mk am-0136 am-0210 0210w-windowserver-finger-pixels-and-scroll-phase.patch src/Frameworks/WindowServer/rpc_wayland.c
+mk am-0136 am-0210 0212-menu-appearance-and-popup-inheritance.patch $A/NSAppearance.m $A/NSMenu.subproj/NSMenu.h $A/NSMenu.subproj/NSMenuView.m
+mk am-0136 am-0210 0214-pasteboard-item-provider-receives-destination-board.patch $A/NSPasteboardItem.m
+mk am-0136 am-0210 0215-coretext-copy-keeps-graphics-font-for-rendering-attributes.patch src/Frameworks/CoreText/CTFont.m
+mk am-0136 am-0210 0217-graphics-font-keeps-fontconfig-collection-face-index.patch $O/O2Font_freetype.h $O/O2Font_freetype.m $O/O2Font_ttf.m
+mk am-0136 am-0210 0219-layer-context-releases-owned-renderer-and-cgl-resources.patch $Q/CALayerContext.m
+( diff -rq am-0136 am-0210 ) | sed 's/^/differs from am-0136: /'
+mk am-0210 am-0137 0137-appkit-vlc-interface-modal-events-minimise-crash.patch $A/NSColor.subproj/NSColor.h $A/NSColor.subproj/NSColor.m \
+  $A/NSCell.h $A/NSImage.m $A/NSStatusItem.m $A/NSSegmentedControl/NSSegmentedCell.m $A/NSVLCAdditions.m $A/NSOutlineView.m \
+  $A/NSSliderCell.m $A/NSClipView.m $A/NSBox.m $A/NSButtonCell.m $A/NSAnimation/NSAnimation.m $A/NSBrowserCell.m $A/NSApplication.m \
+  $A/NSDocumentController.m $A/NSStringDrawing.h $A/NSStringDrawing.m
+mk am-0210 am-0137 0138-quartzcore-layer-autoresizing-visible-rect-display-on-resize.patch $Q/CALayer.h $Q/CALayer.m
+( diff -rq am-0210 am-0137 ) | sed 's/^/differs from am-0210: /'
+# 0139 (TERM8): am-0137 -> am (am-0137 = am-0210 + 0137, 0138; frozen)
+mk am-0137 am-0139 0139-appkit-pinch-magnify.patch $A/NSApplication.m $A/NSEvent.subproj/NSEvent_mouse.h $A/NSEvent.subproj/NSEvent_mouse.m
+mk am-0137 am-0139 0139w-windowserver-pinch-gestures.patch src/Frameworks/WindowServer/rpc_wayland.c
+( diff -rq am-0137 am-0139 ) | sed 's/^/differs from am-0137: /'
