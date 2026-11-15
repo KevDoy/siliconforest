@@ -131,3 +131,11 @@ and root/subordinate access shape from the existing GPL-2.0
 m1-apcie-host/PDApcieT8103Host and Linux pcie-apple.c. The original
 Alyssa Rosenzweig/Google/Corellium/Mark Kettenis notices are retained.
 These are source/host helpers for a future native tunnel bridge.
+
+The unwired kernel/PDCIOPCIHost.cpp and pd_cio_pcie_host.h retain the
+same pcie-apple/PDApcieT8103Host copyright notices and GPL-2.0 selection.
+native/pd_tb_lane_observation.h uses the pinned tb_regs.h two-DWORD PHY
+state/LD and ADP_CS_4 LCK layouts, GPL-2.0:
+  Copyright (c) 2014 Andreas Noever <andreas.noever@gmail.com>
+  Copyright (C) 2018, Intel Corporation
+Its host test exercises the same inline observer linked by the native bridge.

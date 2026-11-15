@@ -226,11 +226,13 @@ int pd_cio_cm_snapshot(PDCIOCM *s)
  if(!ports)return ENOMEM;
  bool ok=true;
  for(unsigned i=0;i<status.port_count && ok;++i){
-  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(6);
+  const auto &p=status.ports[i];auto item=OSDictionary::withCapacity(10);
   if(!item){ok=false;break;}
-  const char *keys[]={"port","state","error","remote","remote-vendor","remote-device"};
-  const uint32_t values[]={p.port,p.state,p.error,p.remote,p.remote_vendor,p.remote_device};
-  for(unsigned n=0;n<6 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
+  const char *keys[]={"port","state","error","remote","remote-vendor","remote-device",
+   "phy-capability","flags-valid","lane-disabled","adapter-locked"};
+  const uint32_t values[]={p.port,p.state,p.error,p.remote,p.remote_vendor,p.remote_device,
+   p.cap_phy,p.flags_valid,p.lane_disabled,p.adapter_locked};
+  for(unsigned n=0;n<10 && ok;++n){auto v=OSNumber::withNumber((uint64_t)values[n],32);ok=v && item->setObject(keys[n],v);OSSafeReleaseNULL(v);}
   if(ok)ok=ports->setObject(item);item->release();
  }
  if(ok)ok=s->owner->setProperty("physical-port-state",ports);

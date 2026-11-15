@@ -11,6 +11,7 @@
 #include "driver/tb.h"
 #include "driver/nhi.h"
 #include "driver/nhi_regs.h"
+#include "pd_tb_lane_observation.h"
 #define IRQ_STATUS 0xd0000
 #define IRQ_ENABLE 0xd0010
 #define IRQ_THROTTLE 0xd004c
@@ -155,6 +156,8 @@ int pd_tb_nhi_start(void *ctx,uint32_t cable)
  ret=tb_sw_write(root,&cable,TB_CFG_SWITCH,cap+1,1);
  done:mutex_unlock(&s->domain->lock);return ret;
 }
+static int lane_read(void *ctx,uint32_t offset,uint32_t *values,unsigned count)
+{ return tb_port_read(ctx,values,TB_CFG_PORT,offset,count); }
 int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
 {
  struct pd_tb_nhi *s=ctx;
@@ -173,8 +176,14 @@ int pd_tb_nhi_snapshot(void *ctx,struct pd_tb_nhi_status *out)
  tb_switch_for_each_port(root,port)if(tb_port_is_null(port)){
   if(out->port_count==ARRAY_SIZE(out->ports)){ret=-EOVERFLOW;break;}
   struct pd_tb_nhi_port_status *p=&out->ports[out->port_count++];p->port=port->port;
-  int state=tb_port_state(port); // actual two-DWORD PHY capability read over NHI
-  if(state<0){p->error=-state;if(!ret)ret=state;}else p->state=state;
+  struct pd_tb_lane_observation lane;
+  p->cap_phy=port->cap_phy;
+  int error=pd_tb_lane_observe(port,lane_read,port->cap_phy,&lane);
+  if(error){p->error=-error;if(!ret)ret=error;}
+  else{
+   p->state=lane.state;p->lane_disabled=lane.disabled;
+   p->adapter_locked=lane.locked;p->flags_valid=1;
+  }
   if(port->remote){
    p->remote=1;p->remote_vendor=port->remote->sw->vendor;p->remote_device=port->remote->sw->device;
   }

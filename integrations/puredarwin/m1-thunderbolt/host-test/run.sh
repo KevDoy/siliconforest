@@ -45,3 +45,5 @@ ${CC:-cc} -std=gnu11 -O1 -g -pthread -fsanitize=address,undefined -I "$here/nati
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" -c "$here/src/pd_pciec_config.c" -o "$tmp/pciec-config.o"
 ${CXX:-c++} -std=c++14 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/include" "$here/host-test/pciec-config.cpp" "$tmp/pciec-config.o" -o "$tmp/pciec-config"
 "$tmp/pciec-config"
+${CC:-cc} -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -I "$here/native" "$here/host-test/lane-observation.c" -o "$tmp/lane-observation"
+"$tmp/lane-observation"

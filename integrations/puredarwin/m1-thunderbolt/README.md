@@ -279,3 +279,22 @@ BDF ranges, exact aperture edges, unaligned/overflow/refused views and command
 widths. These helpers are **not linked into an installed host bridge** and
 supply no physical power, synchronization, IRQ or DMA-drain proof. No native
 PCI enumeration or endpoint-DMA protection is claimed from their tests.
+
+
+`PDCIOPCIHost` now SDK-builds as an unwired IOPCIBridge subclass for
+apciec1. It checks T8103 DT resources, an actual owner power callback and
+physical RUN/link before configuration accesses; it serializes/revokes
+configuration and uses the tested ECAM bounds and command BME filter.
+All bus-master enables remain refused. It supplies neither endpoint DART,
+MSI nor child-DMA drain. The future caller must retain real ownership and
+omit endpoint personalities before enumeration; a registry marker alone
+cannot establish those facts. It has no matching personality or automatic
+start path. No PCI enumeration has been observed on Darwin.
+
+The bounded NHI diagnostic also reads the actual lane capability's LD bit
+and ADP_CS_4 LCK bit, alongside its state, under the existing domain lock.
+An incomplete read leaves flags invalid and returns the error. Startup and
+explicit administrator requests remain the only callers; no timer rearm,
+write or authorization is added. The actual inline observer has sanitizer
+host coverage for input rejection, both I/O failures and all64 state/LD/LCK
+combinations; that is source evidence until the candidate boots.

@@ -27,6 +27,7 @@ int pd_tb_nhi_start(void *,uint32_t cable_info);
  * Public model IDs only; no UID, DROM bytes or DMA/physical addresses. */
 struct pd_tb_nhi_port_status {
  uint32_t port,state,error,remote,remote_vendor,remote_device;
+ uint32_t cap_phy,flags_valid,lane_disabled,adapter_locked;
 };
 struct pd_tb_nhi_status {
  uint32_t root_vendor,root_device,max_port,port_count,cable_info;
