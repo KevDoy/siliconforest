@@ -20,6 +20,8 @@ struct pd_atc_dp {
  * This is a register backend, not an attached DCP endpoint or HPD provider. */
 int pd_atc_dp_aux_start(struct pd_atc_dp *dp);
 int pd_atc_dp_aux_stop(struct pd_atc_dp *dp);
+/* Zero acknowledges the upstream no-op notification: no writes, no cached
+ * rate change and no clock/power-off proof. AUX/mode teardown stays separate. */
 int pd_atc_dp_set_rate(struct pd_atc_dp *dp, unsigned mbps);
 /* DP-over-Thunderbolt uses a separate T8103 pixel-clock sequence. The
  * caller holds the same PHY lock, owns a TBT/USB4 session and drains DCP

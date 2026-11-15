@@ -10,7 +10,7 @@
  * see the bundled NOTICE for its permission/warranty notice.
  *
  * Port 0 is never accessed. Direct USB2/USB3 hosts use runtime calibration;
- * DP/TBT/USB4 ownership is deferred. No PD commands.
+ * DP/TBT/USB4 clients acquire a shared PHY lease. No PD commands.
  */
 #include "pd_usb_dart.h"
 #include "pd_cd321x.h"
@@ -19,6 +19,10 @@
 #include "pd_atc_tunables.h"
 #include "pd_atc_calibration.h"
 #include "pd_atc_pipe.h"
+#include "pd_atc_dp.h"
+#include "pd_usbc_phy_lease.h"
+#include <IOKit/IOCommandGate.h>
+#include <kern/thread_call.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/IOWorkLoop.h>
@@ -27,6 +31,8 @@
 #include <pexpert/pexpert.h>
 
 #define LOG(fmt, ...) IOLog("PDAppleUSB: " fmt "\n", ##__VA_ARGS__)
+int pd_usbc_pmgr_node_off(const char *,uint32_t *);
+
 static const char *const atcPath="/arm-io/atc-phy1";
 static const char *const usbPath="/arm-io/usb-drd1";
 
@@ -65,6 +71,14 @@ class PDAppleUSB : public IOService {
     PDAppleUSBHostNub *nub;
     IOWorkLoop *loop;
     IOTimerEventSource *timer;
+    IOCommandGate *gate;
+    thread_call_t revokeCall;
+    pd_usbc_phy_lease lease;
+    pd_atc_dp directDP;
+    pd_atc_tunnel tunnel;
+    IOService *altClient;
+    uint64_t noticeToken;
+    bool altTouched, auxTouched, stopping;
     bool mapped, active, reversed, superSpeed, quarantined;
     uint32_t session, lastSample;
     uint32_t acceptingSnapshots,snapshotChecks;
@@ -96,9 +110,20 @@ class PDAppleUSB : public IOService {
     bool map();
     static const void *getLane(void *,const char *,const char *,size_t *);
     int stopPHY();
+    int priorACIOOff();
     int begin(bool flip,bool ss);
     bool end();
     void sample();
+    bool readCable(pd_cd321x_snapshot &);
+    int observeCable(const pd_cd321x_snapshot &);
+    int beginAlt(pd_usbc_phy_mode,bool);
+    int stopAlt();
+    int phyRequest(pd_usbc_phy_request *);
+    void queueRevoke();
+    static IOReturn phyAction(OSObject *,void *,void *,void *,void *);
+    static IOReturn stopAction(OSObject *,void *,void *,void *,void *);
+    static IOReturn noticeAction(OSObject *,void *,void *,void *,void *);
+    static void notifyRevoke(thread_call_param_t,thread_call_param_t);
     static void tick(OSObject *owner,IOTimerEventSource *);
 public:
     IOService *probe(IOService *,SInt32 *) override;
@@ -106,6 +131,7 @@ public:
     void stop(IOService *) override;
     void free() override;
     IOReturn message(UInt32,IOService *,void *) override;
+    IOReturn callPlatformFunction(const OSSymbol *,bool,void *,void *,void *,void *) override;
 };
 OSDefineMetaClassAndStructors(PDAppleUSB, IOService)
 
@@ -211,6 +237,20 @@ const void *PDAppleUSB::getLane(void *ctx,const char *path,const char *name,size
     }
     *bytes=data->getLength();return data->getBytesNoCopy();
 }
+int PDAppleUSB::priorACIOOff()
+{
+    // A stopped DWC3 is not proof of stopped ACIO. Check before even
+    // enabling PHY clocks: an inherited controller must not wake on them.
+    uint32_t acioState=0,cpuState=0;
+    int ret=pd_usbc_pmgr_node_off("/arm-io/acio1",&acioState);
+    int cpuRet=pd_usbc_pmgr_node_off("/arm-io/acio-cpu1",&cpuState);
+    setProperty("prior-acio-power-state",acioState,32);
+    setProperty("prior-acio-cpu-power-state",cpuState,32);
+    setProperty("prior-acio-off-error",(uint32_t)ret,32);
+    setProperty("prior-acio-cpu-off-error",(uint32_t)cpuRet,32);
+    return ret?ret:cpuRet;
+}
+
 int PDAppleUSB::stopPHY()
 {
     // Callers have either validated the initial stopped host or completed
@@ -232,7 +272,9 @@ int PDAppleUSB::begin(bool flip,bool ss)
         if (!preflight) preflight=cal.validate(cal.ctx,&program);
         if (preflight) return preflight;
     }
-    int ret=pd_pmgr_enable_node(atcPath,-1,0,true);
+    int ret=priorACIOOff();
+    if (ret) return ret;
+    ret=pd_pmgr_enable_node(atcPath,-1,0,true);
     if (!ret) ret=pd_pmgr_enable_node(usbPath,-1,0,true);
     if (ret) return ret;
     // Never take a controller from another owner. Before changing DART or
@@ -323,18 +365,49 @@ bool PDAppleUSB::end()
     return true;
 }
 
+bool PDAppleUSB::readCable(pd_cd321x_snapshot &state)
+{
+    if (!getProvider() || getProvider()->isInactive()) return false;
+    OSObject *object=getProvider()->copyProperty("port-state");
+    OSData *data=OSDynamicCast(OSData,object);
+    bool valid=data && data->getLength()==sizeof(state);
+    if (valid) bcopy(data->getBytesNoCopy(),&state,sizeof(state));
+    OSSafeReleaseNULL(object);
+    return valid && !state.error && state.sample;
+}
+int PDAppleUSB::observeCable(const pd_cd321x_snapshot &state)
+{
+    uint32_t smask=PD_TPS_STATUS_PLUG_PRESENT|PD_TPS_STATUS_UPSIDE_DOWN|PD_TPS_STATUS_DATAROLE;
+    uint32_t dmask=PD_TPS_DATA_USB2|PD_TPS_DATA_USB3|PD_TPS_DATA_USB_DEVICE|PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4;
+    uint64_t key=((uint64_t)(state.status&smask)<<32)|(state.data_status&dmask);
+    uint32_t eligible=0,d=state.data_status;
+    if (state.status&PD_TPS_STATUS_PLUG_PRESENT) {
+        if (d&PD_CD321X_DATA_USB4) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_USB4);
+        else if (d&PD_TPS_DATA_TBT) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_TBT);
+        // A composite USB3+DP cable needs a joint USB/DP session. Do not
+        // silently steal its USB lanes for a four-lane DP-only claim.
+        else if ((d&PD_TPS_DATA_DP) && !(d&PD_TPS_DATA_USB3)) eligible=PD_USBC_PHY_MODE_BIT(PD_USBC_PHY_DP);
+    }
+    int ret=pd_usbc_phy_observe(&lease,key,eligible,!!(state.status&PD_TPS_STATUS_UPSIDE_DOWN));
+    setProperty("phy-cable-epoch",lease.epoch,64);
+    setProperty("phy-eligible-modes",lease.eligible,32);
+    if (ret) quarantined=true;
+    if (lease.phase==PD_USBC_PHY_REVOKED) queueRevoke();
+    return ret;
+}
 void PDAppleUSB::sample()
 {
     if (!__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE)) return;
     setProperty("snapshot-check-count",++snapshotChecks,32);
-    OSObject *object=getProvider()->copyProperty("port-state");
-    OSData *data=OSDynamicCast(OSData,object);
     pd_cd321x_snapshot state={};
-    bool valid=data && data->getLength()==sizeof(state);
-    if (valid) bcopy(data->getBytesNoCopy(),&state,sizeof(state));
-    OSSafeReleaseNULL(object);
-    if (!valid || state.error || state.sample==lastSample) return;
+    if (stopping || !readCable(state) || state.sample==lastSample) return;
     lastSample=state.sample;
+    if (observeCable(state)) return;
+    if (lease.owner) {
+        setProperty("alternate-mode-deferred",true);
+        setProperty("phy-lease-revoked",lease.phase==PD_USBC_PHY_REVOKED);
+        return; // Never drain/reset another client's PHY from this sampler.
+    }
     bool host=pd_cd321x_usb_role(state.status,state.data_status)==PD_CD321X_USB_HOST;
     bool alt=state.data_status&(PD_TPS_DATA_DP|PD_TPS_DATA_TBT|PD_CD321X_DATA_USB4);
     bool flip=state.status&PD_TPS_STATUS_UPSIDE_DOWN;
@@ -364,7 +437,7 @@ void PDAppleUSB::tick(OSObject *owner,IOTimerEventSource *source)
     PDAppleUSB *self=OSDynamicCast(PDAppleUSB,owner);
     if (!self) return;
     (void)source;
-    self->sample(); // One-shot; the Type-C producer schedules the next observation.
+    self->sample(); // One-shot; Type-C producer schedules the next observation.
 }
 IOService *PDAppleUSB::probe(IOService *provider,SInt32 *score)
 {
@@ -384,20 +457,36 @@ bool PDAppleUSB::start(IOService *provider)
     setProperty("host-active",false);
     setProperty("super-speed-capable",true);
     loop=IOWorkLoop::workLoop(); timer=IOTimerEventSource::timerEventSource(this,tick);
-    if (!loop || !timer || loop->addEventSource(timer)!=kIOReturnSuccess) return false;
+    gate=IOCommandGate::commandGate(this);
+    revokeCall=thread_call_allocate(notifyRevoke,this);
+    if (!loop || !timer || !gate || !revokeCall || loop->addEventSource(gate)!=kIOReturnSuccess ||
+        loop->addEventSource(timer)!=kIOReturnSuccess) return false;
+    setProperty("shared-phy-provider",true);
+    setProperty("phy-lease-active",false);
     setProperty("snapshot-event-driven",true);
     snapshotChecks=0;
     setProperty("snapshot-check-count",(uint32_t)0,32);
     __atomic_store_n(&acceptingSnapshots,1,__ATOMIC_RELEASE);
     timer->setTimeoutMS(1); registerService();
-    LOG("port 1 host lifecycle enabled; port 0 reserved, DP/TBT/USB4 deferred");
+    LOG("port 1 USB/shared PHY provider enabled; port 0 reserved");
     return true;
+}
+IOReturn PDAppleUSB::stopAction(OSObject *owner,void *,void *,void *,void *)
+{
+    auto self=OSDynamicCast(PDAppleUSB,owner);
+    if (!self) return kIOReturnBadArgument;
+    self->stopping=true;
+    if (self->lease.owner) {
+        self->lease.phase=PD_USBC_PHY_REVOKED;self->queueRevoke();
+        self->retain();self->quarantined=true; // Keep provider/MMIO through asynchronous client drain.
+    } else if (!self->end()) {
+        self->retain();self->quarantined=true;LOG("stop retains failed-drain session");
+    }
+    return kIOReturnSuccess;
 }
 IOReturn PDAppleUSB::message(UInt32 type,IOService *provider,void *argument)
 {
     if (type==kIOMessageServicePropertyChange && provider==getProvider()) {
-        // Do not perform drain/MMIO on the producer's workloop or under its
-        // client-iteration locks. Coalesce notifications into our one-shot.
         if (__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE) && timer)
             timer->setTimeoutMS(1);
         return kIOReturnSuccess;
@@ -408,15 +497,193 @@ void PDAppleUSB::stop(IOService *provider)
 {
     __atomic_store_n(&acceptingSnapshots,0,__ATOMIC_RELEASE);
     if (timer) { timer->cancelTimeout(); timer->disable(); if(loop)loop->removeEventSource(timer); }
-    if (!end()) { retain(); quarantined=true; LOG("stop retains failed-drain session"); }
+    if (gate) gate->runAction(stopAction);
+    else stopAction(this,NULL,NULL,NULL,NULL);
     IOService::stop(provider);
 }
 void PDAppleUSB::free()
 {
-    if (active || quarantined) { LOG("quarantined session resources retained"); return; }
-    OSSafeReleaseNULL(timer); OSSafeReleaseNULL(loop);
+    if (active || quarantined || lease.owner) { LOG("quarantined session resources retained"); return; }
+    if (revokeCall) { thread_call_cancel_wait(revokeCall);thread_call_free(revokeCall);revokeCall=NULL; }
+    if (loop && gate) loop->removeEventSource(gate);
+    OSSafeReleaseNULL(timer);OSSafeReleaseNULL(gate);OSSafeReleaseNULL(loop);
     for(unsigned i=0;i<10;++i) OSSafeReleaseNULL(common[i]);
     OSSafeReleaseNULL(laneData);
     core.unmap();usb2.unmap();pipe.unmap();lpdptx.unmap();axi.unmap();dwc.unmap();fuses.unmap();
     IOService::free();
+}
+
+int PDAppleUSB::beginAlt(pd_usbc_phy_mode mode,bool flip)
+{
+    altTouched=false;auxTouched=false;
+    if (quarantined || !map()) return ENODEV;
+    pd_atc_mode target=mode==PD_USBC_PHY_DP?PD_ATC_MODE_DP:
+        mode==PD_USBC_PHY_TBT?PD_ATC_MODE_TBT:PD_ATC_MODE_USB4;
+    OSSafeReleaseNULL(laneData);laneData=OSDictionary::withCapacity(8);
+    pd_atc_cal_bundle bundle={};bundle.io=&atcIO;bundle.adt_ctx=this;bundle.getprop=getLane;
+    auto cal=pd_atc_calibration_callbacks(&bundle);
+    pd_atc_program program;
+    int ret=pd_atc_mode_plan(target,flip,&program);
+    if (!ret) ret=cal.validate(cal.ctx,&program);
+    if (ret) return ret; // All retained calibration is checked before power/writes.
+    ret=priorACIOOff();
+    if (ret) return ret;
+    ret=pd_pmgr_enable_node(atcPath,-1,0,true);
+    if (!ret) ret=pd_pmgr_enable_node(usbPath,-1,0,true);
+    if (ret) return ret;
+    if (pipe.r32(0x1c)&1) {
+        uint32_t cap=dwc.r32(0);unsigned op=cap&0xff;
+        if ((dwc.r32(0xc704)&(1u<<31)) || cap==UINT32_MAX || op<0x20 || op>0x100 ||
+            (dwc.r32(op)&1) || !(dwc.r32(op+4)&1)) return EBUSY;
+    }
+    if (!pipeState.dummy_pending) {
+        switch(pipe.r32(0xc)&0x3f) {
+        case 8:pipeState.backend=PD_ATC_USB3_BACKEND;break;
+        case 0x11:pipeState.backend=PD_ATC_USB4_BACKEND;break;
+        case 0x22:pipeState.backend=PD_ATC_DUMMY;break;
+        default:return EBUSY;
+        }
+    }
+    // Both prior backend checks have passed. No ACIO client has yet
+    // received this lease, so initial failure cleanup has no NHI producers.
+    altTouched=true;
+    directDP={};directDP.io=&atcIO;directDP.lane_mask=program.dp_lanes;directDP.rate=-1;
+    tunnel={};tunnel.io=&atcIO;
+    ret=stopPHY();
+    if (!ret) ret=pd_atc_mode_start(&atcIO,target,flip,&cal);
+    if (!ret && target==PD_ATC_MODE_USB4) ret=pd_atc_pipe_route(&atcIO,&pipeState,PD_ATC_USB4_BACKEND);
+    if (!ret && target==PD_ATC_MODE_DP) {
+        auxTouched=true; // Also unwind a partially failed AUX enable.
+        ret=pd_atc_dp_aux_start(&directDP);
+    }
+    if (!ret) tunnel.configured=target==PD_ATC_MODE_TBT || target==PD_ATC_MODE_USB4;
+    // DWC3 stays reset and unpublished in all three exclusive alt modes.
+    return ret;
+}
+int PDAppleUSB::stopAlt()
+{
+    if (!altTouched) return 0;
+    int ret=0;
+    if (tunnel.clock_on) ret=pd_atc_tunnel_set_rate(&tunnel,0);
+    if (!ret && auxTouched) {
+        ret=pd_atc_dp_aux_stop(&directDP);
+        if (!ret) auxTouched=false;
+    }
+    if (!ret) ret=stopPHY();
+    if (ret) return ret<0?-ret:ret;
+    altTouched=false;directDP={};tunnel={};return 0;
+}
+void PDAppleUSB::queueRevoke()
+{
+    if (!lease.owner || lease.phase!=PD_USBC_PHY_REVOKED || noticeToken==lease.token) return;
+    noticeToken=lease.token;
+    setProperty("phy-lease-revoked",true);
+    if (revokeCall) thread_call_enter(revokeCall);
+}
+struct PDUSBCRevokeNotice { IOService *client;uint64_t token; };
+IOReturn PDAppleUSB::noticeAction(OSObject *owner,void *arg,void *,void *,void *)
+{
+    auto self=OSDynamicCast(PDAppleUSB,owner);auto note=(PDUSBCRevokeNotice *)arg;
+    if (!self || !note) return kIOReturnBadArgument;
+    if (self->lease.owner && self->lease.phase==PD_USBC_PHY_REVOKED && self->altClient) {
+        note->client=self->altClient;note->client->retain();note->token=self->lease.token;
+    }
+    return kIOReturnSuccess;
+}
+void PDAppleUSB::notifyRevoke(thread_call_param_t owner,thread_call_param_t)
+{
+    auto self=(PDAppleUSB *)owner;PDUSBCRevokeNotice note={};
+    if (self->gate) self->gate->runAction(noticeAction,&note);
+    if (note.client) {
+        // Outside the physical gate: the client schedules its actual teardown.
+        // The notification is never a drain ACK; stale tokens must be ignored.
+        note.client->callPlatformFunction(PD_USBC_PHY_REVOKE_FUNCTION,false,&note.token,NULL,NULL,NULL);
+        note.client->release();
+    }
+}
+int PDAppleUSB::phyRequest(pd_usbc_phy_request *req)
+{
+    pd_cd321x_snapshot state={};bool fresh=readCable(state);
+    int ret=fresh?observeCable(state):ENODEV;
+    if (req->command==PD_USBC_PHY_RELEASE ||
+        ((req->command==PD_USBC_PHY_DP_RATE || req->command==PD_USBC_PHY_TUNNEL_RATE) && !req->rate)) ret=0;
+    if (ret) goto out;
+    if (stopping && req->command!=PD_USBC_PHY_RELEASE && req->command!=PD_USBC_PHY_QUERY && req->rate) { ret=ENODEV;goto out; }
+    switch(req->command) {
+    case PD_USBC_PHY_QUERY:break;
+    case PD_USBC_PHY_ACQUIRE: {
+        if (stopping || !__atomic_load_n(&acceptingSnapshots,__ATOMIC_ACQUIRE) || quarantined) { ret=EIO;break; }
+        auto client=OSDynamicCast(IOService,(OSObject *)req->owner);
+        if (!client || client==this) { ret=EINVAL;break; }
+        uint64_t token=0;uint64_t epoch=req->epoch;
+        ret=pd_usbc_phy_claim(&lease,client,epoch,(pd_usbc_phy_mode)req->mode,&token);
+        if (ret) break;
+        altClient=client;altClient->retain();noticeToken=0;
+        // A changed cable never authorizes skipping an actual USB drain.
+        if (active && !end()) ret=EBUSY;
+        if (!ret && (quarantined || (domain && (!domain->healthy() || domain->faults())))) ret=EIO;
+        if (!ret) ret=beginAlt(lease.mode,lease.reversed);
+        // The HPM observer runs on another loop; recheck after calibration.
+        if (!ret) ret=readCable(state)?observeCable(state):ENODEV;
+        if (!ret) ret=pd_usbc_phy_commit(&lease,client,token,epoch);
+        if (ret) {
+            int cleanup=stopAlt();if (cleanup) quarantined=true;
+            pd_usbc_phy_release(&lease,client,token,cleanup,cleanup!=0);
+            if (!lease.owner) OSSafeReleaseNULL(altClient);
+        }
+        break;
+    }
+    case PD_USBC_PHY_RELEASE: {
+        if (!pd_usbc_phy_identity(&lease,req->owner,req->token) || !altClient) { ret=ESTALE;break; }
+        // This is a NONBLOCKING factual check after the caller has joined all
+        // DMA/IRQ/controller/display users. Do not join a client under this gate.
+        IOReturn drained=altClient->callPlatformFunction(PD_USBC_PHY_DRAIN_FUNCTION,false,&req->token,NULL,NULL,NULL);
+        if (drained!=kIOReturnSuccess) {
+            ret=pd_usbc_phy_release(&lease,req->owner,req->token,EBUSY,false);queueRevoke();break;
+        }
+        ret=stopAlt();if (ret) quarantined=true;
+        ret=pd_usbc_phy_release(&lease,req->owner,req->token,ret,ret!=0);
+        if (!ret) OSSafeReleaseNULL(altClient);
+        break;
+    }
+    case PD_USBC_PHY_DP_RATE:case PD_USBC_PHY_TUNNEL_RATE: {
+        if (!pd_usbc_phy_identity(&lease,req->owner,req->token)) { ret=ESTALE;break; }
+        if (req->rate && (ret=pd_usbc_phy_live(&lease,req->owner,req->token))) break;
+        if (req->command==PD_USBC_PHY_DP_RATE && lease.mode==PD_USBC_PHY_DP)
+            ret=pd_atc_dp_set_rate(&directDP,req->rate);
+        else if (req->command==PD_USBC_PHY_TUNNEL_RATE && (lease.mode==PD_USBC_PHY_TBT || lease.mode==PD_USBC_PHY_USB4) && req->rate<=UINT8_MAX)
+            ret=pd_atc_tunnel_set_rate(&tunnel,(uint8_t)req->rate);
+        else ret=EINVAL;
+        if (ret<0) ret=-ret;
+        if (ret && ret!=EINVAL) { lease.quarantined=true;quarantined=true;lease.phase=PD_USBC_PHY_REVOKED;queueRevoke(); }
+        break;
+    }
+    default:ret=EINVAL;
+    }
+out:
+    req->epoch=lease.epoch;req->eligible=lease.eligible;req->reversed=lease.reversed;
+    req->phase=lease.phase;req->quarantined=quarantined||lease.quarantined;
+    req->token=lease.owner==req->owner?lease.token:0;req->error=ret;
+    setProperty("phy-lease-active",lease.owner!=NULL);
+    setProperty("phy-lease-revoked",lease.phase==PD_USBC_PHY_REVOKED);
+    setProperty("phy-mode",(uint32_t)lease.mode,32);
+    setProperty("phy-quarantined",req->quarantined);
+    return ret;
+}
+IOReturn PDAppleUSB::phyAction(OSObject *owner,void *arg,void *,void *,void *)
+{
+    auto self=OSDynamicCast(PDAppleUSB,owner);
+    if (!self || !arg) return kIOReturnBadArgument;
+    int ret=self->phyRequest((pd_usbc_phy_request *)arg);
+    return ret?kIOReturnNotReady:kIOReturnSuccess;
+}
+IOReturn PDAppleUSB::callPlatformFunction(const OSSymbol *name,bool wait,void *a,void *b,void *c,void *d)
+{
+    if (name && name->isEqualTo(PD_USBC_PHY_FUNCTION)) {
+        auto req=(pd_usbc_phy_request *)a;
+        if (!req || req->version!=PD_USBC_PHY_ABI || req->size!=sizeof(*req) || req->port!=1) return kIOReturnBadArgument;
+        if (!gate) { req->error=ENODEV;return kIOReturnNotReady; }
+        return gate->runAction(phyAction,req);
+    }
+    return IOService::callPlatformFunction(name,wait,a,b,c,d);
 }

@@ -103,6 +103,9 @@ int pd_atc_dp_aux_stop(struct pd_atc_dp *dp)
 }
 int pd_atc_dp_set_rate(struct pd_atc_dp *dp,unsigned mbps)
 {
+    // T8103 phy_configure accepts DCP's zero-rate notification unchanged.
+    // This is not clock shutdown and does not clear our actual rate/ownership.
+    if (!mbps) { struct apple_atcphy phy;return dp_context(dp,&phy); }
     enum atcphy_dp_link_rate lr;
     switch(mbps) {
     case 1620:lr=ATCPHY_DP_LINK_RATE_RBR;break;

@@ -734,3 +734,27 @@ on its own workloop, and stop closes admission before cancelling the timer.
 The Type-C producer retains its slow 1 Hz observation. Both actual SDK kext
 builds pass. This change is uninstalled and is not a claimed cause/fix; fold
 it into the next dock kernel rather than spend a direct-only boot.
+
+
+## Shared native PHY ownership for the dock (source only, 05:50Z)
+
+The resumed broker work is now integrated with event-driven snapshot delivery.
+An IOCommandGate serializes native TBT/USB4/DP claims and one-shot observation;
+revoke callbacks run on a separate thread call outside the PHY gate. A changed
+cable retains the owner's configured PHY until actual client drain and PHY stop
+succeed. Token/epoch overflow closes admission; failed hardware cleanup keeps
+the owner quarantined. No native NHI client is attached yet.
+
+A checked, read-only PMGR extension rejects an unknown, active, clock-gated or
+automatically waking ACIO1/M3 before PHY clocks/mux are changed. DWC3's stopped
+view alone was insufficient to establish that prior ownership. The helper is
+staged privately, without changing sound's pd_soc.cpp. Separate error properties
+accompany aggregate ACIO and CPU gate values; zero raw data on an error is not
+off evidence. A poisoned prior USB DART also prevents alternate-mode admission.
+DP AUX partial-start cleanup and the upstream zero-rate no-op are preserved.
+
+The native host bundle SDK-builds; ASan/UBSan covers 10,000 lease transitions,
+actual PMGR refusal/parser paths and all existing ATC/DWC3/DMA lifetime suites.
+This is not installed and proves no dock operation. Next is the native ACIO
+RTKit/NHI attachment, its SID1 DART/interrupts and real CM/root-router discovery;
+then apciec1 brings the dock's PCI endpoints into IOPCIFamily.

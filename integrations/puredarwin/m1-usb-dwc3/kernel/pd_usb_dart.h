@@ -34,6 +34,7 @@ public:
     int map(uint64_t pa, size_t bytes, uint64_t *dva, size_t alignment = PD_DART_PAGE);
     int unmap(uint64_t dva, size_t bytes);
     uint32_t faults();
+    bool healthy(); // after producer drain: reject a poisoned prior domain
 };
 
 /* Page-owned bounce/ring memory: physical pages are distinct from the DMA

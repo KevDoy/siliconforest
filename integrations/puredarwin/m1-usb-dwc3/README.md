@@ -84,3 +84,41 @@ A change in USB2/USB3 mode drains the old session. Stop parks PIPE only
 after native controller drain and synchronous termination; failed handoff
 completion keeps PHY ownership and blocks a new session. No calibration
 values are shipped. This source SDK-builds but is not installed in USB03.
+
+
+The owner has selected the permanently attached TS3 Plus as the first target.
+Direct-host-only boots are deferred. USB04 is installed, but no direct or dock
+USB device has enumerated in Darwin. The following shared PHY change is source
+and SDK evidence only; no ACIO/NHI client has yet acquired a native lease.
+
+`PDAppleUSB` now provides a kernel-only `PDAppleUSBCPhy` interface for exclusive
+TBT, USB4 and four-lane DP sessions. Cable epoch and non-reused token identify
+the owner; a changed cable revokes admission without resetting another client's
+PHY. A revoke notification runs outside the provider's command gate and only
+asks the client to schedule teardown. Release requires a nonblocking, factual
+client drain check after controller/IRQ/DMA/display users have been joined.
+Failed drains retain the owner; failed PHY shutdown quarantines the provider.
+The command gate serializes timer and client transitions. Tokens alone prove
+no hardware fact. Composite USB3+DP remains unsupported by this exclusive API.
+
+Initial handoff checks the real stopped DWC3 view and the ACIO1/M3 PMGR gates
+before enabling PHY clocks. The read-only private PMGR extension distinguishes
+unknown state from off, checks all ADT gate/address bounds, and rejects active,
+clock-gated and automatic-wakeup domains. It is appended only to this bundle's
+copy of pd_soc.cpp, leaving the sound owner's helper untouched. The two state
+properties aggregate raw gate bits; their separate error properties must both
+be zero to establish off. A preexisting live ACIO must be stopped by its actual
+owner, not bypassed using this API. This off check also protects direct-host
+initialization. A poisoned prior USB DART prevents alternate-mode startup.
+
+TBT/USB4 mode setup uses the already ported runtime ATC calibration. DWC3 remains
+unpublished; only USB4 routes PIPE to the USB4 backend. DP AUX is enabled after
+successful mode setup; partial failure cleanup touches AUX only if this session
+began enabling it. Rate changes use the actual DP/tunnel register backend;
+DCP's zero DP-rate notification remains the upstream no-op, not a clock-off ACK.
+
+Host ASan/UBSan checks add 10,000 revoke/retry/stale-token cycles, failed-drain
+retention and counter-overflow quarantine, plus the actual PMGR extension with
+malformed/unknown/active/auto/mapping-failure fixtures. Existing DMA/lifetime,
+all-mode ATC and DP clock/timeout suites pass. Neither these tests nor the SDK
+build establishes M1 gate state, TBT link, NHI DMA or dock PCI enumeration.

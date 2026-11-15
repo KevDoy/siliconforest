@@ -240,3 +240,12 @@ void PDUSBDMABuffer::free()
     }
     IOBufferMemoryDescriptor::free();
 }
+
+bool PDUSBDart::healthy()
+{
+    if (!lock) return false;
+    IOLockLock(lock);
+    bool ok=ready && !poisoned;
+    IOLockUnlock(lock);
+    return ok;
+}

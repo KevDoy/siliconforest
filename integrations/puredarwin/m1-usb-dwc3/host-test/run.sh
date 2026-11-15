@@ -10,3 +10,9 @@ ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -pthread \
 ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined -I "$here/../kernel" -c "$here/../kernel/pd_dwc3_host.c" -o "$tmp/dwc3.o"
 ${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined -I "$here/../kernel" "$here/dwc3.cpp" "$tmp/dwc3.o" -o "$tmp/dwc3"
 "$tmp/dwc3"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined \
+    -I "$here/../kernel" "$here/phy-lease.cpp" -o "$tmp/phy-lease"
+"$tmp/phy-lease"
+${CXX:-c++} -std=c++14 -O1 -g -fsanitize=address,undefined \
+    -I "$here/../kernel" "$here/pmgr.cpp" -o "$tmp/pmgr"
+"$tmp/pmgr"

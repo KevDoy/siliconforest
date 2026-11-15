@@ -39,6 +39,7 @@ int main() {
         assert(!(m.aux[0x4000/4]&0x14)); // AUX unclamped/powered
         assert(!pd_atc_dp_set_rate(&dp,rate) && dp.rate==(int)rate);
         unsigned writes=m.writes.size();
+        assert(!pd_atc_dp_set_rate(&dp,0) && dp.rate==(int)rate && m.writes.size()==writes);
         assert(!pd_atc_dp_set_rate(&dp,rate) && m.writes.size()==writes); // no retune
         bool lane0=false,lane1=false;
         for(auto event:m.writes) {
@@ -84,7 +85,7 @@ int main() {
         }
     }
     Model m;auto io=m.io();pd_atc_dp dp={&io,3,-1,false,false,false,false};
-    for(unsigned rate:{0,1,1619,1621,8101})assert(pd_atc_dp_set_rate(&dp,rate)==-EINVAL);
+    for(unsigned rate:{1,1619,1621,8101})assert(pd_atc_dp_set_rate(&dp,rate)==-EINVAL);
     assert(m.writes.empty());
     puts("T8103 DP AUX + four rates/all PMA lane masks, repeated-rate, shared-PLL refusal, TB pixel clocks/failed-stop retention and command/lock timeout cases passed");
 }
