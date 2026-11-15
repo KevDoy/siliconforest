@@ -72,3 +72,33 @@ a real512-byte padded class and cyclic UID graph; M1 passed in
 `runs/sffinch/nib-allocator-stage-v1`. This is neither a canonical Foundation
 install nor a claim that all VLC NIB/AppKit behavior works. The exact patch and
 fixture are handed to the core owner for QEMU/guarded integration.
+
+VLC v15 now clears the NIB allocation failure, then reaches status-bar setup
+and aborts in missing AppKit -[NSStatusItem _update]. The exact AppKit request
+is in requests-for-TERM5.md. The next launch explicitly disables VLC's optional
+status icon with --no-macosx-statusicon, a real upstream option in
+[3.0.24 macosx.m](https://github.com/videolan/vlc/blob/3.0.24/modules/gui/macosx/macosx.m).
+No empty status-item update implementation or menu-bar support claim is added.
+
+
+V16-v18 further qualification: --no-statusicon passes the status update call.
+The next missing Foundation operations now use actual existing CF engines:
+calendar-operations.m implements ordinality with CFCalendar, honoring the
+calendar identifier and any available timezone/week settings. Unsupported
+inputs return NSNotFound. locale-operations.m supplies character/line direction
+from CFLocale. Both add methods only if absent. Same-byte Linux-built M5/M1
+probes match exactly:42 UTC day/month/year/era/unsupported-unit vectors and16
+language direction vectors. No calendar/locale ivar layout is assumed.
+
+VLCv18 gets through those methods and extension setup, then the real macOS
+interface reports a caught exception at +[NSColor currentControlTint] and
+exits1. NSActionTemplate also lacks an image. Exact AppKit requests are filed
+with TERM7. There is still no window, compositor capture or GUI playback
+claim. This is not a need for another CGL implementation.
+
+The post-install headless canonical run (vlc-hardware-canonical-v1) uses no
+framework/library prefix: vendor videotoolbox completes60 hardware jobs with
+zero new errors/timeouts/DART faults/stale replies and releases all contexts;
+102400 HAL-read frames and traced exit0. Vendor counters still report121 video
+and189 audio decodes for60 source samples/95 audio packets; retain that accounting
+limitation. No real GUI output was attempted by this dummy-video control.

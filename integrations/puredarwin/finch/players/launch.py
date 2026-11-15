@@ -10,6 +10,7 @@ def main():
     ap.add_argument('--framework-prefix',action='store_true',help='Use only reviewed Frameworks/lib inside this stage')
     ap.add_argument('--hardware',action='store_true',help='Prefer actual VideoToolbox with its require-hardware option')
     ap.add_argument('--capture',action='store_true')
+    ap.add_argument('--no-statusicon',action='store_true',help='Disable VLC optional status-menu icon while AppKit lacks its backend')
     ap.add_argument('--as-user',help='Existing unprivileged account; no account or global privilege changes')
     ap.add_argument('--audio-prefix',action='store_true',help='Use the reviewed AudioToolbox-only prefix inside this stage')
     ap.add_argument('--headless',action='store_true',help='VLC dummy interface/video plus real auhal; no GUI evidence')
@@ -46,6 +47,7 @@ def main():
           '--no-media-library','--no-metadata-network-access','--play-and-exit',
           '-vv',str(work/'fixtures/movie.mov')]
     if not a.headless:argv[4:4]=['--intf','macosx']
+    if a.no_statusicon:argv[4:4]=['--no-macosx-statusicon']
     if a.headless:argv[4:4]=['--intf','dummy','--extraintf','oldrc','--rc-unix',str(state/'rc.sock'),'--rc-fake-tty','--vout','dummy','--aout','auhal','--codec','avcodec']
     if a.hardware:
         if a.headless:argv[argv.index('avcodec')]='videotoolbox,avcodec'
@@ -100,7 +102,7 @@ def main():
     report={'open_argv':argv,'open_returncode':r.returncode,'vlc_process_lines':own,'capture':capture,'entry_identity':entry_identity,
             'logs':{name:(work/name).read_text(errors='replace') if (work/name).exists() else None
                     for name in ['open.stdout','open.stderr','state/vlc.log']}, 'launch_user':a.as_user or 'current', 'audio_prefix':str(prefix) if a.audio_prefix else None, 'vendor_rc_stats':rc_stats,
-            'framework_prefix':a.framework_prefix, 'hardware_requested':a.hardware, 'mode':'headless dummy video/real auhal' if a.headless else 'GUI attempt',
+            'framework_prefix':a.framework_prefix, 'hardware_requested':a.hardware, 'status_icon_disabled':a.no_statusicon, 'mode':'headless dummy video/real auhal' if a.headless else 'GUI attempt',
             'note':'Process presence/open success is not playback. No input injection or session restart. No other process was signalled.'}
     (work/'launch.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))

@@ -21,11 +21,13 @@ in e.pkgs.runCommand "siliconforest-vlc-unavailable-frameworks-arm64" {} ''
  F=$out/Frameworks/Foundation.framework;mkdir -p $F/Versions/A/Resources
  ${e.cc} $CF -c ${./foundation.m} -o Foundation.o
  ${e.cc} $CF -c ${./defaults.m} -o Defaults.o
+ ${e.cc} $CF -c ${./calendar-operations.m} -o Calendar-operations.o
+ ${e.cc} $CF -c ${./locale-operations.m} -o Locale-operations.o
  # Preserve the installed Versions/C wrapper, including its Swift overlay and
  # Activity Monitor/Terminal additions. Versions/A alone is only libFoundation.
  ${e.cc} $CF -c ${../../../terminal-app/compat/Foundation.m} -o Foundation-compat.o
  ${e.cc} $CF -c ${../../../activity-monitor/libs/Foundation-am.m} -o Foundation-am.o
- ${e.cc} -dynamiclib Foundation.o Defaults.o Foundation-compat.o Foundation-am.o --ld-path=${e.ld} -nostdlib -isysroot ${e.sdk} -Wl,-reexport_library,${a.base.foundation}/usr/lib/libFoundation.dylib -Wl,-reexport_library,${swift}/usr/lib/swift/libswiftFoundation.dylib -L${e.libsystem}/usr/lib -L${a.base.libobjc}/usr/lib -L${a.base.corefoundation}/usr/lib -lSystem -lobjc -lCoreFoundation -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${e.libsystem}/usr/lib/system/libdyld.dylib -Wl,-platform_version,macos,26.5,26.5 -Wl,-compatibility_version,300 -Wl,-current_version,5026.5.4 -Wl,-install_name,/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation.vlccompat -o $F/Versions/A/Foundation
+ ${e.cc} -dynamiclib Foundation.o Defaults.o Calendar-operations.o Locale-operations.o Foundation-compat.o Foundation-am.o --ld-path=${e.ld} -nostdlib -isysroot ${e.sdk} -Wl,-reexport_library,${a.base.foundation}/usr/lib/libFoundation.dylib -Wl,-reexport_library,${swift}/usr/lib/swift/libswiftFoundation.dylib -L${e.libsystem}/usr/lib -L${a.base.libobjc}/usr/lib -L${a.base.corefoundation}/usr/lib -lSystem -lobjc -lCoreFoundation -Wl,-dylib_file,/usr/lib/system/libdyld.dylib:${e.libsystem}/usr/lib/system/libdyld.dylib -Wl,-platform_version,macos,26.5,26.5 -Wl,-compatibility_version,300 -Wl,-current_version,5026.5.4 -Wl,-install_name,/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation.vlccompat -o $F/Versions/A/Foundation
  ln -s A $F/Versions/Current;ln -s A $F/Versions/C;ln -s Versions/Current/Foundation $F/Foundation
  cp ${./foundation.m} $F/Versions/A/Resources/Source.m
 ''
