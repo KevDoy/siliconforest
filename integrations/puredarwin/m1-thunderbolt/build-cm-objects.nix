@@ -21,6 +21,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
     cp ${./include/pd_tb_registry.h} "$dest/pd_tb_registry.h"
     cp ${./src/pd_tb_registry.c} "$dest/pd_tb_registry.c"
     python3 ${./native/patch_device.py} "$out"
+    cat ${./native/pd_tb_devres_groups.inc} >> "$out/src/Kernel/fbsdkpi/freebsd/linuxkpi/common/src/linux_devres.c"
     cp ${./pd_tb_cm_compat.h} "$dest/pd_tb_cm_compat.h"
     cp ${./include/pd_tb_wire.h} "$dest/pd_tb_wire.h"
     chmod -R u+w "$dest"
@@ -45,7 +46,7 @@ in lkpi.drmKextFinal.overrideAttrs (old: {
   installPhase = ''
     mkdir -p "$out/objects"
     find build-nix/src/Kernel/Extensions/PDThunderboltCM/CMakeFiles/PDThunderboltCM.dir -name '*.o' -exec cp {} "$out/objects/" \;
-    expected=${if full then "27" else "12"}
+    expected=${if full then "28" else "13"}
     test "$(find "$out/objects" -name '*.o' | wc -l)" -eq "$expected"
     ${if full then "test -f \"$out/objects/domain.c.o\"" else "test ! -f \"$out/objects/domain.c.o\""}
     mkdir -p "$out/nix-support"

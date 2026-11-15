@@ -30,11 +30,18 @@ int pd_tb_native_install(const struct pd_tb_native_ops *ops)
  native=*ops;os=snapshot;__atomic_store_n(&ready,true,__ATOMIC_RELEASE);return 0;
 }
 struct new_utsname *pd_tb_utsname(void) { return pd_tb_native_ready()?&os:NULL; }
+void pd_tb_native_fault(int error)
+{
+ int expected=0;
+ __atomic_compare_exchange_n(&fault,&expected,error<0?error:-EIO,false,__ATOMIC_RELEASE,__ATOMIC_RELAXED);
+}
 int pd_tb_runtime(struct device *dev,enum pd_tb_pm_op op,int argument)
 {
  if(!dev || !pd_tb_native_ready())return -ENODEV;
+ if((unsigned)op>PD_TB_PM_WAKE_POLICY){pd_tb_native_fault(-EINVAL);return -EINVAL;}
  int err=native.runtime(native.ctx,dev,op,argument);
- if(err<0)__atomic_store_n(&fault,err,__ATOMIC_RELEASE);
+ if(op==PD_TB_PM_IS_SUSPENDED && err>1)err=-EPROTO;
+ if(err<0)pd_tb_native_fault(err);
  return err;
 }
 int pd_tb_device_init_wakeup(struct device *dev,bool enabled)
@@ -81,7 +88,7 @@ void bus_unregister(const struct bus_type *bus)
  struct pd_tb_registry_iter it;struct pd_tb_registry_ref ref={0};
  if(pd_tb_registry_begin(&registry,&it,PD_TB_MATCH_BUS,(void *)bus,NULL,false))return;
  int n=pd_tb_registry_next(&registry,&it,&ref);
- if(n!=0){pd_tb_registry_put(&registry,&ref);__atomic_store_n(&fault,-EBUSY,__ATOMIC_RELEASE);return;}
+ if(n!=0){pd_tb_registry_put(&registry,&ref);pd_tb_native_fault(-EBUSY);return;}
  registered_bus=NULL;
 }
 /* No optional XDomain service-driver backend yet. Refuse binding explicitly. */
@@ -139,7 +146,7 @@ void pd_tb_device_del(struct device *dev)
  if(!dev || !dev->pd_registered)return;
  /* The caller owns a reference, as with Linux device_del. */
  int err=kobject_uevent(&dev->kobj,KOBJ_REMOVE);
- if(err)__atomic_store_n(&fault,err,__ATOMIC_RELEASE);
+ if(err)pd_tb_native_fault(err);
  dev->pd_registered=false;
  native.unpublish(native.ctx,dev->pd_native_token);dev->pd_native_token=NULL;
  pd_tb_registry_remove(&registry,dev);

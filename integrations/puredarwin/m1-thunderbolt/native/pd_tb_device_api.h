@@ -33,6 +33,7 @@ void pd_tb_device_del(struct device *);
 int pd_tb_device_register(struct device *);
 void pd_tb_device_unregister(struct device *);
 int pd_tb_runtime(struct device *,enum pd_tb_pm_op,int);
+void pd_tb_native_fault(int error);
 int pd_tb_device_init_wakeup(struct device *,bool);
 bool pd_tb_device_may_wakeup(struct device *);
 void pd_tb_device_set_wakeup_capable(struct device *,bool);

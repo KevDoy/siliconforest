@@ -52,6 +52,7 @@
     "include/linux/wordpart.h": "1622fd72851be5e59a98553f5220dd6082bdf3cfecfca45230573cb9cd751391",
     "include/linux/fips.h": "f873e66bf394a0247995a4355094d359b59d46e857d08b303fb5cd11ea7a2d8c",
     "include/linux/component.h": "f7c1d30b78a2a255fe66f75754929d5524d6394988c4743c8970e75a96d85d2f",
-    "drivers/base/component.c": "e5521e8fdb778aa749cd06c4da54850a702c7902ee6b35b14421f4d65f101cc0"
+    "drivers/base/component.c": "e5521e8fdb778aa749cd06c4da54850a702c7902ee6b35b14421f4d65f101cc0",
+    "drivers/base/devres.c": "71e9a931b8746a85a0c67c9f2370aace6aa2c1c67e1110cf49e157fb79522d4d"
   }
 }

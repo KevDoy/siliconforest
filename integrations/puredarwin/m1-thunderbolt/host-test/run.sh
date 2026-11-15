@@ -35,4 +35,7 @@ ${CC:-cc} -std=c11 -O1 -g -fsanitize=address,undefined \
   "$here/native/pd_tb_device.c" "$here/src/pd_tb_registry.c" "$here/host-test/device.c" -pthread -o "$tmp/device"
 "$tmp/device"
 "$tmp/device" fault
+"$tmp/device" query
 "$here/host-test/crypto.sh"
+${CC:-cc} -std=gnu11 -O1 -g -pthread -fsanitize=address,undefined -I "$here/native" "$here/host-test/groups.c" -o "$tmp/groups"
+"$tmp/groups"

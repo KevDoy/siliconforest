@@ -598,3 +598,40 @@ USB04 remains installed, without a new boot or direct device attachment.
 The TS3 is still deferred and no NHI/tunnel/external display milestone has
 been demonstrated. Continuing resource-group rollback, shared native ATC/
 PHY ownership, ACIO and external provider integration.
+
+### Transactional component resources, 2026-11-15 04:49Z
+
+The CM target now provides the four devres group APIs, using the pinned
+Linux marker/rollback design on its private BSD LinuxKPI layout and newest-
+first list. It retains the BSD file's notices and the Linux design's GPL/
+SUSE/Tejun notices. Closed groups release only their bounded interval;
+open groups roll back to their marker, in reverse allocation order. Marker
+removal keeps resources attached; allocation failure leaves previous
+resources alone. Callbacks run after list extraction and outside the lock.
+Crossing closes are refused before list changes and fault the native
+adapter. This implementation requires proper nesting, the subset used by
+component.c. It does not establish DMA/IRQ/producer quiescence: callers
+must stop and join those users before resource retirement.
+
+ASan/UBSan tests run the actual group include with a host BSD-layout and
+allocation fixture: 500 nested rollback/reverse-order cycles, closed/open
+groups, removed markers, failure of each allocation, crossing-close refusal,
+full teardown and callbacks which reenter allocation. The native PM suite
+also refuses an invalid (>1) suspension-query result and still allows
+metadata teardown after fault. All prior host tests and six repository
+checks pass (274 Python, 77 C groups, six mutations).
+
+The verified full target has 28 objects, including the same private
+LinuxKPI devres unit a future kext layer must compile once. A future kext
+must not link a second copy of that runtime. Four group APIs are now absent
+from the remaining-external symbol list. Full SDK:
+`/nix/store/mjlq420i01yl36dgx9r8gpcv8g5021c1-puredarwin-thunderbolt-cm-objects-0.1`.
+Core-only (13 objects):
+`/nix/store/c8sxr85bsh596fmaa4c7ws7ik1z53yf9-puredarwin-thunderbolt-cm-objects-0.1`.
+This remains an object target, without native ACIO/PHY/PM/backend binding.
+
+Read-only USB04 observation at 04:46:51Z still shows TS3-only Thunderbolt,
+4422 samples, zero Type-C read errors, host inactive, alternate-mode deferred
+and removal not blocked. No direct USB2/3 or DP flag is present. No new boot,
+controller DMA, NHI traffic or external output is claimed. Continuing with
+shared native ATC/PHY ownership and ACIO/external provider integration.

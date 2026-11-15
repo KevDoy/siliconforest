@@ -68,3 +68,10 @@ GPLv2. upstream/lib/uuid.c is GPL-2.0-only (Intel, Huang Ying), and
 upstream/lib/component.c is GPL-2.0. Headers and source hashes are recorded
 in family-provenance.json. The SHA/FIPS source inclusion does not claim
 FIPS mode or validation. New host-only scalar/reference fixtures are MIT.
+
+The group rollback adapter native/pd_tb_devres_groups.inc selects GPL-2.0
+and adapts Linux drivers/base/devres.c: Copyright (c) 2006 SUSE Linux
+Products GmbH; Copyright (c) 2006 Tejun Heo <teheo@suse.de>. Its unchanged
+reference is upstream/lib/devres-reference.c. The native private BSD
+LinuxKPI file is extended, retaining its existing notices. Host group
+layout/allocation fixtures are MIT and establish no hardware drain.

@@ -90,7 +90,9 @@ int main(int argc,char **argv)
  assert(add_uevent_var(&env,"%s",big)==-ENOMEM);assert(!env.count && !env.used);
  for(unsigned i=0;i<32;i++)assert(!add_uevent_var(&env,"%u",i));assert(add_uevent_var(&env,"x")==-ENOMEM);
  if(argc>1) {
-  pm_result=-EIO;assert(pm_runtime_get_sync(child)==-EIO);assert(!pd_tb_native_ready());
+  if(!strcmp(argv[1],"query")) { pm_result=2;assert(!pm_runtime_suspended(child)); }
+  else { pm_result=-EIO;assert(pm_runtime_get_sync(child)==-EIO); }
+  assert(!pd_tb_native_ready());
   assert(!pm_runtime_suspended(child));assert(!device_may_wakeup(child));
   unsigned calls=pm_calls;assert(pm_runtime_resume_and_get(child)==-ENODEV && pm_calls==calls);
   struct device *other=node(2,NULL);assert(device_add(other)==-ENODEV);put_device(other);

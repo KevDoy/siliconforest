@@ -11,7 +11,10 @@ set(lkpiinc ${drminc}
     "${FBSDKPI_DIR}/haiku/freebsd_iflib/compat")
 set(lkpiopt "SHELL:-include ${FBSDKPI_DIR}/pd/fbsd-extra/pd_lkpi_pre.h"
     ${drmopts} -Werror=implicit-function-declaration)
-set(sources "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_device.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_registry.c")
+# Object-target validation includes the same private LinuxKPI devres unit a
+# future kext's layer will compile once, not a second parallel devres runtime.
+set(sources "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_device.c" "${CMAKE_CURRENT_SOURCE_DIR}/pd_tb_registry.c"
+    "${FBSDKPI_DIR}/freebsd/linuxkpi/common/src/linux_devres.c")
 set(cmcore cap clx ctl dma_port lc path property tmu tunnel usb4)
 if(PD_TB_CM_FULL)
     list(APPEND cmcore domain eeprom icm nhi nvm retimer switch tb xdomain usb4_port quirks)
