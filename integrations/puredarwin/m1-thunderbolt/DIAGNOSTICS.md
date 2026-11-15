@@ -138,3 +138,43 @@ Firefox's Linux stock benchmark reference is noted for an authorized Linux
 window with a separate uninterrupted allowance (up to20min), installed browser
 only and matched viewport/scale/power/renderer. It cannot fit the diagnostic's
 short installer session and must not cause an extra reboot. No Linux score exists.
+
+## Ready local artifacts and remaining provider work
+
+Diagnostic source is committed as `cd9674da7`; the local collection is
+`/nix/store/nm95yi9gdi9lzz4lys9as5fyy9bxarls-puredarwin-kc-cio41dma-access-guarded`.
+The packed kernel capsule SHA256 is
+`cb7f057c2aa8746275577c625ff30075626dbb9f8050129c9d361c76515dde2a`.
+It keeps qualified29's605-byte configuration and byte-identical boot.bin, no
+AVE/pdave and58 executable modules. Only CIO/Ethernet differ from40; the other56
+UUIDs match. Both complete native SDK inputs retain identical non-debug sections
+through collection preparation, and all57 kext strip proofs pass. This artifact
+is **not uploaded, scheduled or authorized to run** while the machine is paused.
+
+Separate commits `121981a31` and `14b554684` prepare K14 and the native DCP
+tunnel ABI/epoch seam. Neither is included in the diagnostic collection. K14
+has actual-decoder host geometry/lifecycle checks and a native SDK. DCP has
+actual-source host identity/callback/retirement checks and a native SDK whose
+final ARM64 bridge directly calls pinned `apple_dcp_tb_dp_tunnel`. The provider
+class, graph publication and PHY delegation remain; an uncalled bridge cannot
+create a display route.
+
+The next provider implementation must account for these source boundaries:
+
+- `linux/pd_providers.h` in the current private layer registers clocks, reset,
+  power and regulators; it supplies no generic PHY, display mux or Type-C mux
+  backend. Existing fixed-clock support cannot stand in for those services.
+- Pinned `linux/phy/phy.h`, `linux/mux/consumer.h` and
+  `linux/usb/typec_mux.h` have CONFIG-off inline getters/registration returning
+  errors (`ENOSYS`/`EOPNOTSUPP`). Compiling dcp-fabric is not provider support.
+  Enabling defines alone must not replace those failures with fabricated success;
+  real retained native provider handles and operations are required.
+- The actual Linux route probe resolves PHY and mux before connector wiring and
+  Type-C mux registration. Keep route@1's index1 in property arrays even when
+  it is the only available route. Publish all aggregate DRM resources before
+  the component master's binding; adding a second standalone DCP card later
+  does not meet the requested same-card topology.
+- RTKit initialization's first retained native host is a shared IRQ/workloop
+  anchor. Mailbox resolution is keyed by each consumer's actual path and
+  resource/IRQ proof; do not equate that shared anchor with a mailbox alias
+  or overwrite it merely to add dcpext. Per-client lifecycle remains required.

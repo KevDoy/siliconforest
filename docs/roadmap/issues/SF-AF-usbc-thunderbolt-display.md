@@ -3301,3 +3301,21 @@ mailbox/crossbar/notification fixtures also pass. One USB allocator invocation
 initially omitted its required prepared-source argument and failed before
 execution; the corrected run passes against the exact SDK source. No machine
 work, kernel installation, new AVE work or push accompanies these preparations.
+
+The diagnostic capsule is now packed locally with SHA256
+`cb7f057c2aa8746275577c625ff30075626dbb9f8050129c9d361c76515dde2a`.
+It is not uploaded or scheduled. Full native2-input non-debug section comparisons
+and all57 kext strip proofs pass; unchanged29 boot.bin/configuration,58 modules,
+no AVE/pdave and56 other executable UUIDs matching40 are recorded privately.
+K14 commit121981a31 and DCP bridge commit14b554684 are separate and excluded
+from that diagnostic. Final six required checks pass; nothing was pushed.
+
+Further source review confirms that the private layer's provider registry covers
+clock/reset/power/regulator services, not generic PHY/mux/Type-C backends. Pinned
+CONFIG-off PHY/mux headers return errors; a compiled dcp-fabric helper does not
+satisfy those dependencies. The next work must supply actual retained native
+providers under the current TBT lease and publish the aggregate route graph
+before DRM component binding. The RTKit shared host is an IRQ/workloop anchor;
+mailboxes are separately keyed and validated per consumer, so that shared anchor
+alone is not a demonstrated mailbox-routing bug. These are remaining offline
+integration requirements, with no new machine trial implied.
