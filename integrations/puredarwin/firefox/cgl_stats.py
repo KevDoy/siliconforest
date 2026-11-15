@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""Read cache counters from the parent's already-observed private CGL image."""
+"""Read cache counters from the parent's already-observed owned CGL image."""
 import json
 
 
 def inspect(client, providers, output):
     parent = next(row for row in providers['processes'] if row['role'] == 'parent')
     paths = [line.rsplit('> ', 1)[-1] for line in parent['images'] if ' OpenGL ' in line]
-    if len(paths) != 1 or not paths[0].startswith('/private/var/db/sffx/'):
-        raise RuntimeError('Expected one already-loaded private CGL image')
+    if len(paths) != 1 or (not paths[0].startswith('/private/var/db/sffx/') and paths[0] != '/usr/local/lib/siliconforest/firefox/160-system1/gl/Frameworks/OpenGL.framework/Versions/A/OpenGL'):
+        raise RuntimeError('Expected one already-loaded owned CGL image')
     client.command('Marionette:SetContext', {'value': 'chrome'})
     try:
         result = client.command('WebDriver:ExecuteScript', dict(script='''const {ctypes}=

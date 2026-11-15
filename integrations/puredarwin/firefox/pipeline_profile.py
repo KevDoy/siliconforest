@@ -12,17 +12,18 @@ def command(client, source, arguments=None):
         script=source,args=arguments or [],newSandbox=False,scriptTimeout=45000))
 
 
-def start(client):
+def start(client, media=False):
     result=command(client, '''const done=arguments[arguments.length-1];
       if(Services.profiler.IsActive()){done({error:"Profiler already active"});return;}
       const available=Services.profiler.GetFeatures();
       const features=["js","stackwalk","leaf","cpu","threads","ipcmessages"]
         .filter(value=>available.includes(value));
       const filters=["GeckoMain","Compositor","Renderer","RenderBackend","Vsync",
-        "WRWorker","IPC","Canvas","Video","StyleThread","DOM Worker"];
+        "WRWorker","IPC","IPDL","Canvas","Video","StyleThread","DOM Worker","JS Helper"];
+      if(arguments[0])filters.push("Media","ImageBridge","Audio","RDD");
       Services.profiler.StartProfiler(2000000,1,features,filters,0).then(
         ()=>done({started:true,available,features,filters,configuration:Services.profiler.activeConfiguration}),
-        error=>done({error:String(error)}));''')
+        error=>done({error:String(error)}));''',[media])
     if not result.get('started'):
         raise RuntimeError(str(result))
     return result

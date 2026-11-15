@@ -13,7 +13,7 @@ import subprocess
 def inspect(sample, output, identities, parent_pid, expected_appkit):
     if not sample or not sample.startswith('/private/var/db/sffx/'):
         raise ValueError('Provider inspection requires a private sampler')
-    if not expected_appkit.startswith('/private/var/db/sffx/') or '..' in Path(expected_appkit).parts:
+    if (not expected_appkit.startswith('/private/var/db/sffx/') and expected_appkit != '/usr/local/lib/siliconforest/firefox/160-system1/appkit') or '..' in Path(expected_appkit).parts:
         raise ValueError('Expected AppKit must be a private prefix')
     result = dict(diagnostic_sampling_seconds=.05, expected_appkit=expected_appkit, processes=[])
     for pid, start in sorted(identities.items()):

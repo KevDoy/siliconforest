@@ -8,10 +8,10 @@ switching. Network failures remain failures even if the browser survives.
 import json
 import time
 
-SITES = ['https://example.com/', 'https://en.wikipedia.org/wiki/Firefox',
-         'https://developer.mozilla.org/en-US/docs/Web/JavaScript', 'https://www.mozilla.org/en-US/firefox/',
-         'https://www.python.org/', 'https://www.rust-lang.org/', 'https://www.gnu.org/',
-         'https://www.kernel.org/', 'https://www.w3.org/', 'https://www.rfc-editor.org/rfc/rfc9110.html']
+SITES = ['https://www.cnn.com/', 'https://www.nytimes.com/', 'https://www.bbc.com/',
+         'https://www.wikipedia.org/', 'https://github.com/', 'https://www.youtube.com/',
+         'https://www.reddit.com/', 'https://www.amazon.com/',
+         'https://www.google.com/search?q=Firefox', 'https://fonts.google.com/specimen/Roboto']
 
 
 def measure(client, output, deadline, owned_snapshot, seat_activity=False):
@@ -32,6 +32,7 @@ def measure(client, output, deadline, owned_snapshot, seat_activity=False):
       }};
       Services.obs.addObserver(w.__sffxShutdownObserver,"ipc:content-shutdown");return true;
       ''', 'args': [], 'newSandbox': False})
+    legibility={}
     try:
         client.command('Marionette:SetContext', {'value': 'content'})
         handle = client.command('WebDriver:GetWindowHandles')[0]
@@ -67,6 +68,14 @@ def measure(client, output, deadline, owned_snapshot, seat_activity=False):
                 from presentation_seat import admit
                 row['seat_activity'] = admit(client, output.with_name('stability-seat-%03d.json' % visit),
                                             fixture=False, verify_renderer=visit % 10 == 0)
+            if row['loaded'] and url not in legibility:
+                from font_legibility import measure as measure_legibility
+                from legibility_pixels import analyze
+                prefix='stability-legibility-%03d'%visit
+                row['legibility']=measure_legibility(client,output.parent,handles=[handle],prefix=prefix)
+                pixels=analyze(output.parent,prefix+'.json')
+                legibility[url]=dict(pixel_checks=pixels,paint_check_pass=all(p['paint_check_pass'] for p in pixels),visual_review_required=True)
+                row['legibility']['pixel_checks']=pixels
             while time.monotonic() < min(end, before + 18):
                 time.sleep(.5)
             result['elapsed'] = time.monotonic() - start
@@ -83,6 +92,10 @@ def measure(client, output, deadline, owned_snapshot, seat_activity=False):
     result['unclassified_content_exits'] = sum('propertyError' in row for row in result['shutdown_events'])
     result['loads_passed'] = sum(row.get('loaded', False) for row in result['visits'])
     result['loads_failed'] = len(result['visits']) - result['loads_passed']
-    result['complete'] = result['elapsed'] >= 1800 and result['abnormal_content_exits'] == 0 and result['unclassified_content_exits'] == 0 and len(result['gpu_identities']) == 1 and result['loads_failed'] == 0
+    result['legibility_pages']=legibility
+    result['text_paint_passed']=len(legibility)==len(SITES) and all(row['paint_check_pass'] for row in legibility.values())
+    result['legibility_qualified'] = False
+    result['legibility_gap'] = 'Load and process-survival evidence only; real-site text paint must pass paired web-font pixel/capture checks.'
+    result['complete'] = result['elapsed'] >= 1800 and result['abnormal_content_exits'] == 0 and result['unclassified_content_exits'] == 0 and len(result['gpu_identities']) == 1 and result['loads_failed'] == 0 and result['text_paint_passed']
     output.write_text(json.dumps(result, indent=2) + '\n')
     return result

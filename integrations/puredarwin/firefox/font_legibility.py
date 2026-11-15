@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+"""Observe laid-out text and content pixels; loading alone is not legibility.
+
+Text masking changes only paint properties in this owned diagnostic document.
+The original style is restored in finally. Paired content images are evidence,
+not a substitute for reviewing the compositor's renderer capture.
+"""
+import base64
+import json
+import time
+from urllib.parse import urlsplit
+
+
+def measure(client, directory, handles=None, prefix="legibility"):
+    client.command('Marionette:SetContext', {'value': 'content'})
+    rows=[]
+    def script(source):
+        return client.command('WebDriver:ExecuteScript',dict(script=source,args=[],newSandbox=False))
+    def paint():
+        client.command('WebDriver:ExecuteAsyncScript',dict(script='const done=arguments[arguments.length-1];requestAnimationFrame(()=>requestAnimationFrame(()=>done(true)));',args=[],newSandbox=False,scriptTimeout=5000))
+    def shot(path):
+        data=client.command('WebDriver:TakeScreenshot',dict(id=None,highlights=[],full=False))
+        path.write_bytes(base64.b64decode(data))
+    for handle in (handles or client.command('WebDriver:GetWindowHandles')):
+        client.command('WebDriver:SwitchToWindow', {'handle': handle})
+        url=client.command('WebDriver:GetCurrentURL')
+        if urlsplit(url).scheme not in ['http','https','file']:continue
+        time.sleep(4)
+        row=script('''const runs=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
+          while((node=walk.nextNode())&&runs.length<80){
+            if(!node.textContent.trim()||!node.parentElement)continue;
+            const s=getComputedStyle(node.parentElement);let opacity=1;for(let e=node.parentElement;e;e=e.parentElement)opacity*=Number(getComputedStyle(e).opacity);if(opacity<.01)continue;if(s.display==='none'||s.visibility!=='visible'||Number(s.opacity)===0)continue;
+            const range=document.createRange();range.selectNodeContents(node);
+            const boxes=[...range.getClientRects()].filter(r=>r.width>2&&r.height>2&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight).map(r=>({x:r.x,y:r.y,width:r.width,height:r.height}));
+            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor});
+          }
+          return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
+            devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
+            faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
+            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs};''')
+        image_prefix=prefix+'-%02d'%len(rows)
+        from renderer_capture import capture
+        from screen_calibration import calibrate
+        anchors=script('''const anchors=[{x:5,y:5,width:8,color:[17,241,113]},{x:101,y:101,width:8,color:[233,19,157]}];
+          window.__sffxLegibilityAnchors=anchors.map(a=>{const n=document.createElement('div');n.style.cssText=`all:initial!important;position:fixed!important;left:${a.x}px!important;top:${a.y}px!important;width:${a.width}px!important;height:${a.width}px!important;background:rgb(${a.color.join(',')})!important;z-index:2147483647!important;pointer-events:none!important`;document.documentElement.append(n);return n});return anchors;''')
+        try:
+            paint();capture(directory/(image_prefix+'-calibration.ppm'))
+            row['calibration']=calibrate(directory/(image_prefix+'-calibration.ppm'),anchors,row['devicePixelRatio'])
+        finally:
+            script('window.__sffxLegibilityAnchors?.forEach(n=>n.remove());delete window.__sffxLegibilityAnchors;return true;')
+        paint();shot(directory/(image_prefix+'-visible.png'))
+        capture(directory/(image_prefix+'-visible-renderer.ppm'))
+        try:
+            script('''if(window.__sffxLegibilityMask)throw new Error('Text mask already exists');const style=document.createElement('style');
+              style.textContent='*{color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}';
+              document.documentElement.append(style);window.__sffxLegibilityMask=style;return true;''')
+            paint();shot(directory/(image_prefix+'-hidden.png'))
+            capture(directory/(image_prefix+'-hidden-renderer.ppm'))
+        finally:
+            script('window.__sffxLegibilityMask?.remove();delete window.__sffxLegibilityMask;return true;')
+        paint()
+        from renderer_capture import capture
+        row['renderer']=capture(directory/(image_prefix+'-renderer.ppm'))
+        row['renderer_images']={'visible':image_prefix+'-visible-renderer.ppm','text_hidden':image_prefix+'-hidden-renderer.ppm'}
+        row['content_images_readback_only']=True
+        row['content_images']={'visible':image_prefix+'-visible.png','text_hidden':image_prefix+'-hidden.png'}
+        row['loaded_only']=True;row['legibility_qualified']=False;row['visual_review_pending']=True
+        rows.append(row);(directory/(prefix+'.json')).write_text(json.dumps(rows,indent=2)+'\n')
+    if not rows:raise RuntimeError('No owned ordinary page found for legibility checks')
+    from legibility_pixels import analyze
+    pixels=analyze(directory,prefix+'.json')
+    return dict(pages=rows,pixel_checks=pixels,complete=all(p['paint_check_pass'] for p in pixels),diagnostic_complete=True,legibility_qualified=False,method='Laid-out visible text ranges plus paired paint-only text masks and actual renderer captures. Pixel analysis and visual review required; no load-only PASS.')

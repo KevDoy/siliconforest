@@ -78,6 +78,7 @@ def main():
     ap.add_argument('--panels', action='store_true', help='owned native open/save picker selection through synthetic seat input')
     ap.add_argument('--render-quality', type=int, choices=[0, 2], help='controlled ICC off/on pixels and glyph raster evidence')
     ap.add_argument('--video-fullscreen', action='store_true', help='owned trusted DOM video fullscreen and native frame controls')
+    ap.add_argument('--pinch-zoom', action='store_true', help='synthetic native pinch; observe real browser/visual viewport zoom')
     ap.add_argument('--native-ui', action='store_true', help='finite synthetic native seat/menu checks on the owned Firefox PID')
     ap.add_argument('--clipboard-guard', help='RAM-only restore helper for native clipboard controls')
     ap.add_argument('--native-drag', action='store_true', help='native-UI owned DOM drag/drop through the real seat')
@@ -93,6 +94,9 @@ def main():
     ap.add_argument('--fixture-seconds', type=int, default=10, choices=range(1,61), metavar='1..60')
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--pipeline-profile', action='store_true', help='diagnostic native/JS/IPC Gecko profile of this browser family')
+    ap.add_argument('--site-legibility', action='store_true', help='capture text paint masks and actual renderer for owned ordinary pages')
+    ap.add_argument('--font-logs', action='store_true', help='bounded font activation diagnostics for owned legibility controls')
+    ap.add_argument('--profile-video', action='store_true', help='diagnostic all-process Gecko profile around owned video clips')
     ap.add_argument('--profile-benchmark', action='store_true', help='diagnostic Gecko profile around a stock benchmark; score is not timing-qualified')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
@@ -115,6 +119,8 @@ def main():
         raise ValueError('Supply both private surface-session and surface-broker paths')
     if args.expect_appkit_prefix and not args.sample_path:
         raise ValueError('AppKit provider verification requires --sample-path')
+    if args.pinch_zoom and (not args.presentation_seat or args.native_ui or args.measure_fixture or args.benchmark):
+        raise ValueError('Pinch control requires its own presentation-seat run without another workload')
     if args.gpu_transfer_spec and (not args.policy_probe_path or not args.expect_appkit_prefix or not (args.measure_video or args.measure_all_videos)):
         raise ValueError('GPU counters require owned provider admission, native probe and video measurement')
     if args.gpu_coalesce_ticks and not args.gpu_presentation:
@@ -125,6 +131,8 @@ def main():
         raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
     if args.pipeline_profile and (not args.measure_fixture or args.profile_fixture or args.fixture_repetitions != 1):
         raise ValueError('Pipeline profiling requires one fixture measurement without a second sampler')
+    if args.profile_video and (not args.measure_all_videos or args.pipeline_profile or args.profile_benchmark or args.measure_fixture or args.benchmark):
+        raise ValueError('Video profiling requires one measure-all-videos workload')
     if args.profile_benchmark and (not args.benchmark or args.pipeline_profile or args.measure_fixture or args.profile_fixture):
         raise ValueError('Benchmark profiling requires one benchmark without another profiled workload')
     if args.fixture_pacing_sequence:
@@ -174,7 +182,7 @@ def main():
     else:
         env.pop('SFFX_GPU_PHASE_TRACE',None)
     if args.font_config:
-        if not args.font_config.startswith('/private/var/db/sffx/') or '..' in Path(args.font_config).parts:
+        if (not args.font_config.startswith('/private/var/db/sffx/') and args.font_config != '/usr/local/lib/siliconforest/firefox/160-system1/fonts/fonts.conf') or '..' in Path(args.font_config).parts:
             raise ValueError('Font configuration must be inside the private prefix')
         env['FONTCONFIG_FILE'] = args.font_config
     else:
@@ -214,6 +222,8 @@ def main():
             env.pop(name, None)
     if args.media_trace:
         env['MOZ_LOG'] = 'PlatformDecoderModule:5,AppleMedia:5'
+    if args.font_logs:
+        env['MOZ_LOG']='fontlist:5,userfonts:5,textrun:5'
     if args.vt_frame_mode=='copy':env.pop('SF_VT_ZERO_COPY',None)
     else:env['SF_VT_ZERO_COPY']='1' if args.vt_frame_mode=='best-effort' else 'require'
     if args.io_policy:
@@ -252,6 +262,9 @@ def main():
                   io_policy=args.io_policy, ui_qos=args.ui_qos, verbose_trace=not args.quiet_trace, window_trace=args.window_trace)
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
                                     service=env.get('SFFX_IOSURFACE_SERVICE'))
+    from owner_guard import OwnerInputGuard
+    owner_guard=OwnerInputGuard()
+    result['owner_input_before']=owner_guard.before
     owned = {}
     start = time.monotonic()
     wall_start = time.time()
@@ -273,6 +286,7 @@ def main():
             deadline = start + args.seconds
             samples = []
             while p.poll() is None and time.monotonic() < deadline:
+                owner_guard.check()
                 identities = process_identities()
                 owned.update({pid: identities[pid][1] for pid in descendants(p.pid, identities)
                               if pid in identities})
@@ -310,6 +324,13 @@ def main():
                         pass
                     else:
                         support_attempted = True
+                        original_command=client.command
+                        def guarded_command(*arguments,**keywords):
+                            owner_guard.check()
+                            reply=original_command(*arguments,**keywords)
+                            owner_guard.check()
+                            return reply
+                        client.command=guarded_command
                         try:
                             client.socket.settimeout(max(1, min(45, deadline - time.monotonic())))
                             result['marionette'] = client.start(args.page_load_strategy)
@@ -342,6 +363,10 @@ def main():
                                     return ''
                                 return subprocess.run(['ps', '-p', ','.join(map(str, active)),
                                     '-o', 'pid,ppid,time,rss,stat,command'], capture_output=True, text=True).stdout
+                            if args.site_legibility:
+                                from font_legibility import measure as measure_legibility
+                                result['legibility']=measure_legibility(client,args.run)
+                                deadline=min(deadline,time.monotonic()+2)
                             if args.benchmark:
                                 from benchmark import measure
                                 client.socket.settimeout(max(1, min(90, deadline - time.monotonic())))
@@ -409,6 +434,10 @@ def main():
                                 result['native_ui'] = measure(client, args.run / 'native-ui.json', deadline,
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
+                            if args.pinch_zoom:
+                                from pinch_zoom import measure as measure_pinch
+                                result['pinch_zoom']=measure_pinch(client,args.run)
+                                deadline=min(deadline,time.monotonic()+2)
                             if args.measure_fixture:
                                 if args.fixture_pacing_sequence:
                                     from fixture_pacing import measure as measure_pacing
@@ -466,6 +495,10 @@ def main():
                                         pipeline_admission=start_pipeline(client)
                                     try:
                                         result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
+                                        if args.pipeline_profile:
+                                            from renderer_capture import capture as capture_stats
+                                            result['webrender_stats_capture']=capture_stats(args.run/'webrender-interval-end.ppm')
+                                            result['webrender_stats_capture']['method']='Diagnostic renderer snapshot immediately after fixture completion, before profiler serialization; excluded from the fixture interval.'
                                     finally:
                                         if pipeline_admission:
                                             from pipeline_profile import stop as stop_pipeline
@@ -516,25 +549,37 @@ def main():
                                 video_handles=client.video_handles()
                                 if not video_handles:raise RuntimeError('No owned video fixture found')
                                 result['video_tab_count']=len(video_handles)
-                                for handle in video_handles:
-                                    client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
-                                    counters = lambda: subprocess.run(['sysctl', 'kern.pd_avd.stats'],
-                                        capture_output=True, text=True).stdout.strip()
-                                    if args.compositor_stats:
-                                        from compositor_stats import start as start_stats, stop as stop_stats
-                                        clock_admission=start_stats()
-                                    entry = dict(cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()),
-                                                 avd_before=counters())
-                                    result['video_measurements'].append(entry)
-                                    if args.gpu_transfer_spec:
-                                        from gpu_transfer_stats import snapshot as gpu_snapshot
-                                        entry['gpu_before']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
-                                    entry['video'] = client.measure_video(handle)
-                                    entry['avd_after'] = counters()
-                                    entry['cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
-                                    if args.gpu_transfer_spec:
-                                        entry['gpu_after']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
-                                    if args.compositor_stats:entry['compositor_stats']=stop_stats(clock_admission)
+                                video_admission=None
+                                if args.profile_video:
+                                    from pipeline_profile import start as start_video_profile
+                                    video_admission=start_video_profile(client,media=True)
+                                    result['profile_interval']=[time.time()*1000,None]
+                                try:
+                                    for handle in video_handles:
+                                        client.socket.settimeout(max(1, min(76, deadline - time.monotonic())))
+                                        counters = lambda: subprocess.run(['sysctl', 'kern.pd_avd.stats'],
+                                            capture_output=True, text=True).stdout.strip()
+                                        if args.compositor_stats:
+                                            from compositor_stats import start as start_stats, stop as stop_stats
+                                            clock_admission=start_stats()
+                                        entry = dict(cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()),
+                                                     avd_before=counters())
+                                        result['video_measurements'].append(entry)
+                                        if args.gpu_transfer_spec:
+                                            from gpu_transfer_stats import snapshot as gpu_snapshot
+                                            entry['gpu_before']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
+                                        entry['video'] = client.measure_video(handle)
+                                        entry['avd_after'] = counters()
+                                        entry['cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                        if args.gpu_transfer_spec:
+                                            entry['gpu_after']=gpu_snapshot(result['providers'],args.gpu_transfer_spec,args.policy_probe_path,process_identities(),owned)
+                                        if args.compositor_stats:entry['compositor_stats']=stop_stats(clock_admission)
+                                finally:
+                                    if video_admission:
+                                        result['profile_interval'][1]=time.time()*1000
+                                        from pipeline_profile import stop as stop_video_profile
+                                        result['pipeline_profile']=stop_video_profile(client,args.run,video_admission)
+                                        result['video_profile_diagnostic_only']=True
                                 deadline = min(deadline, time.monotonic() + 2)
                         except Exception as error:
                             result['marionette_error'] = str(error)
@@ -606,10 +651,16 @@ def main():
                     result['daily_runtime_log'] = str(logs[0])
                 else:
                     result['daily_runtime_log_error'] = 'Expected one log for this owned launcher PID'
+            try:
+                result['owner_input_after']=owner_guard.check()
+            except (OSError,RuntimeError) as error:
+                automation_failed=True
+                result['owner_input_invalidated']=str(error)
+                (args.run/'qualification-invalidated.json').write_text(json.dumps(dict(valid=False,reason=str(error)))+'\n')
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing']:
+            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing', 'pinch_zoom', 'legibility']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]

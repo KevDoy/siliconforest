@@ -50,7 +50,15 @@ def plan(root, args):
               ['surface', 'avfoundation', 'appkit', 'quartz', 'onyx', 'gl']]
     frames.append(root / 'compat/System/Library/Frameworks')
     if manifest.get('private_fonts', False):
-        frames.insert(0, root / 'coretext/Frameworks')
+        font_framework = root / 'coretext/Frameworks'
+        override = manifest.get('coretext_override')
+        if override is not None:
+            requested = Path(override)
+            if (not manifest.get('system_layout') or '..' in requested.parts or
+                    not requested.is_relative_to(root / 'overrides') or requested.name != 'Frameworks'):
+                raise ValueError('CoreText override must be a versioned provider inside this app runtime')
+            font_framework = requested
+        frames.insert(0, font_framework)
         env['FONTCONFIG_FILE'] = str(root / 'fonts/fonts.conf')
     libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
         root / 'quartz/Frameworks/QuartzCore.framework/Versions/A', root / 'gl/lib', root / 'compat/usr/lib']

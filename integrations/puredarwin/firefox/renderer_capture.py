@@ -17,6 +17,8 @@ import time
 def capture(destination):
     destination = Path(destination)
     inject = Path('/private/var/run/gpu-desktop/inject')
+    from presentation_seat import owner_idle
+    owner_idle(inject)
     name = 'sffx-frame-%d-%s' % (os.getpid(), secrets.token_hex(5))
     if destination.exists():
         raise FileExistsError(destination)
@@ -32,6 +34,9 @@ def capture(destination):
     status = (inject / 'done').read_text()
     if not re.search(r'errors=0\b', status):
         raise RuntimeError('Renderer capture failed: ' + status)
+    owner_idle(inject)
+    if re.search(r'owner_seen_active=1\b',status):
+        raise RuntimeError('Real owner input overlapped renderer capture; discard it')
     shutil.copy2(inject / (name + '.ppm'), destination)
     with Path('/var/log/desktop-session.log').open('rb') as stream:
         stream.seek(0, 2)

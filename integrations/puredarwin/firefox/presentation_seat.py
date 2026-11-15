@@ -8,7 +8,28 @@ import secrets
 import time
 
 
-def _request(inject, lines):
+def owner_idle(inject, require_virtual=False):
+    marker=inject.parent/'owner-input'
+    if not marker.exists():
+        if require_virtual:raise RuntimeError('Virtual seat not installed: refuse pointer/key injection')
+        return
+    text=marker.read_text()
+    if 'DESK7' not in text or not re.search(r'^active=0$',text,re.MULTILINE):
+        raise RuntimeError('Owner input active or unrecognized: stop synthetic input/capture')
+
+
+def _request(inject, lines, _virtual_handshake=False):
+    commands=[line.split()[0] for line in lines.splitlines() if line.split()]
+    mutating=any(command not in ['dump','list','stats','capture','wait'] for command in commands)
+    if any(command=='capture' for command in commands):owner_idle(inject)
+    if mutating and not _virtual_handshake:
+        owner_idle(inject,require_virtual=True)
+        status=_request(inject,'seat virtual\nstats',_virtual_handshake=True)
+        if not re.search(r'owner_seen_active=0\b',status) or not re.search(r'owner_active=0\b',status):
+            raise RuntimeError('Compositor did not confirm idle-owner virtual-seat protocol')
+        owner_idle(inject,require_virtual=True)
+        if any(line.strip()=='seat owner' for line in lines.splitlines()):raise RuntimeError('Owner seat forbidden in Firefox diagnostics')
+        lines='seat virtual\n'+lines
     if (inject / 'request').exists() or (inject / 'request.part').exists():
         raise RuntimeError('Another inject request is pending')
     (inject / 'done').unlink(missing_ok=True)
@@ -21,6 +42,9 @@ def _request(inject, lines):
     status = (inject / 'done').read_text()
     if not re.search(r'errors=0\b', status):
         raise RuntimeError(status)
+    if mutating and (re.search(r'owner_seen_active=1\b',status) or re.search(r'owner_active=1\b',status)):
+        raise RuntimeError('Real owner input interrupted this synthetic request; discard and stop')
+    return status
 
 
 def admit(client, output, fixture=True, verify_renderer=True):

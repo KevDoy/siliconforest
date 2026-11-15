@@ -19,6 +19,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', required=True)
     ap.add_argument('--tools', required=True)
+    ap.add_argument('--installed-bundle', action='store_true', help='diagnose only /Applications/Firefox.app with a fresh private profile; never install or modify it')
     ap.add_argument('--bundle', default='/private/var/db/sffx/baseline-160-001/Firefox.app')
     ap.add_argument('--avd-prewarm', action='store_true')
     ap.add_argument('--avd-counters', action='store_true')
@@ -39,7 +40,9 @@ def main():
            'UserKnownHostsFile=' + str(Path.home() / '.ssh/known_hosts_m1_siliconforest'),
            'root@10.1.1.211']
     options = args.options[1:] if args.options[:1] == ['--'] else args.options
-    if not args.bundle.startswith('/private/var/db/sffx/') or '..' in Path(args.bundle).parts or not args.bundle.endswith('.app'):
+    if args.installed_bundle and args.bundle != '/Applications/Firefox.app':
+        raise ValueError('Installed diagnostics accept only /Applications/Firefox.app')
+    if not args.installed_bundle and (not args.bundle.startswith('/private/var/db/sffx/') or '..' in Path(args.bundle).parts or not args.bundle.endswith('.app')):
         raise ValueError('Bundle must be an app inside the private prefix')
     command = ['python3', args.tools + '/remote-run.py', '--bundle', args.bundle, '--run', remote] + options
     seconds = 40
@@ -86,6 +89,7 @@ def main():
         else:
             (out / 'collection-error.log').write_bytes(copied.stderr)
     print(json.dumps(dict(run=args.run, output=str(out), runner_status=metadata.get('runner_status'))))
+    raise SystemExit(metadata['runner_status'])
 
 
 if __name__ == '__main__':
