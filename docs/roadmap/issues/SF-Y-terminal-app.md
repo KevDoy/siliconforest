@@ -306,6 +306,26 @@ alive (`shots/inst1-sheet.png`). `sf_compat_push.sh check` 18/18. `/usr/bin/samp
 the Shell menu without lines). `.pre-t6` is still the file from before TERM6. Revert:
 `ln -f <path>.pre-t6 <path>.back && mv -f <path>.back <path>`.
 
+### Split panes: a grey box, and the window shrank (owner's finding; cocoa 0130)
+Reproduced on the installed build (synthetic, `runs/sf-term6/splitpane.sh`, my own Terminal): Command-D, then
+Shift-Command-D left the remaining pane at its half and the other half an empty grey box; each split and each close
+made the window shorter (719 -> 599 px in three rounds, `shots/spold-*`). Traced with `PD_SPLIT_TRACE=1` and
+`PD_WINFRAME_TRACE=1` (who set the window's frame, with the calling frames):
+- `-[NSSplitView adjustSubviews]` did nothing with fewer than two panes: the pane left after a close kept its half.
+  Now a lone pane fills the split view, as on macOS.
+- `-[NSSplitView addSubview:]` laid the panes out again at once (Cocotron's; macOS leaves that to the application,
+  "send -adjustSubviews after adding or removing"). Terminal splits by giving both halves their frames (232 + 7 +
+  232 points in a 457-point view), adding them, and making its window 14 points taller; the immediate layout made
+  them 298 and 152, Terminal fitted its window to their rows, and the window shrank. Now adding or removing a pane
+  only marks the split view; what the application leaves inconsistent (a pane alone after a close) is laid out
+  before the split view is next drawn.
+- the panes' sizes were each rounded down and the last pane did not take the remainder; it does now.
+After (`sp30`, `sp2*`, synthetic): five rounds of split and close, the window 809 <-> 830 px (Terminal makes it 14
+points taller for the divider while split) and back to the same size each time; in a second tab (761 <-> 782); after
+two Command-= (852 <-> 872); full screen (2560x1600 throughout, 242x69 -> 242x34 per pane -> 242x69; leaving full
+screen gave back 719); no grey box in any (`shots/sp2*-split.png`, `-end.png`). The first split of a fresh window
+also moves it down the screen when it starts near the top (seen once, `sp30`); not chased.
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default

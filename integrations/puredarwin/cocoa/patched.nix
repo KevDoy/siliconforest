@@ -325,6 +325,18 @@
 #         cell's trailing edge (-sortIndicatorRectForBounds:, -drawSortIndicatorWithFrame:inView:ascending:
 #         priority:), the title's rect excludes it while the column shows one (Activity Monitor's chevron was
 #         drawn on top of "% CPU"), and a title too wide is cut with an ellipsis
+#   0130  AppKit (TERM6, the owner's findings): a column divider drag follows the newest pointer position only,
+#         re-tiles without reloading every row, saves the widths and tells the delegate at the release; a table's
+#         layout solves each changed row once per pass (cell views are layout boundaries; a boundary moved without
+#         changing size skips its solve; row views no longer autoresize their cells; NSViewGlobalFrameDidChange
+#         only for views with surfaces); what is right of a dragged column is copied along in the window, only the
+#         column is drawn; strings drawn in a rectangle are laid out once and kept (by their own width when they fit
+#         on one line); vertical gradients filled a row of pixels at a time; NSClipView copies on scroll
+#         (copiesOnScroll, as macOS; PD_CLIP_NO_COPY=1 / PD_TABLE_NO_COPY=1 / PD_TYPESET_NO_CACHE=1 to compare);
+#         header drag reorders columns (it was missing) and the sort is taken at the release; NSSplitView: one pane
+#         left fills the split view (Terminal's grey box when a split closed), panes are not laid out again at
+#         -addSubview: (Terminal places them itself; its window shrank at each split and close), the last pane
+#         takes the rounding remainder; PD_SPLIT_TRACE, PD_WINFRAME_TRACE (who changed a window's frame)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -404,6 +416,7 @@ let
     ./patches/0125-appkit-menu-panel-seams-translucency-choice-split-view.patch
     ./patches/0127-appkit-float-value-abi-colour-well-click-opaque-menus.patch
     ./patches/0128-appkit-table-header-sort-indicator-slot.patch
+    ./patches/0130-appkit-column-drag-scroll-copy-split-panes.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
