@@ -83,7 +83,10 @@ class Marionette:
             return result;''', 'args': [], 'newSandbox': True,
         })
 
-    def measure_fixture(self, scroll=False):
+    def measure_fixture(self, scroll=False, duration=10000):
+        if not 1000 <= duration <= 60000:
+            raise ValueError('Fixture duration must be1000..60000ms')
+        self.command('WebDriver:SetTimeouts', {'script': duration+4000})
         self.command('Marionette:SetContext', {'value': 'content'})
         handles = self.command('WebDriver:GetWindowHandles')
         for handle in handles:
@@ -94,8 +97,8 @@ class Marionette:
             })
             if found:
                 return self.command('WebDriver:ExecuteAsyncScript', {
-                    'script': 'const done=arguments[arguments.length-1]; window.fxMeasureFrames(10000,arguments[0]).then(done);',
-                    'args': [scroll], 'scriptTimeout': 14000, 'newSandbox': False,
+                    'script': 'const done=arguments[arguments.length-1]; window.fxMeasureFrames(arguments[1],arguments[0]).then(done);',
+                    'args': [scroll,duration], 'scriptTimeout': duration+4000, 'newSandbox': False,
                 })
         raise RuntimeError('No owned measurement fixture found')
 

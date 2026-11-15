@@ -46,16 +46,17 @@ def analyze(directory, data=None):
     seconds = sum(max(0, value-old.get(pid, 0)) for pid, value in new.items())
     wall = after['elapsed']-before['elapsed']
     return dict(name=directory.name, passed=data['measurement_passed'],
-        timing_qualification=data['measurement_passed'] and 'fixture_profile' not in data and bool(presentation),
+        timing_qualification=data['measurement_passed'] and 'fixture_profile' not in data and 'pipeline_profile' not in data and not data.get('window_trace') and bool(presentation),
         raf_fps=fixture['wallFps'], hash=fixture['hash'], gl_error=fixture['glError'],
         raf_wall_median_ms=fixture.get('wallMedian'), raf_wall_p95_ms=fixture.get('wallP95'),
         raf_wall_max_ms=fixture.get('wallMax'),
         gpu_vector_compare=data.get('gpu_vector_compare'), gpu_cache_lookups=data.get('gpu_cache_lookups'),
         gpu_dirty_frames=data.get('gpu_dirty_frames', False),
         gpu_export_cache=data.get('gpu_export_cache', False), presentation=presentation,
+        fixture_qos=data.get('fixture_qos'),
         gpu_coalesce_ticks=data.get('gpu_coalesce_ticks', False),
         cpu=dict(cpu_seconds=seconds, wall_seconds=wall, percent_one_core=seconds/wall*100),
-        method='Unique compositor_ms callback stamps whose callback wall time lies inside the fixture interval; callbacks sharing a stamp count once. CPU is family TIME delta as percent of one core; exited-before-final-snapshot children are omitted. rAF is reported separately.')
+        method='Unique compositor_ms callback stamps whose callback wall time lies inside the fixture interval; callbacks sharing a stamp count once. The compositor sends these after observed page-flip completion using event-loop elapsed time, not the DRM hardware timestamp; they count completion batches, not exact hardware phase. CPU is family TIME delta as percent of one core; exited-before-final-snapshot children are omitted. rAF is reported separately.')
 
 
 if __name__ == '__main__':

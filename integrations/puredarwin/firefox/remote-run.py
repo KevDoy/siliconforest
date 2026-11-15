@@ -48,6 +48,7 @@ def main():
     ap.add_argument('--gpu-cache-lookups', action='store_true', help='diagnostic one-time GPU frame export symbol lookup')
     ap.add_argument('--frame-trace', action='store_true', help='private WindowServer actual compositor frame callback timestamps')
     ap.add_argument('--event-trace', action='store_true', help='private AppKit bounded headless event-loop diagnostics')
+    ap.add_argument('--window-trace', action='store_true', help='diagnostic WindowServer create/map/tab/flush trace')
     ap.add_argument('--software', action='store_true')
     ap.add_argument('--no-sandbox', action='store_true', help='diagnosis only; labelled in result')
     ap.add_argument('--insert-library', help='private diagnostic DSO (e.g. the real SBPL compiler)')
@@ -61,6 +62,7 @@ def main():
                     help='explicit WebDriver strategy; measurements still verify real page/media state')
     ap.add_argument('--quiet-trace', action='store_true', help='disable verbose media/GL/layer traces for timing runs')
     ap.add_argument('--io-policy', choices=['passthrough', 'utility', 'standard', 'default'], help='process-local diagnostic interposer mode')
+    ap.add_argument('--ui-qos', choices=['interactive','initiated'], help='diagnostic startup QoS; no affinity/frequency writes')
     ap.add_argument('--measure-video', action='store_true')
     ap.add_argument('--measure-all-videos', action='store_true', help='measure each owned video tab, with separate CPU/AVD counters')
     ap.add_argument('--browse-stability', action='store_true', help='announced30minute ordinary-site browsing with abnormal-content-exit observer')
@@ -80,8 +82,12 @@ def main():
     ap.add_argument('--benchmark', choices=['speedometer', 'motionmark', 'jetstream'])
     ap.add_argument('--measure-fixture', action='store_true')
     ap.add_argument('--fixture-repetitions', type=int, default=1,
-                    help='one to three separately timed measurements in the same browser')
+                    help='one to four separately timed measurements in the same browser')
+    ap.add_argument('--fixture-qos-sequence', help='paired main-thread modes, e.g. default,interactive,default,interactive')
+    ap.add_argument('--qos-library', help='already-inserted private diagnostic DSO for main-thread QoS')
+    ap.add_argument('--fixture-seconds', type=int, default=10, choices=range(1,61), metavar='1..60')
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
+    ap.add_argument('--pipeline-profile', action='store_true', help='diagnostic native/JS/IPC Gecko profile of this browser family')
     ap.add_argument('--scroll-fixture', action='store_true', help='labelled programmatic scroll on the owned fixture')
     ap.add_argument('--no-startup-cache', action='store_true', help='diagnostic only: fail startup-cache disk writes in this isolated run')
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
@@ -109,7 +115,18 @@ def main():
         raise ValueError('Drag/clipboard seat checks require --native-ui admission')
     if args.profile_fixture and (not args.measure_fixture or not args.sample_path):
         raise ValueError('Fixture profiling requires --measure-fixture and --sample-path')
-    if not 1 <= args.fixture_repetitions <= 3 or (args.fixture_repetitions != 1 and
+    if args.pipeline_profile and (not args.measure_fixture or args.profile_fixture or args.fixture_repetitions != 1):
+        raise ValueError('Pipeline profiling requires one fixture measurement without a second sampler')
+    if args.fixture_qos_sequence:
+        modes=args.fixture_qos_sequence.split(',')
+        if not args.qos_library or args.qos_library not in (args.insert_library or '').split(':'):
+            raise ValueError('QoS diagnostic requires its explicitly inserted library')
+        if any(mode not in ('default','initiated','interactive') for mode in modes) or not 2 <= len(modes) <= 4:
+            raise ValueError('QoS diagnostic requires two to four valid modes')
+        if not args.measure_fixture or args.profile_fixture or args.pipeline_profile or args.ui_qos:
+            raise ValueError('Paired QoS requires a fixture without startup QoS or diagnostic profiling')
+        args.fixture_repetitions=len(modes)
+    if not 1 <= args.fixture_repetitions <= 4 or (args.fixture_repetitions != 1 and
             (not args.measure_fixture or args.profile_fixture)):
         raise ValueError('Repeated fixture timing requires --measure-fixture without diagnostic profiling')
     if not 0 <= args.profile_delay <= 6:
@@ -136,6 +153,10 @@ def main():
     (profile / 'user.js').write_text(''.join('user_pref(%s, %s);\n' % (json.dumps(k), json.dumps(v))
                                           for k, v in prefs.items()))
     env = os.environ.copy()
+    if args.pipeline_profile:
+        env['SFFX_GPU_PHASE_TRACE']='1'
+    else:
+        env.pop('SFFX_GPU_PHASE_TRACE',None)
     if args.font_config:
         if not args.font_config.startswith('/private/var/db/sffx/') or '..' in Path(args.font_config).parts:
             raise ValueError('Font configuration must be inside the private prefix')
@@ -166,6 +187,8 @@ def main():
         env['SFFX_FRAME_TRACE'] = '1'
     if args.event_trace:
         env['SFFX_EVENT_TRACE'] = '1'
+    if args.window_trace:
+        env['PD_WS_TRACE']='1'
     if args.precise_scroll:
         env.update(SFFX_PRECISE_SCROLL='1', SFFX_SCROLL_TRACE='1')
     if args.native_drag:
@@ -177,6 +200,10 @@ def main():
         env['MOZ_LOG'] = 'PlatformDecoderModule:5,AppleMedia:5'
     if args.io_policy:
         env['SFFX_IO_POLICY'] = args.io_policy
+    if args.ui_qos:
+        env['SFFX_UI_QOS']=args.ui_qos
+    else:
+        env.pop('SFFX_UI_QOS',None)
     if args.no_startup_cache:
         # Mozilla's supported cache-path override. The parent deliberately does
         # not exist, so writes fail promptly; profile data remains isolated.
@@ -204,7 +231,7 @@ def main():
                   gpu_coalesce_ticks=args.gpu_coalesce_ticks,
                   synthetic_input=args.presentation_seat or args.scroll_fixture or bool(args.benchmark) or args.native_ui or args.panels, prefs=prefs,
                   diagnostic_library=args.insert_library, startup_cache_write_disabled=args.no_startup_cache,
-                  io_policy=args.io_policy, verbose_trace=not args.quiet_trace)
+                  io_policy=args.io_policy, ui_qos=args.ui_qos, verbose_trace=not args.quiet_trace, window_trace=args.window_trace)
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
                                     service=env.get('SFFX_IOSURFACE_SERVICE'))
     owned = {}
@@ -346,7 +373,7 @@ def main():
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.measure_fixture:
-                                client.socket.settimeout(max(1, min(16, deadline - time.monotonic())))
+                                client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline - time.monotonic())))
                                 profiler = None
                                 if args.profile_fixture:
                                     import threading
@@ -381,10 +408,21 @@ def main():
                                             profile_result['error'] = 'Sampler timeout'
                                     profiler = threading.Thread(target=profile_fixture)
                                     profiler.start()
+                                if args.fixture_qos_sequence:
+                                    from fixture_qos import set_main
+                                    result['fixture_qos']=set_main(client,args.qos_library,modes[0])
                                 result['fixture_cpu_before'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
+                                pipeline_admission=None
+                                if args.pipeline_profile:
+                                    from pipeline_profile import start as start_pipeline
+                                    client.socket.settimeout(50)
+                                    pipeline_admission=start_pipeline(client)
                                 try:
-                                    result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                    result['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
                                 finally:
+                                    if pipeline_admission:
+                                        from pipeline_profile import stop as stop_pipeline
+                                        result['pipeline_profile']=stop_pipeline(client,args.run,pipeline_admission)
                                     if profiler:
                                         cancel_profile.set()
                                         profiler.join(timeout=15)
@@ -392,11 +430,15 @@ def main():
                                 result['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                                 if args.fixture_repetitions > 1:
                                     fields = ['fixture_measurement', 'fixture_cpu_before', 'fixture_cpu_after']
+                                    if args.fixture_qos_sequence:fields.append('fixture_qos')
                                     result['fixture_repetitions'] = [{key: result[key] for key in fields}]
                                     for index in range(1, args.fixture_repetitions):
-                                        client.socket.settimeout(max(1, min(16, deadline-time.monotonic())))
+                                        client.socket.settimeout(max(1, min(args.fixture_seconds+6, deadline-time.monotonic())))
+                                        qos=None
+                                        if args.fixture_qos_sequence:qos=set_main(client,args.qos_library,modes[index])
                                         entry = dict(fixture_cpu_before=dict(elapsed=time.monotonic()-start, ps=snapshot()))
-                                        entry['fixture_measurement'] = client.measure_fixture(args.scroll_fixture)
+                                        if qos:entry['fixture_qos']=qos
+                                        entry['fixture_measurement'] = client.measure_fixture(args.scroll_fixture,args.fixture_seconds*1000)
                                         entry['fixture_cpu_after'] = dict(elapsed=time.monotonic()-start, ps=snapshot())
                                         result['fixture_repetitions'].append(entry)
                                         (args.run / 'fixture-repetitions.json').write_text(

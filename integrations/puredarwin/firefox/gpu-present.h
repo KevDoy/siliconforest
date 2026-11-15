@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <stdint.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <sys/time.h>
 #ifdef __aarch64__
 #include <arm_neon.h>
 #endif
@@ -162,8 +163,14 @@ static void sfGPUTextureParameters(void){
  sfGPU.glTexParameteri(0x0de1,0x2802,0x812f);sfGPU.glTexParameteri(0x0de1,0x2803,0x812f);
 }
 
+static double sfGPUClockMs(void){
+ struct timeval t;gettimeofday(&t,NULL);return t.tv_sec*1000.0+t.tv_usec/1000.0;
+}
+
 static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void *base,int w,int h){
  if(!p||p->failed||!f||!base||f->w!=w||f->h!=h)return 0;
+ int trace=getenv("SFFX_GPU_PHASE_TRACE")!=NULL;
+ double started=trace?sfGPUClockMs():0,imported=started,baseDone=started,drawDone=started,finished=started;
  void *previous=sfGPU.CGLGetCurrentContext();int good=sfGPU.CGLSetCurrentContext(p->context)==0;
  if(!good)return 0;
  for(int clear=0;clear<8&&sfGPU.glGetError();clear++){} // this dedicated context never carries another caller's errors
@@ -171,6 +178,7 @@ static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void
  good=sfGPU.CGLTexImageIOSurface2D(p->context,0x0de1,0x1908,w,h,0x80e1,0x8367,f->surface,0)==0;
  sfGPU.glBindFramebuffer(0x8d40,p->fbo);sfGPU.glFramebufferTexture2D(0x8d40,0x8ce0,0x0de1,f->texture,0);
  good=good&&sfGPU.glCheckFramebufferStatus(0x8d40)==0x8cd5;
+ if(trace)imported=sfGPUClockMs();
  if(good){
   size_t bytes=(size_t)w*h*4;
   sfGPU.glBindTexture(0x0de1,p->baseTexture);sfGPU.glPixelStorei(0x0cf5,4);sfGPU.glPixelStorei(0x0cf2,0);
@@ -182,6 +190,7 @@ static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void
   }else if(!sfGPUBaseEqual(p->baseCache,base,bytes)){
    sfGPU.glTexSubImage2D(0x0de1,0,0,0,w,h,0x80e1,0x1401,base);memcpy(p->baseCache,base,bytes);p->baseUploadBytes+=bytes;
   }
+  if(trace)baseDone=sfGPUClockMs();
   sfGPUTextureParameters();
   sfGPU.glViewport(0,0,w,h);sfGPU.glDisable(0x0b71);sfGPU.glDisable(0x0b90);sfGPU.glDisable(0x0c11);sfGPU.glDisable(0x0be2);
   sfGPU.glDisable(0x8db9);sfGPU.glClearColor(0,0,0,0);sfGPU.glClear(0x4000);
@@ -195,7 +204,9 @@ static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void
    good=lw>0&&lh>0&&sfGPU.CGLTexImageIOSurface2D(p->context,0x0de1,0x1908,lw,lh,0x80e1,0x8367,l->surface,0)==0;
    if(good){sfGPUTextureParameters();sfGPUQuad(l->dx,l->dy,l->dw,l->dh,l->sx/lw,l->sy/lh,l->sw/lw,l->sh/lh);p->layerBytes+=(uint64_t)lw*lh*4;}
   }
+  if(trace)drawDone=sfGPUClockMs();
   sfGPU.glFinish();good=good&&sfGPU.glGetError()==0;
+  if(trace)finished=sfGPUClockMs();
   if(getenv("SFFX_GPU_VERIFY")){
    unsigned char a[4]={0},b[4]={0};sfGPU.glReadPixels(w/4,h/2,1,1,0x1908,0x1401,a);sfGPU.glReadPixels(w*3/4,h/2,1,1,0x1908,0x1401,b);
    const unsigned char *raw=sfGPU.IOSurfaceGetBaseAddress(f->surface);size_t stride=sfGPU.IOSurfaceGetBytesPerRow(f->surface);
@@ -206,6 +217,8 @@ static int sfGPUCompose(struct sfGPUPresenter *p,struct sfGPUFrame *f,const void
   }
  }
  sfGPU.CGLSetCurrentContext(previous);
+ if(trace)fprintf(stderr,"FXGPUPHASE context=%p frame=%llu epoch_ms=%.3f import_ms=%.3f base_ms=%.3f draw_ms=%.3f finish_ms=%.3f restore_ms=%.3f total_ms=%.3f success=%d\n",
+  p->context,(unsigned long long)(p->frames+1),started,imported-started,baseDone-imported,drawDone-baseDone,finished-drawDone,sfGPUClockMs()-finished,sfGPUClockMs()-started,good);
  if(good)p->frames++;else{p->failed=1;p->failures++;}
  return good;
 }
