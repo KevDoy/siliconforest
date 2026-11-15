@@ -28,6 +28,10 @@ class PDCIOPCIEnumeration : public OSObject {
 #ifdef PD_CIO_ENDPOINT_MAPPER
  PDCIOPCIDartMapper *i210Mapper;
  bool mapperAttempted;
+#if PD_CIO_I210_NETWORK
+ IOPCIDevice *usbMapperEndpoint;
+ bool usbMapperAttempted;
+#endif
 #endif
  static bool power(void *);
  static bool tunnel(void *);
@@ -42,6 +46,9 @@ public:
  int publishAfterApproval();
 #ifdef PD_CIO_ENDPOINT_MAPPER
  int prepareI210Mapper(); // IOMapper; explicit NETWORK variant then retries I210 matching.
+#if PD_CIO_I210_NETWORK
+ int prepareDockUSBMapper(); // Source-only first-FL1100 factory; no driver/BME grant.
+#endif
 #endif
  bool blocksStop() const;
  bool pristineForRetrain(); // No reserved controller or attempted host.

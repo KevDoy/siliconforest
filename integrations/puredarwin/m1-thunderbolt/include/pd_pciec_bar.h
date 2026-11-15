@@ -4,6 +4,19 @@
 #define PD_PCIEC_BAR_H
 #include <stdint.h>
 #include <errno.h>
+static inline int pd_pciec_bar_bus(const uint32_t bars[6],unsigned index,uint64_t *bus)
+{
+ if(!bars || !bus || index>=6)return EINVAL;
+ uint32_t low=bars[index];
+ if(low==UINT32_MAX || (low&1))return ENXIO;
+ unsigned kind=(low>>1)&3;uint64_t value=low&~0xfu;
+ if(kind==2){
+  if(index==5 || bars[index+1]==UINT32_MAX)return EPROTO;
+  value|=(uint64_t)bars[index+1]<<32;
+ }else if(kind)return EPROTO;
+ if(!value)return ENXIO;
+ *bus=value;return 0;
+}
 static inline int pd_pciec_bar_cpu(uint64_t bus,uint64_t bytes,uint64_t *cpu)
 {
  if(!cpu || !bytes)return EINVAL;

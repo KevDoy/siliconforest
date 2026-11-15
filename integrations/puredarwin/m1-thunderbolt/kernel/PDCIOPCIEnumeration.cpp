@@ -13,6 +13,9 @@ bool PDCIOPCIEnumeration::initWithOwner(IOService *service,void *ctx,bool (*proo
  posted=committed=attempted=revoked=0;preparing=false;
 #ifdef PD_CIO_ENDPOINT_MAPPER
  i210Mapper=NULL;mapperAttempted=false;
+#if PD_CIO_I210_NETWORK
+ usbMapperEndpoint=NULL;usbMapperAttempted=false;
+#endif
 #endif
  if(!service || !ctx || !proof || !OSObject::init())return false;
  lock=IOLockAlloc();if(!lock)return false;
@@ -227,6 +230,57 @@ int PDCIOPCIEnumeration::prepareI210Mapper()
 #endif
  endpoint->release();return 0;
 }
+#if PD_CIO_I210_NETWORK
+int PDCIOPCIEnumeration::prepareDockUSBMapper()
+{
+ // Explicit owner command gate only, after the real I210 is active. No
+ // caller/profile exposes this factory yet, and no USB matching is retried.
+ if(!i210Mapper || !host || !controller || !tunnel(this) || host->isInactive())return ENODEV;
+ auto ethernet=OSDynamicCast(IOPCIDevice,i210Mapper->getProvider());
+ if(!ethernet || ethernet->configRead32(0)!=0x15338086 ||
+    !(ethernet->configRead16(4)&4))return ENODEV;
+ IOMapper *bound=IOMapper::copyMapperForDevice(ethernet);bool same=bound==i210Mapper;OSSafeReleaseNULL(bound);
+ if(!same)return ENODEV;
+ int ret=catalogueSafe();if(ret)return ret;
+ IOLockLock(lock);bool prior=usbMapperAttempted;usbMapperAttempted=true;IOLockUnlock(lock);
+ if(prior)return EBUSY;
+ auto it=IORegistryIterator::iterateOver(host,gIOServicePlane,kIORegistryIterateRecursively);
+ if(!it)return ENOMEM;
+ IOPCIDevice *endpoint=NULL;unsigned seen=0;bool valid=true;
+ while(auto object=it->getNextObject()){
+  if(++seen>256){valid=false;break;}
+  auto dev=OSDynamicCast(IOPCIDevice,object);
+  if(!dev || dev->configRead32(0)!=0x11001b73 || (dev->configRead32(8)>>8)!=0x0c0330)continue;
+  // Linux's attached Keychron is on the FL1100 behind switch port0. Darwin
+  // bus numbering differs: derive the nearest actual Alpine Ridge bridge.
+  IORegistryEntry *parent=dev->getParentEntry(gIOServicePlane);IOPCIDevice *bridge=NULL;unsigned depth=0;
+  while(parent && parent!=host && depth++<64){
+   bridge=OSDynamicCast(IOPCIDevice,parent);if(bridge)break;
+   parent=parent->getParentEntry(gIOServicePlane);
+  }
+  if(!bridge || bridge->configRead32(0)!=0x15d38086 ||
+     (bridge->configRead32(8)>>8)!=0x060400 || bridge->getDeviceNumber() || bridge->getFunctionNumber())continue;
+  if(endpoint){valid=false;break;}endpoint=dev;endpoint->retain();
+ }
+ if(!it->isValid())valid=false;it->release();
+ if(!valid || !endpoint){OSSafeReleaseNULL(endpoint);return ENODEV;}
+ // Keep even partial requester/binding state with its real owner until
+ // reboot. Registration validates live root ownership and never resets it.
+ usbMapperEndpoint=endpoint;
+ IOReturn registered=i210Mapper->registerDockUSB(endpoint);
+ if(registered!=kIOReturnSuccess)return fail(EIO);
+ if(!tunnel(this) || endpoint->getProperty("iommu-parent") ||
+    !endpoint->setProperty("iommu-parent",i210Mapper))return fail(EIO);
+ bound=IOMapper::copyMapperForDevice(endpoint);same=bound==i210Mapper;OSSafeReleaseNULL(bound);
+ auto query=OSSymbol::withCString("PDCIOPCIDMAReady");
+ bool ready=same && query && i210Mapper->callPlatformFunction(query,false,endpoint,NULL,NULL,NULL)==kIOReturnSuccess;
+ OSSafeReleaseNULL(query);if(!ready)return fail(EIO);
+ ret=host->publishDockUSBResources(endpoint);if(ret)return fail(ret);
+ ret=host->resolveDockUSBInterrupt(endpoint);if(ret)return fail(ret);
+ owner->setProperty("pcie-usb-mapper-stage","actual-shared-root-resources-MSI-no-driver-no-BME");
+ owner->setProperty("pcie-usb-mapper-created",true);return 0;
+}
+#endif
 #endif
 int PDCIOPCIEnumeration::deactivate()
 {

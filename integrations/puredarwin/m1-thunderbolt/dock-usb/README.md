@@ -8,9 +8,12 @@ make the old generic PCI allocation path safe.
 The helper requires the actual shared PCIe-C IOMapper lookup and a fresh
 readiness response for this endpoint. The native mapper now has an explicit registration method for up to four
 actual dock xHCI endpoints on the same host, reserving their real SID0
-requesters without resetting its root or IOVA allocator. No factory calls
-that method yet or binds the actual mapper to USB devices; current boot
-profiles therefore still refuse USB. It must never
+requesters without resetting its root or IOVA allocator. A detached enumeration
+factory now selects the keyboard's FL1100 by its actual Alpine Ridge port0
+ancestry, binds the real shared mapper, verifies 32/64-bit native BAR resources
+and allocates one MSI through the real per-port family controller. No command
+calls that factory yet; it neither retries driver matching nor grants BME.
+Current boot profiles therefore still refuse USB. It must never
 initialize the direct USB1 DART or replace the active I210 root.
 
 Each allocation owns whole16KiB physical pages and a real IODMACommand.
@@ -21,9 +24,9 @@ cannot break that ownership cycle. Every existing USB ring/payload release
 site must therefore be converted before using this class. Failed prepare,
 segment validation, complete or inactive-clear retains backing until reboot.
 
-Still required: real shared-domain endpoint registration, retained per-MMIO
-physical access guards, native BAR resources and posted-write mappings,
-registered/armed MSI, checked late BME/run, all USB release sites and actual
+Still required: factory command wiring, retained per-MMIO physical access
+guards, posted-write mappings, registered/armed MSI, checked late BME/run,
+all USB release sites and actual
 IRQ/work/producer teardown. No Ethernet, keyboard, storage or hot-unplug
 result follows from this source or a successful object build.
 

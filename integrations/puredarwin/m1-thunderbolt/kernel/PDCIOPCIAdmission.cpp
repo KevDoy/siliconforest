@@ -114,21 +114,52 @@ IOReturn PDCIOPCIHost::admitI210(IOPCIDevice *device)
 }
 
 int PDCIOPCIHost::publishI210Resources(IOPCIDevice *device)
+{return publishEndpointResources(device,false);}
+int PDCIOPCIHost::publishDockUSBResources(IOPCIDevice *device)
+{return publishEndpointResources(device,true);}
+int PDCIOPCIHost::resolveDockUSBInterrupt(IOPCIDevice *device)
 {
- auto fail=[this](int error){leaseOwner->setProperty("pcie-i210-resource-error",(UInt32)error,32);return error;};
- if(!device || ml_at_interrupt_context() || !interruptPower(this) ||
-    device->configRead32(0)!=0x15338086 || (device->configRead32(8)>>8)!=0x020000)return fail(ENODEV);
+ if(!device || ml_at_interrupt_context() || !msi || !interruptPower(this) ||
+    (device->configRead16(4)&4))return ENODEV;
+ auto mapper=IOMapper::copyMapperForDevice(device);
+ bool ready=mapper && mapper->metaCast("PDCIOPCIDartMapper") &&
+  mapper->callPlatformFunction("PDCIOPCIDMAReady",false,device,NULL,NULL,NULL)==kIOReturnSuccess;
+ OSSafeReleaseNULL(mapper);if(!ready)return ENODEV;
+ int type=0;
+ if(device->getInterruptType(0,&type)==kIOReturnSuccess)return EBUSY;
+ UInt8 capability=0;
+ if(!device->findPCICapability(kIOPCIMSICapability,&capability) || !capability)return ENODEV;
+ // Call the public allocator used by IOPCIBridge::resolveMSIInterrupts.
+ // This exact retained per-port controller independently checks the actual
+ // host, mapper and endpoint identity; no IRQ properties are invented here.
+ IOReturn result=msi->allocateDeviceInterrupts(device,0,capability);
+ if(result!=kIOReturnSuccess || device->getInterruptType(0,&type)!=kIOReturnSuccess ||
+    !(type&kIOInterruptTypePCIMessaged))return EIO;
+ device->setProperty("PDCIOUSBMSIAllocated",true);return 0;
+}
+int PDCIOPCIHost::publishEndpointResources(IOPCIDevice *device,bool usb)
+{
+ if(!device || ml_at_interrupt_context())return EINVAL;
+ static const char *i210Keys[]={"pcie-i210-resource-error","pcie-i210-resource-BARs","pcie-i210-resource-stage","pcie-i210-resource-memory-count"};
+ static const char *usbKeys[]={"PDCIOUSBResourceError","PDCIOUSBResourceBARs","PDCIOUSBResourceStage","PDCIOUSBResourceMemoryCount"};
+ const char **keys=usb?usbKeys:i210Keys;IORegistryEntry *record=usb?device:leaseOwner;
+ auto fail=[record,keys](int error){record->setProperty(keys[0],(UInt32)error,32);return error;};
+ if(!interruptPower(this))return fail(ENODEV);
+ UInt32 id=device->configRead32(0),code=device->configRead32(8)>>8;
+ if(usb ? code!=0x0c0330 || (id!=0x11001b73 && id!=0x12421b21 && id!=0x15d48086) :
+          id!=0x15338086 || code!=0x020000)return fail(ENODEV);
+ if(device->configRead16(4)&4)return fail(EBUSY);
  IORegistryEntry *parent=device;unsigned depth=0;
  while(parent && parent!=this && depth++<64)parent=parent->getParentEntry(gIOServicePlane);
  if(parent!=this)return fail(ENODEV);
  UInt32 bars[6];for(unsigned n=0;n<6;++n)bars[n]=device->configRead32(0x10+4*n);
- leaseOwner->setProperty("pcie-i210-resource-BARs",bars,sizeof(bars));
+ record->setProperty(keys[1],bars,sizeof(bars));
  auto existing=device->getDeviceMemoryWithRegister(0x10);
  if(existing){
   IOByteCount span=0;UInt64 physical=existing->getPhysicalSegment(0,&span,kIOMemoryMapperNone),wanted=0;
-  UInt64 bytes=existing->getLength();
-  if((bars[0]&7) || pd_pciec_bar_cpu(bars[0]&~0xfu,bytes,&wanted) || physical!=wanted || span<bytes)return fail(EIO);
-  leaseOwner->setProperty("pcie-i210-resource-stage","existing-BAR0-verified");return fail(0);
+  UInt64 bytes=existing->getLength(),bus=0;
+  if(pd_pciec_bar_bus(bars,0,&bus) || pd_pciec_bar_cpu(bus,bytes,&wanted) || physical!=wanted || span<bytes)return fail(EIO);
+  record->setProperty(keys[2],"existing-BAR0-verified");return fail(0);
  }
  auto property=device->copyProperty("reg");
  struct Release {OSObject *value;~Release(){if(value)value->release();}} releaseProperty={property};
@@ -143,13 +174,10 @@ int PDCIOPCIHost::publishI210Resources(IOPCIDevice *device)
   if(registerNumber<0x10 || registerNumber>0x24 || (registerNumber&3))return fail(EPROTO);
   unsigned index=(registerNumber-0x10)/4;
   if(seen&(1u<<index))return fail(EPROTO);seen|=1u<<index;
-  UInt64 bytes=((UInt64)row[3]<<32)|row[4],bus=bars[index]&~0xfu,cpu=0;
-  UInt32 low=bars[index];if(low==UINT32_MAX || (low&1) || !bytes)return fail(ENXIO);
-  unsigned kind=(low>>1)&3;
-  if(kind==2){if(index==5 || bars[index+1]==UINT32_MAX)return fail(EPROTO);bus|=(UInt64)bars[index+1]<<32;}
-  else if(kind)return fail(EPROTO);
-  if(!bus)return fail(ENXIO);
-  int error=pd_pciec_bar_cpu(bus,bytes,&cpu);if(error)return fail(error);
+  UInt64 bytes=((UInt64)row[3]<<32)|row[4],bus=0,cpu=0;
+  if(!bytes)return fail(ENXIO);
+  int error=pd_pciec_bar_bus(bars,index,&bus);if(error)return fail(error);
+  error=pd_pciec_bar_cpu(bus,bytes,&cpu);if(error)return fail(error);
   auto memory=IOMemoryDescriptor::withAddressRange(cpu,bytes,kIODirectionNone|kIOMemoryMapperNone,NULL);
   if(!memory)return fail(ENOMEM);memory->setTag(row[0]);
   bool added=array->setObject(memory);memory->release();if(!added)return fail(ENOMEM);
@@ -160,6 +188,6 @@ int PDCIOPCIHost::publishI210Resources(IOPCIDevice *device)
  // No BAR, bridge window, BME, or PCI configuration write is performed here.
  device->setDeviceMemory(array);
  if(!device->getDeviceMemoryWithRegister(0x10))return fail(EIO);
- leaseOwner->setProperty("pcie-i210-resource-stage","live-BAR-descriptors-published");
- leaseOwner->setProperty("pcie-i210-resource-memory-count",array->getCount(),32);return fail(0);
+ record->setProperty(keys[2],"live-BAR-descriptors-published");
+ record->setProperty(keys[3],array->getCount(),32);return fail(0);
 }

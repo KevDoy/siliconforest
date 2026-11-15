@@ -48,6 +48,7 @@ class PDCIOPCIHost : public IOPCIBridge {
     bool networkAttempted;
     IOReturn admitI210(IOPCIDevice *);
     bool busMasterAllowed(IOPCIAddressSpace);
+    int publishEndpointResources(IOPCIDevice *,bool usb);
 #endif
     bool physicalPower(); // Always-on PMGR proof before any PCIe-C access.
     volatile uint8_t *address(IOPCIAddressSpace,UInt8,unsigned);
@@ -64,6 +65,8 @@ public:
 #if PD_CIO_I210_NETWORK
     int bindI210Access(IOPCIDevice *);
     int publishI210Resources(IOPCIDevice *);
+    int publishDockUSBResources(IOPCIDevice *);
+    int resolveDockUSBInterrupt(IOPCIDevice *);
 #endif
     IOReturn blockConfiguration();
     bool configure(IOService *) override;

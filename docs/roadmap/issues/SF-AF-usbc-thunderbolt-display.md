@@ -2701,3 +2701,23 @@ binary hash and live Wi-Fi query BEFORE any reboot/cycle, under normal locks.
 A failed preflight exits without installing or starting a recovery reboot.
 The actual I210 DHCP attempt still awaits this corrected run, using the same
 non-AVE CIO33 kernel rather than another collection build.
+
+### Dock USB requester/resource factory — source only, 2026-11-15
+
+The detached factory selects the Keychron branch's unique FL1100 by its
+nearest actual Alpine Ridge downstream bridge slot0, without assuming Linux
+bus numbers. After the I210 is active it registers that actual USB requester
+with the existing shared SID0 mapper, binds the native mapper object, checks
+native lookup/readiness, publishes live 32/64-bit BAR CPU descriptors, and
+allocates one MSI through the retained native per-port controller. It does
+not reset the DART root or allocator. No command calls this factory yet;
+there is no USB driver matching, BME grant, controller start or hardware claim.
+
+The first SDK build failed because resolveMSIInterrupts is private in the
+actual IOPCIFamily. That failure is preserved. The corrected source uses the
+public allocateDeviceInterrupts method called by that family, checks actual
+MSI type, and refuses an already allocated interrupt. Native ARM64 SDK
+xqc8d9di0pw55w1sla20dy0xwmfm6970 and the updated host sanitizer suite pass;
+all six required repository checks pass. These checks establish compilation
+and host logic only. The factory is excluded from frozen CIO35, which still
+reuses CIO33's kernel and tests I210 DHCP with the native status tool.

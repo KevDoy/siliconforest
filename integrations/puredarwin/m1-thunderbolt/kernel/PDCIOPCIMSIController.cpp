@@ -62,8 +62,13 @@ bool PDCIOPCIMSIController::deviceAllowed(IOPCIDevice *device)
  if(!device || ml_at_interrupt_context() || !ready())return false;
  IORegistryEntry *p=device;unsigned depth=0;
  while(p && p!=powerOwner && depth++<64)p=p->getParentEntry(gIOServicePlane);
- if(p!=powerOwner || device->configRead32(0)!=0x15338086 ||
-    (device->configRead32(8)>>8)!=0x020000)return false;
+ if(p!=powerOwner)return false;
+ UInt32 id=device->configRead32(0),code=device->configRead32(8)>>8;
+ bool i210=id==0x15338086 && code==0x020000;
+ bool usb=code==0x0c0330 && (id==0x11001b73 || id==0x12421b21 || id==0x15d48086);
+ // USB gets no MSI until the explicit factory bound this actual endpoint
+ // to the live shared domain. Bridge hotplug and generic PCI stay refused.
+ if(!i210 && !(usb && mapperReady(device)))return false;
  UInt8 cap=0;return device->findPCICapability(kIOPCIMSICapability,&cap)!=0 && cap!=0;
 }
 bool PDCIOPCIMSIController::mapperReady(IOPCIDevice *device)
@@ -79,8 +84,7 @@ bool PDCIOPCIMSIController::mapperReady(IOPCIDevice *device)
 }
 uint32_t PDCIOPCIMSIController::getDeviceMSILimit(IOPCIDevice *device,uint32_t requested)
 {
- // First functional scope is I210, one real MSI. USB controllers and bridge
- // hotplug interrupts are deliberately not admitted by this variant yet.
+ // One native MSI for I210 or an explicitly bound real dock xHCI endpoint.
  return requested && deviceAllowed(device)?1:0;
 }
 IOReturn PDCIOPCIMSIController::messageForDevice(IOService *entry,UInt32 vector,UInt32 *message)
