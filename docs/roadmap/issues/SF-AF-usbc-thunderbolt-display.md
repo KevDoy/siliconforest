@@ -2442,3 +2442,36 @@ diagnostics only, with the qualified CIO25 USB/Type-C/DCP artifacts frozen.
 The mapper factory is absent from that profile. CIO25 remains installed
 without AVE or a pdave argument, following CIO26's failed authorization and
 normal rollback. Hardware retry and post-authorization diagnostics are next.
+
+
+### 2026-11-15 16:29Z: first dock PCI inventory observed on Darwin
+
+CIO27 (`efd06345b`, capsule
+`1925387085058fc4e4c542cc72cf0470a99b4215bc393d5cd24426fd4a963c24`)
+is installed and qualified. Root TS3 authorization returned success, count
+0 to 1, error 0. The actual PCIe-C cold startup, link, one-second endpoint
+settle, endpoint-DART blocking and native PCI host publication completed.
+The independent native inventory returned success with 12 PCI functions:
+seven bridges, four xHCI controllers (two FL1100, one ASM1142 and one Intel
+Alpine Ridge), and one Intel I210 `8086:1533`. Darwin assigned the I210 bus3;
+Linux assigns bus6, so downstream code must use actual ancestry and identity.
+This satisfies dock stage(a), registry enumeration. No endpoint BME, driver
+admission, DMA, Ethernet packet, keyboard input or external-display success
+is claimed. The private inclusive HopID correction resolves CIO26's
+authorization ENOMEM. DP tunnel activation attempts still fail; external
+DCP/PHY integration is pending. Optional retimer NVM export remains unsupported.
+
+Actual collection checks: 57 modules, only CIO code UUID changed, other56
+fixed including CIO25 GPIO41/Type-C/DCP, four existing PCI personalities,
+no endpoint mapper/MSI, no AVE module or pdave argument, unchanged605-byte
+configuration and boot.bin, zero segment overlaps. Standard.next/inject and
+Wi-Fi restored; UART reader reaped before lock release at16:29:05Z.
+The qualified rollback is CIO25. No AVE builds, probes or extraction occurred.
+
+The quiet60 result is kernel2.22915% of one CPU and host97.95542% idle,
+NHI24 interrupts (12TX0+12RX0 including explicit-query boundaries; other22
+lines zero). Compositor3.24709% (cleanup1.96448%, main0.87197%, HID0.40798%);
+warm50M work83.676–83.682ms, 100k syscalls14.476ms. There is no NHI storm
+or reproduced fixed-work slowdown; the reported AppKit timing regression
+remains unexplained. Next: real I210 mapper/MSI/checked driver admission,
+Ethernet link and interface-owned DHCP, then the attached keyboard.
