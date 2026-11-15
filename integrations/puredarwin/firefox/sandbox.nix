@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Private interposition of only sandbox_init APIs, never a libSystem replacement.
 # Reuse the exact compiler and permission translation proven by SF-U in QEMU.
-{ prefix ? "/private/var/db/sffx/sandbox-v2" }:
+{ prefix ? "/private/var/db/sffx/sandbox-v4" }:
 let
   a = import ../cocoa/arm64.nix;
   inherit (a) pkgs pd;
@@ -25,6 +25,8 @@ in pkgs.stdenv.mkDerivation {
       "--- a/src/Libraries/libSystem/stub/pd_dirhelper.c"
       (builtins.readFile ../cocoa/patches/0014-libsandbox-window-server-permission-is-the-compositor-socket.patch))))
     ./sandbox-patches/0001-explicit-accelerator-device-permission.patch
+    ./sandbox-patches/0002-explicit-font-server-read-permission.patch
+    ./sandbox-patches/0003-explicit-accelerator-render-node-permission.patch
   ];
   dontConfigure = true;
   buildPhase = ''

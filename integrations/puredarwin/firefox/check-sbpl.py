@@ -55,5 +55,28 @@ for name, source, expected in cases:
     assert bool(grants) == expected, (name, emitted)
     if grants:
         assert grants == [(5, 0, 1, '/dev/pdavd')], grants
-    report.append(dict(name=name, passed=True, avd_grants=grants))
+    graphics = [r for r in emitted if r[3] in {'/usr/local/lib/mesa-asahi', '/dev/dri', '^/dev/dri/renderD[0-9]+$'}]
+    assert bool(graphics) == expected, (name, emitted)
+    if graphics:
+        assert set(graphics) == {(3, 0, 2, '/usr/local/lib/mesa-asahi'),
+                                 (3, 0, 1, '/dev/dri'), (7, 0, 3, '^/dev/dri/renderD[0-9]+$')}
+    report.append(dict(name=name, passed=True, avd_grants=grants, graphics_grants=graphics))
+font_paths = {'/etc/fonts', '/private/etc/fonts', '/usr/share/fonts',
+              '/System/Library/Fonts', '/var/cache/fontconfig', '/private/var/cache/fontconfig'}
+font_cases = [
+    ('font-server', '(allow mach-lookup (global-name "com.apple.FontObjectsServer"))', True),
+    ('fonts-service', '(allow mach-lookup (global-name "com.apple.fonts"))', True),
+    ('deny-fonts', '(deny mach-lookup (global-name "com.apple.fonts"))', False),
+    ('unrelated-font-name', '(allow mach-lookup (global-name "unrelated.service"))', False),
+    ('wrong-font-operation', '(allow iokit-open (global-name "com.apple.fonts"))', False),
+    ('font-intersection', '(allow mach-lookup (require-all (global-name "com.apple.fonts") (literal "/other")))', False),
+]
+for name, source, expected in font_cases:
+    emitted = rules('(version 1) (deny default) ' + source)
+    grants = [r for r in emitted if r[1] == 0 and r[3] in font_paths]
+    assert bool(grants) == expected, (name, emitted)
+    if grants:
+        assert {r[3] for r in grants} == font_paths
+        assert all(r[:3] == (3, 0, 2) for r in grants), grants
+    report.append(dict(name=name, passed=True, font_read_grants=grants))
 print(json.dumps(dict(scope='host compiler permission checks only', tests=report), indent=2))

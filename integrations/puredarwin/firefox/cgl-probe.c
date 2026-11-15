@@ -3,6 +3,12 @@
  * Declarations below describe the public ABI; no Apple SDK headers are used.
  */
 #include <dlfcn.h>
+#include <stdint.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+extern int sandbox_init(const char *,uint64_t,char **);
+extern void sandbox_free_error(char *);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +46,20 @@ int main(int argc, char **argv) {
     LOAD(void, glClear, (unsigned int));
     LOAD(void, glReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *));
     LOAD(void, glFinish, (void));
+    if(argc>2){
+        char *error=NULL;
+        const char *profile=!strcmp(argv[2],"allow")?
+          "(version 1)(deny default)(allow iokit-open (iokit-connection \"IOAccelerator\"))":
+          "(version 1)(deny default)(allow iokit-open (iokit-connection \"unrelated\"))";
+        int applied=sandbox_init(profile,0,&error);
+        printf("FXCGL sandbox=%s applied=%d error=%s\n",argv[2],applied,error?error:"none");sandbox_free_error(error);
+        if(applied)return 1;
+        errno=0;int primary=open("/dev/dri/card0",O_RDWR),pe=errno;
+        errno=0;int codewrite=open("/usr/local/lib/mesa-asahi/libEGL.1.dylib",O_WRONLY),we=errno;
+        printf("FXCGL denied_primary=%d errno=%d denied_codewrite=%d errno=%d\n",primary,pe,codewrite,we);
+        if(primary>=0)close(primary);if(codewrite>=0)close(codewrite);
+        if(primary>=0||codewrite>=0||pe!=EPERM||we!=EPERM)return 1;
+    }
     int failures = 0;
     const int profiles[] = {0x3200, 0x4100};
     for (unsigned i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++) {
