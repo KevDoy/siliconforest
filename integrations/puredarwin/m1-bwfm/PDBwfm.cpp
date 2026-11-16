@@ -688,7 +688,8 @@ SInt32 PDBwfm::apple80211Request(bool set, int type, int value, void *data, uint
 		struct pd80211_powersave_data *ps = (struct pd80211_powersave_data *)data;
 
 		if (set) {
-			if (*len < 3 * sizeof(uint32_t))
+			if (*len < 3 * sizeof(uint32_t) || ps->version != APPLE80211_VERSION ||
+			    ps->mode > 2 || ps->pm2_ret_ms > 60000)
 				return EINVAL;
 			if ((fChipDown || fPortDown) && chipUp(false, "power save") != kIOReturnSuccess)
 				return EIO;
