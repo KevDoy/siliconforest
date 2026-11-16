@@ -12,27 +12,31 @@ def replace(old,new):
 replace('static double sffx_frame_previous_emit_ms;',r'''#include <errno.h>
 static char sffx_frame_log[1200*1024];
 static size_t sffx_frame_log_used;
-static unsigned sffx_frame_log_records,sffx_frame_log_overflow,sffx_frame_preview;
+static unsigned sffx_frame_log_records,sffx_frame_log_overflow,sffx_frame_preview,sffx_frame_log_finished;
 static double sffx_frame_format_sum,sffx_frame_format_max,sffx_frame_hook_sum,sffx_frame_hook_max;
-static void sffx_frame_dump(void){
-    if(pthread_mutex_trylock(&sffx_frame_lock)){
-        const char message[]="FXFRAMEID_BUFFER refused=concurrent-finalizer\n";
-        (void)write(STDERR_FILENO,message,sizeof(message)-1);return;
-    }
+static void sffx_frame_configure(void);
+__attribute__((visibility("default"))) int SFFXFrameIDFlushLog(void){
+    pthread_once(&sffx_frame_once,sffx_frame_configure);
+    if(!sffx_frame_enabled)return 3;
+    if(pthread_mutex_trylock(&sffx_frame_lock))return 1;
+    if(sffx_frame_log_finished){pthread_mutex_unlock(&sffx_frame_lock);return 2;}
+    sffx_frame_log_finished=1;
     double before=pd_cgl_now();
     ssize_t written=write(STDERR_FILENO,sffx_frame_log,sffx_frame_log_used);
     int error=written<0?errno:0;
     double after=pd_cgl_now();
     char summary[512];
     int size=snprintf(summary,sizeof(summary),
-        "FXFRAMEID_BUFFER pid=%d records=%u bytes=%zu write_return=%zd write_errno=%d write_ms=%.6f overflow=%u format_sum_ms=%.6f format_max_ms=%.6f hook_sum_ms=%.6f hook_max_ms=%.6f\n",
+        "FXFRAMEID_BUFFER explicit_flush=1 pid=%d records=%u bytes=%zu write_return=%zd write_errno=%d write_ms=%.6f overflow=%u format_sum_ms=%.6f format_max_ms=%.6f hook_sum_ms=%.6f hook_max_ms=%.6f\n",
         getpid(),sffx_frame_log_records,sffx_frame_log_used,written,error,after-before,
         sffx_frame_log_overflow,sffx_frame_format_sum,sffx_frame_format_max,
         sffx_frame_hook_sum,sffx_frame_hook_max);
     if(size>0&&(size_t)size<sizeof(summary))(void)write(STDERR_FILENO,summary,(size_t)size);
-    pthread_mutex_unlock(&sffx_frame_lock);
+    int status=written==(ssize_t)sffx_frame_log_used&&!error&&!sffx_frame_log_overflow?0:4;
+    pthread_mutex_unlock(&sffx_frame_lock);return status;
 }''')
-replace('    sffx_frame_enabled=1;', '    if(atexit(sffx_frame_dump))return;\n    sffx_frame_enabled=1;')
+replace('    pthread_mutex_lock(&sffx_frame_lock);\n    double before=pd_cgl_now();',
+        '    pthread_mutex_lock(&sffx_frame_lock);\n    if(sffx_frame_log_finished){pthread_mutex_unlock(&sffx_frame_lock);return;}\n    double before=pd_cgl_now();')
 replace('    char line[1024];','    double format_started=pd_cgl_now();\n    char line[1024];')
 replace(' previous_emit_ms=%.6f readback_bytes=', ' log_buffered=1 readback_bytes=')
 replace('before,after,sffx_frame_previous_emit_ms,pixels*8','before,after,pixels*8')

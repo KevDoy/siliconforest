@@ -346,6 +346,30 @@ def main():
                 outside_timed_playback=True,input_injected=False)
             return receipt
 
+        def frame_id_flush(self):
+            path=str(root/'frame-id-cgl/Frameworks/OpenGL.framework/Versions/A/OpenGL')
+            self.command('Marionette:SetContext',{'value':'chrome'})
+            try:
+                result=self.command('WebDriver:ExecuteAsyncScript',dict(script='''
+                  const path=arguments[0],done=arguments[arguments.length-1];
+                  const start=Date.now();let library;
+                  try {
+                    const {ctypes}=ChromeUtils.importESModule("resource://gre/modules/ctypes.sys.mjs");
+                    library=ctypes.open(path);
+                    const flush=library.declare("SFFXFrameIDFlushLog",ctypes.default_abi,ctypes.int);
+                    const attempt=()=>{
+                      try {const status=flush();
+                        if(status===1&&Date.now()-start<3000){setTimeout(attempt,20);return;}
+                        library.close();done({status,path,start,end:Date.now(),explicit:true});
+                      }catch(e){library.close();done({error:String(e),path});}
+                    };attempt();
+                  }catch(e){if(library)library.close();done({error:String(e),path});}
+                ''',args=[path],scriptTimeout=5000,newSandbox=True))
+            finally:self.command('Marionette:SetContext',{'value':'content'})
+            (a.run/'frame-id-log-flush.json').write_text(json.dumps(result,indent=2)+'\n')
+            if result.get('error') or result.get('status')!=0:raise RuntimeError('Explicit frame trace flush failed: '+str(result))
+            return result
+
         def measure_video_with_admission(self,handle=None):
             # Snapshot outside the fixture interval. No profiler, per-frame
             # sampling or dependency on zero counters being valid CPU time.
@@ -432,6 +456,8 @@ def main():
                     try:video['renderer_capture']=(self.frame_id_capture(directory/'renderer.ppm') if a.frame_id
                                                    else renderer_readback(directory/'renderer.ppm'))
                     except Exception as error:video['renderer_capture_error']=str(error)
+            if a.frame_id_cgl and json.loads((root/'frame-id-cgl/identity.json').read_text()).get('explicit_log_flush'):
+                video['frame_identity_log_flush']=self.frame_id_flush()
             if a.lifetime_control:
                 try:video['lifetime_control']=self.lifetime_control(video)
                 except Exception as error:video['lifetime_control_error']=str(error)

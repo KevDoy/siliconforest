@@ -15,7 +15,7 @@ class Export(unittest.TestCase):
     def buffered():
         text=''.join(row(i,frame,i*7500).replace('readback_bytes=','log_buffered=1 readback_bytes=')
                      for i,frame in enumerate([0,1,899]))
-        return text+f'FXFRAMEID_BUFFER pid=100 records=3 bytes={len(text.encode())} write_return={len(text.encode())} write_errno=0 write_ms=1 overflow=0 format_sum_ms=.03 format_max_ms=.01 hook_sum_ms=.4 hook_max_ms=.2\n'
+        return text+f'FXFRAMEID_BUFFER explicit_flush=1 pid=100 records=3 bytes={len(text.encode())} write_return={len(text.encode())} write_errno=0 write_ms=1 overflow=0 format_sum_ms=.03 format_max_ms=.01 hook_sum_ms=.4 hook_max_ms=.2\n'
 
     def test_all900_native_ids(self):
         result=a.analyze(''.join(row(i,i,i*1000/60) for i in range(900)),100)
@@ -64,8 +64,8 @@ class Export(unittest.TestCase):
         text=self.buffered()
         for bad in [text.rsplit('FXFRAMEID_BUFFER',1)[0],text.replace('records=3','records=2'),
                     re.sub(r'write_return=\d+','write_return=1',text),
-                    text.replace('overflow=0','overflow=1'),text.replace('write_errno=0','write_errno=5'),
-                    text.replace('FXFRAMEID_BUFFER pid=100','FXFRAMEID_BUFFER pid=101')]:
+                    text.replace('overflow=0','overflow=1'),text.replace('explicit_flush=1 ','dir=old '),text.replace('write_errno=0','write_errno=5'),
+                    text.replace('explicit_flush=1 pid=100','explicit_flush=1 pid=101')]:
             with self.assertRaises(ValueError):a.analyze(bad,100)
 
     def test_mixed_deferred_and_live_rows_refused(self):

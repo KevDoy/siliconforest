@@ -14,6 +14,7 @@ p.add_argument('--admission',type=Path,required=True)
 p.add_argument('--fixture',type=Path,required=True)
 p.add_argument('--frame-id-fixture',type=Path,help='Own Linux-verified900-frame Gray-code movie and manifest')
 p.add_argument('--frame-id-cgl',type=Path,help='Linux-built CGL hook prefix; package ONLY OpenGL.framework')
+p.add_argument('--frame-id-buffered',action='store_true',help='Private RAM observer needs an explicit post-measurement flush')
 p.add_argument('--stage',type=Path,required=True)
 p.add_argument('--providers',type=Path,help='Reviewed media payload only; graphics and broker remain selected by FX')
 p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exact runtime provider path/UUID and Linux symbol offset')
@@ -31,6 +32,7 @@ if bool(a.mse_fixtures)!=bool(a.mse_pcm_trace) or bool(a.mse_fixtures)!=bool(a.m
 if bool(a.gpu_counter_spec)!=bool(a.policy_probe):raise ValueError('Counter specification and read-only helper required together')
 if a.frame_id_cgl and (not a.frame_id_fixture or a.providers):
     raise ValueError('Private frame-ID CGL must retain installed media and use the own fixture')
+if a.frame_id_buffered and not a.frame_id_cgl:raise ValueError('Buffered observer requires its private CGL')
 if a.stage.exists():raise ValueError('Fresh destination required')
 a.stage.mkdir();(a.stage/'bin').mkdir();(a.stage/'lib').mkdir();(a.stage/'media').mkdir()
 for name in ['cadence-baseline','cadence-observed']:
@@ -79,6 +81,7 @@ if a.frame_id_cgl:
     (a.stage/'frame-id-cgl/identity.json').write_text(json.dumps(dict(original_linux_nix=str(a.frame_id_cgl),
         sha256=hashlib.sha256(data).hexdigest(),uuid=uuids[0],
         relative_binary='frame-id-cgl/Frameworks/OpenGL.framework/Versions/A/OpenGL',
+        explicit_log_flush=a.frame_id_buffered,
         scope='Private CGL only; canonical GLAPI/IOSurface/broker/UI and selected media remain'),indent=2)+'\n')
 if a.codec_fixtures:
     manifest=json.loads((a.codec_fixtures/'manifest.json').read_text())

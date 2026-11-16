@@ -295,14 +295,19 @@ log writes, so it is not attributed to logging. A separate52ms active log write
 does coincide with a66ms export gap, making per-frame filesystem I/O intrusive.
 
 `frame-buffer-port.py` patches only that observer's logging: at most1200 rows
-fit in a fixed RAM buffer, then one exit-time write emits the trace. Exactly one
+fit in a fixed RAM buffer, then one explicit post-measurement write emits the trace. Exactly one
 `FXFRAMEID_PREVIEW` frame-zero receipt precedes playback; it is not counted again
 as a final trace row. No `previous_emit_ms=0` claim replaces missing per-frame
 write measurements. The final receipt records actual write return, overflow and
 format/hook costs. The parser refuses missing, mixed, truncated or incomplete
-deferred logs. Literal-header host controls in `host-test/frame-buffer.c` use
+deferred logs, including the explicit-flush receipt. The first exit-callback
+variant failed on the M1 with exit139 and no dump; that failure is retained.
+The replacement has no exit callback: our admitted parent calls the private
+`SFFXFrameIDFlushLog` through Chrome jsctypes after its final capture and before
+ordinary Quit. The request and receipt times must fall outside playback.
+Literal-header host controls in `host-test/frame-buffer.c` use
 fake GL/clock/write to test this policy with sanitizers, including default-off,
-the1200-row cap and a short final write; they are not GPU evidence.
+the1200-row cap, busy/duplicate flushes and a short final write; they are not GPU evidence.
 
 `frame-buffer-cgl.nix` takes the original `nix derivation show` JSON and explicit
 original/header paths. Without a replacement it must reproduce the original

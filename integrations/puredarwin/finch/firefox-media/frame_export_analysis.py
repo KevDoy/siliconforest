@@ -56,13 +56,13 @@ def analyze(text,parent):
             if int(fields.get('pid',0))==parent:receipts.append(fields)
         if len(receipts)!=1:raise ValueError('One complete owned deferred-log receipt required')
         fields=receipts[0]
-        if (int(fields['records'])!=len(samples) or int(fields['bytes'])!=record_bytes or
+        if (fields.get('explicit_flush')!='1' or int(fields['records'])!=len(samples) or int(fields['bytes'])!=record_bytes or
             int(fields['write_return'])!=record_bytes or int(fields['write_errno']) or int(fields['overflow'])):
             raise ValueError('Deferred native log incomplete, truncated or failed')
         costs={k:float(fields[k]) for k in ['write_ms','format_sum_ms','format_max_ms','hook_sum_ms','hook_max_ms']}
         if any(not math.isfinite(v) or v<0 for v in costs.values()):raise ValueError('Invalid deferred observer cost')
         buffered=dict(records=len(samples),bytes=record_bytes,complete=True,**costs,
-            scope='Bounded RAM log emitted at process exit; excludes one frame-zero preview write before play. Hook cost ends before mutex unlock, includes formatting and buffer copy; final bulk write outside playback.')
+            scope='Bounded RAM log explicitly flushed before teardown; excludes one frame-zero preview write before play. Hook cost ends before mutex unlock, includes formatting and buffer copy; final bulk write outside playback.')
     valid=[s for s in samples if s['valid']];positive=next((i for i,s in enumerate(valid) if s['frame']>0),None)
     start=None;end=None
     if positive is not None:
