@@ -78,6 +78,13 @@
 #define SPK_AMP_GAIN        0x0f    /* 18.5 dBV; dBV = 11 + 0.5 * value */
 #define SPK_STEPS_LOCKED    200     /* register 0xc8: -100 dB */
 #define SPK_PROBE_STEPS     40      /* 20 dB down until the sense data is believed */
+/*
+ * Interim cap until a tone test on this machine confirms the sense scale the model is fed
+ * with: never louder than 12.5 dB below full (25 steps; 176 on speakersafetyd's 0..201
+ * volume scale, which model-test compares). The boot argument pdspeaker_cap_steps=<n>
+ * sets another floor (0 lifts the cap; above 200 is 200); nothing at run time lowers it.
+ */
+#define SPK_CAP_STEPS       25
 #define SPK_VOLUME_REG(steps) ((uint8_t)(steps))       /* PLAY_CFG_REG2: half-dB steps below 0 dB */
 /* a full-scale sample at 0 dB is 10^(18.5/20) V RMS * sqrt(2) = 11.9 V peak; the voltage sense reads 14 V at 32768 */
 #define SPK_FULL_SCALE_COUNTS 27853
@@ -146,6 +153,7 @@ static uint32_t gModelOn = 1;                   /* pdspeaker_model= */
 static struct pd_spk_model gModel;
 static bool     gModelValid;
 static uint32_t gHoldProbe;                     /* kern.pd_speaker.hold_probe: never release above the probe volume */
+static uint32_t gCapSteps = SPK_CAP_STEPS;      /* pdspeaker_cap_steps=: the volume never goes above this */
 static uint64_t gIdleStamp;                     /* uptime of the last idle step of the model */
 /* per side (0 left, 1 right: amplifier index & 1), since a signal may be on one side only */
 static uint32_t gSteps[2] = { SPK_STEPS_LOCKED, SPK_STEPS_LOCKED };     /* half-dB steps below 0 dB in the amplifiers now */
@@ -271,6 +279,8 @@ wanted_steps(unsigned side)
 	steps = pd_spk_model_limit_steps(&gModel);
 	if ((!gSenseTrusted[side] || gHoldProbe) && steps < SPK_PROBE_STEPS)
 		steps = SPK_PROBE_STEPS;
+	if (steps < gCapSteps)
+		steps = gCapSteps;
 	return steps > SPK_STEPS_LOCKED ? SPK_STEPS_LOCKED : steps;
 }
 
@@ -782,7 +792,7 @@ static struct cdevsw spk_cdevsw = {
 enum {
 	kCtlTone, kCtlToneDb, kCtlRate, kCtlPlaying, kCtlUnlocked, kCtlOwner, kCtlLimitSteps, kCtlVolumeSteps,
 	kCtlSenseTrusted, kCtlPeriods, kCtlSensePeriods, kCtlTrips, kCtlSessions, kCtlRateMilliHz,
-	kCtlTestShutdown, kCtlHoldProbe, kCtlFrames, kCtlFifoFrames, kCtlLockMs, kCtlPrerollMs,
+	kCtlTestShutdown, kCtlHoldProbe, kCtlFrames, kCtlFifoFrames, kCtlLockMs, kCtlPrerollMs, kCtlCapSteps,
 };
 
 static int
@@ -812,6 +822,7 @@ spk_sysctl_int(struct sysctl_oid *oidp, __unused void *arg1, int arg2, struct sy
 	/* the amplifiers need no lock time: both are 0, so a client of either output can read the same names */
 	case kCtlLockMs:        value = 0; break;
 	case kCtlPrerollMs:     value = 0; break;
+	case kCtlCapSteps:      value = (int)gCapSteps; break;
 	}
 	IOLockUnlock(gLock);
 	error = sysctl_handle_int(oidp, &value, 0, req);
@@ -939,6 +950,7 @@ SPK_INT(frames, kCtlFrames, CTLFLAG_RD, "frames played since boot (wraps)");
 SPK_INT(fifo_frames, kCtlFifoFrames, CTLFLAG_RD, "frames a writer has queued that are not yet in the DMA ring");
 SPK_INT(lock_ms, kCtlLockMs, CTLFLAG_RD, "always 0 (kern.pd_sound.lock_ms has the codec's lock time)");
 SPK_INT(preroll_ms, kCtlPrerollMs, CTLFLAG_RD, "always 0: playback starts with the first frames");
+SPK_INT(cap_steps, kCtlCapSteps, CTLFLAG_RD, "the volume never goes above this many half-dB steps below 0 dB (boot argument pdspeaker_cap_steps)");
 
 static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_speaker,
@@ -950,7 +962,7 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__kern_pd_speaker_trips, &sysctl__kern_pd_speaker_sessions, &sysctl__kern_pd_speaker_rate_mhz,
 	&sysctl__kern_pd_speaker_test_shutdown, &sysctl__kern_pd_speaker_hold_probe,
 	&sysctl__kern_pd_speaker_frames, &sysctl__kern_pd_speaker_fifo_frames, &sysctl__kern_pd_speaker_lock_ms,
-	&sysctl__kern_pd_speaker_preroll_ms,
+	&sysctl__kern_pd_speaker_preroll_ms, &sysctl__kern_pd_speaker_cap_steps,
 };
 
 /* ---- bring-up ------------------------------------------------------------------------- */
@@ -1036,6 +1048,9 @@ pd_speakers_bring_up(PDGpio *gpio, PDDartFixed *dart, uint8_t *playRing, uint64_
 	for (unsigned i = 1; i < 64; i++)
 		gAttenQ16[i] = (uint32_t)(((uint64_t)gAttenQ16[i - 1] * 61870) >> 16);
 	PE_parse_boot_argn("pdspeaker_model", &gModelOn, sizeof(gModelOn));
+	PE_parse_boot_argn("pdspeaker_cap_steps", &gCapSteps, sizeof(gCapSteps));
+	if (gCapSteps > SPK_STEPS_LOCKED)
+		gCapSteps = SPK_STEPS_LOCKED;
 	gModelValid = pd_spk_model_init(&gModel, gRate, SPK_AMP_GAIN) == 0;
 	gIdleStamp = uptime_ns();
 	gState = kIdle;
