@@ -14,6 +14,22 @@ spec.loader.exec_module(daily)
 
 
 class LaunchPlanPolicy(unittest.TestCase):
+    def test_system_gpu_selection_removes_private_surface_and_gl_and_uses_system_broker(self):
+        self.manifest.update(system_ui=True, system_gpu_providers=True,
+                             surface_override=str(self.root / 'overrides/surface-old/Frameworks'))
+        command, env = self.plan()
+        self.assertEqual(command[1], '/usr/libexec/iosurfaced')
+        self.assertIn(str(self.root / 'surface/bin/surface-session'), command)
+        for field in ['DYLD_FRAMEWORK_PATH', 'DYLD_LIBRARY_PATH']:
+            for path in env[field].split(':'):
+                self.assertFalse(any(part in Path(path).parts for part in ['surface', 'gl', 'overrides']))
+        self.assertIn('/System/Library/Frameworks', env['DYLD_FRAMEWORK_PATH'].split(':'))
+
+    def test_system_gpu_selection_requires_the_system_ui_cohort(self):
+        self.manifest['system_gpu_providers'] = True
+        with self.assertRaises(ValueError):
+            self.plan()
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

@@ -40,6 +40,9 @@ def plan(root, args, manifest=None):
     system_ui = manifest.get('system_ui', False)
     if type(system_ui) is not bool or (system_ui and not manifest.get('system_layout')):
         raise ValueError('System UI selection requires an installed system runtime')
+    system_gpu = manifest.get('system_gpu_providers', False)
+    if type(system_gpu) is not bool or (system_gpu and not system_ui):
+        raise ValueError('System GPU providers require the canonical system UI cohort')
     env = os.environ.copy()
     env.update(diagnostic.get('environment',{}))
     for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
@@ -102,6 +105,10 @@ def plan(root, args, manifest=None):
         frames += [root / 'compat/System/Library/Frameworks', Path('/System/Library/Frameworks')]
         libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
                      root / 'gl/lib', root / 'compat/usr/lib']
+        if system_gpu:
+            frames = [root / 'avfoundation/Frameworks', root / 'compat/System/Library/Frameworks',
+                      Path('/System/Library/Frameworks')]
+            libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A', root / 'compat/usr/lib']
     env.update(DYLD_FRAMEWORK_PATH=':'.join(map(str, frames)),
         DYLD_LIBRARY_PATH=':'.join(map(str, libraries)) + ':/usr/local/lib/mesa-asahi',
         DYLD_INSERT_LIBRARIES=str(root / 'sandbox/libsffx-sandbox.dylib') + ':' + str(root / 'io/libsffx-io-policy.dylib'),
@@ -122,7 +129,8 @@ def plan(root, args, manifest=None):
         if name.startswith('MOZ_DISABLE_') and name.endswith('_SANDBOX'):
             raise RuntimeError('Refusing inherited disabled sandbox: ' + name)
     original = Path(manifest.get('original_bundle', str(root / 'original/Firefox.app')))
-    command = [str(root / 'surface/bin/surface-session'), str(root / 'surface/bin/iosurfaced'),
+    broker = Path('/usr/libexec/iosurfaced') if system_gpu else root / 'surface/bin/iosurfaced'
+    command = [str(root / 'surface/bin/surface-session'), str(broker),
                str(original / 'Contents/MacOS/firefox')]
     if selected_profile(args) is None:
         command += ['--profile', str(default_profile(root, manifest))]

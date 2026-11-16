@@ -60,6 +60,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--system-gpu', action='store_true', help='select qualified canonical IOSurface/OpenGL and system broker too')
     args = parser.parse_args()
     source = args.source.resolve()
     root = Path('/usr/local/lib/siliconforest/firefox/160-system1')
@@ -81,7 +82,7 @@ def main():
         raise ValueError('Staged launcher changed')
     surface_source = source / 'surface-provider'
     surface_destination = root / 'overrides/surface-lookup-v1'
-    if surface_source.exists():
+    if surface_source.exists() and not args.system_gpu:
         qualification = json.loads((source / 'surface-qualification.json').read_text())
         image = 'surface-provider/Frameworks/IOSurface.framework/Versions/A/IOSurface'
         if (qualification.get('native_fixed_passes') != 5 or qualification.get('native_old_sigsegv') != 5 or
@@ -100,6 +101,13 @@ def main():
     providers = {name: Path('/System/Library/Frameworks') / (name + '.framework/Versions/A') / name
                  for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
     providers['libWindowServer'] = Path('/usr/lib/libWindowServer.dylib')
+    if args.system_gpu:
+        for name in ['IOSurface', 'OpenGL']:
+            providers[name] = Path('/System/Library/Frameworks') / (name + '.framework/Versions/A') / name
+        if not Path('/usr/libexec/iosurfaced').is_file():
+            raise FileNotFoundError('Canonical IOSurface broker is not installed')
+        manifest['system_gpu_providers'] = True
+        manifest.pop('surface_override', None)
     uuids = {name: dict(path=str(path), uuid=image_uuid(path)) for name, path in providers.items()}
     # A future system install can supersede c18; record the actual metadata and
     # verify loaded paths in the browser gate instead of pinning stale hashes.
@@ -113,10 +121,15 @@ def main():
     spec.loader.exec_module(candidate)
     command, environment = candidate.plan(root, [], manifest=manifest)
     paths = environment['DYLD_FRAMEWORK_PATH'].split(':') + environment['DYLD_LIBRARY_PATH'].split(':')
-    if any(any(part in Path(path).parts for part in ['appkit', 'quartz', 'onyx', 'coretext', 'windowserver'])
+    forbidden = ['appkit', 'quartz', 'onyx', 'coretext', 'windowserver']
+    if args.system_gpu:
+        forbidden += ['surface', 'gl', 'overrides']
+        if command[1] != '/usr/libexec/iosurfaced':
+            raise ValueError('Candidate launcher did not select the canonical broker')
+    if any(any(part in Path(path).parts for part in forbidden)
            for path in paths):
         raise ValueError('A private Cocoa provider remains selected')
-    backup = root / 'maintenance-system-ui-v1'
+    backup = root / ('maintenance-system-gpu-v1' if args.system_gpu else 'maintenance-system-ui-v1')
     if backup.exists():
         raise FileExistsError('System UI backup already exists; review its receipt')
     plan = dict(runtime=str(root), system_providers=uuids, command=command,
@@ -133,7 +146,7 @@ def main():
     (backup / 'release.json').write_bytes(previous)
     (backup / 'firefox-sf').write_bytes(launcher.read_bytes())
     (backup / 'firefox-sf').chmod(0o755)
-    if surface_source.exists():
+    if surface_source.exists() and not args.system_gpu:
         surface_destination.parent.mkdir(exist_ok=True)
         shutil.copytree(surface_source, surface_destination, symlinks=True)
     try:

@@ -10,7 +10,7 @@ import re
 import subprocess
 
 
-def inspect(sample, output, identities, parent_pid, expected_appkit):
+def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=False):
     if not sample or not sample.startswith('/private/var/db/sffx/'):
         raise ValueError('Provider inspection requires a private sampler')
     if (not expected_appkit.startswith('/private/var/db/sffx/') and expected_appkit not in [
@@ -18,6 +18,9 @@ def inspect(sample, output, identities, parent_pid, expected_appkit):
             '/System/Library/Frameworks/AppKit.framework']) or '..' in Path(expected_appkit).parts:
         raise ValueError('Expected AppKit must be a private prefix')
     result = dict(diagnostic_sampling_seconds=.05, expected_appkit=expected_appkit, processes=[])
+    result['expected_system_gpu'] = system_gpu
+    if system_gpu and expected_appkit != '/System/Library/Frameworks/AppKit.framework':
+        raise ValueError('System GPU verification requires canonical Cocoa verification')
     for pid, start in sorted(identities.items()):
         current = subprocess.run(['ps', '-p', str(pid), '-o', 'lstart='], capture_output=True, text=True).stdout.strip()
         if current != start.strip():
@@ -41,6 +44,9 @@ def inspect(sample, output, identities, parent_pid, expected_appkit):
             required = {name: '/System/Library/Frameworks/' + name + '.framework/'
                         for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
             required['libWindowServer.dylib'] = '/usr/lib/libWindowServer.dylib'
+            if system_gpu:
+                for name in ['IOSurface', 'OpenGL']:
+                    required[name] = '/System/Library/Frameworks/' + name + '.framework/'
             actual = {}
             for name, prefix in required.items():
                 paths = [line.rsplit('> ', 1)[-1] for line in selected

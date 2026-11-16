@@ -3,8 +3,8 @@
 """Finite owned-profile native-menu/audio lifecycle diagnostic on SiliconForest.
 
 Caller holds gui.lock, checks coordination and cold-verifies these tools first.
-Runtime-plan launches reuse the installed providers and pristine Mozilla binary;
-they are labelled separately from the actual installed outer/dock launcher.
+Default launches use the actual installed outer launcher. Explicit private UI
+comparisons use the runtime plan and are labelled separately from installed QA.
 """
 import argparse
 import importlib.util
@@ -35,6 +35,7 @@ def main():
     ap.add_argument('--ui-prefix', type=Path)
     ap.add_argument('--system-coretext', action='store_true')
     ap.add_argument('--observer', type=Path)
+    ap.add_argument('--runtime-plan', action='store_true', help='diagnostic comparison; bypass installed outer launcher')
     ap.add_argument('--sample-path', default='/private/var/db/sffx/probes-v3/sf-sample')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
@@ -62,8 +63,13 @@ def main():
     fixture = AudioFixture(args.run)
     runtime = Path('/usr/local/lib/siliconforest/firefox/160-system1')
     manifest = json.loads((runtime / 'release.json').read_text())
-    command, env = module('daily', 'daily-launch.py').plan(runtime,
-        ['--no-remote', '--profile', str(profile), '--marionette', fixture.url])
+    arguments = ['--no-remote', '--profile', str(profile), '--marionette', fixture.url]
+    installed_outer = not (args.runtime_plan or args.ui_prefix or args.system_coretext)
+    if installed_outer:
+        command = ['/Applications/Firefox.app/Contents/MacOS/firefox-sf'] + arguments
+        env = os.environ.copy()
+    else:
+        command, env = module('daily', 'daily-launch.py').plan(runtime, arguments)
     env.update(MOZ_NO_REMOTE='1', MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1', MOZ_CRASHREPORTER_DISABLE='1',
                HOME=str(home), CFFIXED_USER_HOME=str(home))
     if args.ui_prefix:
@@ -75,12 +81,16 @@ def main():
     if args.observer:
         if not args.observer.is_file():
             raise FileNotFoundError(args.observer)
-        env['DYLD_INSERT_LIBRARIES'] += ':' + str(args.observer)
+        if installed_outer:
+            env['SFFX_DIAGNOSTIC_OBSERVER'] = str(args.observer)
+        else:
+            env['DYLD_INSERT_LIBRARIES'] += ':' + str(args.observer)
         env.update(SF_FIREFOX_MEDIA_TRACE='1', SF_FIREFOX_MEDIA_TRACE_SECONDS='60')
     helpers = module('remote', 'remote-run.py')
     owned = {}
-    result = dict(action=args.action, launcher_kind='installed-runtime-plan-with-explicit-diagnostic-profile',
-                  installed_outer_or_dock=False, command=command, ui_prefix=str(args.ui_prefix),
+    result = dict(action=args.action,
+                  launcher_kind=('installed-outer-launcher' if installed_outer else 'installed-runtime-plan-with-explicit-diagnostic-profile'),
+                  installed_outer_or_dock=installed_outer, dock_launch=False, command=command, ui_prefix=str(args.ui_prefix),
                   requested_system_coretext=args.system_coretext, observer=str(args.observer),
                   owner_input_before=guard.before, audio_stop_qualified=False, complete=False,
                   functional_qa=True, timing_qualified=False)
@@ -155,7 +165,8 @@ def main():
             expected = ('/System/Library/Frameworks/AppKit.framework'
                         if manifest.get('system_ui') and not args.ui_prefix
                         else str((args.ui_prefix or runtime) / 'appkit'))
-            result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned, parent, expected)
+            result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned, parent, expected,
+                                          manifest.get('system_gpu_providers', False) and not args.ui_prefix)
             if not result['providers']['complete']:
                 raise RuntimeError('Actual owned parent/GPU provider check failed')
             # DOM focus alone does not establish AppKit's key window. Native
@@ -163,11 +174,17 @@ def main():
             from presentation_seat import admit, _request
             result['admission'] = admit(client, args.run / 'native-admission.json', fixture=False, verify_renderer=False)
             result['before_windows'] = gecko_windows(client)
+            result['before_content_identities'] = {
+                str(tab['contentPid']): owned.get(tab['contentPid'])
+                for window in result['before_windows'] for tab in window['tabs'] if tab['contentPid']}
             result['before_menu'] = native_menu(parent)
+            identity()
+            result['before_action_owned_identities'] = {str(pid): start for pid, start in owned.items()}
             if len(result['before_windows']) != 1 or len(result['before_windows'][0]['tabs']) != 1:
                 raise RuntimeError('Expected exactly one owned browser window and one audio tab')
             guard.check()
             result['action_wall_ms'] = time.time() * 1000
+            result['action_monotonic'] = time.clock_gettime(time.CLOCK_MONOTONIC)
             if args.action in ['close-box', 'cmd-w']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
@@ -193,11 +210,18 @@ def main():
             for _ in range(24):
                 guard.check()
                 identity()
-                if process.poll() is not None:
-                    break
                 pause(.25)
             result['exit_before_cleanup'] = process.poll()
-            if process.poll() is None:
+            current = identity()
+            result['after_action_monotonic'] = time.clock_gettime(time.CLOCK_MONOTONIC)
+            result['after_action_owned_alive'] = {
+                str(pid): current[pid][1] for pid, start in owned.items()
+                if pid in current and current[pid][1] == start}
+            inject = Path('/private/var/run/gpu-desktop/inject')
+            from presentation_seat import _request
+            _request(inject, 'dump sffx-lifecycle-%d-after' % parent)
+            result['after_action_native_windows'] = (inject / ('sffx-lifecycle-%d-after.txt' % parent)).read_text()
+            if parent in current and current[parent][1] == owned[parent]:
                 result['after_menu'] = native_menu(parent)
                 if args.action in ['hide', 'minimize', 'close-tab', 'close-window', 'close-box', 'cmd-w']:
                     result['reopen_reply'] = native_menu(parent, 'reopen')
@@ -207,6 +231,9 @@ def main():
                     if handles:
                         client.command('WebDriver:SwitchToWindow', {'handle': handles[0]})
                     result['after_reopen_windows'] = gecko_windows(client)
+                    result['reopen_admission'] = admit(client, args.run / 'reopen-admission.json', fixture=False)
+                    _request(inject, 'dump sffx-lifecycle-%d-reopened' % parent)
+                    result['after_reopen_native_windows'] = (inject / ('sffx-lifecycle-%d-reopened.txt' % parent)).read_text()
             result['diagnostic_complete'] = True
             result['audio_stop_qualified'] = False  # HAL/callback analysis is a separate evidence gate.
             guard.check()
@@ -217,6 +244,7 @@ def main():
             client.close()
         if process is not None:
             current = identity()
+            result['cleanup_monotonic'] = time.clock_gettime(time.CLOCK_MONOTONIC)
             result['before_cleanup_processes'] = subprocess.run(['ps', '-p', ','.join(map(str, sorted(owned))), '-o', 'pid,ppid,time,stat,command'], capture_output=True, text=True).stdout
             result['owned_pids'] = sorted(owned)
             for sig in [signal.SIGTERM, signal.SIGKILL]:

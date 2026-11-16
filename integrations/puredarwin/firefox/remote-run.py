@@ -80,6 +80,7 @@ def main():
     ap.add_argument('--video-fullscreen', action='store_true', help='owned trusted DOM video fullscreen and native frame controls')
     ap.add_argument('--pinch-zoom', action='store_true', help='synthetic native pinch; observe real browser/visual viewport zoom')
     ap.add_argument('--native-ui', action='store_true', help='finite synthetic native seat/menu checks on the owned Firefox PID')
+    ap.add_argument('--popup-stress', action='store_true', help='20 trusted virtual-seat application-menu open/close cycles on the owned browser')
     ap.add_argument('--clipboard-guard', help='RAM-only restore helper for native clipboard controls')
     ap.add_argument('--native-drag', action='store_true', help='native-UI owned DOM drag/drop through the real seat')
     ap.add_argument('--clipboard-empty', action='store_true', help='native copy/paste only after focused backend proves empty clipboard')
@@ -107,6 +108,7 @@ def main():
                     help='owner-authorized functional checks without idle waits; no qualified timings')
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
+    ap.add_argument('--expect-system-gpu', action='store_true', help='also require canonical IOSurface/OpenGL in parent/GPU image lists')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
     ap.add_argument('--font-config', help='private process fontconfig file')
     ap.add_argument('--gpu-dirty-frames', action='store_true', help='experimental generation-based GPU frame reuse')
@@ -119,12 +121,16 @@ def main():
     args = ap.parse_args()
     if args.functional_qa and (args.benchmark or args.measure_fixture or args.measure_video or args.measure_all_videos):
         raise ValueError('Functional QA does not qualify benchmark or video/frame timings')
+    if args.popup_stress and (not args.functional_qa or not args.presentation_seat or args.native_ui):
+        raise ValueError('Popup stress requires a separate functional-QA presentation-seat run')
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
     if bool(args.surface_session) != bool(args.surface_broker):
         raise ValueError('Supply both private surface-session and surface-broker paths')
     if args.expect_appkit_prefix and not args.sample_path:
         raise ValueError('AppKit provider verification requires --sample-path')
+    if args.expect_system_gpu and args.expect_appkit_prefix != '/System/Library/Frameworks/AppKit.framework':
+        raise ValueError('Canonical GPU verification requires the system Cocoa provider gate')
     if args.pinch_zoom and (not args.presentation_seat or args.native_ui or args.measure_fixture or args.benchmark):
         raise ValueError('Pinch control requires its own presentation-seat run without another workload')
     if args.gpu_transfer_spec and (not args.policy_probe_path or not args.expect_appkit_prefix or not (args.measure_video or args.measure_all_videos)):
@@ -384,7 +390,7 @@ def main():
                                 current = process_identities()
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current) if pid in current})
                                 result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned,
-                                    result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix)
+                                    result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix, args.expect_system_gpu)
                             if args.policy_probe_path:
                                 from scheduling_snapshot import inspect as inspect_policies
                                 current=process_identities()
@@ -473,6 +479,11 @@ def main():
                                 from native_ui import measure
                                 result['native_ui'] = measure(client, args.run / 'native-ui.json', deadline,
                                     args.clipboard_guard, args.native_drag, args.clipboard_empty, args.precise_scroll)
+                                deadline = min(deadline, time.monotonic() + 2)
+                            if args.popup_stress:
+                                from popup_stress import measure as measure_popups
+                                result['popup_stress'] = measure_popups(client, args.run / 'popup-stress.json', deadline,
+                                                                        result['presentation_seat'])
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.pinch_zoom:
                                 from pinch_zoom import measure as measure_pinch
@@ -703,7 +714,7 @@ def main():
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing', 'pinch_zoom', 'legibility']:
+            for field in ['benchmark', 'native_ui', 'popup_stress', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing', 'pinch_zoom', 'legibility']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]
