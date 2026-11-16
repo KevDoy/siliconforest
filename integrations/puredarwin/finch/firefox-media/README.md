@@ -173,8 +173,9 @@ offset, reads only the48-byte ring header, then releases the client task port
 before exit. It retains no audio session/memory-entry right, suspends no process,
 writes no process memory and reads no PCM. Only two consecutive all-zero reads
 of that matched40-byte slot qualify removal; reuse or partial transitions fail.
-The M1 self-test has matched two aliases of our own memory object, without
-opening the daemon. This is not yet an exact Firefox-slot runtime result.
+The Linux-built own-memory alias self-test passed on the M1 and M5 without
+opening the daemon. The M5 verified the binary hash before execution and removed
+its temporary directory afterward.
 
 `prepare-audio-death.py --session-watch BINARY --audio-server PRIVATE_SPEC ...`
 freezes it with the qualified HAL/Wayland-loss observers. Under GUI→core-shared
@@ -186,6 +187,17 @@ admission retains the raw clock bridge/removal interval, actual audio providers,
 whole-family liveness and cleanup signals. No daemon restart or installed file
 change occurs. Exact slot destruction would establish server-client cleanup,
 not acoustic silence, output-buffer drain time or every crash mode.
+
+The installed M1 test subsequently passed all12 checks. Its own native log
+records a successful Wayland `shutdown`; the exactly matched server slot is
+still bound0.378ms later and fully zero by12.193ms, with a second empty sample.
+Relative to the controller trigger, removal is bounded55.421–67.236ms; native
+clock-bridge drift is0.0012ms. The parent is observed absent within172.439ms and
+the full family within400.742ms, with natural status70 and no cleanup signals.
+The daemon PID/start identity is unchanged, and both actual normalized audio
+providers match the installed selection. This verifies exact server cleanup for
+one active-audio connection-loss path. It does not measure acoustic silence,
+queued device-audio drain or every abnormal window/termination path.
 
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
