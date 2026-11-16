@@ -757,3 +757,15 @@ NSApp and exceptions are explicit observations. Prepare with
 `--view-state`; this uses the launcher's three-observer limit without cadence
 tracing. It is diagnostic only. Linux build and dependency inspection passed;
 M1 execution awaits the kernel owner's release, not an owner-idle condition.
+
+The private media wrapper also applies the installed launcher's own per-key
+platform and compositor preference helpers to its admitted test profile. Calling
+`plan()` alone skipped `main()`'s defaults, so earlier staged runs lacked the
+explicit `browser.tabs.inTitlebar=0` and `webgl.disable-angle=true` values.
+Existing explicit test choices and unrelated profile bytes are preserved. The
+owned browser now queries actual values plus user-value status through its
+admitted Marionette session and restores content context afterward. This fixes
+a launch-comparison mismatch; whether it fixes the transparent window requires
+the same-cohort native A/B, not a host-helper test. Earlier installed-outer
+controls were also transparent, so that symptom is not assigned solely to the
+private wrapper.

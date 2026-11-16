@@ -1,5 +1,52 @@
 # Decoder-to-GPU contract for one future kernel installation
 
+## Current measured state, 16 November
+
+Kernel44 qualified shared capture after the earlier teardown failure; kernel45
+retains it. CODEX-TB owns the active kernel46 install/recovery, adding reviewed
+per-context diagnostics. Media makes no SSH or workload attempt during that
+hold. The following canonical-graphics browser pair predates46; staged CV/VT
+remain unselected, full32-buffer pools retained and pool retirement off.
+
+| Ten-second generated clip | H2641080p60 copy → shared | HEVC4K30 copy → shared |
+| --- | --- | --- |
+| Decoder frames |600 →600|300 →300|
+| CPU decoder pixel copies/frame |1 →0|1 →0|
+| Decoder copied pixel bytes |1866240000 →0|3732480000 →0|
+| RDD CPU, percent of one core |13.886 →7.944|26.322 →16.009|
+| Whole-family CPU, percent of one core |124.692 →122.298|153.914 →150.809|
+| Reported dropped frames |89 →85|0 →0|
+| Median JavaScript frame-callback interval |40.04 →40.02ms|40.02 →40.02ms|
+| Maximum callback gap |844.98 →883.24ms|145.10 →116.64ms|
+| Inspected compositor body |transparent →transparent|transparent →transparent|
+
+This is one unprofiled pair, not a qualified speed improvement. Final diagnostic
+canvas hashes match within each codec. CGL CPU transport upload/readback are zero
+in both modes; its GPU blits remain nonzero. Those counters exclude whole-browser
+QuartzCore uploads and the diagnostic canvas readback, so they do not establish
+that the whole browser makes no CPU pixel copies. Each phase has exactly600/300
+kernel jobs/done and no new errors, timeouts, DART faults or quarantine. Repeated
+VT finalizer log rows must not be summed as additional decoded frames.
+
+FX035's25Hz JavaScript notification follows Gecko's playback-position scheduler:
+`MediaDecoderStateMachine::UpdatePlaybackPositionPeriodically` uses
+`AUDIO_DURATION_USECS=40000` divided by playback rate; logical-position updates
+invalidate the VideoFrameContainer. Observed0.5/1/2 rates yield80.06/40.04/20.02ms
+notifications. Isolated M1 CoreVideo callbacks run near60Hz; VT output and GPU
+plane bindings also reach the source60/30Hz. No CoreVideo25Hz timer fix follows
+from these measurements, and JavaScript notification cadence alone is not panel
+presentation cadence. H264 nevertheless has real long stalls and reported drops.
+
+The separate submit trace places478.258/475.124/275.730ms gaps outside VT calls
+during playback; its longest playing-time H264 VT call is5.643ms. CoreVideo
+continues ticking during those gaps, while already queued GPU frames drain.
+This narrows the upstream submission/backpressure/scheduling investigation but
+does not identify its cause. The no-input private launcher also skipped the
+installed per-key platform defaults; its corrected private-profile path now
+uses the installed helpers and records actual pref values. Native same-cohort
+A/B and read-only AppKit view observations are prepared. No visible-playback or
+owner-ready claim follows until real captures paint and cadence gates pass.
+
 ## First native import attempt: failed and rolled back
 
 2026-11-16: CODEX-TB's combined Firefox42 kernel exposed ABI1/import capability,

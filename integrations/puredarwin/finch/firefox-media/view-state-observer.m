@@ -66,9 +66,9 @@ static void view(SFPeekView *v,unsigned window,unsigned depth,unsigned *remainin
     fprintf(stderr,"SFVIEW_VIEW pid=%d window=%u depth=%u class=%s frame-valid=%d frame=%.3f,%.3f,%.3f,%.3f bounds-valid=%d bounds=%.3f,%.3f,%.3f,%.3f hidden=%d wants-layer=%d alpha-valid=%d alpha=%.6f\n",
         getpid(),window,depth,class_name(v),(int)has_frame,f.x,f.y,f.width,f.height,(int)has_bounds,b.x,b.y,b.width,b.height,
         boolean(v,@selector(isHidden)),boolean(v,@selector(wantsLayer)),(int)has_alpha,has_alpha?[v alphaValue]:0);
-    if([v respondsToSelector:@selector(subviews)]){
+    if(depth<4&&[v respondsToSelector:@selector(subviews)]){
         SFPeekArray *children=[v subviews];unsigned long count=[children count];
-        for(unsigned long i=0;i<count&&*remaining;i++)view([children objectAtIndex:i],window,depth+1,remaining);
+        for(unsigned long i=0;i<count&&i<24&&*remaining;i++)view([children objectAtIndex:i],window,depth+1,remaining);
     }
 }
 static void observe(void *opaque)

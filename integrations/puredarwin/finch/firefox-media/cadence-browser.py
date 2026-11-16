@@ -139,6 +139,20 @@ def main():
                 raise RuntimeError('Marionette parent is outside this owned launch')
             self.owned_parent=pid
             self.owned_parent_start=identities[pid][1]
+            # Read actual values, not just requested prefs or user.js. This
+            # occurs only after the parent is admitted as our descendant.
+            self.command('Marionette:SetContext',{'value':'chrome'})
+            try:
+                observed=self.command('WebDriver:ExecuteScript',{
+                    'script':'''const p=Components.classes["@mozilla.org/preferences-service;1"]
+                      .getService(Components.interfaces.nsIPrefBranch),result={};
+                      for(const [name,kind] of [["browser.tabs.inTitlebar","int"],
+                        ["webgl.disable-angle","bool"],["gfx.webrender.compositor","bool"]]){
+                        try{result[name]={value:kind==="int"?p.getIntPref(name):p.getBoolPref(name),
+                          userValue:p.prefHasUserValue(name)}}catch(e){result[name]={error:String(e)}}
+                      }return result;''','args':[],'newSandbox':True})
+                (a.run/'owned-startup-preferences.json').write_text(json.dumps(observed,indent=2)+'\n')
+            finally:self.command('Marionette:SetContext',{'value':'content'})
             return result
 
         def cpu_snapshot(self):

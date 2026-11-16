@@ -34,10 +34,18 @@ def main():
         manifest['graphics_override']=graphics
         manifest['system_gpu_providers']=False
     command,env=daily.plan(runtime,sys.argv[1:],manifest)
+    # plan() deliberately has no profile writes. Match the installed main()'s
+    # platform/layout defaults in this already admitted OWN profile as well.
+    # Its helpers preserve explicit test choices and unrelated bytes.
+    settings=profile/'user.js'
+    platform_preferences=daily.update_platform_preferences(settings)
+    compositor_preferences=daily.update_compositor_preference(
+        settings,daily.native_compositor_preference(manifest,os.environ))
     env['DYLD_FRAMEWORK_PATH']=str(frameworks)+':'+env['DYLD_FRAMEWORK_PATH']
     (profile.parent/'private-media-launch.json').write_text(json.dumps(dict(
         command=command,frameworks=sorted(names),installed_outer_launcher=False,
         installed_runtime_plan=True,owner_profile=False,
+        platform_preferences=platform_preferences,compositor_preferences=compositor_preferences,
         graphics_override=graphics,
         environment={k:v for k,v in env.items() if k.startswith(('DYLD_','SF_VT_','SF_AU_'))}),indent=2)+'\n')
     # Match the installed launcher: relative bundle resources must be resolved
