@@ -1,21 +1,25 @@
 # One Firefox kernel on qualified CIO29
 
-Current2026-11-16: the devfs-only kernel is qualified and installed normally;
-CIO29 remains the recovery baseline. The reviewed AVD5238, Touch Bar/K14 42j and
-HID publication/readiness zc02 SDKs are preserved in the next combined image,
-with devfs/core and shared DRM retained. Its final collection is nr5fsaf3…
-(capsule0d31b0c0c108c409…, prelink ID A704E5E0-5ABF-41AB-A31E-49A0DB963DF2),
-57 modules, exactly5 changed versus CIO29 and52 unchanged. It is BUILT, not yet
-installed; hardware import, cache visibility, zero-copy video and physical pinch
-remain unqualified. The failing dock diagnostics and AVE are excluded.
+Current2026-11-16 01:29Z: devfs-only12168f25… is the qualified normal kernel.
+The AVD5238 import/cache image42 booted and advertised capability, but the first
+strict shared capture PANICKED during IOMemoryDescriptor teardown. It was rolled
+back. No zero-copy or physical-pinch claim. Full evidence and recovery are below.
 
-The owner's durable Firefox grant now permits installs as soon as ready with
-2-minute notice, core/gui/bench locks, UART, rollback and standard-state recovery.
-Owner-idle and hourly waits are lifted. This directory only builds artifacts;
-the controlled installer owns machine actions. The earlier offline/exclusive
-window and three-module artifact notes below are historical preparation records.
-See [../m1-devfs-clone/README.md](../m1-devfs-clone/README.md) for the devfs fix,
-observed clone stress/GL/Vulkan results and separate Firefox page-paint failure.
+build-final-kc.nix produces the next safe image43: devfs+K14/HID, reviewed
+killable GPU waits (KERN0f446bdcd) and speaker cap (KERN7590d2cf4); exactly7
+changed modules/50 unchanged versus CIO29. The ORIGINAL CIO29 AVD is retained,
+with its exact module UUID verified by verify-baseline-avd.py. The failed
+AVD import/CMO/IRQ module is excluded, so the import-only cache-link gate is
+explicitly inapplicable; no stubbed cache success or capability is substituted.
+The old five-module recipe remains preserved for audit and must not be installed
+again until its UPL failure is fixed. The following scope/contract sections
+record that failed import candidate's source intent, not native qualification.
+
+Owner authorization permits installs as soon as ready with2-minute notice,
+core/gui/bench locks, UART, rollback and standard-state recovery. Idle and hourly
+waits are lifted; Thunderbolt and AVE stay paused. build-final-kc.nix pins all
+three reviewed replacement SDKs. Its normal installer and actual native gates
+remain the kernel owner's responsibility; this directory does not install.
 
 ## Exact scope
 
@@ -183,3 +187,42 @@ recover rather than call zero-copy qualified. Force CMO cost and native GPU-cach
 visibility must be measured; neither60fps nor zero-copy follows from this build.
 Dock Ethernet diagnostic, USB/keyboard and DP-provider qualification remain
 separate subsequent work after Firefox and an explicit owner window.
+
+
+### Native Firefox42 import panic and rollback, 2026-11-16
+
+The five-module image0d31b0c0… booted successfully. INFO reported ABI1/caps65543
+(import bit16); the gesture ring reported776 bytes/version2. Clone stress on
+the actual asahi renderD129 allocated/freed60000 reservations, slots3→3, failures0.
+The first harness attempted absent renderD128 (ENOENT, no allocations); that
+failure is retained with the corrected-node repeat. The decoder packet's
+portable Python placeholder was resolved in a separate native manifest after
+all45 files were cold-hash verified; original bytes/receipt remain private.
+
+Strict H264 shared-capture testing then panicked at01:17:15Z in
+vm_upl.c:1360, VM_OBJECT_WIRED_PAGE_UPDATE_END's !__overflow assertion. Exact
+symbolication gives upl_commit_range+0x1cf4 →upl_commit →
+IOGeneralMemoryDescriptor::complete+0x288 →pd_avd_os_dma_free+0x110 →
+avd_buf_free/pd_avd_session_destroy/context_destroy. This is teardown accounting,
+not a demonstrated Force-CMO fault. The register pair426/−426 is consistent
+with a wired-count underflow; MD kind/UPL flags were not captured. No candidate
+or after-stats survived; before-stats show jobs0/contexts0. HEVC was not started.
+No shared-buffer, cache-visibility, decoder-output or physical-pinch success claim.
+
+The panic automatically returned to Linux; no external reset was needed.
+Normal installation restored qualified devfs-only12168f25… /prelink65F85F90….
+The consumed next-try mark required one supported sf-session relaunch-next
+after boot; DESK8-next003/socket/inject and non-input stats were verified.
+UART reader/route stopped, actual interactive lock holder exited01:20:47Z.
+Postpanic read-only fsck returned4 (journal skipped plus previous extent/bitmap
+errors); no repair, root subsequently mounted. An initial rollback command
+found Linux's volatile /tmp installer gone; it made no boot-file write. The
+installer/env were reuploaded and the normal rollback then verified its hashes.
+All failures and UART are retained privately in runs/sftb/firefox-install-0042/.
+
+The following image43 deliberately retains the ORIGINAL CIO29 AVD, excluding
+the failed import/CMO/IRQ input. It retains devfs and K14/HID, adds KERN's
+reviewed killable-wait PDAgx/PDDcp and speaker cap25 half-dB steps (control176),
+and requires exactly7 changed modules/50 unchanged against CIO29. Source/SDK/
+link/host evidence is separate from the forthcoming native wait/speaker gate.
+The UPL fix is being prepared independently; no assertion or complete call is removed.

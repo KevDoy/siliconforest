@@ -1,6 +1,6 @@
 # SF-AF: USB-C, Thunderbolt and external display on J293
 
-Owner: CODEX-TB. Survey started15 November2026; current update16 November01:05Z.
+Owner: CODEX-TB. Survey started15 November2026; current update16 November01:29Z.
 Thunderbolt/dock trials and AVE remain paused. The owner's later standing grant
 permits immediate Firefox/desktop kernel installs with2-minute notice, locks,
 UART and rollback; there is no owner-idle or hourly wait.
@@ -9,7 +9,7 @@ UART and rollback; there is no owner-idle or hourly wait.
 |---|---|---|
 | Devfs clone recovery | Installed normal devfs-only kernel;60000 reservations allocated/freed, slots3→3, zero failures; GL exact hash50 and Vulkan50 pass; standard DESK8-next003/inject responds | Broader LinuxKPI GPU-wait interruptibility remains separate |
 | Firefox launches |20 consecutive fresh profiles create mapped/captured windows and quit/reap; slots3 after each | All20 captures have blank page content/stale chrome: page-paint STRICTFAIL, FX/DESK investigating |
-| Shared decoder output / pinch | Not observed; installed devfs-only image retains old AVD/HID | Combined AVD import/cache/IRQ +K14/readiness +devfs built; next announced install earliest01:07:30Z |
+| Shared decoder output / pinch | 42 INFO import bit16 and ring2 observed; no successful shared decode/physical pinch; rollback restored old AVD/HID | Image42 booted but strict shared capture PANICKED/rolled back; original AVD retained in next K14/readiness/killable-wait/speaker-cap image43 |
 | TS3 router / PCIe | Earlier native trials authorize TS3, bring NHI/PCIe tunnel up and enumerate12 functions including4 xHCI and I210 | No new dock trials while paused |
 | Dock Ethernet | Earlier en1 link1Gb/s | No DHCP lease or demonstrated packets |
 | Dock USB / Samsung | No USB device/HID typing, HPD/EDID/external output or10-cycle hotplug qualification | Sources/host/SDK preparation only; DP provider graph missing |
@@ -3465,3 +3465,42 @@ finds blank content/stale NewTab chrome in all20: creation/exit passes, page-pai
 is a strict failure handed to FX/DESK. No claim of working Firefox rendering.
 UART reader and route are gone; all locks released. The combined decoder/K14
 image is now built and separately announced; native import/cache/pinch proof is pending.
+
+
+### Native Firefox42 import panic and rollback, 2026-11-16
+
+The five-module image0d31b0c0… booted successfully. INFO reported ABI1/caps65543
+(import bit16); the gesture ring reported776 bytes/version2. Clone stress on
+the actual asahi renderD129 allocated/freed60000 reservations, slots3→3, failures0.
+The first harness attempted absent renderD128 (ENOENT, no allocations); that
+failure is retained with the corrected-node repeat. The decoder packet's
+portable Python placeholder was resolved in a separate native manifest after
+all45 files were cold-hash verified; original bytes/receipt remain private.
+
+Strict H264 shared-capture testing then panicked at01:17:15Z in
+vm_upl.c:1360, VM_OBJECT_WIRED_PAGE_UPDATE_END's !__overflow assertion. Exact
+symbolication gives upl_commit_range+0x1cf4 →upl_commit →
+IOGeneralMemoryDescriptor::complete+0x288 →pd_avd_os_dma_free+0x110 →
+avd_buf_free/pd_avd_session_destroy/context_destroy. This is teardown accounting,
+not a demonstrated Force-CMO fault. The register pair426/−426 is consistent
+with a wired-count underflow; MD kind/UPL flags were not captured. No candidate
+or after-stats survived; before-stats show jobs0/contexts0. HEVC was not started.
+No shared-buffer, cache-visibility, decoder-output or physical-pinch success claim.
+
+The panic automatically returned to Linux; no external reset was needed.
+Normal installation restored qualified devfs-only12168f25… /prelink65F85F90….
+The consumed next-try mark required one supported sf-session relaunch-next
+after boot; DESK8-next003/socket/inject and non-input stats were verified.
+UART reader/route stopped, actual interactive lock holder exited01:20:47Z.
+Postpanic read-only fsck returned4 (journal skipped plus previous extent/bitmap
+errors); no repair, root subsequently mounted. An initial rollback command
+found Linux's volatile /tmp installer gone; it made no boot-file write. The
+installer/env were reuploaded and the normal rollback then verified its hashes.
+All failures and UART are retained privately in runs/sftb/firefox-install-0042/.
+
+The following image43 deliberately retains the ORIGINAL CIO29 AVD, excluding
+the failed import/CMO/IRQ input. It retains devfs and K14/HID, adds KERN's
+reviewed killable-wait PDAgx/PDDcp and speaker cap25 half-dB steps (control176),
+and requires exactly7 changed modules/50 unchanged against CIO29. Source/SDK/
+link/host evidence is separate from the forthcoming native wait/speaker gate.
+The UPL fix is being prepared independently; no assertion or complete call is removed.

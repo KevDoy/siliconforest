@@ -449,3 +449,42 @@ map5.4175s, range4.055–6.844s. LOOKED at the20-capture montage: ALL content ar
 are blank/stale NewTab chrome. Thus window creation/close passes while Firefox
 page-paint is STRICTFAIL, handed to FX/DESK; no presentation-correctness claim.
 DESK8-next003/inject responds, owned UART reader/route are gone, locks released.
+
+
+### Native Firefox42 import panic and rollback, 2026-11-16
+
+The five-module image0d31b0c0… booted successfully. INFO reported ABI1/caps65543
+(import bit16); the gesture ring reported776 bytes/version2. Clone stress on
+the actual asahi renderD129 allocated/freed60000 reservations, slots3→3, failures0.
+The first harness attempted absent renderD128 (ENOENT, no allocations); that
+failure is retained with the corrected-node repeat. The decoder packet's
+portable Python placeholder was resolved in a separate native manifest after
+all45 files were cold-hash verified; original bytes/receipt remain private.
+
+Strict H264 shared-capture testing then panicked at01:17:15Z in
+vm_upl.c:1360, VM_OBJECT_WIRED_PAGE_UPDATE_END's !__overflow assertion. Exact
+symbolication gives upl_commit_range+0x1cf4 →upl_commit →
+IOGeneralMemoryDescriptor::complete+0x288 →pd_avd_os_dma_free+0x110 →
+avd_buf_free/pd_avd_session_destroy/context_destroy. This is teardown accounting,
+not a demonstrated Force-CMO fault. The register pair426/−426 is consistent
+with a wired-count underflow; MD kind/UPL flags were not captured. No candidate
+or after-stats survived; before-stats show jobs0/contexts0. HEVC was not started.
+No shared-buffer, cache-visibility, decoder-output or physical-pinch success claim.
+
+The panic automatically returned to Linux; no external reset was needed.
+Normal installation restored qualified devfs-only12168f25… /prelink65F85F90….
+The consumed next-try mark required one supported sf-session relaunch-next
+after boot; DESK8-next003/socket/inject and non-input stats were verified.
+UART reader/route stopped, actual interactive lock holder exited01:20:47Z.
+Postpanic read-only fsck returned4 (journal skipped plus previous extent/bitmap
+errors); no repair, root subsequently mounted. An initial rollback command
+found Linux's volatile /tmp installer gone; it made no boot-file write. The
+installer/env were reuploaded and the normal rollback then verified its hashes.
+All failures and UART are retained privately in runs/sftb/firefox-install-0042/.
+
+The following image43 deliberately retains the ORIGINAL CIO29 AVD, excluding
+the failed import/CMO/IRQ input. It retains devfs and K14/HID, adds KERN's
+reviewed killable-wait PDAgx/PDDcp and speaker cap25 half-dB steps (control176),
+and requires exactly7 changed modules/50 unchanged against CIO29. Source/SDK/
+link/host evidence is separate from the forthcoming native wait/speaker gate.
+The UPL fix is being prepared independently; no assertion or complete call is removed.
