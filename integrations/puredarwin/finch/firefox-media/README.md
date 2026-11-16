@@ -383,6 +383,41 @@ The installed result is accepted2026-11-16. Completed presentation-rate testing
 and eliminating QuartzCore's separate CPU uploads remain open. The earlier
 startup/bootstrap failure and capture failures are retained separately.
 
+`strict-nv12-plane.h` is a private CGL extension for the remaining QuartzCore
+upload. `CGLPDCopyNV12ToTextures2D(surface, textures)` copies both planes through
+GPU blits into caller-owned independent, exact-size R8/RG8 2D storage. It holds
+a global IOSurface use across both completed copies; retaining surface metadata
+alone cannot prevent decoder reuse between planes. It keeps the conservative
+completion waits, returns false without CPU fallback, and requires the caller
+to overwrite both destinations on failure. It refuses P010/non-GPU/wrong-layout
+inputs, preserves bindings/FBO/scissor/sRGB and leaves PBO/unpack state alone.
+Single-plane and diagnostic counter entry points are also exported; their
+counters describe successful planes, not complete video frames. The independent
+destination-storage precondition belongs to the caller.
+
+`private-cgl-extension.nix` appends only this header to an original derivation
+supplied as JSON. Its null-header control must reproduce the exact original
+drvPath; the candidate may add only that input and change postPatch/output.
+It does not edit the CGL owner's recipes or select an installed provider.
+`strict-nv12-host.nix` executes the literal header under ASan/UBSan with fake
+GL/IOSurface operations, including paired lifetime, partial-plane failure and
+completion quarantine. These controls are not GPU evidence.
+
+`strict-nv12-probe.nix` ports the reviewed exec-separated rectangle control in
+a private source copy. It tests independent 2D storage, source overwrite after
+completion, odd visible dimensions/padding, both NV12 ranges, three GL profiles
+and nine GL state values. The Linux build is complete; native qualification is
+pending the integration owner's current presentation series. Prepare with
+`strict-nv12-native.py prepare --stage OWN_PACKET --cgl ORIGINAL_BUILD --probe
+PROBE_BUILD`, then call its `run --stage OWN_PACKET` phase only under gui/core/
+bench locks and the fresh coordination gate. The prefix must be a new
+`runs/sffinch/firefox-strict-nv12-packet-*` directory. It hashes cold bytes before
+execution, uses an isolated broker/process group, retains all failures and
+collects only this test's logs/results. No selected provider changes. Tiny
+verification readbacks and CPU fixture writes are separate from transport;
+neither host controls nor these native cases qualify Firefox throughput or
+whole-browser zero CPU copies.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore
