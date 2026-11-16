@@ -26,13 +26,13 @@ subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
 shutil.copy2(here/'audio-death-browser.py',a.stage/'audio-death-browser.py')
 shutil.copy2(here/'audio_state_controls.py',a.stage/'audio_state_controls.py')
 shutil.copy2(here/'audio_logs.py',a.stage/'audio_logs.py')
+shutil.copy2(here/'media_images.py',a.stage/'media_images.py')
 for file in sorted((here.parents[1]/'firefox').iterdir()):
     if file.is_file() and file.suffix in ['.py','.html','.js','.json']:
         shutil.copy2(file,a.stage/'tools'/file.name)
 if a.clock_family:
     shutil.copytree(a.clock_family/'Frameworks/AudioToolbox.framework',a.stage/'Frameworks/AudioToolbox.framework',symlinks=True)
     shutil.copy2(here/'media-launch.py',a.stage/'media-launch.py')
-    shutil.copy2(here/'media_images.py',a.stage/'media_images.py')
 if a.aac_fixture:
     (a.stage/'media').mkdir();shutil.copy2(a.aac_fixture,a.stage/'media/tone-aac.m4a')
     tool=a.stage/'tools/lifecycle_observer.py';text=tool.read_text()

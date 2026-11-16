@@ -28,6 +28,23 @@ def fixture():
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_installed_clock_gate_requires_real_selector_images_hal_and_quit(self):
+        r,t=fixture()
+        r.update(installed_outer_launcher=True,expected_installed_clock=True,normalized_audio_family=False,
+                 parent_pid=7,exit_before_cleanup=0,launcher_final_exit=0,media_providers={'complete':True},
+                 selected_manifest={'audio_output_clock':True,'audio_override':
+                     '/usr/local/lib/siliconforest/firefox/160-system1/overrides/audio-clock-v1/Frameworks'})
+        t+='\nSF_AU_CLOCK normalized=1 device-fixed-frames=8192\nSFMEDIA_RING pid=7 rate=48000 write=8192 read=4096\n'
+        self.assertTrue(m.analyze(r,t,True)['installed_clock_gate']['passed'])
+        for changes in [dict(exit_before_cleanup=139),dict(launcher_final_exit=139),dict(expected_installed_clock=False),
+                        dict(normalized_audio_family=True),dict(media_providers={'complete':False}),
+                        dict(selected_manifest={}),dict(before_cleanup_owned=[7]),dict(cleanup_signals=[{'pid':7,'signal':15}])]:
+            bad=copy.deepcopy(r);bad.update(changes)
+            with self.subTest(changes=changes):self.assertFalse(m.analyze(bad,t,True)['output_boundary_passed'])
+        for old,new in [('normalized=1','normalized=0'),('SFMEDIA_RING pid=7','SFMEDIA_RING pid=8'),
+                        ('rate=48000','rate=44100'),('write=8192','write=0'),('read=4096','read=0')]:
+            with self.subTest(old=old):self.assertFalse(m.analyze(r,t.replace(old,new),True)['output_boundary_passed'])
+
     def test_meter_can_supply_its_own_clock_bridge(self):
         r,t=fixture();lines=[]
         for line in t.splitlines()[1:]:

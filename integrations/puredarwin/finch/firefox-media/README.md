@@ -782,3 +782,26 @@ overlapping inclusive weights nor this profiled720p run establishes full codec
 CPU or broad1080p speed. The independent unprofiled generated1080p60 pattern
 completed600/0 in10.208s at RDD58.67% of one core; visible playback and more
 complex real content remain separate gates.
+
+For FX's installed audio-clock activation, the owner gate adds
+`--expect-installed-clock` to the owned browser and analyzer. Before launch it
+requires the installed `release.json` to select `audio-clock-v1/Frameworks` and
+`audio_output_clock=true`; it never overrides that selection. It observes both
+actual AudioToolbox main and PD output-child paths in the admitted process.
+The host analyzer additionally requires the normalized marker, own48k HAL
+accepted/consumed frames, all ten PCM state phases, natural Quit0, no remaining
+own family and no cleanup signals. Old139 exits cannot pass this gate.
+
+Prepare a fresh audio-state packet with both qualified native meters and our
+AAC fixture, then, inside FX's gui.lock→bench guarded integration hold, run:
+
+```sh
+python3 integrations/puredarwin/finch/firefox-media/run-audio-browser-state.py \
+  --stage runs/sffinch/firefox-audio-state-browser-packet-owner-v1 --installed-clock
+```
+
+That one-profile gate cold-copies the packet, runs the installed outer launcher,
+collects only owned logs/evidence, and writes `installed-clock-admission.json`.
+An unselected family or missing observations fail rather than silently choosing
+the private provider. It is a prepared acceptance gate, not new native evidence
+until FX actually selects and executes it. Acoustic sync remains unmeasured.

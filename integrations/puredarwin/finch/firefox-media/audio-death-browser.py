@@ -22,12 +22,21 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True)
     p.add_argument('--audio-clock-family',action='store_true',help='Private full AudioToolbox comparison, never changes installed selection')
     p.add_argument('--state-controls',action='store_true',help='Own media volume/mute/pause/two-tab controls and normal quit, no disconnect')
+    p.add_argument('--expect-installed-clock',action='store_true',help='Require the selected installed normalized AudioToolbox family, never override it')
     a=p.parse_args()
+    if a.expect_installed_clock and (not a.state_controls or a.audio_clock_family):
+        raise ValueError('Installed clock gate requires installed state controls, no private selection')
     root=Path(__file__).resolve().parent
     if os.uname().sysname!='Darwin' or not root.is_relative_to(Path('/private/var/db/sffx')):
         raise ValueError('Cold private SiliconForest packet required')
     if not a.run.is_absolute() or '..' in a.run.parts or not a.run.is_relative_to(root) or a.run.exists():
         raise ValueError('Fresh owned destination required')
+    installed_clock=Path('/usr/local/lib/siliconforest/firefox/160-system1/overrides/audio-clock-v1/Frameworks')
+    selected_manifest=None
+    if a.expect_installed_clock:
+        selected_manifest=json.loads(Path('/usr/local/lib/siliconforest/firefox/160-system1/release.json').read_text())
+        if selected_manifest.get('audio_output_clock') is not True or selected_manifest.get('audio_override')!=str(installed_clock):
+            raise ValueError('Installed normalized audio family is not selected; no test launched')
     sys.path.insert(0,str(root/'tools'))
     from marionette import Marionette
     from lifecycle_observer import AudioFixture
@@ -45,6 +54,7 @@ def main():
     server=Path('/var/log/coreaudiod.log');offset=0;inode=None;server_rows=[]
     result=dict(synthetic_input=False,installed_outer_launcher=not a.audio_clock_family,audio_stop_qualified=False,
                 normalized_audio_family=a.audio_clock_family,
+                expected_installed_clock=a.expect_installed_clock,selected_manifest=selected_manifest,
                 acoustic_stop_proved=False,cleanup_signals=[],timeline=[],port=port)
     def save():
         result['document']=fixture.snapshot();result['coreaudiod_observations']=server_rows
@@ -113,11 +123,12 @@ def main():
                 args=[],newSandbox=False,scriptTimeout=8000))
             if result['audio_started'].get('error') or result['audio_started'].get('paused') or result['audio_started'].get('muted'):
                 raise RuntimeError('Unmuted own document did not start')
-            if a.audio_clock_family:
+            if a.audio_clock_family or a.expect_installed_clock:
                 import media_images
                 directory=a.run/'media-providers';directory.mkdir()
                 result['media_providers']=media_images.inspect(
-                    [dict(pid=parent,type='browser',os_start_identity=owned[parent])],directory,root/'Frameworks')
+                    [dict(pid=parent,type='browser',os_start_identity=owned[parent])],directory,
+                    installed_clock if a.expect_installed_clock else root/'Frameworks')
                 if not result['media_providers']['complete']:raise RuntimeError('Full normalized AudioToolbox family not selected')
             if a.state_controls:
                 import audio_state_controls

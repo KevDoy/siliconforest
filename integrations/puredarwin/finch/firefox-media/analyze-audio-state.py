@@ -19,7 +19,7 @@ def fields(line):
     return dict(word.split('=',1) for word in line.split()[1:] if '=' in word)
 
 
-def analyze(result,text):
+def analyze(result,text,expect_installed_clock=False):
     if result.get('error') or not result.get('diagnostic_complete'):
         raise ValueError('Incomplete browser state run')
     phases=result.get('state_controls',{}).get('phases',[])
@@ -78,16 +78,34 @@ def analyze(result,text):
     ratio=rows[1]['power']/rows[0]['power'] if rows[0]['power'] else None
     half_pass=ratio is not None and .20<=ratio<=.30
     natural_exit=not result.get('before_cleanup_owned') and not result.get('cleanup_signals')
-    return dict(phases=rows,half_to_full_power_ratio=ratio,half_volume_passed=half_pass,
+    answer=dict(phases=rows,half_to_full_power_ratio=ratio,half_volume_passed=half_pass,
                 native_to_controller_seconds=offsets,
                 output_boundary_passed=all(r['output_boundary_passed'] for r in rows) and half_pass,
                 natural_exit_without_cleanup_signals=natural_exit,
                 acoustic_proof=False,glitch_free_proof=False,performance_qualified=False)
+    if expect_installed_clock:
+        rings=[fields(line) for line in text.splitlines() if line.startswith('SFMEDIA_RING ')]
+        parent=str(result.get('parent_pid'))
+        checks=dict(installed_outer=result.get('installed_outer_launcher') is True,
+            admitted_expectation=result.get('expected_installed_clock') is True,
+            no_private_selection=result.get('normalized_audio_family') is False,
+            image_proof=result.get('media_providers',{}).get('complete') is True,
+            natural_quit_zero=result.get('exit_before_cleanup')==0 and result.get('launcher_final_exit')==0 and natural_exit,
+            clock_marker='SF_AU_CLOCK normalized=1 ' in text,
+            own_hal_accepts=any(r.get('pid')==parent and r.get('rate')=='48000' and
+                               int(r.get('write','0'))>0 and int(r.get('read','0'))>0 for r in rings))
+        manifest=result.get('selected_manifest') or {}
+        checks['selected_manifest']=manifest.get('audio_output_clock') is True and manifest.get('audio_override')==(
+            '/usr/local/lib/siliconforest/firefox/160-system1/overrides/audio-clock-v1/Frameworks')
+        answer['installed_clock_gate']=dict(checks=checks,passed=all(checks.values()))
+        answer['output_boundary_passed'] &= all(checks.values())
+    return answer
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('run',type=Path);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--native-log',type=Path,help='Explicit recovered original own runtime stdout, retained separately from the empty outer log')
+    p.add_argument('--expect-installed-clock',action='store_true',help='Additionally require installed selection, image/clock/HAL evidence and natural Quit0')
     a=p.parse_args();raw=json.loads((a.run/'result.json').read_text());text=(a.run/'firefox.log').read_text(errors='replace')
     if raw.get('native_log_collection_error'):raise ValueError('Incomplete native log collection')
     for row in raw.get('native_log_files',[]):
@@ -97,7 +115,7 @@ def main():
         if len(data)!=row['bytes'] or hashlib.sha256(data).hexdigest()!=row['sha256']:raise ValueError('Native log receipt mismatch')
         text+='\n'+data.decode(errors='replace')
     if a.native_log:text+='\n'+a.native_log.read_text(errors='replace')
-    result=analyze(raw,text)
+    result=analyze(raw,text,a.expect_installed_clock)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
     return int(not result['output_boundary_passed'])
 
