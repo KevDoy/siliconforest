@@ -55,3 +55,28 @@ The 30 FreeType maps of the same file (one per FT_New_Face) are clean shared pag
   its remaining per-frame maps are probably new video surfaces - inference), one glFinish per CGL write-back (GPU Renderer 8.3 -> 8.4 %).
 - File system (kernel): unlink and fsync of a 4 KB file take 15 / 14 ms (p50) on the M1's ext4; Firefox's IndexedDB,
   cache and quota threads spend their idle time there.
+
+### FX-031 (idle static page) on c19
+- Warm profile, example.com, 30 s after a 45 s settle, no tracing (runs E2, E4): family 2.4 % / 2.1 % of a core,
+  248 / 210 context switches/s, 7 interrupt wake-ups/s; no GPU commits in steady 10 s windows (compositor WMPACING).
+  Left: the parent main thread (~0.85 %) and Glean's dispatcher thread (~0.7 %).
+- The first minutes of a fresh profile cost 19-27 % (E1, E3): IndexedDB/quota first-run work whose threads sit in
+  ext4 unlink/fsync (15 / 14 ms per 4 KB file on the M1).
+
+### Memory at 1 / 10 / 30 tabs (c19, after the font fix was installed)
+Family sum of RSS / of phys_footprint: 1 tab (example.com, warm) 2.0 / 0.95 GB; 10 static tabs 2.6 / 1.28 GB; 30 tabs
+(10 static + 20 Wikipedia) 4.1 / 2.25 GB (FXQA's earlier RSS sums: 2.3 / 4.0 / 5.4 GB). RSS sums overstate: every
+process maps the same font files (the parent alone maps NotoSansMonoCJK 31 times = ~980 MB of "RSS", clean shared
+pages). Per process, our libraries' private dirty pages are small (Mesa ~5 MB, AppKit/Foundation/libSystem ~1 MB each);
+XUL's relocated data is 55-66 MB per process (Mozilla's, as on macOS). Gecko's own accounting at 30 tabs: explicit
+602 MB, heap-allocated 772 MB across all processes.
+
+### FX-030 (tab switch) - partial attribution (profile with 1 ms sampling, inflated)
+Key -> AsyncTabSwitch:Start 3-5 ms; the content repaints at once (PaintWhileInterruptingJS) and the GPU process
+composites the new tab within ~3 ms (DidComposite); AsyncTabSwitch:Finish at ~21 ms; but the parent's compositor
+thread receives the native-layer commit for that frame only ~55 ms after Start and renders it (CARenderer) at ~57 ms,
+then the window present + compositor flip (~22 ms commit->flip) follow. The ~50 ms between the GPU composite and the
+parent's commit is not explained yet (not a busy thread: the GPU Renderer and the parent compositor thread wait).
+
+### Start-up (installed c19 path, warm profile, 3 runs)
+exec -> first presented frame 2.00 / 1.75 / 1.82 s (median 1.82 s); window listed by the compositor ~2.6 s (polled).

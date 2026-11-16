@@ -17,6 +17,8 @@ def thread_ms(st, role, name):
 
 def frames(d):
     rows = []
+    if not (d / 'desktop.log').exists():
+        return (None, None)
     for line in open(d / 'desktop.log', errors='replace'):
         m = re.match(r'WMPACING over_ms=(\d+) window=\d+ app="org.mozilla.firefox" commits=(\d+) shown=(\d+)', line)
         if m:

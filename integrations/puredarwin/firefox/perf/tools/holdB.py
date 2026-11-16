@@ -85,78 +85,96 @@ def switches(win, order, label):
 
 ENV = 'MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1,SFFX_FRAME_TRACE=1' + XENV
 ORDER = [2, 3, 4, 5, 1, 6, 7, 8, 2, 3, 9, 4]
+SWITCHONLY = 'SWITCHONLY' in sys.argv[3:]
 
 with hold(9, 'FXPERF capture %s (%s): tab switches (Command-number, own window), 30 tabs idle, warm start-ups x3 + start-up profile' % (TAG, MODE)):
-    for name, body in WWW.items():
-        sh('mkdir -p %s/www && cat > %s/www/%s' % (B, B, name), inp=body, check=True)
-    sh('mkdir -p %s; rm -rf %s/results; (nohup python3 %s/www/serve.py >/dev/null 2>&1 &) ; sleep 0.5' % (RO, B, B))
-    R['desk_log_lines0'] = int(sh('wc -l < /var/log/desktop-session.log').stdout.split()[0])
-    before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
-    sh('rm -rf %s && mkdir -p %s && cat > %s/user.js' % (PROFILE, PROFILE, PROFILE), inp=USERJS, check=True)
-    sh('/Applications/Firefox.app/Contents/MacOS/firefox-sf --sf-plan -no-remote --profile %s > %s/plan.json; '
-       'shasum -a 256 /usr/local/lib/siliconforest/firefox/160-system1/release.json /Applications/Firefox.app/Contents/MacOS/firefox-sf > %s/runtime.sha; '
-       'uname -v >> %s/runtime.sha' % (PROFILE, RO, RO, RO))
-    step('launch tabs')
-    R['launch1'] = sh(T + " launch %s '%s' --marionette 'http://127.0.0.1:8766/tab.html?i=0'" % (PROFILE, ENV), check=True).stdout.strip()
-    if 'marionette up' not in mn('wait', 'tabs:9:http://127.0.0.1:8766/tab.html?i={i}', 'sleep:1'):
-        sh(T + ' quitall'); sh("pkill -f 'sffxperf/www/serve.py'")
-        raise SystemExit('no marionette')
-    # the tabs got i=0..8; rename by order of the strip: first tab i=0 then 9 background tabs i=0..8
-    me = mywin(before); R['win'] = me and me['line'][:300]; print('window', R['win'])
-    time.sleep(4)
-    step('switches with profiler')
-    mn('prof:on:1')
-    switches(me['id'], ORDER, 'switch_prof')
-    mn('prof:dump:%s/switch.prof.json' % RO)
-    step('switches without profiler')
-    sh('rm -f %s/results/*' % B)
-    switches(me['id'], ORDER, 'switch_plain')
-    R['page_results'] = sh('cd %s/results && for f in $(ls); do echo "$f $(cat $f)"; done' % B).stdout
-    step('20 more tabs')
-    mn('tabs:20:https://en.wikipedia.org/wiki/Special:Random', 'sleep:25')
-    sh(T + ' req 10', inp='target %d\nkey e1 down\nwait 30\nkey e1 up' % me['id'], timeout=40); time.sleep(3)
-    step('30 tabs idle stat')
-    comp = sh("ps -axo pid=,rss=,command= | grep chonkstep-darwin-desktop | grep -v grep | sort -k2 -n | tail -1 | awk '{print $1}'").stdout.strip()
-    print(sh(T + ' stat 30 %s/tabs30-stat.json %s' % (RO, comp)).stdout)
-    mn('mem:%s/tabs30-mem.json.gz' % RO)
-    par = sh(T + " mine | awk '$4==\"parent\"{print $1}'").stdout.split()
-    if par:
-        print(sh(T + ' regions %s %s/regions-parent-30.json' % (par[0], RO)).stdout[:2500])
-    sh(T + ' req 10', inp='target %d\nkey e1 down\nwait 30\nkey e1 up' % me['id'], timeout=40)
-    step('quit')
-    mn('quit'); R['left1'] = wait_exit()
-    pid = R['launch1'].split()[0]
-    sh('cp $(ls -t /var/root/Library/Logs/SiliconForest/Firefox/*-%s.log | head -1) %s/firefox-tabs.log' % (pid, RO))
-    # warm start-ups: no Marionette; exec -> first presented frame (FXWSPRESENTED), quit with Command-Q
-    for n in range(4):
-        prof = n == 3
-        env = 'SFFX_FRAME_TRACE=1' + XENV
-        if prof:
-            env += ',MOZ_PROFILER_STARTUP=1,MOZ_PROFILER_STARTUP_INTERVAL=1,MOZ_PROFILER_STARTUP_FILTERS=*,' \
-                   'MOZ_PROFILER_STARTUP_FEATURES=js%stackwalk%cpuallthreads%processcpu%ipcmessages%markersallthreads,' \
-                   'MOZ_PROFILER_SHUTDOWN=%s/startup.prof.json' % RO
-        before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
-        step('start %d' % n)
-        lr = sh(T + " launch %s '%s' https://example.com/" % (PROFILE, env), check=True).stdout.strip()
-        t0 = int(lr.split()[1])
-        w = mywin(before)
-        tmap = time.time()
-        time.sleep(4 if not prof else 6)
-        if w:
-            sh(T + ' req 10', inp='target %d\n' % w['id'] + keys('chord:cmd+q', 'wait:300'), timeout=40)
-        left = wait_exit(25)
-        p = lr.split()[0]
-        logf = sh('ls -t /var/root/Library/Logs/SiliconForest/Firefox/*-%s.log | head -1' % p).stdout.strip()
-        first = sh("grep -m1 FXWSPRESENTED %s" % logf).stdout.strip()
-        m = re.search(r'callback_ms=([\d.]+)', first); q = re.search(r'request_ms=([\d.]+)', first)
-        R.setdefault('starts', []).append(dict(n=n, profiled=prof, t_exec_ms=t0,
-            first_request_ms=round(float(q[1]) - t0, 1) if q else None,
-            first_presented_ms=round(float(m[1]) - t0, 1) if m else None,
-            window_seen_ms=round(tmap * 1000 - t0) if w else None, left=left))
-        print(R['starts'][-1], flush=True)
-        sh('cp %s %s/firefox-start%d.log' % (logf, RO, n))
+  try:
+      for name, body in WWW.items():
+          sh('mkdir -p %s/www && cat > %s/www/%s' % (B, B, name), inp=body, check=True)
+      sh('mkdir -p %s; rm -rf %s/results; (nohup python3 %s/www/serve.py >/dev/null 2>&1 &) ; sleep 0.5' % (RO, B, B))
+      R['desk_log_lines0'] = int(sh('wc -l < /var/log/desktop-session.log').stdout.split()[0])
+      before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
+      sh('rm -rf %s && mkdir -p %s && cat > %s/user.js' % (PROFILE, PROFILE, PROFILE), inp=USERJS, check=True)
+      sh('/Applications/Firefox.app/Contents/MacOS/firefox-sf --sf-plan -no-remote --profile %s > %s/plan.json; '
+         'shasum -a 256 /usr/local/lib/siliconforest/firefox/160-system1/release.json /Applications/Firefox.app/Contents/MacOS/firefox-sf > %s/runtime.sha; '
+         'uname -v >> %s/runtime.sha' % (PROFILE, RO, RO, RO))
+      step('launch tabs')
+      R['launch1'] = sh(T + " launch %s '%s' --marionette 'http://127.0.0.1:8766/tab.html?i=0'" % (PROFILE, ENV), check=True).stdout.strip()
+      if 'marionette up' not in mn('wait', 'tabs:9:http://127.0.0.1:8766/tab.html?i={i}', 'sleep:1'):
+          sh(T + ' quitall'); sh("pkill -f 'sffxperf/www/serve.py'")
+          raise SystemExit('no marionette')
+      # the tabs got i=0..8; rename by order of the strip: first tab i=0 then 9 background tabs i=0..8
+      me = mywin(before); R['win'] = me and me['line'][:300]; print('window', R['win'])
+      time.sleep(4)
+      comp0 = sh("ps -axo pid=,rss=,command= | grep chonkstep-darwin-desktop | grep -v grep | sort -k2 -n | tail -1 | awk '{print $1}'").stdout.strip()
+      step('10 tabs idle stat 20s')
+      print(sh(T + ' stat 20 %s/tabs10-stat.json %s' % (RO, comp0)).stdout)
+      if not SWITCHONLY:
+          step('switches with profiler')
+          mn('prof:on:1')
+          switches(me['id'], ORDER, 'switch_prof')
+          mn('prof:dump:%s/switch.prof.json' % RO)
+      step('switches without profiler')
+      sh('rm -f %s/results/*' % B)
+      switches(me['id'], ORDER, 'switch_plain')
+      R['page_results'] = sh('cd %s/results && for f in $(ls); do echo "$f $(cat $f)"; done' % B).stdout
+      json.dump(R, open(D / 'run.json', 'w'), indent=1)
+      if SWITCHONLY:
+          raise StopIteration('switch-only run')
+      step('20 more tabs')
+      mn('tabs:20:https://en.wikipedia.org/wiki/Special:Random', 'sleep:25')
+      sh(T + ' req 10', inp='target %d\nkey e1 down\nwait 30\nkey e1 up' % me['id'], timeout=40); time.sleep(3)
+      step('30 tabs idle stat')
+      comp = sh("ps -axo pid=,rss=,command= | grep chonkstep-darwin-desktop | grep -v grep | sort -k2 -n | tail -1 | awk '{print $1}'").stdout.strip()
+      print(sh(T + ' stat 30 %s/tabs30-stat.json %s' % (RO, comp)).stdout)
+      mn('mem:%s/tabs30-mem.json.gz' % RO)
+      par = sh(T + " mine | awk '$4==\"parent\"{print $1}'").stdout.split()
+      if par:
+          print(sh(T + ' regions %s %s/regions-parent-30.json' % (par[0], RO)).stdout[:2500])
+      sh(T + ' req 10', inp='target %d\nkey e1 down\nwait 30\nkey e1 up' % me['id'], timeout=40)
+      step('quit')
+      mn('quit'); R['left1'] = wait_exit()
+      pid = R['launch1'].split()[0]
+      sh('cp $(ls -t /var/root/Library/Logs/SiliconForest/Firefox/*-%s.log | head -1) %s/firefox-tabs.log' % (pid, RO))
+      # warm start-ups: no Marionette; exec -> first presented frame (FXWSPRESENTED), quit with Command-Q
+      for n in range(4):
+          prof = n == 3
+          env = 'SFFX_FRAME_TRACE=1' + XENV
+          if prof:
+              env += (',MOZ_PROFILER_STARTUP=1,MOZ_PROFILER_STARTUP_INTERVAL=1,MOZ_PROFILER_STARTUP_FILTERS=*,'
+                      'MOZ_PROFILER_STARTUP_FEATURES=js%stackwalk%cpuallthreads%processcpu%ipcmessages%markersallthreads,'
+                      'MOZ_PROFILER_SHUTDOWN=' + RO + '/startup.prof.json')
+          before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
+          step('start %d' % n)
+          lr = sh(T + " launch %s '%s' https://example.com/" % (PROFILE, env), check=True).stdout.strip()
+          t0 = int(lr.split()[1])
+          w = mywin(before)
+          tmap = time.time()
+          time.sleep(4 if not prof else 6)
+          if w:
+              sh(T + ' req 10', inp='target %d\n' % w['id'] + keys('chord:cmd+q', 'wait:300'), timeout=40)
+          left = wait_exit(25)
+          p = lr.split()[0]
+          logf = sh('ls -t /var/root/Library/Logs/SiliconForest/Firefox/*-%s.log | head -1' % p).stdout.strip()
+          first = sh("grep -m1 FXWSPRESENTED %s" % logf).stdout.strip()
+          m = re.search(r'callback_ms=([\d.]+)', first); q = re.search(r'request_ms=([\d.]+)', first)
+          R.setdefault('starts', []).append(dict(n=n, profiled=prof, t_exec_ms=t0,
+              first_request_ms=round(float(q[1]) - t0, 1) if q else None,
+              first_presented_ms=round(float(m[1]) - t0, 1) if m else None,
+              window_seen_ms=round(tmap * 1000 - t0) if w else None, left=left))
+          print(R['starts'][-1], flush=True)
+          sh('cp %s %s/firefox-start%d.log' % (logf, RO, n))
+      sh("pkill -f 'sffxperf/www/serve.py'")
+      sh('tail -n +%d /var/log/desktop-session.log > %s/desktop.log' % (R['desk_log_lines0'], RO))
+  except StopIteration:
+      pass
+  finally:
+    json.dump(R, open(D / 'run.json', 'w'), indent=1)
+    if sh(T + ' mine').stdout.strip():
+        print('cleanup: own Firefox still running, Marionette quit then TERM')
+        sh(MN + ' quit', timeout=40); time.sleep(3)
+        if sh(T + ' mine').stdout.strip(): print(sh(T + ' quitall').stdout)
     sh("pkill -f 'sffxperf/www/serve.py'")
-    sh('tail -n +%d /var/log/desktop-session.log > %s/desktop.log' % (R['desk_log_lines0'], RO))
 sh('cd %s && gzip -f -1 *.prof.json' % RO, timeout=300)
 json.dump(R, open(D / 'run.json', 'w'), indent=1)
 r = subprocess.run(SSH + ['tar -C %s -cf - %s' % (B + '/out', TAG)], capture_output=True, timeout=900)
