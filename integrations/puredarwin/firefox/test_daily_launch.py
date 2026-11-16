@@ -81,6 +81,8 @@ class LaunchPlanPolicy(unittest.TestCase):
         command, env = self.plan()
         self.assertEqual(command[1], '/usr/libexec/iosurfaced')
         self.assertIn(str(self.root / 'surface/bin/surface-session'), command)
+        self.assertEqual(env['DYLD_LIBRARY_PATH'].split(':')[0],
+                         '/usr/local/lib/siliconforest/opengl/v1/lib')
         for field in ['DYLD_FRAMEWORK_PATH', 'DYLD_LIBRARY_PATH']:
             for path in env[field].split(':'):
                 self.assertFalse(any(part in Path(path).parts for part in ['surface', 'gl', 'overrides']))

@@ -189,7 +189,12 @@ def plan(root, args, manifest=None):
         if system_gpu:
             frames = [root / 'avfoundation/Frameworks', root / 'compat/System/Library/Frameworks',
                       Path('/System/Library/Frameworks')]
-            libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A', root / 'compat/usr/lib']
+            # OpenGL re-exports the matched Mesa dispatch at this canonical
+            # prefix. Direct /usr/lib/libGL loads must resolve to the same
+            # image too, rather than introducing a second dispatch provider.
+            libraries = [Path('/usr/local/lib/siliconforest/opengl/v1/lib'),
+                         root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
+                         root / 'compat/usr/lib']
         elif graphics is not None:
             # Select storage, CGL, GL dispatch and broker as one cohort. Never
             # combine a new plane layout with the previous runtime's broker.
