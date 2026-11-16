@@ -17,6 +17,7 @@ let
     ${a.pkgs.patch}/bin/patch -p1 < ${./iosurface-patches/0003-nv12-gpu-planes-and-local-use-count.patch}
    ''}
   ''}
+  ${a.pkgs.patch}/bin/patch -p1 < ${./iosurface-patches/0004-lookup-never-revives-a-finalizing-surface.patch}
  '';
  raw=a.iosurface.override {src=patched;};
  iso=if gpuBacking then raw.overrideAttrs(old:{

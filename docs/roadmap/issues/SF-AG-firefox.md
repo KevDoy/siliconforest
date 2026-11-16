@@ -4,11 +4,13 @@
 
 ## State for the owner
 
-Firefox remains installed, but the selected private UI libraries still have the disappearing-window bug: one click on the ≡ menu can remove the window while video audio continues. TERM8 installed the repaired system libraries at 00:09 UTC. I am switching Firefox to those system AppKit, Onyx2D, CoreText, QuartzCore and WindowServer providers as the first integration step, with a rollback. That switch is prepared but has not been applied yet.
+At 01:04:10 UTC, Firefox's installed launcher was switched to the system AppKit, Onyx2D, CoreText, QuartzCore and WindowServer providers. That closes the selection gap that kept TERM8's popup and connection-loss fixes out of Firefox. A rollback is retained. The installed-app check passes: both parent and GPU loaded all five system providers, and renderer captures show correct NYT labels (32/32 measured text runs) and CNN text (8/8). The required 20 popup repetitions, popup stress and 20 launches are still pending.
 
-The GPU device slots exhausted again at 00:33 UTC. CODEX-TB is installing the devfs fix now; no Firefox or GPU tests run until it confirms the fixed kernel is back. The owner has authorized the necessary kernel and compositor work without idle waits. Disruptions retain notices, locks and rollbacks; synthetic input uses only the virtual seat.
+CODEX-TB installed and released the devfs clone-slot fix. It passed 60,000 clone operations with balanced slots, 50 GL and 50 Vulkan launches, and 20 window creation/close checks. All 20 old-cohort browser captures were blank, so those checks do not qualify page painting. Kernel decoder buffers, pinch and HID readiness are the next announced install. No owner-idle waits remain; locks and disruption notices still apply.
 
-The original blank web-font fault is fixed. The subsequent wrong-letter glyph-cache repair passes private NYT and CNN captures: 33/33 and 8/8 measured text runs, with the NYT navigation visually correct. The installed-app check then crashed while CGL released an IOSurface, so installed verification is still open. FXQA will repeat the menu sequence 20 times, stress popups, launch 20 fresh instances and check CNN/NYT after the provider switch.
+FXLEAD proved the installed-app crash was a race that revived a finalizing IOSurface. The old provider crashed in 5/5 native race tests; the fix passed 5/5. The fixed provider was selected alongside the system UI at 01:04:10. The first installed browser check with that fixed provider passes without the earlier crash.
+
+The blank web-font fault and wrong-letter glyph-cache fault now pass installed NYT and CNN captures. The earlier installed verification crashed while CGL released an IOSurface; that failure is retained, and the new installed check with the lifetime fix passes. Independent FXQA popup and launch verification remains open.
 
 Stale tiles, blank regions after resize and blank software fallback remain open. FXLEAD owns those paint and geometry repairs. FXPERF owns the idle and memory work: CNN used 92% of one core and presented about 20 full-window frames each second while idle; a static page used 6.6%. Memory at 1/10/30 tabs was 2.3/4.0/5.4 GB and tab switching about 120 ms. These are before measurements; no improvement is claimed yet.
 

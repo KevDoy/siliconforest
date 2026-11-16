@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import shutil
 
 
 def sha(path):
@@ -78,6 +79,24 @@ def main():
         raise ValueError('Matching cold staging receipt required')
     if sha(source / 'firefox-sf') != cold['sha256']['firefox-sf']:
         raise ValueError('Staged launcher changed')
+    surface_source = source / 'surface-provider'
+    surface_destination = root / 'overrides/surface-lookup-v1'
+    if surface_source.exists():
+        qualification = json.loads((source / 'surface-qualification.json').read_text())
+        image = 'surface-provider/Frameworks/IOSurface.framework/Versions/A/IOSurface'
+        if (qualification.get('native_fixed_passes') != 5 or qualification.get('native_old_sigsegv') != 5 or
+                qualification.get('sha256') != cold['sha256'].get(image)):
+            raise ValueError('Matching native IOSurface race qualification required')
+        for path in surface_source.rglob('*'):
+            name = str(path.relative_to(source))
+            if path.is_symlink():
+                if str(path.readlink()) != cold['symlinks'].get(name):
+                    raise ValueError('Staged IOSurface link changed')
+            elif path.is_file() and sha(path) != cold['sha256'].get(name):
+                raise ValueError('Staged IOSurface changed')
+        if surface_destination.exists():
+            raise FileExistsError('IOSurface update destination must be new')
+        manifest['surface_override'] = str(surface_destination / 'Frameworks')
     providers = {name: Path('/System/Library/Frameworks') / (name + '.framework/Versions/A') / name
                  for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
     providers['libWindowServer'] = Path('/usr/lib/libWindowServer.dylib')
@@ -94,7 +113,7 @@ def main():
     spec.loader.exec_module(candidate)
     command, environment = candidate.plan(root, [], manifest=manifest)
     paths = environment['DYLD_FRAMEWORK_PATH'].split(':') + environment['DYLD_LIBRARY_PATH'].split(':')
-    if any(any(part in Path(path).parts for part in ['appkit', 'quartz', 'onyx', 'coretext', 'windowserver', 'overrides'])
+    if any(any(part in Path(path).parts for part in ['appkit', 'quartz', 'onyx', 'coretext', 'windowserver'])
            for path in paths):
         raise ValueError('A private Cocoa provider remains selected')
     backup = root / 'maintenance-system-ui-v1'
@@ -114,6 +133,9 @@ def main():
     (backup / 'release.json').write_bytes(previous)
     (backup / 'firefox-sf').write_bytes(launcher.read_bytes())
     (backup / 'firefox-sf').chmod(0o755)
+    if surface_source.exists():
+        surface_destination.parent.mkdir(exist_ok=True)
+        shutil.copytree(surface_source, surface_destination, symlinks=True)
     try:
         atomic(launcher, (source / 'firefox-sf').read_bytes(), 0o755)
         atomic(manifest_path, (json.dumps(manifest, indent=2) + '\n').encode(), 0o600)

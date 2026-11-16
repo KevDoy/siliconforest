@@ -104,6 +104,13 @@ class LaunchPlanPolicy(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.plan()
 
+    def test_system_ui_keeps_the_qualified_iosurface_lifetime_provider(self):
+        provider = self.root / 'overrides/surface-lookup-v1/Frameworks'
+        self.manifest.update(system_ui=True,surface_override=str(provider))
+        _, env = self.plan()
+        self.assertEqual(env['DYLD_FRAMEWORK_PATH'].split(':')[0],str(provider))
+        self.assertNotIn(str(self.root / 'appkit/Frameworks'),env['DYLD_FRAMEWORK_PATH'].split(':'))
+
 
 if __name__ == '__main__':
     unittest.main()

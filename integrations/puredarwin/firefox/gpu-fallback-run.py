@@ -56,7 +56,7 @@ def main():
             environment.pop(name, None)
     os.environ.update(environment)
     options = ['remote-run.py', '--bundle', str(original), '--run', str(args.run),
-        '--seconds', '60', '--page-load-strategy', 'none', '--quiet-trace',
+        '--seconds', '60', '--functional-qa', '--page-load-strategy', 'none', '--quiet-trace',
         '--capture-renderer', '--capture-pages', '--presentation-seat', '--site-legibility',
         '--sample-parent', '--sample-path', '/private/var/db/sffx/probes-v3/sf-sample',
         '--framework-path', environment['DYLD_FRAMEWORK_PATH'],
@@ -74,7 +74,7 @@ def main():
         if enabled:
             options.append(option)
     if args.software:
-        options += ['--pref', 'gfx.webrender.software=true']
+        options += ['--software']
     if args.kill_first_gpu:
         options += ['--gpu-startup-fault', 'kill', '--pref', 'layers.gpu-process.max_restarts=0',
                     '--pref', 'layers.gpu-process.max_launch_attempts=0']

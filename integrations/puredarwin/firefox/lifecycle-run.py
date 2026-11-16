@@ -42,7 +42,9 @@ def main():
     for path in [args.run, args.ui_prefix, args.observer]:
         if path is not None and (not str(path).startswith('/private/var/db/sffx/') or '..' in path.parts):
             raise ValueError('Only the owned private target prefix is allowed')
-    guard = OwnerInputGuard()
+    guard = OwnerInputGuard(require_idle=False)
+    from presentation_seat import functional_qa
+    functional_qa()
     args.run.mkdir(exist_ok=False)
     profile = args.run / 'profile'
     profile.mkdir()
@@ -59,6 +61,7 @@ def main():
     (profile / 'user.js').write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v)) for k, v in prefs.items()))
     fixture = AudioFixture(args.run)
     runtime = Path('/usr/local/lib/siliconforest/firefox/160-system1')
+    manifest = json.loads((runtime / 'release.json').read_text())
     command, env = module('daily', 'daily-launch.py').plan(runtime,
         ['--no-remote', '--profile', str(profile), '--marionette', fixture.url])
     env.update(MOZ_NO_REMOTE='1', MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1', MOZ_CRASHREPORTER_DISABLE='1',
@@ -79,7 +82,8 @@ def main():
     result = dict(action=args.action, launcher_kind='installed-runtime-plan-with-explicit-diagnostic-profile',
                   installed_outer_or_dock=False, command=command, ui_prefix=str(args.ui_prefix),
                   requested_system_coretext=args.system_coretext, observer=str(args.observer),
-                  owner_input_before=guard.before, audio_stop_qualified=False, complete=False)
+                  owner_input_before=guard.before, audio_stop_qualified=False, complete=False,
+                  functional_qa=True, timing_qualified=False)
     client = None
     process = None
 
@@ -148,7 +152,9 @@ def main():
             pause(2)
             from provider_images import inspect
             identity()
-            expected = str((args.ui_prefix or runtime) / 'appkit')
+            expected = ('/System/Library/Frameworks/AppKit.framework'
+                        if manifest.get('system_ui') and not args.ui_prefix
+                        else str((args.ui_prefix or runtime) / 'appkit'))
             result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned, parent, expected)
             if not result['providers']['complete']:
                 raise RuntimeError('Actual owned parent/GPU provider check failed')

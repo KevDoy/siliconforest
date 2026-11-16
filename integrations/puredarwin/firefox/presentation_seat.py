@@ -47,9 +47,12 @@ def _request(inject, lines, _virtual_handshake=False):
         owner_idle(inject,require_virtual=True)
         if any(line.strip()=='seat owner' for line in lines.splitlines()):raise RuntimeError('Owner seat forbidden in Firefox diagnostics')
         target=_target_window.get()
-        if target is None:
+        # Reopen/Quit address an admitted process and must work with no window.
+        # Pointer/key streams always retain an explicit window target.
+        process_request=all(command in ['app','wait','dump','list','stats','capture'] for command in commands)
+        if target is None and not process_request:
             raise RuntimeError('Admit an owned window before synthetic input')
-        lines='seat virtual\ntarget %d\n'%target+lines
+        lines='seat virtual\n'+('target %d\n'%target if not process_request else '')+lines
     if (inject / 'request').exists() or (inject / 'request.part').exists():
         raise RuntimeError('Another inject request is pending')
     (inject / 'done').unlink(missing_ok=True)

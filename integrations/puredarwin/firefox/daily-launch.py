@@ -54,6 +54,13 @@ def plan(root, args, manifest=None):
     frames = [root / (name + '/Frameworks') for name in
               ['surface', 'avfoundation', 'appkit', 'quartz', 'onyx', 'gl']]
     frames.append(root / 'compat/System/Library/Frameworks')
+    surface_framework = root / 'surface/Frameworks'
+    if manifest.get('surface_override') is not None:
+        surface_framework = Path(manifest['surface_override'])
+        if (not manifest.get('system_layout') or '..' in surface_framework.parts or
+                not surface_framework.is_relative_to(root / 'overrides') or surface_framework.name != 'Frameworks'):
+            raise ValueError('IOSurface override must be a versioned provider inside this app runtime')
+        frames[0] = surface_framework
     onyx = manifest.get('onyx_override')
     if onyx is not None:
         requested = Path(onyx)
@@ -91,7 +98,7 @@ def plan(root, args, manifest=None):
         # The missing-provider tree contains no AppKit, Onyx2D, CoreText or
         # QuartzCore. Remove private library directories too: QuartzCore.pd
         # and libWindowServer must follow the selected system frameworks.
-        frames = [root / (name + '/Frameworks') for name in ['surface', 'avfoundation', 'gl']]
+        frames = [surface_framework, root / 'avfoundation/Frameworks', root / 'gl/Frameworks']
         frames += [root / 'compat/System/Library/Frameworks', Path('/System/Library/Frameworks')]
         libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
                      root / 'gl/lib', root / 'compat/usr/lib']
