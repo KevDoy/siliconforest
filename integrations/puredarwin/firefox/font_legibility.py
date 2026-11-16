@@ -11,7 +11,7 @@ import time
 from urllib.parse import urlsplit
 
 
-def measure(client, directory, handles=None, prefix="legibility"):
+def measure(client, directory, handles=None, prefix="legibility", seat_activity=False):
     client.command('Marionette:SetContext', {'value': 'content'})
     rows=[]
     def script(source):
@@ -26,6 +26,14 @@ def measure(client, directory, handles=None, prefix="legibility"):
         url=client.command('WebDriver:GetCurrentURL')
         if urlsplit(url).scheme not in ['http','https','file']:continue
         time.sleep(4)
+        image_prefix=prefix+'-%02d'%len(rows)
+        admission=None
+        if seat_activity:
+            # A tab switch through Marionette is not an AppKit input event.
+            # Admit each page's actual window, just as in the Page Down gate,
+            # rather than assuming the initial tab's admission covers it.
+            from presentation_seat import admit
+            admission=admit(client,directory/(image_prefix+'-admission.json'),fixture=False)
         row=script('''const runs=[],excluded=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
           function visibleBox(rect,element){
             // A partially offscreen glyph is not a measurable complete run.
@@ -54,7 +62,7 @@ def measure(client, directory, handles=None, prefix="legibility"):
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
             fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};''')
-        image_prefix=prefix+'-%02d'%len(rows)
+        row['per_page_virtual_admission']=admission
         from renderer_capture import capture
         from screen_calibration import calibrate
         anchors=script('''const anchors=[{x:5,y:5,width:8,color:[17,241,113]},{x:101,y:101,width:8,color:[233,19,157]}];

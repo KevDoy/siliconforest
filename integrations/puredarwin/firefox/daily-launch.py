@@ -14,6 +14,8 @@ import time
 COMPOSITOR_BEGIN = '// BEGIN SiliconForest FX-011/012 compositor preference\n'
 COMPOSITOR_END = '// END SiliconForest FX-011/012 compositor preference\n'
 COMPOSITOR_KEY = 'gfx.webrender.compositor'
+PLATFORM_BEGIN = '// BEGIN SiliconForest window and GL defaults\n'
+PLATFORM_END = '// END SiliconForest window and GL defaults\n'
 
 
 def native_compositor_preference(manifest, environment):
@@ -34,10 +36,25 @@ def update_compositor_preference(settings, value):
         return 'unmanaged'
     if type(value) is not bool:
         raise ValueError('Expected a boolean compositor preference')
+    return update_managed_preferences(settings, {COMPOSITOR_KEY: value},
+                                      COMPOSITOR_BEGIN, COMPOSITOR_END)
+
+
+def update_platform_preferences(settings):
+    # Firefox's full-frame titlebar layout overlaps AppKit's in-window menu
+    # strip under server decorations. ANGLE has no usable display backend here.
+    # These defaults also apply when an existing user.js contains other keys.
+    return update_managed_preferences(settings,
+        {'browser.tabs.inTitlebar': 0, 'webgl.disable-angle': True},
+        PLATFORM_BEGIN, PLATFORM_END)
+
+
+def update_managed_preferences(settings, preferences, begin_marker, end_marker):
+    """Keep explicit choices and unrelated bytes; own only the marked block."""
     if settings.is_symlink():
         raise ValueError('Refusing to replace a symlinked user.js')
     original = settings.read_bytes() if settings.exists() else b''
-    begin, end = COMPOSITOR_BEGIN.encode(), COMPOSITOR_END.encode()
+    begin, end = begin_marker.encode(), end_marker.encode()
     if original.count(begin) != original.count(end) or original.count(begin) > 1:
         raise ValueError('Malformed SiliconForest preference block; leave user.js intact')
     if begin in original:
@@ -48,7 +65,9 @@ def update_compositor_preference(settings, value):
         prefix, suffix = original[:first], original[last:]
     else:
         prefix, suffix = original, b''
-    if COMPOSITOR_KEY.encode() in prefix + suffix:
+    defaults = {key: value for key, value in preferences.items()
+                if key.encode() not in prefix + suffix}
+    if not defaults:
         # An explicit owner/test preference wins. Remove our previous block
         # too, or its later assignment could override that explicit choice.
         if begin not in original:
@@ -57,8 +76,8 @@ def update_compositor_preference(settings, value):
     else:
         if prefix and not prefix.endswith(b'\n'):
             prefix += b'\n'
-        block = begin + ('user_pref(%s,%s);\n' %
-            (json.dumps(COMPOSITOR_KEY), json.dumps(value))).encode() + end
+        block = begin + ''.join('user_pref(%s,%s);\n' %
+            (json.dumps(key), json.dumps(value)) for key, value in defaults.items()).encode() + end
         updated = prefix + block + suffix
     if updated == original:
         return 'unchanged'
@@ -297,10 +316,11 @@ def main():
                         'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False})
     settings = profile / 'user.js'
     # Upgrade only the byte-exact four-setting file this installer generated.
-    # An existing owner-edited user.js remains untouched.
+    # Preserve other settings and explicit choices; add missing platform defaults below.
     if not settings.exists() or (manifest.get('system_layout') and settings.read_text() == legacy):
         settings.write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v))
                                    for k, v in preferences.items()))
+    update_platform_preferences(settings)
     update_compositor_preference(settings, native_compositor_preference(manifest, os.environ))
     logs = (Path.home() / 'Library/Logs/SiliconForest/Firefox') if manifest.get('system_layout') else root / 'logs'
     logs.mkdir(mode=0o700, parents=True, exist_ok=True)

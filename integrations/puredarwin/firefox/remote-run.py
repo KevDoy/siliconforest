@@ -437,7 +437,8 @@ def main():
                                 deadline = min(deadline, time.monotonic()+2)
                             if args.site_legibility:
                                 from font_legibility import measure as measure_legibility
-                                result['legibility']=measure_legibility(client,args.run)
+                                result['legibility']=measure_legibility(client,args.run,
+                                                                       seat_activity=args.presentation_seat)
                                 if not args.popup_stress:
                                     deadline=min(deadline,time.monotonic()+2)
                             if args.benchmark:

@@ -197,6 +197,31 @@ class CompositorPreferenceSafety(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.settings = Path(self.temporary.name) / 'user.js'
 
+    def test_existing_other_preferences_still_receive_safe_window_and_gl_defaults(self):
+        original = b'// existing profile\nuser_pref("browser.zoom.full",false);\n'
+        self.settings.write_bytes(original)
+        self.settings.chmod(0o640)
+        daily.update_platform_preferences(self.settings)
+        result = self.settings.read_bytes()
+        self.assertTrue(result.startswith(original))
+        self.assertIn(b'user_pref("browser.tabs.inTitlebar",0);', result)
+        self.assertIn(b'user_pref("webgl.disable-angle",true);', result)
+        self.assertNotIn(daily.COMPOSITOR_KEY.encode(), result)
+        self.assertEqual(self.settings.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(daily.update_platform_preferences(self.settings), 'unchanged')
+        self.assertEqual(self.settings.read_bytes(), result)
+
+    def test_explicit_platform_choices_win_and_later_choices_remove_managed_defaults(self):
+        original = b'user_pref("browser.tabs.inTitlebar",1);\n'
+        self.settings.write_bytes(original)
+        daily.update_platform_preferences(self.settings)
+        self.assertNotIn(b'user_pref("browser.tabs.inTitlebar",0);', self.settings.read_bytes())
+        explicit = b'user_pref("webgl.disable-angle",false);\n'
+        self.settings.write_bytes(self.settings.read_bytes()+explicit)
+        daily.update_platform_preferences(self.settings)
+        self.assertEqual(self.settings.read_bytes(), original+explicit)
+        self.assertEqual(daily.update_platform_preferences(self.settings), 'explicit-user-preference')
+
     def test_unselected_policy_never_creates_or_modifies_preferences(self):
         daily.update_compositor_preference(self.settings, None)
         self.assertFalse(self.settings.exists())
