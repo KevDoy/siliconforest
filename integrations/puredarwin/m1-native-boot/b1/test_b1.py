@@ -262,6 +262,33 @@ class Stage(unittest.TestCase):
             self.assertLess(ret, 0, name)
 
     # -- configuration --
+    def test_pack_bootargs_firmware_capacity(self):
+        # Default M1 revision 2 must reject the 621-byte package that reached
+        # SF_STOPPED before XNU. Other revisions require an explicit choice.
+        for revision, capacity in ((1, 256), (2, 608), (3, 1024)):
+            text = pdsf_pack.config_text('a' * (capacity - 1), bootargs_revision=revision)
+            self.assertEqual(text, b'bootargs=' + b'a' * (capacity - 1) + b'\n')
+            with self.assertRaises(ValueError):
+                pdsf_pack.config_text('a' * capacity, bootargs_revision=revision)
+        for bad in ('a' * 608, 'a' * 621, '', 'a\tb', '\u00e9'):
+            with self.assertRaises(ValueError):
+                pdsf_pack.config_text(bad)
+        with self.assertRaises(ValueError):
+            pdsf_pack.config_text('x', bootargs_revision=4)
+        # A rejected CLI invocation must neither create nor truncate its output.
+        kernel = self.write('pack-kernel', b'kernel')
+        output = self.write('pack-output', b'rollback')
+        cmd = [sys.executable, str(HERE / 'pdsf_pack.py'), 'pack', '--kernel', str(kernel),
+               '--bootargs', 'a' * 621, '-o', str(output)]
+        result = subprocess.run(cmd, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'revision 2', result.stderr)
+        self.assertEqual(output.read_bytes(), b'rollback')
+        output.unlink()
+        result = subprocess.run(cmd, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(output.exists())
+
     def test_config(self):
         seed = os.urandom(256)
         text = pdsf_pack.config_text('-v serial=0x13 cpus=8 pdcpuheld=1 rd=md0', display=1, usb_nodes='remove1',

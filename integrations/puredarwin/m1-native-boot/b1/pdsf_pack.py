@@ -25,6 +25,8 @@ CONFIG_KEYS = ('display', 'usb-nodes', 'sprr', 'amx', 'serial', 'wdt', 'reserve-
 # Records travel inside the image m1n1 was loaded with; a stage 1 that chainloads from the EFI
 # partition accepts about 64 MiB (DESIGN.md, "Sizes").
 ESP_IMAGE_LIMIT = 60 << 20
+# m1n1 src/xnuboot.h: capacity includes the terminating NUL. The M1 uses v2.
+BOOTARGS_CAPACITY = {1: 256, 2: 608, 3: 1024}
 
 
 def gzip_bytes(data, level=6):
@@ -44,10 +46,14 @@ def record(kind, data=b'', raw=None, flags=0):
     return body + bytes(-len(body) % ALIGN)
 
 
-def config_text(bootargs, **keys):
+def config_text(bootargs, *, bootargs_revision=2, **keys):
     """The CONFIG record: `bootargs=` and any of CONFIG_KEYS (underscores for dashes)."""
-    if not bootargs or len(bootargs) >= 1024 or any(not 32 <= ord(c) < 127 for c in bootargs):
-        raise ValueError('bootargs: 1..1023 printable ASCII characters')
+    if bootargs_revision not in BOOTARGS_CAPACITY:
+        raise ValueError('bootargs revision must be 1, 2 or 3')
+    capacity = BOOTARGS_CAPACITY[bootargs_revision]
+    if not bootargs or len(bootargs) >= capacity or any(not 32 <= ord(c) < 127 for c in bootargs):
+        raise ValueError('bootargs revision %d: 1..%d printable ASCII characters' %
+                         (bootargs_revision, capacity - 1))
     lines = ['bootargs=' + bootargs]
     for key, value in keys.items():
         key = key.replace('_', '-')
@@ -113,6 +119,8 @@ def main(argv=None):
     pack.add_argument('--kernel', required=True)
     pack.add_argument('--ramdisk')
     pack.add_argument('--bootargs', required=True)
+    pack.add_argument('--bootargs-revision', type=int, choices=BOOTARGS_CAPACITY, default=2,
+                      help='firmware BootArgs revision (M1: 2, at most 607 characters)')
     pack.add_argument('--set', action='append', default=[], metavar='key=value')
     pack.add_argument('-o', '--output', required=True)
     show = sub.add_parser('list')
@@ -128,13 +136,14 @@ def main(argv=None):
                 NAMES[kind], stored, ' gzip' if flags & F_GZIP else '', raw, 'ok' if ok else 'WRONG'))
         return 0 if all(item[4] for item in found) else 1
     keys = dict(item.split('=', 1) for item in args.set)
+    config = config_text(args.bootargs, bootargs_revision=args.bootargs_revision, **keys)
     m1n1 = open(args.m1n1, 'rb').read() if args.m1n1 else b''
     kernel = open(args.kernel, 'rb').read()
     ramdisk = open(args.ramdisk, 'rb').read() if args.ramdisk else None
     if args.m1n1:
-        data = image(m1n1, config_text(args.bootargs, **keys), kernel, ramdisk)
+        data = image(m1n1, config, kernel, ramdisk)
     else:
-        data = records(config_text(args.bootargs, **keys), kernel, ramdisk)
+        data = records(config, kernel, ramdisk)
     with open(args.output, 'wb') as out:
         out.write(data)
     print('%s: %d bytes (m1n1 %d, kernel %d%s)' % (
