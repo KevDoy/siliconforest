@@ -23,6 +23,9 @@ def analyze(text,parent):
         f=dict(re.findall(r'([A-Za-z0-9_]+)=(\S+)',line))
         if int(f['pid'])!=parent:foreign+=1;continue
         before=float(f['before_ms']);after=float(f['after_ms']);sequence=int(f['sequence'])
+        previous_emit=float(f['previous_emit_ms']) if 'previous_emit_ms' in f else None
+        if previous_emit is not None and (not math.isfinite(previous_emit) or previous_emit<0):
+            raise ValueError('Invalid native previous-write cost')
         if not math.isfinite(before+after) or before<0 or after<before:raise ValueError('Invalid export clock interval')
         if samples and (sequence<=samples[-1]['sequence'] or before<samples[-1]['before_ms']):
             raise ValueError('Own export sequence/clock is not ordered')
@@ -37,7 +40,8 @@ def analyze(text,parent):
         elif frame!=-1 or f['reason'] not in ['gl_error','marker_rejected']:
             raise ValueError('Invalid native rejection row')
         samples.append(dict(sequence=sequence,surface=surface,frame=frame,valid=valid,gl_error=error,
-            before_ms=before,after_ms=after,readback_ms=after-before,readback_bytes=size))
+            before_ms=before,after_ms=after,readback_ms=after-before,readback_bytes=size,
+            previous_emit_ms=previous_emit if sequence>0 else None))
         if len(samples)>4096:raise ValueError('Unexpected own diagnostic sample count')
     if not samples:raise ValueError('No owned native frame-ID export rows')
     valid=[s for s in samples if s['valid']];positive=next((i for i,s in enumerate(valid) if s['frame']>0),None)
@@ -64,6 +68,7 @@ def analyze(text,parent):
         diagnostic_distinct_id_hz=(len(observed)-1)*1000/elapsed if elapsed and len(observed)>1 else None,
         changed_id_interval_ms=distribution(changes),
         readback_cost_ms=distribution([s['readback_ms'] for s in samples]),
+        previous_log_write_cost_ms_excluding_last=distribution([s['previous_emit_ms'] for s in samples if s['previous_emit_ms'] is not None]),
         diagnostic_readback_bytes=sum(s['readback_bytes'] for s in samples),
         active_export_samples=active,panel_delivery_proved=False,production_performance_qualified=False,
-        limits='Raw36 levels independently decoded; native PID supplied by the admitted own fixture. Excludes preroll0 repeats and after-end899 repeats using the last0 before positive progress/first899. No JS/native clock bridge, actual-provider admission or completed-flip association is established by this parser. Instrumentation cost is retained; discontinuities remain observations.')
+        limits='Raw36 levels independently decoded; native PID supplied by the admitted own fixture. Excludes preroll0 repeats and after-end899 repeats using the last0 before positive progress/first899. No JS/native clock bridge, actual-provider admission or completed-flip association is established by this parser. Readback phase and previous-write cost are separate; the last write and formatting cost are not measured by these fields. Discontinuities remain observations.')

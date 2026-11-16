@@ -297,6 +297,15 @@ or contradictory evidence refuses the timed run; no arbitrary timed samples are
 discarded to repair bad geometry. This first-frame gate does not admit every
 later export or a completed compositor flip.
 
+The batched CGL logger's `previous_emit_ms` is summarized separately from the GL
+readback phase. The first placeholder and unknown final write are excluded;
+formatting cost is not inferred from either field. `native_clock_bridge.py`
+calls libSystem's `clock_gettime(CLOCK_MONOTONIC)`, the actual CGL clock source,
+inside epoch-time brackets. Python's monotonic epoch differs from that C clock
+in observed M1 audio evidence, so the values must not be mixed directly. The
+bridge retains uncertainty, boot time and kernel identity; its arithmetic has
+host controls, but native execution awaits the kernel owner's released slot.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

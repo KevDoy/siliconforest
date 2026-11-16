@@ -40,5 +40,12 @@ class Export(unittest.TestCase):
         with self.assertRaises(ValueError):a.analyze('',100)
         self.assertFalse(a.analyze(row(0,1,0)+row(1,899,15000),100)['identity_span_complete'])
 
+    def test_previous_write_cost_keeps_boundary_unknown(self):
+        text=row(0,0,0).replace('readback_bytes=','previous_emit_ms=0 readback_bytes=')
+        text+=row(1,899,15000).replace('readback_bytes=','previous_emit_ms=2.5 readback_bytes=')
+        result=a.analyze(text,100)
+        self.assertEqual(result['previous_log_write_cost_ms_excluding_last']['count'],1)
+        self.assertEqual(result['previous_log_write_cost_ms_excluding_last']['p50'],2.5)
+
 
 if __name__=='__main__':unittest.main()
