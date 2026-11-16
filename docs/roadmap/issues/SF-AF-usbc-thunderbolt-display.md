@@ -3725,3 +3725,26 @@ improvement; stage timing/steady-state repeats are needed before a performance
 change. Source already batches64 metadata blocks/1s; no durability reduction.
 A separate source audit notes ignored fsync/flush errors and commit-error buffer
 cleanup, without a native I/O-error observation or a proposed45 journal change.
+
+
+Follow-up offline fragmented control: --fragmented seeds alternating holes in a
+fresh regular scratch image using debugfs, requires a clean precheck, then boots
+the same frozen/fixed drivers. Both28 IO cases+7 resizes/29 dumped byte oracles
+pass;17 files in each contain counted extent-tree metadata. With
+e2fsck -fn -E no_optimize_extents the frozen image has real initialized EOF
+extent errors (RC4), fixed image is clean (RC0). The optional optimization
+exclusion matches M1 checks and does not suppress consistency errors. The first
+fragmented classifier expected only i_size wording and remains failed; the
+corrected check ties either exact i_size or logical13..15 bounds errors to the
+inode of /m-52208. Private receipts: runs/sftb/ext4-eof-qemu-fragmented-{001,002}.
+
+A further native45 CLI sample (no input/install/reboot; other desktop work active)
+gives three30-file p50s: fsync16.129/13.264/12.678ms and
+unlink18.619/13.081/13.489ms. No causal44/45 performance claim follows.
+Read-only NVMe counters show0 errors/timeouts, flush lifetime mean6.519ms;
+392 flushes during the samples imply an approximate interval mean6.760ms
+(from rounded cumulative averages). Global background I/O is included. The
+source's two journal flushes could account for much of the13ms latency; this
+is a measurement-supported lead, not per-call attribution. DTrace was absent
+from PATH. Before choosing an optimization, obtain syscall/commit/flush-stage
+counts and timings; preserve crash consistency and all existing barriers.
