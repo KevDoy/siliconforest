@@ -22,7 +22,7 @@ def main():
     parser.add_argument('--software', action='store_true')
     parser.add_argument('--kill-first-gpu', action='store_true')
     parser.add_argument('--provider-control', choices=['current', 'system-gpu', 'system-gpu-private-gl-api',
-                        'system-surface-private-gl', 'system-gl-private-surface'], default='current')
+                        'system-surface-private-gl', 'system-gl-private-surface', 'nv12-cohort'], default='current')
     parser.add_argument('--fixture-reference', action='store_true')
     args = parser.parse_args()
     if os.uname().sysname != 'Darwin':
@@ -44,6 +44,9 @@ def main():
         manifest['system_ui'] = True
         manifest['system_gpu_providers'] = True
         manifest.pop('graphics_override', None)
+    if args.provider_control == 'nv12-cohort':
+        manifest['system_gpu_providers'] = False
+        manifest['graphics_override'] = str(root / 'overrides/nv12-v1')
     original = Path(manifest['original_bundle'])
     if original != Path('/Applications/Firefox.app/Contents/Resources/Mozilla.app'):
         raise ValueError('Unexpected installed Mozilla payload')

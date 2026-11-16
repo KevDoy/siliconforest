@@ -109,7 +109,8 @@ def measure(client, output, deadline, admission=None):
           if(!b)throw new Error("No application menu button");
           w.__sffxPopupEvents=[];
           w.__sffxPopupInput=[];w.__sffxPopupLifecycle=[];w.__sffxPopupWindowInput=[];
-          b.addEventListener("mousedown",e=>w.__sffxPopupEvents.push({trusted:e.isTrusted,button:e.button}),true);
+          b.addEventListener("mousedown",e=>w.__sffxPopupEvents.push({trusted:e.isTrusted,
+            button:e.button,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,shift:e.shiftKey}),true);
           for(const type of ["mousedown","mouseup","click"])
             b.addEventListener(type,e=>w.__sffxPopupInput.push({type,trusted:e.isTrusted,
               button:e.button,time:performance.now(),target:e.target.id}),true);

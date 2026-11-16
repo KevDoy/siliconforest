@@ -401,7 +401,8 @@ def main():
                                 result['scheduling']=inspect_policies(args.policy_probe_path,current,owned,args.run/'scheduling.json')
                             if args.presentation_seat:
                                 from presentation_seat import admit
-                                result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json', fixture=args.measure_fixture)
+                                result['presentation_seat'] = admit(client, args.run / 'presentation-seat.json',
+                                    fixture=args.measure_fixture or args.scene_reference)
                             def snapshot():
                                 current = process_identities()
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current)
