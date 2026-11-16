@@ -446,8 +446,9 @@
 #         longer loses to six compression resistances of 749 (Activity Monitor's "Context Switches:" got 59 of 95 pt)
 #   0138  QuartzCore (TERM8): CALayer -needsDisplayOnBoundsChange, -autoresizingMask (sublayers follow their
 #         superlayer by their masks, as with no layout manager on macOS) -visibleRect and -layoutSublayers/-setNeedsLayout/-layoutIfNeeded (VLC's CAOpenGLLayer raised on them)
-#   0148w WindowServer (TERM9, frame pacing): wp_presentation feedback for every frame committed; the latest flip (in
-#         host time), the measured refresh and the commits still waiting for their flip, for CoreVideo's display link
+#   0148w WindowServer (TERM9, frame pacing): for every frame committed the flip that shows it (wp_presentation feedback
+#         for a GPU frame, the desk answers those; a frame callback for the others, done at the flip with its time):
+#         the latest flip (in host time), the measured refresh and the commits still waiting, for CoreVideo's display link
 #         (_windowServerDisplayClock/_windowServerDisplayClockWait: ./patches/0149-corevideo-...)
 #   0149  CoreVideo (TERM9; built by ./corevideo-displaylink.nix on CODEX's ../finch/CoreVideo/pd-displaylink.nix): the
 #         display link ticks right after the flip that showed the application's last frame (inNow = that flip,

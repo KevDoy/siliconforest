@@ -17,7 +17,7 @@
      // modes the compositor lists through wlr-output-management, read from any thread under modesLock
      struct zwlr_output_manager_v1 *outputManager;
      struct pd_window_position_manager_v1 *positionManager;
-@@ -511,6 +514,137 @@
+@@ -511,6 +514,175 @@
  static void windowReleaseBuffer(struct wsWindow *window);
  static void windowReleaseFrames(struct wsWindow *window);
  
@@ -62,13 +62,14 @@
 +}
 +
 +static void feedbackAnswered(int presented, uint64_t flipNs, uint32_t refresh, uint64_t seq) {
++    clockid_t clock = seq != 0 || refresh != 0 ? ws.presentationClock : CLOCK_MONOTONIC;
 +    pthread_mutex_lock(&wsClock.lock);
 +    if (wsClock.pending > 0 && --wsClock.pending == 0)
 +        wsClock.pendingSince = 0;
 +    if (presented) {
 +        struct timespec t;
 +        uint64_t hostNow = mach_absolute_time(), nowNs = 0;
-+        if (clock_gettime(ws.presentationClock, &t) == 0)
++        if (clock_gettime(clock, &t) == 0)
 +            nowNs = (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 +        // the flip's time on our host clock: now, less how long ago the flip was on the compositor's clock
 +        uint64_t ago = nowNs > flipNs ? nowNs - flipNs : 0;
@@ -106,14 +107,51 @@
 +    .discarded = feedbackDiscarded,
 +};
 +
-+// before a commit that shows a new frame: ask for the flip that will show it
-+static void windowAskPresentation(struct wsWindow *window) {
-+    if (ws.presentation == NULL || window->surface == NULL)
++/* A frame callback (every surface): done at the flip that showed the frame, its data that flip's time in ms of
++ * CLOCK_MONOTONIC (low 32 bits, DESK8's contract). Used where the compositor gives no presentation feedback: it
++ * answers wp_presentation only for dma-buf (GPU) frames. */
++static void clockFrameDone(void *data, struct wl_callback *callback, uint32_t time) {
++    struct timespec t;
++    uint64_t flipNs = 0;
++    if (clock_gettime(CLOCK_MONOTONIC, &t) == 0) {
++        uint64_t nowMs = (uint64_t)t.tv_sec * 1000ull + (uint64_t)t.tv_nsec / 1000000ull;
++        uint64_t full = (nowMs & ~0xffffffffull) | time;
++        if (full > nowMs)
++            full -= 0x100000000ull;
++        flipNs = full * 1000000ull;
++    }
++    wl_callback_destroy(callback);
++    feedbackAnswered(flipNs != 0, flipNs, 0, 0);
++}
++
++static const struct wl_callback_listener clockFrameListener = { .done = clockFrameDone };
++
++// before a commit that shows a new frame: ask for the flip that will show it (at most 32 questions unanswered: a
++// compositor that never answers costs nothing more)
++static void windowAskPresentation(struct wsWindow *window, struct wsFrame *frame) {
++    if (window->surface == NULL || window->state == MINIMIZED || window->state == HIDDEN)
 +        return;
-+    struct wp_presentation_feedback *feedback = wp_presentation_feedback(ws.presentation, window->surface);
-+    if (feedback == NULL)
++    pthread_mutex_lock(&wsClock.lock);
++    // questions a second old are written off (a surface that went with its callbacks): the clock keeps going
++    if (wsClock.pending > 0 && mach_absolute_time() - wsClock.pendingSince > wsNsToHost(1000000000ull)) {
++        wsClock.pending = 0;
++        wsClock.pendingSince = 0;
++    }
++    int full = wsClock.pending >= 32;
++    pthread_mutex_unlock(&wsClock.lock);
++    if (full)
 +        return;
-+    wp_presentation_feedback_add_listener(feedback, &feedbackListener, NULL);
++    if (ws.presentation != NULL && frame != NULL && frame->gpuOutput != NULL) {
++        struct wp_presentation_feedback *feedback = wp_presentation_feedback(ws.presentation, window->surface);
++        if (feedback == NULL)
++            return;
++        wp_presentation_feedback_add_listener(feedback, &feedbackListener, NULL);
++    } else {
++        struct wl_callback *callback = wl_surface_frame(window->surface);
++        if (callback == NULL)
++            return;
++        wl_callback_add_listener(callback, &clockFrameListener, NULL);
++    }
 +    pthread_mutex_lock(&wsClock.lock);
 +    if (wsClock.pending++ == 0)
 +        wsClock.pendingSince = mach_absolute_time();
@@ -155,7 +193,7 @@
  static void registryGlobal(void *data, struct wl_registry *registry, uint32_t name,
                             const char *interface, uint32_t version) {
      if (strcmp(interface, wl_compositor_interface.name) == 0) {
-@@ -566,6 +700,10 @@
+@@ -566,6 +738,10 @@
          ws.cursorShapes = wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
          if (ws.pointer != NULL && ws.shapeDevice == NULL)
              ws.shapeDevice = wp_cursor_shape_manager_v1_get_pointer(ws.cursorShapes, ws.pointer);
@@ -166,11 +204,11 @@
      } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
          ws.viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
      } else if (strcmp(interface, xdg_activation_v1_interface.name) == 0) {
-@@ -1351,6 +1489,7 @@
+@@ -1351,6 +1527,7 @@
              struct wl_callback *callback=wl_surface_frame(window->surface);
              if(callback)wl_callback_add_listener(callback,&sfPresentedListener,trace);else free(trace);}
      }
-+    windowAskPresentation(window);
++    windowAskPresentation(window, frame);
      wl_surface_attach(window->surface, frame->buffer, 0, 0);
      window->attached = 1;
      if (window->viewport != NULL && frame->pointsW > 0 && frame->pointsH > 0) {
