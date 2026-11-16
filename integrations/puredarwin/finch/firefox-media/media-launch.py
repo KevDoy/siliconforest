@@ -32,6 +32,7 @@ def main():
         # The FX plan validates and selects framework, GLAPI and broker as one
         # cohort. This is a copy of the manifest, never an installed mutation.
         manifest['graphics_override']=graphics
+        manifest['system_gpu_providers']=False
     command,env=daily.plan(runtime,sys.argv[1:],manifest)
     env['DYLD_FRAMEWORK_PATH']=str(frameworks)+':'+env['DYLD_FRAMEWORK_PATH']
     (profile.parent/'private-media-launch.json').write_text(json.dumps(dict(

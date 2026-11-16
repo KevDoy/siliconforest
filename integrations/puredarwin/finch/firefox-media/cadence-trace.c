@@ -23,10 +23,10 @@ static unsigned seconds=90;
 static pthread_once_t once=PTHREAD_ONCE_INIT;
 static pthread_mutex_t dump_lock=PTHREAD_MUTEX_INITIALIZER;
 struct cv_context { CVDisplayLinkOutputCallback callback; CVDisplayLinkOutputHandler handler; void *data; unsigned index; };
-struct vt_context { VTDecompressionOutputCallbackRecord original; unsigned index; };
+struct vt_context { VTDecompressionOutputCallbackRecord original; unsigned index; VTDecompressionSessionRef session; };
 static struct cv_context cvs[CONTEXTS];
 static struct vt_context vts[CONTEXTS];
-static const char *names[]={"cv-callback","cv-handler","vt-output","cgl-plane","vt-create","cv-register"};
+static const char *names[]={"cv-callback","cv-handler","vt-output","cgl-plane","vt-create","cv-register","vt-submit","vt-finish","vt-wait","vt-invalidate"};
 static void record(unsigned kind,unsigned context,uint64_t host,uint64_t duration,CMTime pts,int status,unsigned flags,unsigned plane,const void *token)
 {
  unsigned index=__atomic_fetch_add(&next_event,1,__ATOMIC_RELAXED);
@@ -103,7 +103,44 @@ static OSStatus traced_vt_create(CFAllocatorRef allocator,CMVideoFormatDescripti
  struct vt_context *c=&vts[index];c->original=*callback;c->index=index;
  VTDecompressionOutputCallbackRecord proxy={vt_output,c};uint64_t begin=mach_absolute_time();
  OSStatus status=VTDecompressionSessionCreate(allocator,format,spec,attributes,&proxy,session);
+ if(status==0&&session)__atomic_store_n(&c->session,*session,__ATOMIC_RELEASE);
  record(4,index,begin,mach_absolute_time()-begin,(CMTime){0},status,0,0,status==0&&session?*session:NULL);return status;
+}
+static unsigned vt_index(VTDecompressionSessionRef session)
+{
+ if(!session)return UINT32_MAX;
+ unsigned count=__atomic_load_n(&vt_count,__ATOMIC_ACQUIRE);if(count>CONTEXTS)count=CONTEXTS;
+ for(unsigned i=count;i>0;i--)if(__atomic_load_n(&vts[i-1].session,__ATOMIC_ACQUIRE)==session)return i-1;
+ return UINT32_MAX; /* A session not wrapped by this finite observer. */
+}
+static OSStatus traced_vt_decode(VTDecompressionSessionRef session,CMSampleBufferRef sample,
+ VTDecodeFrameFlags flags,void *source,VTDecodeInfoFlags *out)
+{
+ pthread_once(&once,initialize);
+ if(!enabled)return VTDecompressionSessionDecodeFrame(session,sample,flags,source,out);
+ uint64_t begin=mach_absolute_time();
+ OSStatus status=VTDecompressionSessionDecodeFrame(session,sample,flags,source,out);
+ /* Never inspect the input sample, source refcon or caller's output flags. */
+ record(6,vt_index(session),begin,mach_absolute_time()-begin,(CMTime){0},status,flags,0,session);return status;
+}
+static OSStatus traced_vt_finish(VTDecompressionSessionRef session)
+{
+ pthread_once(&once,initialize);if(!enabled)return VTDecompressionSessionFinishDelayedFrames(session);
+ uint64_t begin=mach_absolute_time();OSStatus status=VTDecompressionSessionFinishDelayedFrames(session);
+ record(7,vt_index(session),begin,mach_absolute_time()-begin,(CMTime){0},status,0,0,session);return status;
+}
+static OSStatus traced_vt_wait(VTDecompressionSessionRef session)
+{
+ pthread_once(&once,initialize);if(!enabled)return VTDecompressionSessionWaitForAsynchronousFrames(session);
+ uint64_t begin=mach_absolute_time();OSStatus status=VTDecompressionSessionWaitForAsynchronousFrames(session);
+ record(8,vt_index(session),begin,mach_absolute_time()-begin,(CMTime){0},status,0,0,session);return status;
+}
+static void traced_vt_invalidate(VTDecompressionSessionRef session)
+{
+ pthread_once(&once,initialize);if(!enabled){VTDecompressionSessionInvalidate(session);return;}
+ unsigned index=vt_index(session);uint64_t begin=mach_absolute_time();VTDecompressionSessionInvalidate(session);
+ if(index<CONTEXTS)__atomic_store_n(&vts[index].session,NULL,__ATOMIC_RELEASE);
+ record(9,index,begin,mach_absolute_time()-begin,(CMTime){0},0,0,0,session);
 }
 static CGLError traced_plane(CGLContextObj context,GLenum target,GLenum internal,GLsizei width,GLsizei height,GLenum format,GLenum type,IOSurfaceRef surface,GLuint plane)
 {
@@ -115,5 +152,7 @@ static CGLError traced_plane(CGLContextObj context,GLenum target,GLenum internal
 __attribute__((used,section("__DATA,__interpose")))
 static const struct {const void *replacement,*original;} interpose[]={
  {traced_cv_set,CVDisplayLinkSetOutputCallback},
- {traced_vt_create,VTDecompressionSessionCreate},{traced_plane,CGLTexImageIOSurface2D}
+ {traced_vt_create,VTDecompressionSessionCreate},{traced_plane,CGLTexImageIOSurface2D},
+ {traced_vt_decode,VTDecompressionSessionDecodeFrame},{traced_vt_finish,VTDecompressionSessionFinishDelayedFrames},
+ {traced_vt_wait,VTDecompressionSessionWaitForAsynchronousFrames},{traced_vt_invalidate,VTDecompressionSessionInvalidate}
 };

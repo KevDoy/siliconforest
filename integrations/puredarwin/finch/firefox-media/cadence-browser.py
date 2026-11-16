@@ -32,9 +32,14 @@ def main():
     p.add_argument('--codec-matrix',action='store_true',help='Owned AV1/VP9/PQ fixtures; declarations remain separate from decode')
     p.add_argument('--youtube',action='store_true',help='Own public non-DRM YouTube tab, no account/consent/ad interaction')
     p.add_argument('--youtube-profile',action='store_true',help='Separate diagnostic Gecko media profile; excludes performance qualification')
+    p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
+    p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     a=p.parse_args()
     if a.youtube_profile and not a.youtube:raise ValueError('YouTube profile requires its owned playback case')
     if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
+    if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):
+        raise ValueError('Lifetime control requires separate strict owned fixtures')
+    if a.retire_pool and not a.lifetime_control:raise ValueError('Pool retirement requires its lifetime control')
     if a.frame_mode=='require' and not a.staged_media:
         raise ValueError('Strict sharing requires the reviewed staged VT producer')
     if a.graphics_override and (not a.staged_media or '..' in a.graphics_override.parts or
@@ -87,11 +92,16 @@ def main():
             if a.youtube_profile:
                 import pipeline_profile
                 admission=pipeline_profile.start(self,media=True)
+                # Profiler control runs in chrome; playback belongs to the
+                # admitted owned page. Leaving chrome selected times out its
+                # asynchronous document query instead of measuring the video.
+                self.command('Marionette:SetContext',{'value':'content'})
             try:playback=super().command(name,parameters)
             finally:
                 if admission:
                     directory=a.run/'youtube-gecko-profile';directory.mkdir()
-                    profile=pipeline_profile.stop(self,directory,admission)
+                    try:profile=pipeline_profile.stop(self,directory,admission)
+                    finally:self.command('Marionette:SetContext',{'value':'content'})
             after=self.cpu_snapshot()
             playback['owned_process_cpu']=dict(before=before,after=after,comparison=process_cpu.compare(before,after))
             playback['profile_diagnostic_only']=a.youtube_profile
@@ -138,6 +148,33 @@ def main():
                 if current==parent:owned[pid]=start
             return process_cpu.capture(self,parent,owned)
 
+        def lifetime_control(self,video):
+            import process_cpu
+            import time
+            if not video.get('ended') or video.get('error'):raise RuntimeError('Completed own video required before lifetime control')
+            source=video.get('source','')
+            if not source.startswith((root/'media').as_uri()+'/'):raise RuntimeError('Only our frozen local media may be unloaded')
+            def snapshot():
+                return dict(cpu=self.cpu_snapshot(),global_decoder_stats=subprocess.check_output(
+                    ['sysctl','kern.pd_avd.stats'],text=True,timeout=4))
+            result=dict(retire_pool=a.retire_pool,synthetic_input=False,
+                memory_source='Gecko ProcInfo memory bytes; not unique aggregate physical pages',
+                limits='Global decoder counters can include other clients; no panel or owner-visible memory proof')
+            result['ended_start']=snapshot();time.sleep(1)
+            result['ended_after_idle']=snapshot()
+            result['ended_idle_cpu']=process_cpu.compare(result['ended_start']['cpu'],result['ended_after_idle']['cpu'])
+            self.command('Marionette:SetContext',{'value':'content'})
+            result['unload']=self.command('WebDriver:ExecuteScript',dict(script='''
+              const v=document.querySelector('video');
+              if(!v||v.currentSrc!==arguments[0])throw new Error('Owned media identity changed');
+              v.pause();v.removeAttribute('src');v.load();
+              return {paused:v.paused,readyState:v.readyState,currentSrc:v.currentSrc};''',
+              args=[source],newSandbox=False))
+            result['unloaded_start']=snapshot();time.sleep(1)
+            result['unloaded_after_idle']=snapshot()
+            result['unloaded_idle_cpu']=process_cpu.compare(result['unloaded_start']['cpu'],result['unloaded_after_idle']['cpu'])
+            return result
+
         def measure_video(self,handle=None):
             # Snapshot outside the fixture interval. No profiler, per-frame
             # sampling or dependency on zero counters being valid CPU time.
@@ -176,6 +213,9 @@ def main():
                                                      file=str(directory/'renderer.ppm'),input_injected=False,
                                                      timing='After measurement; visibility/pixels still require inspection')
                     except Exception as error:video['renderer_capture_error']=str(error)
+            if a.lifetime_control:
+                try:video['lifetime_control']=self.lifetime_control(video)
+                except Exception as error:video['lifetime_control_error']=str(error)
             return video
     marionette.Marionette=IsolatedClient
     if not a.without_trace:
@@ -193,6 +233,8 @@ def main():
     manifest=json.loads((runtime/'release.json').read_text())
     if a.staged_media:os.environ['SF_VT_COPY_COUNTS']='1'
     if a.timer_control:os.environ['PD_CV_TIMER']='1'
+    if a.retire_pool:os.environ['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
+    else:os.environ.pop('SF_VT_RETIRE_POOL_AT_INVALIDATE',None)
     if a.graphics_override:os.environ['SF_MEDIA_GRAPHICS_OVERRIDE']=str(a.graphics_override)
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
@@ -204,6 +246,7 @@ def main():
         cv_timer_control=a.timer_control,
         codec_matrix=a.codec_matrix,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
+        lifetime_control=a.lifetime_control,retire_pool=a.retire_pool,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
@@ -242,6 +285,9 @@ def main():
         clips=[(name,1) for name in names]
     for clip,rate in clips:
         source=root/'media/codecs'/clip if a.codec_matrix else Path('/private/var/db/sffx/media-highrate-v1')/clip
+        if a.lifetime_control:
+            source=root/'media'/clip
+            if not source.is_file():raise ValueError('Missing frozen lifetime fixture: '+clip)
         if a.codec_matrix and not source.is_file():raise ValueError('Missing generated codec fixture: '+clip)
         argv+=['--url','file://'+str(tools/'video-page.html')+
                '?src='+source.as_uri()+

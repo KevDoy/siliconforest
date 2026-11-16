@@ -19,7 +19,13 @@ p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','bro
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
+p.add_argument('--lifetime-control',action='store_true',help='Owned strict playback end/unload observation')
+p.add_argument('--retire-pool',action='store_true',help='Private retirement comparison, requires lifetime control')
+p.add_argument('--trace-media',action='store_true',help='Diagnostic CV/VT/CGL boundary tracing; never performance qualification')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
+if (a.lifetime_control or a.retire_pool) and a.phase!='shared':raise ValueError('Separate strict shared case required')
+if a.retire_pool and not a.lifetime_control:raise ValueError('Retirement requires lifetime control')
+if a.trace_media and a.phase!='shared':raise ValueError('Boundary trace requires its separate strict shared case')
 if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold gui.lock then bench')
 if not a.stage.name.startswith('firefox-media-cadence-packet-'):raise ValueError('Own cadence packet required')
 dest='/private/var/db/sffx/'+a.stage.name
@@ -61,12 +67,15 @@ try:
             argv+=['--youtube','--without-trace']
             if a.phase=='youtube-profile':argv+=['--youtube-profile']
         if a.phase in ['copy','shared']:
-            argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy','--without-trace']
+            argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy']
+            if not a.trace_media:argv+=['--without-trace']
         if a.graphics_override:
             if a.phase not in ['copy','shared']:raise ValueError('Graphics comparisons require staged-media copy/shared phase')
             argv+=['--graphics-override',a.graphics_override]
         if a.no_native_compositor:argv+=['--no-native-compositor']
         if a.timer_control:argv+=['--timer-control']
+        if a.lifetime_control:argv+=['--lifetime-control']
+        if a.retire_pool:argv+=['--retire-pool']
         limit=165
     with (out/'launcher.log').open('w') as stream:
         result=subprocess.run(ssh+[shlex.join(argv)],stdout=stream,stderr=subprocess.STDOUT,timeout=limit)
@@ -95,4 +104,17 @@ finally:
             t.extractall(out,members=[m for m in members if not m.issym() and not m.islnk()],filter='data')
     log('media cadence '+a.phase+' END; collection '+('OK' if r is not None and r.returncode==0 else 'FAILED')+', no installed changes/input.')
 if collection_error:raise RuntimeError(collection_error)
+if a.lifetime_control and result.returncode==0 and r.returncode==0:
+    browser=json.loads((out/(a.phase+'-run')/'browser/result.json').read_text())
+    clips=browser.get('video_measurements',[])
+    checks={'two_owned_clips':len(clips)==2,'browser_survived':browser.get('browser_survived_run') is True}
+    for index,clip in enumerate(clips):
+        video=clip.get('video',{});control=video.get('lifetime_control',{})
+        checks[str(index)+'_lifetime_observed']=bool(control) and not video.get('lifetime_control_error')
+        checks[str(index)+'_source_unloaded']=control.get('unload',{}).get('paused') is True
+        checks[str(index)+'_mode_matches']=control.get('retire_pool') is a.retire_pool
+    admission=dict(status='PASS' if all(checks.values()) else 'FAIL',checks=checks,
+        scope='Owned end/unload sequence only; memory savings, timing and visible playback require separate review')
+    (out/'lifetime-admission.json').write_text(json.dumps(admission,indent=2)+'\n')
+    if admission['status']!='PASS':raise RuntimeError('Owned browser lifetime sequence incomplete; raw failure retained')
 raise SystemExit(result.returncode or r.returncode)

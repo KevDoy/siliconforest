@@ -559,3 +559,66 @@ Zero decoder DART mappings does not mean every client-owned GPU allocation is
 freed. No browser memory saving, visible playback or canonical activation is
 qualified. The next gate measures actual browser pause/end/close with retained
 GPU contents; owner selection remains unchanged.
+
+## Browser lifetime and stall follow-through
+
+The strict browser end/unload comparison uses the same full32-buffer provider
+build and graphics cohort, with retirement enabled only in the candidate.
+Ended-video and source-unload snapshots retain the baseline's243792/843376KiB
+of global decoder DART mappings; the retirement case reaches0/0 before its first
+end snapshot, after detaching15/14 outstanding frame references. Both final
+canvas hashes match. These are decoder mappings, not total physical allocations:
+RDD ProcInfo memory is32.23/36.51MB versus32.06/33.15MB. No total-memory or idle-CPU
+improvement is inferred from these short samples. The collector requires both
+owned clips, actual lifetime observations and successful source unloading;
+missing observations remain failures.
+
+Both H264 clips report81/83 dropped frames and800.90/837.64ms maximum rVFC gaps;
+HEVC reports0/0. All600/300 decoder frames arrive, but that does not make the
+first case smooth. The later boundary trace records an H264 VT-output gap of
+482.216ms while CV callbacks continue (maximum64.847ms) and CGL plane calls
+remain at most4.368ms. New opt-in submit/finish/wait/invalidate timings separate
+VT call duration from upstream submission gaps without inspecting or changing
+input samples, refcons or output flags. Four Linux-built baseline/observed runs
+on M1/M5 retain all120 reference pictures and PTS; presentation-sorted NV12
+hashes match the independent Linux reference. Callback order is retained as
+observed rather than mistaken for display order. Reference programs run from
+hashed temporary directories with no Mac builds or DYLD overrides.
+
+The public YouTube Gecko profile initially failed because profiler control
+left Marionette in chrome context; the failed run is retained. The corrected
+run restores content context before playback and after stopping the profiler.
+It completes actual15.027s/720p60/900frames/2drops, diagnostic only. Markers
+identify software AV1 through FFmpegVideoDecoder and bundled libmozavcodec.
+CPU-weighted, module-matched stacks identify parent QuartzCore TexImage2D ->
+Mesa byte-format conversion; this measured source-owner candidate was handed to
+TERM/FX. Selected registered RDD threads do not cover the complete codec worker
+CPU, so no complete decoder-cost attribution follows.
+
+A fresh installed-outer public YouTube run after canonical graphics and the
+QuartzCore0157 install decodes901/0 in15.019s, but its inspected renderer capture
+is still transparent. The no-input first-show reproduction remains with TERM/FX;
+no coherent CV/VT activation follows. Whole-browser CPU pixel copies and actual
+panel cadence remain outside the VT/CGL transport counters. The runtime's
+canonical selector stays unchanged by this stream; an explicit private graphics
+comparison changes only a copied manifest and selects that entire cohort.
+
+The submit tracer subsequently locates the repeated H264 gap upstream of the
+next call:482.017ms between entries, prior call3.759ms, leaving478.258ms outside
+VT; later outside-call gaps475.124/275.730ms also occur during playback. Longest
+H264 call after `playing` is5.643ms; callback body0.198ms, asynchronous wait1.75us,
+invalidate0.336ms. HEVC's longest playing-time call is19.457ms. Its611ms initial
+pool allocation precedes `playing` and is kept separate from steady playback.
+This rules out attributing the large observed gaps to time inside our VT call;
+it does not identify the upstream scheduling/input/backpressure cause. FX has
+the exact timing hand-over. The diagnostic case still reports74/0 drops and
+an800.72ms H264 rVFC gap; no speed improvement follows.
+
+`analyze-gecko-media.py --profile RAW.json --symbols XUL.functions.sym
+--symbols mozavcodec.functions.sym --output ANALYSIS.json` reproduces the offline
+CPU-weighted view. It requires arm64 module headers matching the captured
+Breakpad identities and explicit microsecond CPU-delta units. Inclusive weights
+count each label once per stack, unresolved native offsets remain unresolved,
+and missing CPU deltas stay missing. Wait leaf samples may reflect work before
+the stack capture and cannot establish that a wait spins. Selected threads are
+not the complete process; diagnostic CPU is not unprofiled performance.
