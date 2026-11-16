@@ -29,3 +29,9 @@ alive or cleanup signals, and UUID-matched private framework mappings before
 requires cold original build bytes, preserves the launcher/manifest for checked
 rollback, and leaves owner processes and profiles alone. Reporting remains
 disabled until the crashreporter UI itself is qualified.
+
+After a verifier failure has triggered rollback, `--retry` can reselect the same
+qualified image. It checks both prior text hashes, the original cold payload,
+and the executed image's load-command UUID. It preserves the original backup
+and never treats lowered executed Mach-O bytes as a new pristine image. A
+changed launcher or runtime manifest prevents both retry and rollback.

@@ -14,6 +14,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
+import uuid as uuid_module
 
 ROOT = Path('/usr/local/lib/siliconforest/firefox/160-system1')
 APP = Path('/Applications/Firefox.app')
@@ -22,6 +24,28 @@ BACKUP = ROOT / 'maintenance-network-v1'
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+def image_uuid(path):
+    # Read metadata only: executed Mach-O pages may contain lowered PAC bytes.
+    with path.open('rb') as stream:
+        header = stream.read(32)
+        if len(header) != 32 or struct.unpack_from('<I', header)[0] != 0xFEEDFACF:
+            raise ValueError('Expected an arm64 Mach-O image')
+        count, size = struct.unpack_from('<II', header, 16)
+        if size > 1024 * 1024:
+            raise ValueError('Oversized Mach-O load commands')
+        commands = stream.read(size)
+    at = 0
+    for _ in range(count):
+        if at + 8 > len(commands):
+            raise ValueError('Truncated Mach-O command')
+        kind, length = struct.unpack_from('<II', commands, at)
+        if length < 8 or at + length > len(commands):
+            raise ValueError('Invalid Mach-O command')
+        if kind == 0x1B and length == 24:
+            return str(uuid_module.UUID(bytes=commands[at+8:at+24])).upper()
+        at += length
+    raise ValueError('Missing Mach-O UUID')
 
 def atomic(path, data, mode):
     tmp = path.with_name(path.name + '.network-tmp')
@@ -37,7 +61,10 @@ def main():
     ap.add_argument('--source', type=Path, required=True)
     ap.add_argument('--apply', action='store_true')
     ap.add_argument('--rollback', action='store_true')
+    ap.add_argument('--retry', action='store_true', help='reselect an unchanged qualified image after checked rollback')
     args = ap.parse_args()
+    if args.retry and args.rollback:
+        ap.error('--retry and --rollback are mutually exclusive')
     source = args.source.resolve()
     if not source.is_relative_to('/private/var/db/sffx'):
         raise ValueError('Expected a new owned private staging directory')
@@ -61,7 +88,7 @@ def main():
             and manifest.get('system_ui') is True and manifest.get('system_gpu_providers') is True
             and not manifest.get('diagnostics') and not manifest.get('network_override')):
         raise ValueError('Expected the qualified canonical UI/graphics runtime')
-    if DEST.exists() or BACKUP.exists():
+    if not args.retry and (DEST.exists() or BACKUP.exists()):
         raise ValueError('Refuse an existing installation or rollback directory')
     cold = json.loads((source / 'cold-verified.json').read_text())
     expected = cold['sha256']
@@ -103,21 +130,31 @@ def main():
                'new_launcher_sha256': sha(candidate), 'new_release_sha256': sha(new_release),
                'launcher_mode': launcher.stat().st_mode & 0o777, 'release_mode': release.stat().st_mode & 0o777,
                'cold_payload': cold, 'qualification': proof}
+    if args.retry:
+        saved = json.loads((BACKUP / 'receipt.json').read_text())
+        if any(saved[key] != receipt[key] for key in ['uuid', 'previous_launcher_sha256', 'previous_release_sha256',
+                                                     'new_launcher_sha256', 'new_release_sha256', 'launcher_mode', 'release_mode']):
+            raise ValueError('Retry requires the unchanged prior and qualified runtime selection')
+        if saved['cold_payload'] != cold:
+            raise ValueError('Retry cold qualification differs')
+        if image_uuid(DEST / 'Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration') != uuid:
+            raise ValueError('Installed qualified image metadata changed')
     print(json.dumps({'apply': args.apply, 'destination': str(DEST), 'rollback': str(BACKUP), 'uuid': uuid}))
     if not args.apply:
         return
     if os.uname().sysname != 'Darwin':
         raise ValueError('Apply requires the target')
-    BACKUP.mkdir()
-    (BACKUP / 'launcher').write_bytes(prior_launcher)
-    (BACKUP / 'release.json').write_bytes(prior_release)
-    (BACKUP / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-    DEST.mkdir(parents=True)
-    shutil.copytree(source / 'Frameworks', DEST / 'Frameworks', symlinks=True)
-    # Destination is still cold here; never hash this Mach-O after it runs.
-    for name, digest in expected.items():
-        if name.startswith('Frameworks/') and sha((DEST / name).read_bytes()) != digest:
-            raise ValueError('Cold destination differs: ' + name)
+    if not args.retry:
+        BACKUP.mkdir()
+        (BACKUP / 'launcher').write_bytes(prior_launcher)
+        (BACKUP / 'release.json').write_bytes(prior_release)
+        (BACKUP / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+        DEST.mkdir(parents=True)
+        shutil.copytree(source / 'Frameworks', DEST / 'Frameworks', symlinks=True)
+        # Destination is still cold here; never hash this Mach-O after it runs.
+        for name, digest in expected.items():
+            if name.startswith('Frameworks/') and sha((DEST / name).read_bytes()) != digest:
+                raise ValueError('Cold destination differs: ' + name)
     try:
         atomic(launcher, candidate, receipt['launcher_mode'])
         atomic(release, new_release, receipt['release_mode'])
