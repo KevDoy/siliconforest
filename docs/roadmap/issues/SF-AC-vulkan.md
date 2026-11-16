@@ -693,3 +693,55 @@ source's two journal flushes could account for much of the13ms latency; this
 is a measurement-supported lead, not per-call attribution. DTrace was absent
 from PATH. Before choosing an optimization, obtain syscall/commit/flush-stage
 counts and timings; preserve crash consistency and all existing barriers.
+
+
+### Urgent Firefox launch check on45, 2026-11-16 04:24Z
+
+TERM reported a real SSH-launched family failing child check-in with
+BOOTSTRAP_UNKNOWN_SERVICE, and DESK reported a second-launch crash. The initial
+health harness also had missing automation permission and an owner-overlapped
+capture; these failures were retained, not counted as kernel failures.
+
+The corrected installed-app gate completed3 compositor application requests
+and3 SSH wrapper launches. CODEX-TB independently inspected all six retained
+no-input renderer images: each has its own heading/text and three coloured
+squares. None of those six Firefox logs contains bootstrap_look_up failure or
+MachCheckInListener timeout. This refutes a universal45 launch outage; retain45
+with exact44 rollback ready. The earlier genuine intermittent timeout remains
+open and is not erased by these six successes. FX owns the fuller runtime gate.
+Private receipts: runs/firefox/urgent-launch45-v2 and
+runs/sftb/firefox-bootstrap-0045.
+
+Comparison of the actual derivations confirms IDENTICAL immutable core input
+sp4zw2… for44/45, all55 other kext source inputs,605-byte boot arguments and
+boot.bin. Only ext4 changes. The same Mach SEND_INVALID_RIGHT guard signature
+is already present in the saved44 state before45's reboot. These facts exclude
+an intentional Mach/bootstrap policy or boot-arg change, not an effect of boot
+timing or filesystem behavior. A native SSH parent registered a fresh private
+service; its exec-spawned child looked it up successfully. The first probe's
+cleanup failed with SERVICE_ACTIVE because its receive right was still alive;
+that failure remains. Closing that right before unregister gives all-zero
+registration/lookup/cleanup in the corrected probe. No existing service changed.
+
+CORRECTION: an initial TB name-filtered process review incorrectly called a
+Firefox parent childless; its PPID graph contains12 plugin-container descendants.
+The correction was posted immediately after the full graph was checked.
+
+Pre-install filesystem validation was REAL QEMU, completed03:25:43 BEFORE the
+03:41:12 installer: exact frozen11f479… and patchedar0bc… SDKs,16KiB VM/4KiB FS,
+28 mmap/write cases,7 resize steps, clean unmount and29 independent Linux
+debugfs byte oracles per driver; frozen fsck RC4 reproduces the EOF error,
+patched RC0. Actual-source ASan/UBSan counterexample/controls and96 identical
+SDK exports also passed. The fragmented17-metadata-file VM control came AFTER
+installation and is supplemental. Native45 acceptance had filesystem/GPU/desktop
+checks but no fresh painted Firefox launch; the corrected gate closes that gap.
+Future kernel acceptance must include a fresh installed-app painted launch via
+each route before retaining it normal, as well as the change-specific tests.
+No rollback, reboot, bootstrap policy rewrite or user runtime selection was
+performed for this check; the owner-specified both-paths-fail trigger was not met.
+
+FX final review04:25:04 confirms all3+3 launches map/paint with no bootstrap
+errors, but desktop3 has paragraph glyph corruption (s appears as dots), so
+this is launch availability, not full visual quality. The other five reviewed
+scenes are correct. The launchd1/sshd4/session5 parent relationships also match
+the saved44 boot; complete service timing/state equality is not established.
