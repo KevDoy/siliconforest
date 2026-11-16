@@ -3650,3 +3650,23 @@ CIO29 and devfs-only kits remain local. DESK9-next001 df5a3290/socket/inject and
 non-input stats were verified; UART stopped, actual core/gui/bench released by
 SystemExit at the02:37:43 return marker. Private receipts and classifications:
 runs/sftb/firefox-install-0044. No dock/AVE trial or push.
+
+
+### Kernel44 producer-task lifetime gate, 2026-11-16 03:18:01Z
+
+Three native rounds passed producer GPU-VA unmap, SIGKILL of only our child,
+and reap in2.53–2.54ms while the parent kept the consumer BOs. Immediate INFO
+returned0, contexts1 and caps0x10007: retirement is lazy, on the next CREATE,
+as the frozen driver documents. The real CREATE reaper ran complete/unpin;
+consumer data marked after producer death survived retirement and new allocation
+pressure. Final contexts/DART bytes/quarantine were0, with no GPU or decoder
+jobs and no fault-counter change. This tests that lazy retirement contract,
+not immediate-on-death cleanup or GPU-consumer completion.
+
+The first probe's immediate-INFO composite predicate remains a failed run; its
+stale errno did not establish an ioctl timeout. Revised source prints each field
+and tests the documented CREATE reaper instead of changing the kernel to meet
+that mistaken expectation. Both runs remain private under
+runs/sftb/firefox-task-death-0044{,-v2}. Same qualified44 and DESK9-next001
+remained running; non-input stats responded, UART stopped, actual core/gui/bench
+released at03:18:01. No install, reboot, injection, dock or AVE trial.

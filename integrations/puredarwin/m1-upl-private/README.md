@@ -110,4 +110,10 @@ post-exit fields, checks its consumer, writes a marker only after the producer
 is dead (no jobs), then invokes the REAL CREATE reaper and checks the surviving
 consumer again under new allocation pressure. It destroys that new owned
 context and requires contexts/DART allocations0. This is explicit lazy retirement,
-not an immediate-on-death claim. Revised native execution is pending.
+not an immediate-on-death claim. Revised native execution passed three rounds on qualified44 at2026-11-16
+03:18Z. Immediate INFO returned0/contexts1/caps0x10007; the real next CREATE
+reaped, while the marked consumer survived retirement/allocation pressure.
+Owned child reap was2.53–2.54ms, final contexts/DART bytes/quarantine0 and no
+GPU/decoder jobs or fault-counter changes. This establishes the tested lazy
+retirement contract; GPU-consumer fences and real-browser presentation remain
+separate gates. The first native failure remains a failure.
