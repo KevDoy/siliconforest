@@ -669,8 +669,21 @@ runs is unchanged (lines).
 - FX-027: Escape cancels the modal open panel (TERM9's probe returned Cancel); AppKit centres it, the desk places it
   lower right: DESK9 asked to honour the app's position for panels.
 - FX-003: SystemConfiguration rebuild with 0152 requested of the root owner (requests-for-CLAUDE.md).
-- FX-029: 0160/0160a built for FXPERF's A/B (unchanged layer properties render nothing; opt-in
-  SFFX_GPU_SKIP_UNCHANGED reuses the frame for a bare commit and presents nothing); PD_CA_DIAG counts.
+- FX-029: 0160/0160a (unchanged layer properties render nothing; opt-in SFFX_GPU_SKIP_UNCHANGED reuses the frame for a
+  bare commit and presents nothing); PD_CA_DIAG counts: on GitHub without damage 58 of 134 renders per 5 s had
+  unchanged layers and seeds. FXPERF2's damage-only frames (0300, 0301 adapted, 0302w; opt-in SFFX_GPU_DAMAGE=1)
+  adopted into the series; with t10s7 my own Firefox showed 0 frames with a foreign surface with and without it
+  (wiki, GitHub; captures looked at).
+
+### Candidates and gates (second set)
+t10s7 = AppKit 7aa13533 (0158, 0159, 0160a, 0161, 0162, 0301), libWindowServer 821dc8c4 (0158w, 0159w, 0302w),
+QuartzCore.pd 2c6d0b74 (0157, 0160, 0300). Gates before: visual check looked at (data only), Activity Monitor random input
+228 actions alive, compat 18/18; the Terminal pass twice did no actions (the owner active; then an empty inject
+request.part from my own stalled pass blocked all injects - removed). t10s6 (the same without FXPERF2's patches) passed
+all: AM 240 / Terminal 240 actions alive, compat 18/18. Found on the way: the M1's root filesystem was full (921 MB
+free, captures failing); my 47 test profiles (~3.5 GB) removed. At 07:4xZ the M1 went to Linux for CODEX-TB's window;
+the install of t10s7 waits for SiliconForest (`runs/sf-term10/install-b.sh`, keeps `.pre-t10b`).
+
 
 ## TERM9 round (16 November, night): Firefox on the system frameworks
 Tools in `runs/sf-term9` (not committed; TERM8's gates with `target` lines for DESK8's bound keys). Synthetic input only,
