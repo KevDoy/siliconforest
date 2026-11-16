@@ -457,6 +457,12 @@
 #   0153  QuartzCore (FXLEAD, FX-036, the blank page): -[CALayer display] asks a delegate that wants to update its layer
 #         itself (-wantsUpdateLayer, NSView) for -updateLayer, as AppKit's -displayLayer: does on macOS; Firefox ends the
 #         suspension of its layer commits there (a stale first picture, then nothing); inert for views that answer NO
+#   0155  QuartzCore (FXLEAD, FX-011/012 stale and foreign tiles): an IOSurface that is a layer's contents is marked in use
+#         (IOSurfaceIncrement/DecrementUseCount, looked up at run time) while it is, as the window server does on macOS
+#         (Firefox's tile pool recycled surfaces the window still showed); -dealloc releases the last contents (leaked)
+#   0154  Onyx2D (FXPERF, adopted unchanged): an installed font file of 1 MB or more is mapped once per process and
+#         shared by every data provider (it was read whole into a private copy each time: Firefox's parent held ten
+#         30 MB copies of the CJK collection, footprint 921 -> 634 MB)
 #   0150  AppKit (TERM9, FX-023): NSEvent timestamps are seconds since the system started (mach_absolute_time), as on
 #         macOS, not since 2001 (Firefox's Event.timeStamp was 26 years ahead of performance.now())
 #   0230-0233 IOSurface (./iosurface.nix; CODEX-FX's iosurface-patches 0001-0004, FXLEAD's 0004): the per-session broker
@@ -615,6 +621,7 @@ let
     ./patches/0200-onyx2d-serialize-shared-freetype-raster.patch
     ./patches/0217-graphics-font-keeps-fontconfig-collection-face-index.patch
     ./patches/0146-onyx2d-glyph-cache-knows-a-reused-face.patch
+    ./patches/0154-onyx2d-font-files-mapped-once.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
@@ -649,6 +656,7 @@ let
     ./patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch
     ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
     ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
+    ./patches/0155-quartzcore-layer-contents-surface-in-use-and-released.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
