@@ -64,6 +64,29 @@ completed playback followed by natural exit separately. FX rolls selection back
 if either admission or actual image inspection fails. Source-policy tests and
 an inactive cold stage do not establish installed playback.
 
+The installed acceptance subsequently passed all28 checks:600/300 pictures,
+zero reported drops and decoder copies, matching final pixels/hardware jobs,
+no new decoder faults, actual CV/VT/PD child and retained system graphics/audio.
+Both actual GPU captures were inspected. Ordinary Quit returned0 before and
+after cleanup, with no live family remaining in1.748s and no cleanup signals.
+FX retained the checked rollback and left the family selected. Its separate
+installed sample uses RDD7.913/16.327% and matched family114.850/151.338% of
+one core; these are not a new matched copy/shared comparison. Pool retirement
+remains off. Prepare a fresh packet for any repeat; executed packets are retained.
+
+`youtube_quality.py` requests1080 only after the existing public non-ad video
+identity admission. A requested/available quality label is insufficient: actual
+video dimensions must reach1920×1080 before measurement. The new
+`run-cadence.py <fresh-packet> youtube1080` phase uses the installed outer
+launcher and its selected family, without private providers or injected input.
+It records actual decoded-frame/media-time rate, drops, owned CPU, media image
+paths, actual renderer output and ordinary Quit. `analyze-youtube.py` refuses
+lower resolution, non60fps decoding, advertising, incomplete playback, missing
+provider/renderer proof, or cleanup-only exit. Actual images still require review.
+The quality request changes only this fresh test page; it does not change the
+owner's quality preferences, import cookies or bypass consent. Availability or
+successful source tests do not establish site playback or panel60fps.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

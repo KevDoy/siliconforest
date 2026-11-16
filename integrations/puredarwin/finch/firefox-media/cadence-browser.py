@@ -48,6 +48,7 @@ def main():
     p.add_argument('--codec-matrix',action='store_true',help='Owned AV1/VP9/PQ fixtures; declarations remain separate from decode')
     p.add_argument('--youtube',action='store_true',help='Own public non-DRM YouTube tab, no account/consent/ad interaction')
     p.add_argument('--youtube-profile',action='store_true',help='Separate diagnostic Gecko media profile; excludes performance qualification')
+    p.add_argument('--youtube-1080',action='store_true',help='Request1080 on the admitted own video; require actual dimensions before measurement')
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
@@ -61,6 +62,7 @@ def main():
     # shutdown defect (FX-003). No owner process environment is changed.
     os.environ['MOZ_CRASHREPORTER_DISABLE']='1'
     if a.youtube_profile and not a.youtube:raise ValueError('YouTube profile requires its owned playback case')
+    if a.youtube_1080 and not a.youtube:raise ValueError('Quality admission requires its own YouTube case')
     if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
     if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):
         raise ValueError('Lifetime control requires separate strict owned fixtures')
@@ -115,6 +117,10 @@ def main():
                     'startMedia=v.currentTime' in source and 'v.requestVideoFrameCallback' in source):
                 return super().command(name,parameters)
             import process_cpu
+            quality=None
+            if a.youtube_1080:
+                import youtube_quality
+                quality=youtube_quality.prepare(self,'aqz-KE-bpKQ',a.run/'youtube-quality-admission.json')
             before=self.cpu_snapshot();admission=None
             if a.youtube_profile:
                 import pipeline_profile
@@ -131,7 +137,18 @@ def main():
                     finally:self.command('Marionette:SetContext',{'value':'content'})
             after=self.cpu_snapshot()
             playback['owned_process_cpu']=dict(before=before,after=after,comparison=process_cpu.compare(before,after))
+            if a.youtube_1080:
+                import media_images
+                directory=a.run/'youtube-media-providers';directory.mkdir()
+                playback['media_providers']=media_images.inspect(after['processes'],directory,installed_frameworks)
             playback['profile_diagnostic_only']=a.youtube_profile
+            if quality:
+                playback['quality_admission']=quality
+                frames=playback.get('after',{}).get('total',0)-playback.get('before',{}).get('total',0)
+                elapsed=playback.get('endMedia',0)-playback.get('startMedia',0)
+                playback['observed_decoded_frames_per_media_second']=frames/elapsed if elapsed>0 else None
+                playback['actual_1080p60_observed']=playback.get('width',0)>=1920 and playback.get('height',0)>=1080 and elapsed>=12 and frames/elapsed>=55
+                self.youtube_completed=playback.get('actual_1080p60_observed') is True and not playback.get('error') and playback.get('ad') is False
             if admission:playback['gecko_profile']=profile
             try:
                 capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(a.run/'youtube-cpu-scene.ppm')],
@@ -192,7 +209,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if a.installed_media and getattr(self,'completed_installed_videos',0)==2:
+            if (a.installed_media and getattr(self,'completed_installed_videos',0)==2) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -329,11 +346,11 @@ def main():
         raise ValueError('Installed launcher lacks isolated diagnostic hook')
     manifest=json.loads((runtime/'release.json').read_text())
     installed_frameworks=None
-    if a.installed_media:
+    if a.installed_media or a.youtube_1080:
         from video_selection import installed_family
         installed_frameworks=installed_family(manifest)
         if not installed_frameworks.is_dir():raise ValueError('Selected video family is absent')
-    if a.staged_media or a.installed_media:os.environ['SF_VT_COPY_COUNTS']='1'
+    if a.staged_media or a.installed_media or a.youtube_1080:os.environ['SF_VT_COPY_COUNTS']='1'
     if a.timer_control:os.environ['PD_CV_TIMER']='1'
     if a.retire_pool:os.environ['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
     else:os.environ.pop('SF_VT_RETIRE_POOL_AT_INVALIDATE',None)
@@ -351,6 +368,7 @@ def main():
         mse_representation_control=a.mse,
         view_state_diagnostic=a.view_state,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
+        youtube_1080=a.youtube_1080,
         lifetime_control=a.lifetime_control,retire_pool=a.retire_pool,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
@@ -363,7 +381,7 @@ def main():
           '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
-    if a.installed_media:argv+=['--expect-system-gpu']
+    if a.installed_media or a.youtube_1080:argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file() and not a.youtube:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
@@ -421,14 +439,14 @@ def main():
     try:
         try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
         except SystemExit as error:
-            if not a.installed_media:raise
+            if not (a.installed_media or a.youtube_1080):raise
             # Intentional Quit makes the shared survival-oriented runner return1.
             # Preserve its raw status/verdict and admit only via the exact gate.
             (a.run/'shared-runner-status.json').write_text(json.dumps(dict(returncode=error.code,
                 reason='Survival-oriented runner; intentional Quit qualified separately'))+'\n')
             if error.code not in [0,1]:raise
     finally:
-        if a.installed_media and destination.is_dir():
+        if (a.installed_media or a.youtube_1080) and destination.is_dir():
             import audio_logs
             rows=audio_logs.collect(destination,destination/'home')
             (destination/'native-logs.json').write_text(json.dumps(rows,indent=2)+'\n')
