@@ -20,8 +20,10 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-def close_button(dump, window_id):
+def window_button(dump, window_id, kind):
     """Use the compositor's actual button center for this admitted window."""
+    if kind not in ['Close', 'Miniaturize', 'Maximize']:
+        raise ValueError('Unknown compositor button')
     rows = [line for line in dump.splitlines()
             if re.match(r'window %d ' % window_id, line) and 'mapped=true' in line]
     if len(rows) != 1:
@@ -29,15 +31,19 @@ def close_button(dump, window_id):
     frame = re.search(r'frame=Some\((.*?)\)', rows[0])
     bounds = list(map(int, re.findall(r'-?\d+', frame[1]))) if frame else []
     buttons = re.search(r'buttons=(\[[^\]]*\])', rows[0])
-    points = [item[1:] for item in ast.literal_eval(buttons[1]) if item[0] == 'Close'] if buttons else []
+    points = [item[1:] for item in ast.literal_eval(buttons[1]) if item[0] == kind] if buttons else []
     if len(bounds) != 4 or len(points) != 1 or len(points[0]) != 2:
-        raise ValueError('Owned close-button geometry absent or ambiguous')
+        raise ValueError('Owned button geometry absent or ambiguous')
     x, y, width, height = bounds
     tx, ty = points[0]
     if not (type(tx) is int and type(ty) is int and 0 <= tx <= 2559 and 0 <= ty <= 1599 and
             x <= tx < x + width and y <= ty < y + height):
-        raise ValueError('Owned close button is outside its frame or panel')
+        raise ValueError('Owned button is outside its frame or panel')
     return tx, ty
+
+
+def close_button(dump, window_id):
+    return window_button(dump, window_id, 'Close')
 
 
 class AudioFixture:

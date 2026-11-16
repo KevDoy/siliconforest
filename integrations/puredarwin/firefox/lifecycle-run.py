@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import time
 
-from lifecycle_observer import AudioFixture, close_button, gecko_windows, native_menu
+from lifecycle_observer import AudioFixture, close_button, gecko_windows, native_menu, window_button
 from marionette import Marionette
 from owner_guard import OwnerInputGuard
 
@@ -236,15 +236,15 @@ def main():
                 else:
                     result['native_action'] = dict(route='compositor-app-request', pid=parent,
                         response=_request(inject, 'app %d quit' % parent))
-            elif args.action in ['close-box', 'cmd-w']:
+            elif args.action in ['close-box', 'cmd-w', 'minimize']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
-                if args.action == 'close-box':
+                if args.action in ['close-box', 'minimize']:
                     name = 'sffx-lifecycle-%d-close-frame' % parent
                     _request(inject, 'dump ' + name)
                     dump = (inject / (name + '.txt')).read_text()
                     (args.run / 'close-frame.txt').write_text(dump)
-                    tx, ty = close_button(dump, admission['window_id'])
+                    tx, ty = window_button(dump, admission['window_id'], 'Miniaturize' if args.action == 'minimize' else 'Close')
                     result['close_button_point'] = [tx, ty]
                     lines = 'abs %d %d\nbuttons 1\nwait 60\nbuttons 0' % (round(tx * 65535 / 2559), round(ty * 65535 / 1599))
                 else:

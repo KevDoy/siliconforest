@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from lifecycle_observer import close_button
+from lifecycle_observer import close_button, window_button
 
 spec = importlib.util.spec_from_file_location('lifecycle_gate', Path(__file__).with_name('analyze-lifecycle.py'))
 gate = importlib.util.module_from_spec(spec)
@@ -96,6 +96,11 @@ class CloseButtonGeometry(unittest.TestCase):
     row = ('window 92 mapped=true frame=Some(Rect { pos: Point { x: 112, y: 59 }, '
            'size: Size { w: 1942, h: 1541 } }) '
            'buttons=[("Close", 2014, 92), ("Maximize", 1972, 92)]')
+
+    def test_minimize_uses_its_own_observed_button(self):
+        row=self.row.replace('("Maximize", 1972, 92)', '("Miniaturize", 1930, 92)')
+        self.assertEqual(window_button(row,92,'Miniaturize'),(1930,92))
+        with self.assertRaises(ValueError):window_button(self.row,92,'Miniaturize')
 
     def test_observed_compositor_center(self):
         self.assertEqual(close_button(self.row, 92), (2014, 92))
