@@ -155,8 +155,9 @@ def check_tiles(path, dpr=1.5, win=None):
         if o: break
     if not o:
         return dict(error='marker not found')
-    ox, oy = o
-    bits = ''.join('1' if sum(px[int(ox + (i * 8 + 4) * dpr), int(oy + 28 * dpr)]) < 200 else '0' for i in range(16))
+    ox, oy = o[0] - int(200 * dpr), o[1]
+    bits = ''.join('1' if sum(px[int(ox + (200 + i * 8 + 4) * dpr), int(oy + 28 * dpr)]) < 200 else '0' for i in range(16))
+    dock = 200   # device px from the screen's left edge: the desk's dock covers it
     scroll = int(bits, 2)
     bx = int(ox + 300 * dpr); y = int(oy + 40 * dpr); bottom = None
     while y < im.height - 1:
@@ -172,7 +173,7 @@ def check_tiles(path, dpr=1.5, win=None):
             continue
         for c in range(10):
             x0 = ox + (c * 128 + 3) * dpr
-            if x0 + 6 * dpr >= right:
+            if x0 + 6 * dpr >= right or x0 < dock:
                 continue
             exp = GRID[(r * 5 + c) % 17]
             samples = [px[int(x0 + dx), int(y0 + dy)] for dx in (0, 4, 8) for dy in (0, 6, 12, 20)]
@@ -181,7 +182,7 @@ def check_tiles(path, dpr=1.5, win=None):
             else:
                 res['bad'].append(dict(r=r, c=c, x=int(x0 - ox), y=int(y0 - oy), got=samples[0], exp=exp))
     if bottom is not None:
-        res['banner_bad_x'] = [x - ox for x in range(ox + 4, right - 4, 40) if not near(px[x, bottom + int(5 * dpr)], (160, 16, 16), 20)]
+        res['banner_bad_x'] = [x - ox for x in range(max(ox + 4, dock), right - 4, 40) if not near(px[x, bottom + int(5 * dpr)], (160, 16, 16), 20)]
     return res
 
 
@@ -291,20 +292,20 @@ def tabs_one(tag, name, env, resdir):
 # says so in its title ('pix-done'), so two variants can be compared pixel for pixel from the marker
 PIX_PAGES = {
  'still.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{font:18px/1.5 serif;margin:30px 60px;background:#fafafa}
-#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+#mk{position:fixed;left:200px;top:0;width:12px;height:12px;background:#f0f;z-index:9}
 .b{display:inline-block;width:180px;height:120px;margin:10px;border-radius:18px;box-shadow:4px 6px 12px rgba(0,0,0,.4)}
 </style><div id=mk></div><h1>Static mix</h1><div class=b style="background:linear-gradient(45deg,#c33,#36c)"></div>
 <div class=b style="background:#3a3;opacity:.55"></div><div class=b style="background:radial-gradient(#ff0,#f80)"></div>
 <div class=b style="background:#123;transform:rotate(7deg)"></div>''' + ''.join('<p>Paragraph %d: <b>bold</b> <i>italic</i> <code>code()</code> text, more text, numbers 0123456789.</p>' % i for i in range(30)) + '''
 <script>addEventListener('load',()=>setTimeout(()=>document.title='pix-done',1500))</script>''',
  'scrolled.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{margin:0;font:16px sans-serif}
-#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+#mk{position:fixed;left:200px;top:0;width:12px;height:12px;background:#f0f;z-index:9}
 #bar{position:fixed;left:12px;right:0;top:0;height:40px;background:#334;color:#fff;z-index:8;line-height:40px;padding-left:10px}
 .r{height:90px;border-bottom:1px solid #ccc;padding:20px 40px;box-sizing:border-box}</style><div id=mk></div><div id=bar>fixed bar</div>
 ''' + ''.join('<div class=r style="background:hsl(%d,60%%,85%%)">Row %d - scrolled content with a fixed bar over it</div>' % (i * 37 % 360, i) for i in range(120)) + '''
 <script>addEventListener('load',()=>{let n=0;const s=()=>{scrollBy(0,700);if(++n<6)setTimeout(s,250);else setTimeout(()=>document.title='pix-done',1500)};setTimeout(s,800)})</script>''',
  'nested.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{margin:0;font:15px sans-serif;background:#eee}
-#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+#mk{position:fixed;left:200px;top:0;width:12px;height:12px;background:#f0f;z-index:9}
 .box{position:absolute;overflow:auto;width:420px;height:300px;border:2px solid #444;border-radius:12px;background:#fff}
 .in{height:1400px;background:repeating-linear-gradient(0deg,#fff 0 20px,#dde 20px 40px)}</style><div id=mk></div>
 <div class=box id=a style="left:40px;top:60px"><div class=in>scroll box A</div></div>
@@ -341,15 +342,33 @@ def pix_one(tag, name, env, url, n):
     return r
 
 
+def pix_marker(im, win):
+    px = im.load()
+    for y in range(max(0, win['y']), min(im.height, win['y'] + win['h']), 2):
+        for x in range(max(0, win['x']), min(im.width, win['x'] + win['w']), 2):
+            if px[x, y] == (255, 0, 255):
+                while x > 0 and px[x - 1, y] == (255, 0, 255): x -= 1
+                while y > 0 and px[x, y - 1] == (255, 0, 255): y -= 1
+                return x, y
+    return None
+
+
 def pix_compare(a, b):
+    # the page from its own top-left marker to the window's lower right: Firefox's bars above it (a session-restore
+    # notice after the known quit crash, FX-003) differ between launches and are not what is compared
     from PIL import Image, ImageChops
     ia, ib = Image.open(a['capture']).convert('RGB'), Image.open(b['capture']).convert('RGB')
     wa, wb = a['win'], b['win']
-    w, h = min(wa['w'], wb['w']), min(wa['h'], wb['h'])
-    ca = ia.crop((wa['x'], wa['y'], wa['x'] + w, wa['y'] + h)); cb = ib.crop((wb['x'], wb['y'], wb['x'] + w, wb['y'] + h))
+    ma, mb = pix_marker(ia, wa), pix_marker(ib, wb)
+    if not ma or not mb:
+        return dict(error='marker not found', markers=(ma, mb))
+    w = min(wa['x'] + wa['w'] - ma[0], wb['x'] + wb['w'] - mb[0], ia.width - ma[0], ib.width - mb[0])
+    h = min(wa['y'] + wa['h'] - ma[1], wb['y'] + wb['h'] - mb[1], ia.height - ma[1], ib.height - mb[1])
+    ca = ia.crop((ma[0], ma[1], ma[0] + w, ma[1] + h)); cb = ib.crop((mb[0], mb[1], mb[0] + w, mb[1] + h))
     d = ImageChops.difference(ca, cb).convert('L').point(lambda v: 255 if v > 8 else 0)
     box = d.getbbox()
-    return dict(size=(w, h), differing=sum(1 for v in d.getdata() if v), bbox=box)
+    return dict(size=(w, h), markers=(ma, mb), differing=sum(1 for v in d.histogram()[255:256]), bbox=box,
+                differing_pixels=d.histogram()[255])
 
 
 def main():
@@ -381,9 +400,11 @@ def main():
         res = []
         with hold(max(1, round(len(urls) * len(variants) * 20 / 60)), 'FXPERF2 pix %s: own Firefox on %d static pages x %s, Shift tap + capture of own window' % (
                 tag, len(urls), '/'.join(n for n, _ in variants))):
-            sh('mkdir -p %s/www && cat > %s/www/anim.html' % (B, B), inp=ANIM_HTML.replace('<title>FXPERF2 anim</title>', '<title>pix</title><style>*{animation-play-state:paused!important;animation-delay:-1s!important}</style><div style="position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9"></div>'), check=True)
+            sh('mkdir -p %s/www && cat > %s/www/anim.html' % (B, B), inp=ANIM_HTML.replace('<title>FXPERF2 anim</title>', '<title>pix</title><style>*{animation-play-state:paused!important;animation-delay:-1s!important}</style><div style="position:fixed;left:200px;top:0;width:12px;height:12px;background:#f0f;z-index:9"></div>'), check=True)
             for fn, html in PIX_PAGES.items():
                 sh('cat > %s/www/%s' % (B, fn), inp=html, check=True)
+            sh("sed -e 's/#mk{position:fixed;left:0;/#mk{position:fixed;left:200px;/' -e 's/#code{position:fixed;left:0;/#code{position:fixed;left:200px;/' "
+               "/private/var/db/sffxlead/www/tiles.html > %s/www/tiles.html" % B, check=True)
             sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
             srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
             time.sleep(1.5)
@@ -439,6 +460,8 @@ def main():
         res = []
         with hold(max(1, round(trials * len(variants) * 18 / 60)), 'FXPERF2 grid %s: own Firefox on the self-scrolling tile page, %d x %s, Shift tap + capture of own window' % (
                 tag, trials, '/'.join(n for n, _ in variants))):
+            sh("sed -e 's/#mk{position:fixed;left:0;/#mk{position:fixed;left:200px;/' -e 's/#code{position:fixed;left:0;/#code{position:fixed;left:200px;/' "
+               "/private/var/db/sffxlead/www/tiles.html > %s/www/tiles.html; grep -c 'left:200px' %s/www/tiles.html" % (B, B), check=True)
             sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
             srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
             time.sleep(1.5)
