@@ -363,3 +363,39 @@ At21:29:28–21:30:17UTC, corrected private browser003 uses the installed suppor
 TERM8 adopted0220 byte-for-byte into the main source. The installed app still forces its older private CoreText, so canonical adoption alone does not repair it. An owned maintenance installer prepares a new versioned provider under the Firefox runtime, checks retained actual-browser qualification and cold hashes, saves the old launcher/manifest, and selects the override in the app's launcher. It does not replace shared CoreText or alter the owner's preferences, dock pins, theme or scale. Actual installation and ordinary compositor-dock CNN capture remain pending behind the desktop/kernel owners' active reservations. The ten-site stability gate now records actual-renderer text masks and requires ink for every eligible visible run; visual review and comparisons with web fonts disabled remain required.
 
 The owner update installed at21:52:28UTC, selecting the new CoreText from the app runtime's `overrides/memory-font-v1/Frameworks`; the old launcher/manifest are saved in `maintenance-font-memory-v1`. The first attempt safely refused an existing owner Firefox process and changed nothing. The second installed successfully but its original verification failed because a process filter counted the launcher wrapper as another Firefox parent. Both failures remain retained. The corrected installed gate003 passed at21:57:33–45: ordinary compositor dock request and canonical CNN open succeed, the actual parent and GPU both load the corrected provider, and the actual-renderer capture was inspected. CNN's navigation, headlines, summaries, body and Google sign-in text are visible at150%, without Marionette or injected input. Real owner counters stay0 before/after. DESK's subsequent compositor relaunch ends windows, so the ten-site follow-up will use a fresh ordinary dock launch as needed.
+
+## Network latency: the pause before a page (FXNET, 16 November)
+
+The owner reported that "resolving hostnames and getting connections to go is slow in general" and that loading pages "has what feels like a long up front pause". I measured it on the M1 layer by layer. The reference is the lab's wired Linux machine on the same LAN; Linux brcmfmac on the same M1 and access point answered LAN pings in 1.2 ms (it was in Linux during a kernel install). Tools are in `integrations/puredarwin/m1-bwfm/tools/fxnet/`; raw output is under `runs/fxnet/` (not in git).
+
+Two causes accounted for the pause, and both are fixed and measured on the M1:
+
+1. **Wi-Fi power save.** In fast power save the BCM4378 firmware dozed 200 ms after our last frame (its default `pm2_sleep_ret`). A reply arriving later waited at the access point for the next DTIM beacon, about 307 ms apart. Measured with a delayed TCP echo from the M1 to the lab (`tcpdelay.py`, 12 samples per step): with a 0-200 ms reply delay the extra cost was 3-8 ms; at 250-2500 ms it was p50 43-258 ms, max 325. Lab-to-M1 ping at a 1 s interval: p50 65-159 ms, max 316-318. Every server answer slower than 200 ms paid this, including the HTML time-to-first-byte of news sites. The fix is PDBwfm with `pm2_sleep_ret` 2000 ms: `cf9034f6b` and `996666faf`, kernel 47 by CODEX-TB, firmware readback fast/2000. Measured after the fix in the same boot: reply delays of 0-1500 ms cost p50 4.3-5.4 ms, and ping at a 1 s interval is p50 5.2-6.1 ms, p99 6.5-7.5. Boot-args `bwfm_pm` and `bwfm_pm2_ret` set the defaults, and `m1-bwfm/tools/pd-wifipm` (`off | ps | fast [ms]`) changes the mode at run time. Constantly awake (`off`) measured no better than the new default.
+2. **Resolver.** Every lookup goes through libinfo to mdnsd, and mdnsd had two separate defects.
+   - Synchronous logging. With `-debug`, mdnsd also turned on every LogInfo: dozens of lines per lookup, plus one per mDNS packet on the LAN, written synchronously from its only thread to `/var/log/mdnsd.log`. That file had reached 120 MB and grew about 1 KB/s across boots. On the M1's root ext4, 10% of small appends take 13-33 ms. getaddrinfo on fresh names had p50 25-40 ms but outliers of 1.1-9.7 s, while raw UDP to the router answered in 25-47 ms. libinfo's own trace (`RES_DEBUG`) showed the request IPC taking 184 ms with mdnsd nearly idle.
+   - Large answers stalled. A rotating CDN name can carry 111-209 cached addresses. When the answer did not fit the client socket, the rest waited up to a second for the daemon's next timer.
+
+   The fixes are `m1-bwfm/netd/mdnsd-debug-quiet.patch`, where `-debug` keeps only errors and `-debug -verbose` restores the old log, and `mdnsd-reply-backlog.patch`, which gives each client a 256 KiB send buffer and retries queued replies after 10 ms. `/usr/sbin/mdnsd` is now `fcb66165`; the original is kept as `/usr/sbin/mdnsd.pre-fxnet`. To revert, copy it back and `kill -TERM` the running mdnsd; launchd restarts it. Results:
+   - fresh-name getaddrinfo: p90 89 → 42 ms;
+   - cached names: max 199 → 3.3 ms;
+   - a burst of 30 fresh S3 names: max 218 and 2068 → 55-79 ms.
+
+Firefox, cold loads with my own instance (fresh profile, `-no-remote`, crash reporter off, Marionette Navigation Timing). Before is one run (W1: kernel 46, old mdnsd); after is three runs (W2, W4, W5: kernel 47, fixed mdnsd):
+
+| Site | main-document DNS (ms), before → after | load (ms), before → after |
+|---|---:|---:|
+| cnn.com | 1799 → 13, 3, 11 | 3214 → 2450, 2649, 1602 |
+| news.ycombinator.com | 1243 → 22, 22, 27 | 1679 → 346, 475, 309 |
+| theguardian.com | 893 → 19, 2, 19 | 2493 → 1511, 1400, 963 |
+| apple.com | 8269 → 20, 2, 22 | no load in 60 s → 724, (timeout), 691 |
+| the six other sites | 1-28 → 0-25 | about the same |
+
+After the fixes, main-document DNS over 26 loads has p50 19 ms and max 27 ms. All ten sites took 109 s before and 50-51 s after when nothing hung. TCP plus TLS with the CA store loaded up front (`tlsbench.py`, 30 handshakes, IPv4): M1 p50 44 ms against 35 ms on the lab (1.26×), p90 114 against 80 (1.42×). HTTP/3 works and is used. Firefox's connectivity service reports IPv4 OK and IPv6 not available, so it makes no IPv6 attempts. TRR is off and the native resolver is used. No launcher pref change is needed.
+
+Still open, with what is known:
+- **apple.com navigation hung once.** It did not commit within 60 s in 1 of 5 apple.com loads after the fixes (W4). The next run (W5) loaded it in 691 ms, and a MOZ_LOG run with three apple.com pages (W6) loaded all three in 0.6-1.8 s. No capture of the hang exists.
+- **github.com DOMContentLoaded at about 11.5 s**, before and after. The MOZ_LOG run shows the page itself requesting `mona-smile*.glb` 10.1 s after navigation start, and the network answered it in 64 ms. This is page script/WebGL time, not network (FXPERF's area).
+- **About 3.5 ms per round trip more than Linux brcmfmac on the same M1.** It stays the same at 200 packets/s and in constantly-awake mode, and MSI is delivered, so it is in the host driver or I/O path.
+- **Download throughput** is 155 Mbit/s against 460 on the wired lab; upload is 37-40 on both (the ISP). Occasional 0.2-0.7 s getaddrinfo tails on small NXDOMAIN answers were not reproduced under trace.
+- **The ext4 append stall** is with the kernel owner (`runs/m1-coord/requests-for-CODEX-TB.md`, 08:15Z).
+- **curl's own TLS time** (0.2-1.8 s) is OpenSSL's default CApath lookups and `cert.pem` parsing. It is not Firefox's path.
