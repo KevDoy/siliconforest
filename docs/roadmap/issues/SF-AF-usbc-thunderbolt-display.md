@@ -1,12 +1,24 @@
 # SF-AF: USB-C, Thunderbolt and external display on J293
 
-Owner: CODEX-TB. Survey started 15 November 2026. **No dock PCI/USB enumeration or external display has been established
-on SiliconForest; ACIO M3, NHI control DMA/IRQs and host-router startup
-are now observed ready, and both Thunderbolt lanes reach UP/CL0 in CIO25.**
-The acceptance milestones below require the actual M1; source and build results
-are recorded separately. Internal keyboard/trackpad are SPI, not USB evidence.
+Owner: CODEX-TB. Survey started15 November2026; current update16 November01:05Z.
+Thunderbolt/dock trials and AVE remain paused. The owner's later standing grant
+permits immediate Firefox/desktop kernel installs with2-minute notice, locks,
+UART and rollback; there is no owner-idle or hourly wait.
 
-## Current target and observed state (owner change; updated 15:20Z)
+| Piece | Observed on the M1 | Built / still pending |
+|---|---|---|
+| Devfs clone recovery | Installed normal devfs-only kernel;60000 reservations allocated/freed, slots3→3, zero failures; GL exact hash50 and Vulkan50 pass; standard DESK8-next003/inject responds | Broader LinuxKPI GPU-wait interruptibility remains separate |
+| Firefox launches |20 consecutive fresh profiles create mapped/captured windows and quit/reap; slots3 after each | All20 captures have blank page content/stale chrome: page-paint STRICTFAIL, FX/DESK investigating |
+| Shared decoder output / pinch | Not observed; installed devfs-only image retains old AVD/HID | Combined AVD import/cache/IRQ +K14/readiness +devfs built; next announced install earliest01:07:30Z |
+| TS3 router / PCIe | Earlier native trials authorize TS3, bring NHI/PCIe tunnel up and enumerate12 functions including4 xHCI and I210 | No new dock trials while paused |
+| Dock Ethernet | Earlier en1 link1Gb/s | No DHCP lease or demonstrated packets |
+| Dock USB / Samsung | No USB device/HID typing, HPD/EDID/external output or10-cycle hotplug qualification | Sources/host/SDK preparation only; DP provider graph missing |
+
+Private native evidence is in runs/sftb/devfs-install-0041/. Filesystem check
+returned4 with bitmap/count and two beyond-EOF SQLite extent records; no repair
+was performed. Root subsequently mounted; a clean filesystem is not claimed.
+
+## Historical target and observed state (owner change; updated15:20Z)
 
 The CalDigit TS3 Plus remains attached to left-front Type-C port 1 and is
 now the **first hardware target**. Direct USB/DWC3 and a USB-C DP adapter are
@@ -3412,3 +3424,44 @@ Correction: the initial clean request used /sbin/reboot rather than supported
 fenced /bin/reboot, so a supported shutdown hang is NOT proved. Raw failures
 and the command mistake are retained; no extra recovery boot followed.
 CODEX-TB resumed the machine pause after recovery; all later work is offline.
+
+
+### Devfs-only recovery kernel install in progress, 2026-11-16 00:54Z
+
+The owner's later durable Firefox authorization supersedes the earlier machine
+pause for Firefox kernels; idle and hourly waits are lifted. Thunderbolt and AVE
+remain paused. The first image deliberately contains only devfs/core + shared
+PDDRMDri changes, with55 of57 executable module UUIDs unchanged from CIO29.
+Normal installation retained CIO29 as rollback; the supported /bin/reboot reached
+Linux without an external reset. Read-only filesystem checking returned4 with
+bitmap/count errors and two beyond-EOF extent records in Firefox YouTube SQLite
+files. No repair was performed because this exceeds the conditional bitmap/count
+repair permission. Private full output, inode/path evidence and filesystem features
+are retained in runs/sftb/devfs-install-0041/.
+
+Observed on the new M1 boot: DESK8-next003 hash46dc9bde runs with responsive
+non-input inject stats; four processes each completed5000 stat,5000 open-close
+and5000 failed O_DIRECTORY opens. Reservations allocated60000/freed60000;
+used slots3 before/after, zero allocation failures. GL exact pixel hash and
+vulkaninfo each passed50 launches. Firefox20 fresh-profile visible-window
+qualification is in progress, so final adoption is not yet claimed.
+
+Identification correction: Mach-O LC_UUID/embedded kernel UUID1FDC2A71… is
+not kern.kernelcacheuuid. XNU obtains that sysctl from the prelink plist's
+_PrelinkKCID, which is65F85F90-FF31-4541-A51E-8247DD0C4881 in the actual capsule
+and live M1. Decompressed capsule bytes equal the built collection. The initial
+UUID assertion failure and premature explanation are preserved with the corrected
+proof in the run directory; no image change was needed.
+
+
+### Devfs-only qualification completed01:03:43Z
+
+The first kernel cycle is complete and the image remains the normal SiliconForest
+kernel, with CIO29 retained as rollback. All20 consecutive fresh profiles04–23
+created mapped, committed and captured windows, used their own app-menu Quit,
+and left no process-family member; clone slots returned to3 after every launch.
+Median mapping time5.4175s (4.055–6.844s). Visual review of the complete montage
+finds blank content/stale NewTab chrome in all20: creation/exit passes, page-paint
+is a strict failure handed to FX/DESK. No claim of working Firefox rendering.
+UART reader and route are gone; all locks released. The combined decoder/K14
+image is now built and separately announced; native import/cache/pinch proof is pending.

@@ -670,3 +670,18 @@ background stderr redirected. The supported fenced installed command is
 supported clean shutdown hung on the wedged processes. Future recovery must
 use /bin/reboot and retain status/stderr; no extra reboot was performed to
 retest after this recovery. No SSH/firewall/authentication configuration changed.
+
+
+### Devfs-fix install filesystem check, 2026-11-16
+
+The supported /bin/reboot reached Linux cleanly in the devfs-only install cycle;
+no external reset was needed. Root identity, geometry and unmounted state were
+checked before e2fsck -fn -E no_optimize_extents. Exit4 includes the older
+zero-dtime deleted inode, bitmap/free-count differences, and two beyond-EOF
+extent records in Firefox YouTube SQLite databases (one owner profile, one
+throwaway QA profile). Full output, debugfs inode/path evidence and dumpe2fs
+features are saved privately in runs/sftb/devfs-install-0041/. No filesystem
+repair was attempted because this exceeds the current conditional bitmap/count
+repair permission. Normal SFBOOT installation, one-time bless and subsequent
+SiliconForest root mount succeeded; this is not a clean filesystem qualification.
+The kernel rollback remains CIO29.

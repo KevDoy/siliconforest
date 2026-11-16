@@ -411,3 +411,41 @@ no repairs made. Correction: initial clean request used /sbin/reboot rather
 than supported fenced /bin/reboot, so a shutdown-kernel hang was not proved.
 No extra recovery boot was used to retest that mistake. CODEX-TB then resumed
 its machine pause and continued only workstation work. No AVE or push.
+
+
+### Devfs-only recovery kernel install in progress, 2026-11-16 00:54Z
+
+The owner's later durable Firefox authorization supersedes the earlier machine
+pause for Firefox kernels; idle and hourly waits are lifted. Thunderbolt and AVE
+remain paused. The first image deliberately contains only devfs/core + shared
+PDDRMDri changes, with55 of57 executable module UUIDs unchanged from CIO29.
+Normal installation retained CIO29 as rollback; the supported /bin/reboot reached
+Linux without an external reset. Read-only filesystem checking returned4 with
+bitmap/count errors and two beyond-EOF extent records in Firefox YouTube SQLite
+files. No repair was performed because this exceeds the conditional bitmap/count
+repair permission. Private full output, inode/path evidence and filesystem features
+are retained in runs/sftb/devfs-install-0041/.
+
+Observed on the new M1 boot: DESK8-next003 hash46dc9bde runs with responsive
+non-input inject stats; four processes each completed5000 stat,5000 open-close
+and5000 failed O_DIRECTORY opens. Reservations allocated60000/freed60000;
+used slots3 before/after, zero allocation failures. GL exact pixel hash and
+vulkaninfo each passed50 launches. Firefox20 fresh-profile visible-window
+qualification is in progress, so final adoption is not yet claimed.
+
+Identification correction: Mach-O LC_UUID/embedded kernel UUID1FDC2A71… is
+not kern.kernelcacheuuid. XNU obtains that sysctl from the prelink plist's
+_PrelinkKCID, which is65F85F90-FF31-4541-A51E-8247DD0C4881 in the actual capsule
+and live M1. Decompressed capsule bytes equal the built collection. The initial
+UUID assertion failure and premature explanation are preserved with the corrected
+proof in the run directory; no image change was needed.
+
+
+Devfs-only qualification completed2026-11-16 01:03:43Z: the image remains
+installed as the normal SiliconForest kernel with CIO29 rollback. Twenty
+consecutive fresh profiles04–23 map/commit/capture a window and cleanly Quit/reap
+their whole family; slots3 after every launch, zero allocation failures. Median
+map5.4175s, range4.055–6.844s. LOOKED at the20-capture montage: ALL content areas
+are blank/stale NewTab chrome. Thus window creation/close passes while Firefox
+page-paint is STRICTFAIL, handed to FX/DESK; no presentation-correctness claim.
+DESK8-next003/inject responds, owned UART reader/route are gone, locks released.

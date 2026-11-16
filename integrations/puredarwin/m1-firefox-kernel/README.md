@@ -1,16 +1,21 @@
 # One Firefox kernel on qualified CIO29
 
-Prepared offline on 2026-11-15 at the owner's request. **Nothing here installs,
-reboots, visits Linux, takes target locks or contacts the M1.** The machine
-remains on qualified NON-AVE CIO29. Hardware import, cache visibility, zero-copy
-video and physical pinch delivery are unqualified. The failing dock Ethernet
-and uninstalled dock diagnostic are excluded from this candidate.
+Current2026-11-16: the devfs-only kernel is qualified and installed normally;
+CIO29 remains the recovery baseline. The reviewed AVD5238, Touch Bar/K14 42j and
+HID publication/readiness zc02 SDKs are preserved in the next combined image,
+with devfs/core and shared DRM retained. Its final collection is nr5fsaf3…
+(capsule0d31b0c0c108c409…, prelink ID A704E5E0-5ABF-41AB-A31E-49A0DB963DF2),
+57 modules, exactly5 changed versus CIO29 and52 unchanged. It is BUILT, not yet
+installed; hardware import, cache visibility, zero-copy video and physical pinch
+remain unqualified. The failing dock diagnostics and AVE are excluded.
 
-The later23:20 desktop wedge makes devfs clone lifetime the first priority.
-The original three-module artifact below is superseded for the next window by
-[../m1-devfs-clone/README.md](../m1-devfs-clone/README.md): the SAME reviewed three
-SDKs plus the kernel/shared-DRM fix in one image. The old artifact remains a
-local build, and qualified29 remains the installed recovery baseline.
+The owner's durable Firefox grant now permits installs as soon as ready with
+2-minute notice, core/gui/bench locks, UART, rollback and standard-state recovery.
+Owner-idle and hourly waits are lifted. This directory only builds artifacts;
+the controlled installer owns machine actions. The earlier offline/exclusive
+window and three-module artifact notes below are historical preparation records.
+See [../m1-devfs-clone/README.md](../m1-devfs-clone/README.md) for the devfs fix,
+observed clone stress/GL/Vulkan results and separate Firefox page-paint failure.
 
 ## Exact scope
 

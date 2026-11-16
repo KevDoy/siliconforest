@@ -168,3 +168,32 @@ and5000 deliberately failed O_DIRECTORY opens of the render node. It requires
 stable slot counts, counter/scan agreement and balanced allocations/frees.
 No frame, DMA or firmware work is submitted by this stress. GL/vulkaninfo50 and
 20 isolated visible Firefox launches follow in the installation qualification.
+
+
+## Native devfs-only installation, 2026-11-16
+
+The first install uses the devfs-only collection on the exact CIO29 baseline,
+with only XNU and shared PDDRMDri changed (55 unchanged module UUIDs).
+Observed: DESK8-next003 and non-input inject stats respond; four children each
+complete5000 stat,5000 open/close and5000 failed-open cycles. All60000 clone
+allocations are freed, used3 before/after, failures0, peak7. GL exact pixel-hash
+and vulkaninfo each pass50 launches. Firefox20 fresh-profile mapped-window
+qualification is still running. Its first capture has a blank content area;
+page-paint correctness is a separate unresolved Firefox/compositor issue.
+
+For native identity gates, use the collection prelink plist's _PrelinkKCID,
+not the top-level or embedded kernel's LC_UUID. XNU bootstrap.cpp copies that
+prelink ID into kern.kernelcacheuuid. The installed candidate's prelink ID is
+65F85F90-FF31-4541-A51E-8247DD0C4881; Mach-O LC_UUID is1FDC2A71… . The first
+gate used the wrong field and refused before stress; private receipts retain
+that failure and a corrected byte-equality/prelink proof.
+
+
+Devfs-only qualification completed2026-11-16 01:03:43Z: the image remains
+installed as the normal SiliconForest kernel with CIO29 rollback. Twenty
+consecutive fresh profiles04–23 map/commit/capture a window and cleanly Quit/reap
+their whole family; slots3 after every launch, zero allocation failures. Median
+map5.4175s, range4.055–6.844s. LOOKED at the20-capture montage: ALL content areas
+are blank/stale NewTab chrome. Thus window creation/close passes while Firefox
+page-paint is STRICTFAIL, handed to FX/DESK; no presentation-correctness claim.
+DESK8-next003/inject responds, owned UART reader/route are gone, locks released.
