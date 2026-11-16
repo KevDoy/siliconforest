@@ -23,7 +23,12 @@ def main():
     p.add_argument('--run',type=Path,required=True)
     p.add_argument('--profile-video',action='store_true')
     p.add_argument('--rate-control',action='store_true')
+    p.add_argument('--staged-media',action='store_true')
+    p.add_argument('--frame-mode',choices=['copy','require'],default='copy')
+    p.add_argument('--without-trace',action='store_true')
     a=p.parse_args()
+    if a.frame_mode=='require' and not a.staged_media:
+        raise ValueError('Strict sharing requires the reviewed staged VT producer')
     root=Path(__file__).resolve().parent
     private=Path('/private/var/db/sffx')
     if os.uname().sysname!='Darwin':raise ValueError('SiliconForest target only')
@@ -71,10 +76,62 @@ def main():
                 # No support/runtime/DOM command or Quit against another app.
                 self.socket.close()
                 raise RuntimeError('Marionette parent is outside this owned launch')
+            self.owned_parent=pid
+            self.owned_parent_start=identities[pid][1]
             return result
+
+        def cpu_snapshot(self):
+            import process_cpu
+            rows=subprocess.check_output(['ps','-axo','pid=,ppid=,lstart='],text=True)
+            identities={int(p):(int(pp),start) for p,pp,start in
+                        (row.split(None,2) for row in rows.splitlines())}
+            parent=self.owned_parent
+            if parent not in identities or identities[parent][1]!=self.owned_parent_start:
+                raise RuntimeError('Owned Firefox parent identity changed')
+            owned={}
+            for pid,(_,start) in identities.items():
+                current=pid;seen=set()
+                while current in identities and current not in seen and current!=parent:
+                    seen.add(current);current=identities[current][0]
+                if current==parent:owned[pid]=start
+            return process_cpu.capture(self,parent,owned)
+
+        def measure_video(self,handle=None):
+            # Snapshot outside the fixture interval. No profiler, per-frame
+            # sampling or dependency on zero counters being valid CPU time.
+            import process_cpu
+            cpu={}
+            try:cpu['before']=self.cpu_snapshot()
+            except Exception as error:cpu['before_error']=str(error)
+            video=super().measure_video(handle)
+            try:
+                cpu['after']=self.cpu_snapshot()
+                if 'before' in cpu:cpu['comparison']=process_cpu.compare(cpu['before'],cpu['after'])
+            except Exception as error:cpu['after_error']=str(error)
+            video['owned_process_cpu']=cpu
+            if 'after' in cpu:
+                import media_images
+                directory=a.run/('media-provider-'+str(len(list(a.run.glob('media-provider-*')))))
+                directory.mkdir()
+                try:video['media_providers']=media_images.inspect(cpu['after']['processes'],directory,
+                                    root/'Frameworks' if a.staged_media else None)
+                except Exception as error:video['media_provider_error']=str(error)
+                if a.staged_media:
+                    try:
+                        capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(directory/'renderer.ppm')],
+                                               capture_output=True,text=True,timeout=5)
+                        video['renderer_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
+                                                     file=str(directory/'renderer.ppm'),input_injected=False,
+                                                     timing='After measurement; visibility/pixels still require inspection')
+                    except Exception as error:video['renderer_capture_error']=str(error)
+            return video
     marionette.Marionette=IsolatedClient
-    os.environ.update(SFFX_DIAGNOSTIC_OBSERVER=str(library),
-                      SF_MEDIA_CADENCE_TRACE='1',SF_MEDIA_CADENCE_SECONDS='120')
+    if not a.without_trace:
+        os.environ.update(SFFX_DIAGNOSTIC_OBSERVER=str(library),
+                          SF_MEDIA_CADENCE_TRACE='1',SF_MEDIA_CADENCE_SECONDS='120')
+    else:
+        os.environ.pop('SFFX_DIAGNOSTIC_OBSERVER',None)
+        os.environ.pop('SF_MEDIA_CADENCE_TRACE',None)
     runtime=Path('/usr/local/lib/siliconforest/firefox/160-system1')
     # Confirm the installed launcher supports the isolated-profile hook. A
     # missing hook is a refusal, never a claim that a trace was installed.
@@ -82,10 +139,12 @@ def main():
     if not launcher.is_file() or 'SFFX_DIAGNOSTIC_OBSERVER' not in launcher.read_text():
         raise ValueError('Installed launcher lacks isolated diagnostic hook')
     manifest=json.loads((runtime/'release.json').read_text())
+    if a.staged_media:os.environ['SF_VT_COPY_COUNTS']='1'
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
         release=manifest,diagnostic_only=True,timing_qualified=False,
         synthetic_input=False,owner_idle_wait=False,rate_control=a.rate_control,
+        staged_media=a.staged_media,frame_mode=a.frame_mode,boundary_trace=not a.without_trace,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
@@ -96,6 +155,18 @@ def main():
           '--expect-appkit-prefix','/System/Library/Frameworks/AppKit.framework',
           '--pref','media.autoplay.default=0','--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
+    argv+=['--vt-frame-mode',a.frame_mode]
+    if (tools/'gpu-counters.json').is_file():
+        argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
+               '--policy-probe-path',str(root/'bin/thread-policy-probe')]
+    if a.staged_media:
+        bundle=a.run/'Diagnostic.app'
+        wrapper=bundle/'Contents/MacOS/firefox-sf'
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_text('#!/usr/bin/env python3\nimport os,sys\nos.execv(sys.executable,[sys.executable,'+
+                           repr(str(root/'media-launch.py'))+']+sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+        argv[argv.index('--bundle')+1]=str(bundle)
     if a.profile_video:argv+=['--profile-video']
     clips=([( 'pattern-1080p60-h264.mp4',rate) for rate in [0.5,1,2]] if a.rate_control else
            [('pattern-1080p60-h264.mp4',1),('pattern-4k30-hevc.mp4',1)])

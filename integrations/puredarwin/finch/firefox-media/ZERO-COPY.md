@@ -133,3 +133,22 @@ TERM8 owns the CA snapshot/retirement fix. This is a stronger source-contract
 candidate for foreign1024px tiles, not runtime attribution of FX011/012. It
 does not retroactively make the five upstream decoder files above release
 proof. CV frame lifetime and final BGRA CA tile lifetime are separate holds.
+
+## Corrected native import gate
+
+The corrected combined kernel passed three native WB-BO duplicate-map/unmap,
+16KiB data-offset import and context-destroy rounds before any decoder jobs.
+Then strict public-VT capture passed6001080p H264 frames and3004K HEVC frames:
+every visible NV12 hash and PTS matched independent Linux references, the first
+picture stayed unchanged across64 later callbacks, GPU-backed output was
+present, and producer counters reported zero copied pixel bytes. Kernel job/done
+counts matched, contexts returned to zero, and no new errors, timeouts, DART
+faults, poisoned objects or quarantine were reported. H264/HEVC capture took
+17.32/31.07s including expensive diagnostic hashing; these are not playback FPS.
+This follows the retained failed UPL teardown attempt; it does not erase it.
+
+This qualifies the private decoder-output/storage contract. The program did not
+sample those frames in Firefox's GPU compositor or prove its cross-context GPU
+completion. Firefox copies/frame, CPU, dropped frames, cadence and actual visible
+presentation still require the coherent consumer test. No kernel build or boot
+was performed by the media agent; CODEX-TB owns those operations.

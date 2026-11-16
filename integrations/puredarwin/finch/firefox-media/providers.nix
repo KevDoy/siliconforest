@@ -19,7 +19,7 @@ in e.pkgs.runCommand "siliconforest-firefox-media-provider-payload-arm64" {} ''
    IOSurfaceCGL="CODEX-FX supplies one coherent cohort and owns activation";
    status="Build only until cold prefix and installed-bundle qualification";
    zeroCPUCopy=false;
-   currentKernelImportCapability=0;
+   kernelImportQualification="Check the running kernel and native strict capture result; package metadata cannot establish capability";
  }}
  PROVIDERS
 ''

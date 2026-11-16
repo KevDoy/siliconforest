@@ -8,7 +8,7 @@ s=s.replace(a,a+'\n    Boolean zeroRequested,zeroRequired;\n    uint64_t zeroFra
 a='static void picture_decoded(void *opaque, const AVFrame *frame);';assert s.count(a)==1
 s=s.replace(a,'#include "SFGPUProducer.h"\n\n'+a)
 a='    s->timing = false;';assert s.count(a)==1
-s=s.replace(a,'''    if (s->zeroRequested) fprintf(stderr,"SF_VT_GPU frames=%llu copied-bytes=%llu required=%d\\n",
+s=s.replace(a,'''    if (s->zeroRequested || getenv("SF_VT_COPY_COUNTS")) fprintf(stderr,"SF_VT_GPU frames=%llu copied-bytes=%llu required=%d\\n",
         (unsigned long long)s->zeroFrames,(unsigned long long)s->copiedBytes,(int)s->zeroRequired);
 '''+a)
 a='            avd->picture_decoded = picture_decoded;';assert s.count(a)==1

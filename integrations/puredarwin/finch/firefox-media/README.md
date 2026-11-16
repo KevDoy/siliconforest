@@ -23,10 +23,14 @@ queries so the installed symbol family is retained. AudioToolbox stays
 canonical. FX supplies and qualifies its matching surface/CGL and versioned
 support selection before deployment. A build is not an installed result.
 
-Kernel import capability remains0. The [one-install contract](ZERO-COPY.md)
-records the missing decoder/GPU pinning, cache ownership and lifetime pieces.
-Keep the one-copy fallback and strict rejection until actual shared output,
-independent hashes/PTS, GPU completion and browser rate/copy measurements pass.
+CODEX-TB's corrected shared-buffer kernel passed the native strict capture gate:
+600 H2641080p and300 HEVC4K frames matched every independent visible-pixel hash
+and PTS, retained the first frame across64 later callbacks, and reported zero
+pixel-copy bytes. Three pin/import/destroy rounds and decoder context teardown
+also passed without errors or quarantine. This qualifies private hardware
+capture, not the real Firefox consumer's GPU fence or delivery rate. The
+[one-install contract](ZERO-COPY.md) records those remaining boundaries. Keep
+the one-copy fallback until the browser's whole path is qualified.
 The earlier149/150 frame-hash failure remains open; a later600-frame exact run
 did not reproduce it or prove the uninstalled IRQ fix works on hardware.
 
@@ -115,6 +119,18 @@ family. The optional Gecko profile is diagnostic, not a performance result.
 The fixture selects its own loopback automation port and checks the returned
 Firefox PID's ancestry before support/runtime/page commands. It also collects
 native image lists from the owned parent/GPU to record the selected providers.
+The next packet records process/thread CPU counters before/after each fixture,
+with separate RDD accounting, actual OS start identities and explicit unavailable
+or changed-process records. Post-measurement media image lists include the RDD;
+they verify that private media selected one CoreVideo/VideoToolbox family.
+`clocked-providers.nix` composes the existing producer/query wrapper with TERM's
+display clock and our415-export CV lifetime provider. `copy`/`shared` phases
+use `media-launch.py` only for their explicit owned profile, retain the runtime's
+graphics/broker plan and select only the packaged media frameworks. They never
+change the installed selector. Boundary interposition is disabled in these CPU
+comparisons; native provider sampling remains outside the fixture interval.
+`SF_VT_COPY_COUNTS=1` enables the producer's existing exit counters in copy mode
+too. It does not change allocation, timing, copying or lifetime policy.
 The `rates` phase uses `cadence-rate.js` only in our fixture snapshot, setting
 and reporting its requested/actual playback rate. It changes no global browser
 preference, decoder clock, display pacing or installed source.
@@ -358,7 +374,25 @@ and135/135 effective exports, with a new normalized PD child. It is built only;
 Firefox/queue/codec integration still needs its gate. No canonical replacement
 or acoustic proof follows from the silent test.
 
+`prepare-audio.py --clock-family FULL_FAMILY --latency` selects the full Finch
+forwarding family while retaining canonical AudioUnit/CoreAudio. Optional
+`--family-tests`/`--fixtures` add WAVE/AAC/ALAC/MP3 decode, file/converter and
+WAVE/AAC queue tests; `--lifecycle-package` adds the already-built silent
+stop/restart/two-unit observer. Each packet is fresh and hashed before execution.
+Passing these CLI tests would not prove browser selection, acoustic sync or
+abnormal-window-death cleanup.
+
 Current first task is FX-035: all video rVFC intervals are about40ms/25Hz.
 No GPU/Firefox workload is permitted before the exact CODEX-TB devfs-fix
 restoration marker. Kernel optimization authorization is durable; TB owns its
 installs. Source/host work continues during recovery.
+
+`prepare-audio-death.py` freezes the Linux-built qualified HAL observer and
+own Wayland-loss observer with our `audio-death-browser.py`. This separate
+installed-launcher test admits only its own random-port/profile parent, starts
+our loopback audio document, and shuts down only that client's Wayland FD.
+It invokes no seat, input, native menu, compositor restart or owner process.
+Family liveness, independent document events and coreaudiod append observations
+are recorded against monotonic time for8s before cleanup. Server slot identity
+can be ambiguous with other clients; missing/ambiguous drops cannot be declared
+audio-stop proof. Source/preparation alone do not qualify abnormal death cleanup.
