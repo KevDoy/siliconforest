@@ -531,3 +531,37 @@ passes. No zero-copy, physical-pinch or GPU-fence success is claimed.
 
 Image43 remains the independently ready original-AVD/default-cap0 cohort.
 Thunderbolt and AVE trials remain paused; no UPL candidate has been installed.
+
+
+### Kernel43 qualified and retained normal, 2026-11-16 02:08:31Z
+
+The owner's requested default-off sound input is installed: the live
+kern.pd_speaker.cap_steps is0 and the enabling boot argument remains available.
+Image43 capsule11f6f53b… /prelink0C63FD93… retains original CIO29 AVD (caps7,
+no import), devfs, K14/HID and reviewed killable-wait AGX/DCP. Exactly7 executable
+modules differ from CIO29;50 are unchanged. No AVE or dock trial was added.
+
+Observed on the M1:60 infinite binary/timeline syncobj waits across SIGKILL,
+SIGTERM and caught SIGUSR1 all returned/reaped, worst2.6ms; four concurrent
+children completed60000 stat/open-close/failed-open operations with60000 clone
+allocations/frees, slots3→3 and zero failures. Exact GL pixel hashes and
+vulkaninfo each passed50 runs. This qualifies the tested interruptible waits,
+not every uninterruptible DMA wait or a real Firefox-helper fallback. The latter
+remains an FX integration gate. Gesture-ring776B/version2 is live; physical
+pinch remains unobserved. Current model comparison still has zero violations.
+
+The supported /bin/reboot reached Linux without external reset. Read-only fsck
+returned4 with the same two beyond-EOF extents and bitmap/count errors; no repair
+was made and root mounted afterwards. Normal installation kept qualified devfs
+as rollback; original CIO29 remains local. DESK8-next004 c4a8c437, socket/inject
+and non-input stats were verified. UART reader/route stopped; SystemExit released
+actual core/gui/bench at the02:08:31 back-in-SiliconForest marker. Private receipts
+are under runs/sftb/firefox-install-0043. No push.
+
+The separate private-UPL core and collection now build successfully. Native
+instruction review finds the added object-private bit13 branch to per-page
+completion, absent from43. The57-module candidate has exactly8 changed/49
+unchanged against CIO29 and only core+AVD differ from43; the real Force-CMO
+BL/stub/chained-pointer check passes. It is uninstalled. Its first hardware gate
+will be the bounded no-job GPU-BO pin/import/destroy probe, followed by strict
+frame/PTS/held64 checks only on success. No zero-copy or decoded-output claim.

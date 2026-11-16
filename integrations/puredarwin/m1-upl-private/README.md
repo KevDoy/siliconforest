@@ -65,5 +65,7 @@ inputs (speaker extra cap default0), replaces its core with build-kernel.nix,
 and reintroduces the reviewed import SDK only alongside that fixed core.
 The final verifier requires57 modules, exactly8 changed/49 unchanged against
 CIO29, no AVE, and the real ARM64 BL/stub/chained-pointer Force-CMO link check.
-The complete core/collection builds are in progress; these recipes do not
-install or boot anything. Image43 remains original-AVD and separately gated.
+The complete core and collection builds succeed. Native instruction inspection
+finds the added object-private bit13 test selecting per-page completion, absent
+from image43. These recipes do not install or boot anything. Image43 is now
+natively qualified with original AVD; the private-UPL/import image is uninstalled.
