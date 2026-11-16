@@ -15,14 +15,16 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','mse'])
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
 p.add_argument('--lifetime-control',action='store_true',help='Owned strict playback end/unload observation')
 p.add_argument('--retire-pool',action='store_true',help='Private retirement comparison, requires lifetime control')
 p.add_argument('--trace-media',action='store_true',help='Diagnostic CV/VT/CGL boundary tracing; never performance qualification')
+p.add_argument('--view-state',action='store_true',help='MSE-only read-only native view observation; excludes performance qualification')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
+if a.view_state and a.phase!='mse':raise ValueError('View-state requires separate MSE phase')
 if (a.lifetime_control or a.retire_pool) and a.phase!='shared':raise ValueError('Separate strict shared case required')
 if a.retire_pool and not a.lifetime_control:raise ValueError('Retirement requires lifetime control')
 if a.trace_media and a.phase!='shared':raise ValueError('Boundary trace requires its separate strict shared case')
@@ -63,6 +65,8 @@ try:
         if a.phase=='profile':argv+=['--profile-video']
         if a.phase=='rates':argv+=['--rate-control']
         if a.phase=='codecs':argv+=['--codec-matrix','--without-trace']
+        if a.phase=='mse':argv+=['--mse','--staged-media','--frame-mode','require','--without-trace']
+        if a.view_state:argv+=['--view-state']
         if a.phase in ['youtube','youtube-profile']:
             argv+=['--youtube','--without-trace']
             if a.phase=='youtube-profile':argv+=['--youtube-profile']

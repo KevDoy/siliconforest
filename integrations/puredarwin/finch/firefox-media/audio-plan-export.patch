@@ -1,11 +1,11 @@
 --- a/integrations/puredarwin/firefox/daily-launch.py
 +++ b/integrations/puredarwin/firefox/daily-launch.py
-@@ -292,7 +292,10 @@
+@@ -300,7 +300,10 @@
      command, env = plan(root, arguments[1:] if dry else arguments)
      if dry:
          print(json.dumps(dict(command=command, environment={k: v for k, v in env.items()
--            if k.startswith(('DYLD_', 'SFFX_')) or k=='MOZ_CRASHREPORTER_DISABLE'}, sandbox_enabled=True), indent=2))
-+            if k.startswith(('DYLD_', 'SFFX_')) or k in {'MOZ_CRASHREPORTER_DISABLE','SF_AU_NORMALIZE_HAL_CLOCK'}
+-            if k.startswith(('DYLD_', 'SFFX_')) or k in {'MOZ_CRASHREPORTER_DISABLE', 'SF_AU_NORMALIZE_HAL_CLOCK'}}, sandbox_enabled=True), indent=2))
++            if k.startswith(('DYLD_', 'SFFX_')) or k in {'MOZ_CRASHREPORTER_DISABLE', 'SF_AU_NORMALIZE_HAL_CLOCK'}
 +            or (env.get('SFFX_DIAGNOSTIC_OBSERVER') and k in {
 +                'SF_FIREFOX_MEDIA_TRACE','SF_FIREFOX_MEDIA_TRACE_SECONDS',
 +                'SF_HAL_PCM_AUDIT','SF_HAL_PCM_TRACE','SF_MEDIA_CADENCE_TRACE'})}, sandbox_enabled=True), indent=2))

@@ -23,7 +23,10 @@ class ExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);path=root/RELATIVE;path.parent.mkdir(parents=True)
             original=SOURCE.read_text();path.write_text(original)
-            if patched and ANCHOR in original:
+            # FX integrated the clock flag independently. Apply the remaining
+            # diagnostic-only hand-over to that current source in this private
+            # tree; never assume every proposed hunk was merged together.
+            if patched and 'SF_FIREFOX_MEDIA_TRACE_SECONDS' not in original:
                 subprocess.run(['patch','--batch','-p1','-i',str(HERE/'audio-plan-export.patch')],cwd=root,
                                capture_output=True,text=True,check=True)
             m=types.ModuleType('private_daily_export');m.__file__=str(path)

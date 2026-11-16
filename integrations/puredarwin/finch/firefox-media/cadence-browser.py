@@ -34,7 +34,13 @@ def main():
     p.add_argument('--youtube-profile',action='store_true',help='Separate diagnostic Gecko media profile; excludes performance qualification')
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
+    p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
+    p.add_argument('--view-state',action='store_true',help='Main-queue read-only window/view getter diagnostic, no focus/input/drawing')
     a=p.parse_args()
+    if a.view_state and (not a.mse or not a.without_trace):
+        raise ValueError('View-state requires separate MSE without cadence trace (three observer limit)')
+    if a.mse and (a.youtube or a.codec_matrix or a.rate_control or a.lifetime_control):
+        raise ValueError('MSE representation control is a separate owned measurement')
     # Do not leave crashreporter helpers from owned tests of the open platform
     # shutdown defect (FX-003). No owner process environment is changed.
     os.environ['MOZ_CRASHREPORTER_DISABLE']='1'
@@ -227,6 +233,16 @@ def main():
     else:
         os.environ.pop('SFFX_DIAGNOSTIC_OBSERVER',None)
         os.environ.pop('SF_MEDIA_CADENCE_TRACE',None)
+    if a.mse:
+        observers=[root/'lib/SFHALPCMTrace.dylib',root/'lib/SFFirefoxMediaObserver.dylib']
+        if a.view_state:observers.append(root/'lib/SFFirefoxViewState.dylib')
+        if not all(p.is_file() for p in observers):raise ValueError('MSE audio boundary observers missing')
+        existing=os.environ.get('SFFX_DIAGNOSTIC_OBSERVER')
+        os.environ['SFFX_DIAGNOSTIC_OBSERVER']=':'.join(([existing] if existing else [])+list(map(str,observers)))
+        os.environ.update(SF_HAL_PCM_AUDIT='1',SF_HAL_PCM_TRACE='1',
+                          SF_FIREFOX_MEDIA_TRACE='1',SF_FIREFOX_MEDIA_TRACE_SECONDS='50')
+    if a.view_state:os.environ['SF_FIREFOX_VIEW_STATE']='1'
+    else:os.environ.pop('SF_FIREFOX_VIEW_STATE',None)
     runtime=Path('/usr/local/lib/siliconforest/firefox/160-system1')
     # Confirm the installed launcher supports the isolated-profile hook. A
     # missing hook is a refusal, never a claim that a trace was installed.
@@ -248,6 +264,8 @@ def main():
         native_compositor_disabled=a.no_native_compositor,
         cv_timer_control=a.timer_control,
         codec_matrix=a.codec_matrix,
+        mse_representation_control=a.mse,
+        view_state_diagnostic=a.view_state,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
         lifetime_control=a.lifetime_control,retire_pool=a.retire_pool,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
@@ -286,6 +304,7 @@ def main():
             if not names or len(names)>4 or len(names)!=len(set(names)) or any(name not in allowed for name in names):
                 raise ValueError('Invalid frozen codec selection')
         clips=[(name,1) for name in names]
+    if a.mse:clips=[]
     for clip,rate in clips:
         source=root/'media/codecs'/clip if a.codec_matrix else Path('/private/var/db/sffx/media-highrate-v1')/clip
         if a.lifetime_control:
@@ -301,8 +320,23 @@ def main():
         first=argv.index('--url');argv=argv[:first]
         argv.remove('--measure-all-videos')
         argv+=['--streaming','--url','https://www.youtube.com/watch?v=aqz-KE-bpKQ']
+    server=None;server_thread=None
+    if a.mse:
+        import functools
+        from http.server import SimpleHTTPRequestHandler,ThreadingHTTPServer
+        import threading
+        folder=root/'media/mse'
+        if not (folder/'manifest.json').is_file() or not (folder/'index.html').is_file():
+            raise ValueError('Frozen local MSE inputs missing')
+        handler=functools.partial(SimpleHTTPRequestHandler,directory=str(folder))
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler)
+        server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
+        argv+=['--url','http://127.0.0.1:'+str(server.server_port)+'/index.html']
     sys.argv=argv
-    runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+    try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+    finally:
+        if server:
+            server.shutdown();server.server_close();server_thread.join(timeout=2)
 
 
 if __name__=='__main__':main()

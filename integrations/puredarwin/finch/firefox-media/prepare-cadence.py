@@ -18,13 +18,37 @@ p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exac
 p.add_argument('--policy-probe',type=Path,help='Linux-built read-only Mach helper, required with --gpu-counter-spec')
 p.add_argument('--codec-fixtures',type=Path,help='Our generated codec matrix with its Linux hash/probe manifest')
 p.add_argument('--codec-profile',choices=['basic','highrate'],default='basic')
+p.add_argument('--mse-fixtures',type=Path,help='Own Linux-generated representation-switch files and manifest')
+p.add_argument('--mse-pcm-trace',type=Path,help='Linux-built output aggregate meter; required for MSE')
+p.add_argument('--mse-hal-trace',type=Path,help='Linux-built HAL ring observer; required for MSE')
+p.add_argument('--view-state',type=Path,help='Linux-built read-only AppKit getter observer/control prefix; MSE diagnostic only')
 a=p.parse_args();here=Path(__file__).resolve().parent
+if a.view_state and not a.mse_fixtures:raise ValueError('View-state diagnostic requires its own MSE case')
+if bool(a.mse_fixtures)!=bool(a.mse_pcm_trace) or bool(a.mse_fixtures)!=bool(a.mse_hal_trace):
+    raise ValueError('MSE requires its generated fixtures and both qualified native observers')
 if bool(a.gpu_counter_spec)!=bool(a.policy_probe):raise ValueError('Counter specification and read-only helper required together')
 if a.stage.exists():raise ValueError('Fresh destination required')
 a.stage.mkdir();(a.stage/'bin').mkdir();(a.stage/'lib').mkdir();(a.stage/'media').mkdir()
 for name in ['cadence-baseline','cadence-observed']:
     shutil.copy2(a.probes/'bin'/name,a.stage/'bin'/name)
 shutil.copy2(a.probes/'lib/SFMediaCadenceTrace.dylib',a.stage/'lib/SFMediaCadenceTrace.dylib')
+if a.mse_fixtures:
+    manifest=json.loads((a.mse_fixtures/'manifest.json').read_text())
+    target=a.stage/'media/mse';target.mkdir()
+    for row in manifest['segments']:
+        name=row['file']
+        if Path(name).name!=name or not name.endswith('.mp4'):raise ValueError('Own MSE basename required')
+        source=a.mse_fixtures/name;data=source.read_bytes()
+        if len(data)!=row['bytes'] or hashlib.sha256(data).hexdigest()!=row['sha256']:
+            raise ValueError('Generated MSE input changed')
+        shutil.copy2(source,target/name)
+    shutil.copy2(a.mse_fixtures/'manifest.json',target/'manifest.json')
+    shutil.copy2(here/'mse-page.html',target/'index.html')
+    shutil.copy2(a.mse_pcm_trace,a.stage/'lib/SFHALPCMTrace.dylib')
+    shutil.copy2(a.mse_hal_trace,a.stage/'lib/SFFirefoxMediaObserver.dylib')
+if a.view_state:
+    shutil.copy2(a.view_state/'lib/SFFirefoxViewState.dylib',a.stage/'lib/SFFirefoxViewState.dylib')
+    shutil.copy2(a.view_state/'bin/view-state-control',a.stage/'bin/view-state-control')
 shutil.copy2(a.admission/'bin/vt-codec-admission',a.stage/'bin/vt-codec-admission')
 shutil.copy2(a.fixture,a.stage/'media/hevc-main10-pq.mp4')
 if a.codec_fixtures:

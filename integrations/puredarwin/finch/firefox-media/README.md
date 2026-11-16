@@ -26,8 +26,10 @@ In the private normalized Firefox, all ten HTML/native-output state phases
 pass, including mute/pause, a surviving second tab and silence after the last
 media tab closes. Half/full power is0.2499133. These are software-boundary
 observations, not audible output, glitch-free playback or acoustic sync.
-Both test browsers returned139 on normal Quit, with no family left before
-cleanup and no cleanup signals; this does not qualify clean shutdown.
+These historical test browsers returned139 on normal Quit, with no family
+left before cleanup and no cleanup signals. FX subsequently repaired and
+qualified installed SystemConfiguration shutdown; the old failures remain
+recorded, not a claim about the current installed shutdown path.
 
 The first installed-outer analysis refused the empty inherited stdout log.
 The launcher actually redirects stdout into the NEW test HOME. Recovering
@@ -41,10 +43,11 @@ The collector's data-only M1 control copies178951 bytes from that original
 owned run; its SHA-256 matches the separately recovered log. No browser is
 relaunched for this control.
 
-`audio-plan-export.patch` remains a real hand-over to FX: `--sf-plan` JSON
-omits diagnostic flags and the selected `SF_AU_NORMALIZE_HAL_CLOCK` enable.
-Six temporary-tree controls execute actual `plan()`/`main()` and reproduce
-that omission, then test selected/false clock policy and observer scoping.
+`audio-plan-export.patch` hands the remaining diagnostic-only JSON export
+change to FX. FX integrated the selected `SF_AU_NORMALIZE_HAL_CLOCK` enable
+separately. Temporary-tree controls execute the current `plan()`/`main()`, apply
+only the remaining patch locally, and verify clock policy and observer scoping.
+The old clock-gap reproduction skips once that upstream fix is present.
 **Direct launches use the full environment, so this JSON omission did not
 cause the missing observations and does not block direct-launch activation.**
 No shared launcher is changed here. Private-meter `SFFX_HAL_PCM_AUDIT/TRACE`
@@ -714,3 +717,43 @@ count each label once per stack, unresolved native offsets remain unresolved,
 and missing CPU deltas stay missing. Wait leaf samples may reflect work before
 the stack capture and cannot establish that a wait spins. Selected threads are
 not the complete process; diagnostic CPU is not unprofiled performance.
+
+## Local MSE representation control
+
+`make-mse-fixtures.py FRESH_DIRECTORY` generates three two-second fragmented
+H264 Main/AAC LC MP4s on Linux:640×360,1920×1080 and1280×720 at60fps, with
+120 video packets each. Its manifest records the commands, Linux ffmpeg identity,
+stream probes and SHA-256 of each input. Nothing is built on a Mac.
+`prepare-cadence.py --mse-fixtures DIRECTORY --mse-pcm-trace DYLIB
+--mse-hal-trace DYLIB` freezes these files and `mse-page.html` into a fresh
+packet alongside the reviewed CV/VT providers and current FX launch policy.
+Run `run-cadence.py PACKET control`, then `run-cadence.py PACKET mse` only
+inside gui.lock→bench with the fresh coordination gate.
+
+The page appends three independent muxed init/media files to one MSE
+SourceBuffer in sequence mode, then plays its finite local timeline. It records
+append ranges, observed video sizes, frame notifications, playback-quality
+counters, final diagnostic canvas pixels and DOM geometry. Its audio meters
+record own output power and HAL-ring counters. This is an init-segment and
+representation-change control, not a DASH/network-adaptation, perceptual A/V
+sync, visible playback or presentation-rate qualification.
+
+The native M1 run completed360 decoded frames/0 reported drops and all three
+resolution changes, with360 hardware jobs and no new decoder faults. VT copied
+bytes and CGL CPU transport upload/readback stayed0. Own48k audio accepted292864
+frames and consumed291328 with nonzero output power and no callback errors.
+The actual compositor capture was inspected and still shows a transparent
+client despite visible/focused DOM and a960×540 video rectangle. That visible
+gate FAIL remains; neither staged CV/VT nor lifetime retirement is activated.
+
+`view-state-observer.nix` builds an optional read-only native host diagnostic
+and a no-AppKit-load CLI control. The dylib links only libobjc and libSystem;
+it never loads AppKit/Foundation or creates NSApplication in helper processes.
+With `SF_FIREFOX_VIEW_STATE=1`, existing NSApp/window/view public getters are
+observed on the main queue at3/9/15s, capped at8 windows,24 views/window and
+depth4. No layer getter, drawing, setters, input or focus changes occur; absent
+NSApp and exceptions are explicit observations. Prepare with
+`--view-state BUILD_PREFIX`, then run the separate MSE phase with
+`--view-state`; this uses the launcher's three-observer limit without cadence
+tracing. It is diagnostic only. Linux build and dependency inspection passed;
+M1 execution awaits the kernel owner's release, not an owner-idle condition.
