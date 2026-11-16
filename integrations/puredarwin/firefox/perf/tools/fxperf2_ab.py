@@ -11,8 +11,13 @@ the compositor's WMPACING lines for that window, the parent's loaded images (reg
   fxperf2_ab.py run <tag> <url> <runs> <settle> <stat> <name>=<ENV,...> [<name>=<ENV,...> ...] [capture]
   fxperf2_ab.py grid <tag> <trials> <name>=<ENV,...> [...]  FXLEAD's self-scrolling tile page (served from the prefix's
                                              www on 127.0.0.1:8776), capture when its title says done, every cell checked
+  fxperf2_ab.py tabs <tag> <rounds> <name>=<ENV,...> [...]  tab switches (FXPERF's method): 10 static tabs given on the
+                                             command line, 12 Command-number switches into the own window per round;
+                                             each page posts visibilitychange / 1st / 2nd rAF times (Date.now, the M1's
+                                             clock, as the inject request time)
 ENV entries KEY=VAL (commas separate; '%' stands for a comma inside a value). 'capture' takes one capture of each
-variant's window in its first run (compositor capture, for the visual check)."""
+variant's window in its first run (compositor capture, for the visual check); 'sample' takes a 5 s sf-sample of
+the parent after each run's stat (profiling run: its CPU numbers are not used)."""
 import json, re, subprocess, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,7 +56,7 @@ def quit_own(win):
     return left
 
 
-def one(tag, name, env, url, settle, stat, capture):
+def one(tag, name, env, url, settle, stat, capture, sample=False):
     RO = '%s/out/%s/%s' % (B, tag, name)
     r = dict(variant=name, env=env, url=url)
     before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
@@ -88,6 +93,10 @@ def one(tag, name, env, url, settle, stat, capture):
                  'print(sorted(set(x[\'path\'] for x in d[\'regions\'] if x[\'path\'].startswith((\'/private/var/db/sffxperf2\',\'/System/Library/Frameworks/QuartzCore\',\'/System/Library/Frameworks/OpenGL\',\'/System/Library/Frameworks/AppKit\',\'/usr/lib/libWindowServer\')))))"'
                  % (B, r['parent_pid'], RO, RO), timeout=120).stdout.strip()
         r['images'] = img
+    if sample and 'parent_pid' in r:
+        # after the clean stat: sf-sample of the parent, 5 s at 2 ms (changes the numbers; never reported as CPU)
+        sh('sample %d 5 2 -file %s/sample-parent.txt >/dev/null 2>&1' % (r['parent_pid'], RO), timeout=120)
+        r['sampled'] = True
     if capture:
         try:
             inj('target %d\nkey e1 down\nkey e1 up\nwait 400\ncapture fxperf2-%s-%s' % (win['id'], tag, name), timeout=40)
@@ -178,6 +187,68 @@ def grid_one(tag, name, env):
     return r
 
 
+TAB_HTML = '''<!doctype html><meta charset=utf-8><title>FXPERF tab</title>
+<style>body{font:20px sans-serif;margin:40px}</style>
+<h1 id=h>FXPERF tab</h1><p>Static page for tab-switch timing.</p>
+<script>
+const i=new URLSearchParams(location.search).get('i')||'0';document.title='FXPERF tab '+i;
+document.body.style.background=['#fff','#eef','#efe','#fee','#ffe','#eff','#fef','#ddd','#cdf','#fdc'][i%10];
+function post(n,o){fetch('/r/'+n,{method:'POST',body:JSON.stringify(o)}).catch(()=>{});}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')return;const t0=Date.now(),p0=performance.now();
+ requestAnimationFrame(()=>{const t1=Date.now();requestAnimationFrame(()=>{post('tab'+i,{i,vis:t0,raf1:t1,raf2:Date.now(),tori:performance.timeOrigin,p0});});});});
+</script>'''
+SERVE = '''import http.server, time, sys
+from pathlib import Path
+W = Path(sys.argv[1]); R = Path(sys.argv[2]); R.mkdir(parents=True, exist_ok=True)
+class H(http.server.SimpleHTTPRequestHandler):
+    def __init__(s, *a, **k): super().__init__(*a, directory=str(W), **k)
+    def do_POST(s):
+        n = int(s.headers.get('Content-Length', 0)); b = s.rfile.read(n)
+        name = ''.join(c for c in s.path.rsplit('/', 1)[-1] if c.isalnum() or c in '-_') or 'r'
+        (R / ('%s-%d.json' % (name, int(time.time() * 1000)))).write_bytes(b)
+        s.send_response(204); s.end_headers()
+    def log_message(s, *a): pass
+http.server.ThreadingHTTPServer(('127.0.0.1', 8776), H).serve_forever()
+'''
+ORDER = [2, 3, 4, 5, 1, 6, 7, 8, 2, 3, 9, 4]
+
+
+def tabs_one(tag, name, env, resdir):
+    r = dict(variant=name, env=env)
+    before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
+    sh('rm -rf {p} && cp -a {t} {p} && rm -rf {r} && mkdir -p {r}'.format(p=PROFILE, t=TEMPLATE, r=resdir), check=True)
+    urls = ' '.join("'http://127.0.0.1:8776/tab.html?i=%d'" % i for i in range(10))
+    r['launch'] = sh(T + " launch %s '_LAUNCHER=%s/bin/firefox-perf2,%s' %s" % (PROFILE, B, env, urls), check=True).stdout.strip()
+    win = own_window(before)
+    if win is None:
+        r['error'] = 'no window'; quit_own(None); return r
+    time.sleep(8)
+    sw = []
+    for k in ORDER:
+        q = sh(T + ' req 10', inp='target %d\n' % win['id'] + keys('chord:cmd+%d' % k, 'wait:300'), timeout=40)
+        m = re.search(r't_req=(\d+)', q.stdout)
+        sw.append(dict(k=k, t_req=int(m[1]) if m else None, rc=q.returncode))
+        time.sleep(0.9)
+    time.sleep(1)
+    res = []
+    for line in sh('for f in %s/*.json; do echo "$(basename $f) $(cat $f)"; done' % resdir).stdout.splitlines():
+        try:
+            res.append(json.loads(line.split(' ', 1)[1]))
+        except Exception:
+            pass
+    out = []
+    for s_ in sw:
+        if not s_['t_req']:
+            continue
+        want = str(s_['k'] - 1) if s_['k'] < 9 else '9'
+        c = [x for x in res if x['i'] == want and s_['t_req'] <= x['vis'] <= s_['t_req'] + 3000]
+        if c:
+            out.append(dict(k=s_['k'], vis=c[0]['vis'] - s_['t_req'], raf1=c[0]['raf1'] - s_['t_req'], raf2=c[0]['raf2'] - s_['t_req']))
+    r['switches'] = out
+    r['left'] = quit_own(win)
+    return r
+
+
 def main():
     a = sys.argv[1:]
     if a[0] == 'push':
@@ -199,6 +270,36 @@ def main():
             print('left', quit_own(win))
             sh('cp -a %s %s' % (PROFILE, TEMPLATE), check=True)
         return
+    if a[0] == 'tabs':
+        import statistics
+        tag, rounds = a[1], int(a[2])
+        variants = [x.split('=', 1) for x in a[3:] if '=' in x]
+        (OUT / tag).mkdir(parents=True, exist_ok=True)
+        sh('mkdir -p %s/www && cat > %s/www/tab.html' % (B, B), inp=TAB_HTML, check=True)
+        sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
+        res = []
+        with hold(max(1, round(rounds * len(variants) * 35 / 60)), 'FXPERF2 tabs %s: own Firefox, 10 static tabs, 12 Command-number switches into own window per round, %d x %s' % (
+                tag, rounds, '/'.join(n for n, _ in variants))):
+            srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
+            time.sleep(1.5)
+            try:
+                for i in range(rounds):
+                    for name, env in variants:
+                        r = tabs_one(tag, '%s-%d' % (name, i), env, B + '/results'); r['i'] = i; r['name'] = name; res.append(r)
+                        v = sorted(x['raf2'] for x in r.get('switches', []))
+                        print(now(), name, i, 'n=%d raf2 p50=%s' % (len(v), statistics.median(v) if v else '-'), r.get('error', ''), flush=True)
+                        json.dump(res, open(OUT / tag / 'tabs.json', 'w'), indent=1)
+            finally:
+                if sh(T + ' mine').stdout.strip():
+                    sh(T + ' quitall')
+                sh("pkill -f 'sffxperf2/tools/serve.py' || true")
+                srv.terminate()
+        for name, _env in variants:
+            for k in ('vis', 'raf1', 'raf2'):
+                v = sorted(x[k] for r in res if r['name'] == name for x in r.get('switches', []))
+                if v:
+                    print('%s %s: n=%d p50=%d p95=%d min=%d max=%d ms' % (name, k, len(v), statistics.median(v), v[min(len(v) - 1, int(.95 * len(v)))], v[0], v[-1]))
+        return
     if a[0] == 'grid':
         tag, trials = a[1], int(a[2])
         variants = [x.split('=', 1) for x in a[3:] if '=' in x]
@@ -206,7 +307,8 @@ def main():
         res = []
         with hold(max(1, round(trials * len(variants) * 18 / 60)), 'FXPERF2 grid %s: own Firefox on the self-scrolling tile page, %d x %s, Shift tap + capture of own window' % (
                 tag, trials, '/'.join(n for n, _ in variants))):
-            srv = shbg('cd %s/www && exec python3 -m http.server 8776 --bind 127.0.0.1' % B, OUT / tag / 'http.log')
+            sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
+            srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
             time.sleep(1.5)
             try:
                 for i in range(trials):
@@ -217,7 +319,7 @@ def main():
             finally:
                 if sh(T + ' mine').stdout.strip():
                     sh(T + ' quitall')
-                sh("pkill -f 'http.server 8776' || true")
+                sh("pkill -f 'sffxperf2/tools/serve.py' || true")
                 srv.terminate()
         for name, _env in variants:
             rows = [r for r in res if r['name'] == name]
@@ -228,6 +330,7 @@ def main():
         tag, url, runs, settle, stat = a[1], a[2], int(a[3]), float(a[4]), float(a[5])
         variants = [x.split('=', 1) for x in a[6:] if '=' in x]
         capture = 'capture' in a[6:]
+        sample = 'sample' in a[6:]
         (OUT / tag).mkdir(parents=True, exist_ok=True)
         res = []
         what = 'FXPERF2 A/B %s: %s, %d x %s (own Firefox, no input but Command-Q/capture to own window)' % (
@@ -238,7 +341,7 @@ def main():
                 for i in range(runs):
                     for name, env in variants:
                         print(now(), 'run', i, name, flush=True)
-                        r = one(tag, '%s-%d' % (name, i), env, url, settle, stat, capture and i == 0)
+                        r = one(tag, '%s-%d' % (name, i), env, url, settle, stat, capture and i == 0, sample)
                         r['i'] = i; r['name'] = name; res.append(r)
                         print(json.dumps({k: r.get(k) for k in ('name', 'i', 'parent_pct', 'parent_main_ms', 'roles', 'wmpacing', 'error')})[:900], flush=True)
                         json.dump(res, open(OUT / tag / 'ab.json', 'w'), indent=1)

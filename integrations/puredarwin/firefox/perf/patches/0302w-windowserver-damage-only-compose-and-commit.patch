@@ -145,7 +145,7 @@
 +// (FXPERF2) before a damage present: the CPU-drawn base uploaded where its rows changed, and this picture's damage
 +// (the layers' since the last prepare and the base's) recorded as serial p->serial. Called with nothing current
 +// or another context; restores it.
-+static void sfGPUPrepare(struct sfGPUPresenter *p,const void *base,int w,int h){
++static void sfGPUPrepare(struct sfGPUPresenter *p,const void *base,int w,int h,int maybeChanged){
 + if(!p||p->failed||!base)return;
 + void *previous=sfGPU.CGLGetCurrentContext();
 + if(sfGPU.CGLSetCurrentContext(p->context)!=0)return;
@@ -156,7 +156,7 @@
 +  if(cache){p->baseCache=cache;p->baseBytes=bytes;p->baseW=w;p->baseH=h;
 +   sfGPU.glTexImage2D(0x0de1,0,0x8058,w,h,0,0x80e1,0x1401,base);memcpy(cache,base,bytes);p->baseUploadBytes+=bytes;}
 +  int all[4]={0,0,w,h};sfGPUBoxUnion(p->damage,all);
-+ }else if(!sfGPUBaseEqual(p->baseCache,base,bytes)){
++ }else if(maybeChanged&&!sfGPUBaseEqual(p->baseCache,base,bytes)){
 +  const unsigned char *a=p->baseCache,*b=base;int r0=0,r1=h;
 +  while(r0<h&&!memcmp(a+r0*row,b+r0*row,row))r0++;
 +  while(r1>r0&&!memcmp(a+(r1-1)*row,b+(r1-1)*row,row))r1--;
@@ -253,15 +253,17 @@
  };
  
  #define WS_FRAMES 4
-@@ -114,6 +116,7 @@
+@@ -114,6 +116,9 @@
      int flushed;           // AppKit has flushed the backing store at its current size
      int presentPending;    // a flush found every frame busy: the next release presents it
      int frameOut;          // (TERM9) a commit whose frame callback has not come (PD_WS_PACE_PRESENTS)
 +    int presentMaySkip;    // (FXPERF2) this present may be left out when the picture is the one shown
++    int baseClean;         // (FXPERF2) AppKit drew nothing into the backing store before the flush it precedes
++    int baseDirty;         // (FXPERF2) a flush since the last compare may have changed the backing store
      double frameOutAt;
      int staleConfigures;   // unmaps the compositor has not passed yet: configures from before them are void
      char title[64];
-@@ -1302,6 +1305,7 @@
+@@ -1302,6 +1307,7 @@
          window->frameOut = 0;
          if (window->presentPending && window->state != MINIMIZED && window->state != HIDDEN && window->surface != NULL) {
              window->presentPending = 0;
@@ -269,7 +271,7 @@
              if (windowPresent(window)) {
                  windowPacedCommit(window);
                  if (wsTiming())
-@@ -1333,6 +1337,7 @@
+@@ -1333,6 +1339,7 @@
      struct wsWindow *window = windowForID(frame->ownerID);
      if (window != NULL && window->presentPending) {
          window->presentPending = 0;
@@ -277,7 +279,7 @@
          if (window->state != MINIMIZED && window->state != HIDDEN && window->surface != NULL &&
              !(window->frameOut && wsNowMs() - window->frameOutAt < 100) && windowPresent(window)) {
              windowPacedCommit(window);
-@@ -1578,8 +1583,16 @@
+@@ -1578,8 +1585,16 @@
      }
      windowAskPresentation(window, frame);
      wl_surface_attach(window->surface, frame->buffer, 0, 0);
@@ -295,7 +297,7 @@
          wp_viewport_set_destination(window->viewport, frame->pointsW, frame->pointsH);
          wl_surface_damage(window->surface, 0, 0, frame->pointsW, frame->pointsH);
      } else {
-@@ -1614,6 +1627,24 @@
+@@ -1614,6 +1629,25 @@
  
      windowTrimFrames(window);
      int gpu=window->gpuPresenter&&!window->gpuPresenter->failed&&window->gpuPresenter->count>0&&ws.dmabuf&&sfGPURoleTakesDmabuf(window);
@@ -307,7 +309,8 @@
 +        struct sfGPUPresenter *p = window->gpuPresenter;
 +        int since[4];
 +
-+        sfGPUPrepare(p, window->pixels, window->pixelsW, window->pixelsH);
++        sfGPUPrepare(p, window->pixels, window->pixelsW, window->pixelsH, window->baseDirty);
++        window->baseDirty = 0;
 +        if (maySkip && window->attached && window->front != NULL && window->front->gpuOutput != NULL &&
 +            window->front->w == window->pixelsW && window->front->h == window->pixelsH && p->presented > 0 &&
 +            sfGPUDamageSince(p, p->presented, since) && sfGPUBoxIsEmpty(since)) {
@@ -320,7 +323,7 @@
      struct wsFrame *frame = windowFreeFrame(window, window->pixelsW, window->pixelsH, gpu);
      if (frame == NULL) {
          pthread_mutex_unlock(&ws.pixelsLock);
-@@ -1626,9 +1657,16 @@
+@@ -1626,9 +1660,16 @@
              pthread_mutex_unlock(&ws.pixelsLock);return 0;
          }
          struct sfGPUPresenter *p=window->gpuPresenter;
@@ -339,7 +342,17 @@
      }else memcpy(frame->pixels, window->pixels, frame->size);
      frame->pointsW = window->pointsW;
      frame->pointsH = window->pointsH;
-@@ -3970,6 +4008,7 @@
+@@ -3963,6 +4004,9 @@
+             double began = wsTiming() ? wsNowMs() : 0;
+             pthread_mutex_lock(&ws.pixelsLock);
+             window->presentPending = 0;
++            if (!window->baseClean)
++                window->baseDirty = 1;
++            window->baseClean = 0;
+             if (wsPacePresents() && window->frameOut && wsNowMs() - window->frameOutAt < 100 &&
+                 window->state != MINIMIZED && window->state != HIDDEN) {
+                 // the last commit is not drawn yet: its frame callback presents the newest backing store
+@@ -3970,6 +4014,7 @@
                  pthread_mutex_unlock(&ws.pixelsLock);
                  return KERN_SUCCESS;
              }
@@ -347,7 +360,7 @@
              if (window->state != MINIMIZED && window->state != HIDDEN && windowPresent(window)) {
                  windowPacedCommit(window);
                  if (wsTiming())
-@@ -4957,6 +4996,21 @@
+@@ -4957,6 +5002,29 @@
      }
      pthread_mutex_unlock(&ws.pixelsLock);return good;
  }
@@ -365,6 +378,14 @@
 +        good=sfGPUSetLayerDamaged(window->gpuPresenter,key,surface,sx,sy,sw,sh,dx,dy,dw,dh,sfGPUDamageEnabled()?damage:NULL);
 +    }
 +    pthread_mutex_unlock(&ws.pixelsLock);return good;
++}
++// (FXPERF2) AppKit drew nothing into the window's backing store since its last flush: the next flush need not
++// compare it with what was uploaded (any flush without this note compares)
++void _windowServerSFFXBaseUnchanged(int windowID){
++    pthread_mutex_lock(&ws.pixelsLock);
++    struct wsWindow *window=windowForID(windowID);
++    if(window)window->baseClean=1;
++    pthread_mutex_unlock(&ws.pixelsLock);
 +}
  int _windowServerSFFXGPUStats(int windowID,uint64_t values[4]){
      pthread_mutex_lock(&ws.pixelsLock);
