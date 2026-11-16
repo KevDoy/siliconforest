@@ -65,6 +65,8 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
             fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};'''
         row=script(collect_source)
+        from used_fonts import observe
+        row['actual_font_faces']=observe(client)
         from legibility_documents import discover, document, translate_runs, mask, freeze_transitions
         documents, skipped = discover(client, script)
         row['frame_documents']=[]
@@ -72,12 +74,13 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
         for item in documents[1:]:
             with document(client, item['path']):
                 child=script(collect_source)
+                child_faces=observe(client)
             child_runs=translate_runs(child['runs'], item['offset'], item['clip'])
             row['runs'].extend(child_runs)
             row['faces'].extend(child['faces'])
             row['fontResources'].extend(child['fontResources'])
             row['frame_documents'].append(dict(url=child['url'],offset=item['offset'],clip=item['clip'],
-                measured_runs=len(child_runs),fontsStatus=child['fontsStatus']))
+                measured_runs=len(child_runs),fontsStatus=child['fontsStatus'],actual_font_faces=child_faces))
         row['per_page_virtual_admission']=admission
         row['transitions_suppressed_during_capture']=True
         with freeze_transitions(client,script,documents):
