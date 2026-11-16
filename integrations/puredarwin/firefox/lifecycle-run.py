@@ -29,6 +29,19 @@ def module(name, filename):
     return result
 
 
+def private_ui_environment(env, runtime, prefix):
+    """Select an explicit comparison even when the installed cohort is system UI."""
+    result = dict(env)
+    for key, component in [('DYLD_FRAMEWORK_PATH', 'appkit'),
+                           ('DYLD_LIBRARY_PATH', 'windowserver')]:
+        previous = str(runtime / component)
+        selected = str(prefix / component)
+        entries = [p for p in result.get(key, '').split(':')
+                   if p and p not in [previous, selected]]
+        result[key] = ':'.join([selected] + entries)
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', type=Path, required=True)
@@ -84,8 +97,13 @@ def main():
     env.update(MOZ_NO_REMOTE='1', MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1', MOZ_CRASHREPORTER_DISABLE='1',
                HOME=str(home), CFFIXED_USER_HOME=str(home))
     if args.ui_prefix:
-        env['DYLD_FRAMEWORK_PATH'] = env['DYLD_FRAMEWORK_PATH'].replace(str(runtime / 'appkit'), str(args.ui_prefix / 'appkit'))
-        env['DYLD_LIBRARY_PATH'] = env['DYLD_LIBRARY_PATH'].replace(str(runtime / 'windowserver'), str(args.ui_prefix / 'windowserver'))
+        # Firefox requests Versions/C. Refuse an incomplete prefix rather than
+        # silently falling back to the installed AppKit for a candidate test.
+        for required in [args.ui_prefix / 'appkit/AppKit.framework/Versions/C/AppKit',
+                         args.ui_prefix / 'windowserver/libWindowServer.dylib']:
+            if not required.is_file():
+                raise FileNotFoundError(required)
+        env = private_ui_environment(env, runtime, args.ui_prefix)
     if args.system_coretext:
         frames = [p for p in env['DYLD_FRAMEWORK_PATH'].split(':') if '/coretext/' not in p and '/overrides/memory-font-' not in p]
         env['DYLD_FRAMEWORK_PATH'] = ':'.join(frames + ['/System/Library/Frameworks'])
@@ -184,7 +202,9 @@ def main():
                         if manifest.get('system_ui') and not args.ui_prefix
                         else str((args.ui_prefix or runtime) / 'appkit'))
             result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned, parent, expected,
-                                          manifest.get('system_gpu_providers', False) and not args.ui_prefix)
+                                          manifest.get('system_gpu_providers', False) and not args.ui_prefix,
+                                          private_windowserver=(str(args.ui_prefix / 'windowserver/libWindowServer.dylib')
+                                                                if args.ui_prefix else None))
             if not result['providers']['complete']:
                 raise RuntimeError('Actual owned parent/GPU provider check failed')
             # DOM focus alone does not establish AppKit's key window. Native

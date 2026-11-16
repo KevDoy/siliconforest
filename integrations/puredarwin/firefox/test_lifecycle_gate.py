@@ -7,11 +7,65 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from lifecycle_observer import close_button, window_button
+import provider_images
 
 spec = importlib.util.spec_from_file_location('lifecycle_gate', Path(__file__).with_name('analyze-lifecycle.py'))
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
+spec = importlib.util.spec_from_file_location('lifecycle_run', Path(__file__).with_name('lifecycle-run.py'))
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+
+
+class PrivateUISelection(unittest.TestCase):
+    def test_system_cohort_gets_explicit_private_precedence(self):
+        runtime = Path('/usr/local/lib/siliconforest/firefox/160-system1')
+        prefix = Path('/private/var/db/sffx/quit-candidate')
+        env = {'DYLD_FRAMEWORK_PATH': '/media:/System/Library/Frameworks',
+               'DYLD_LIBRARY_PATH': '/canonical-gl:/usr/lib', 'MOZ_CRASHREPORTER_DISABLE': '1'}
+        selected = runner.private_ui_environment(env, runtime, prefix)
+        self.assertEqual(selected['DYLD_FRAMEWORK_PATH'], str(prefix / 'appkit') + ':' + env['DYLD_FRAMEWORK_PATH'])
+        self.assertEqual(selected['DYLD_LIBRARY_PATH'], str(prefix / 'windowserver') + ':' + env['DYLD_LIBRARY_PATH'])
+        self.assertEqual(selected['MOZ_CRASHREPORTER_DISABLE'], '1')
+        self.assertEqual(env['DYLD_FRAMEWORK_PATH'], '/media:/System/Library/Frameworks')
+
+    def test_legacy_and_repeated_selection_do_not_leave_competing_private_ui(self):
+        runtime, prefix = Path('/runtime'), Path('/candidate')
+        env = {'DYLD_FRAMEWORK_PATH': '/media:/runtime/appkit:/candidate/appkit:/System/Library/Frameworks',
+               'DYLD_LIBRARY_PATH': '/runtime/windowserver:/canonical-gl:/usr/lib'}
+        selected = runner.private_ui_environment(env, runtime, prefix)
+        self.assertEqual(selected['DYLD_FRAMEWORK_PATH'], '/candidate/appkit:/media:/System/Library/Frameworks')
+        self.assertEqual(selected['DYLD_LIBRARY_PATH'], '/candidate/windowserver:/canonical-gl:/usr/lib')
+        self.assertEqual(runner.private_ui_environment(selected, runtime, prefix), selected)
+
+    def test_sampled_system_windowserver_cannot_qualify_private_candidate(self):
+        prefix = '/private/var/db/sffx/quit-candidate'
+        selected = prefix + '/windowserver/libWindowServer.dylib'
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'providers.json'
+            actual_ws = [selected]
+
+            def command(argv, **kwargs):
+                if argv[0] == 'ps':
+                    return SimpleNamespace(stdout=('start\n' if argv[-1] == 'lstart='
+                        else 'Firefox GPU Helper gpu-helper.app/Contents/MacOS/Firefox GPU Helper\n'
+                        if argv[2] == '22' else 'firefox\n'), returncode=0)
+                Path(argv[-1]).write_text('\nBinary Images:\n'
+                    '0x1 AppKit <UUID> ' + prefix + '/appkit/AppKit.framework/Versions/C/AppKit\n'
+                    '0x2 libWindowServer.dylib <UUID> ' + actual_ws[0] + '\n')
+                return SimpleNamespace(stdout='', returncode=0)
+
+            with patch.object(provider_images.subprocess, 'run', side_effect=command):
+                def inspect():
+                    return provider_images.inspect('/private/var/db/sffx/sf-sample', output,
+                        {11: 'start', 22: 'start'}, 11, prefix + '/appkit',
+                        private_windowserver=selected)
+                self.assertTrue(inspect()['complete'])
+                actual_ws[0] = '/usr/lib/libWindowServer.dylib'
+                self.assertFalse(inspect()['complete'])
 
 
 class LifecycleEvidence(unittest.TestCase):

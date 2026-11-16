@@ -22,9 +22,8 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
     if private_windowserver is not None:
         path = Path(private_windowserver)
         if (not path.is_relative_to('/private/var/db/sffx') or '..' in path.parts or
-                path.name != 'libWindowServer.dylib' or
-                expected_appkit != '/System/Library/Frameworks/AppKit.framework'):
-            raise ValueError('Private WindowServer control requires a private library and canonical UI')
+                path.name != 'libWindowServer.dylib'):
+            raise ValueError('Private WindowServer control requires an owned private library')
         result['private_windowserver_expected'] = private_windowserver
         result['canonical_cocoa_complete'] = False
     if system_gpu and expected_appkit != '/System/Library/Frameworks/AppKit.framework':
@@ -48,6 +47,11 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
         row=dict(pid=pid, role='gpu' if gpu else 'parent', status=sampled.returncode,
             images=selected, appkit=appkit, passed=sampled.returncode == 0 and len(appkit) == 1 and
             appkit[0].startswith(expected_appkit.rstrip('/') + '/'))
+        if private_windowserver is not None:
+            paths = [line.rsplit('> ', 1)[-1] for line in selected
+                     if re.search(r'\slibWindowServer\.dylib\s+<', line)]
+            row['private_windowserver'] = paths
+            row['passed'] &= paths == [private_windowserver]
         if expected_appkit == '/System/Library/Frameworks/AppKit.framework':
             required = {name: '/System/Library/Frameworks/' + name + '.framework/'
                         for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
