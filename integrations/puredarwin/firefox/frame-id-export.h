@@ -6,10 +6,14 @@
 #include "sffx-frame-id-decode.h"
 static pthread_once_t sffx_frame_once=PTHREAD_ONCE_INIT;
 static pthread_mutex_t sffx_frame_lock=PTHREAD_MUTEX_INITIALIZER;
-static int sffx_frame_geometry[7],sffx_frame_enabled;
+static int sffx_frame_geometry[7],sffx_frame_enabled,sffx_frame_dimensions;
+static int sffx_frame_sizes[8][3];
+static unsigned sffx_frame_size_count;
 static unsigned sffx_frame_count;
 static double sffx_frame_started;
 static void sffx_frame_configure(void){
+    const char *dimensions=getenv("SFFX_FRAME_ID_DIMENSIONS");
+    sffx_frame_dimensions=dimensions&&!strcmp(dimensions,"1");
     const char *value=getenv("SFFX_FRAME_ID_GEOMETRY");int end=0;
     if(!value||sscanf(value,"%d,%d,%d,%d,%d,%d,%d%n",
        &sffx_frame_geometry[0],&sffx_frame_geometry[1],
@@ -23,8 +27,23 @@ static void sffx_frame_configure(void){
        (g[6]!=1&&g[6]!=-1))return;
     sffx_frame_enabled=1;
 }
-static void sffx_frame_export(CGLContextObj ctx,IOSurfaceRef surface,GLuint fbo){
+static void sffx_frame_export(CGLContextObj ctx,IOSurfaceRef surface,GLuint fbo,int flip){
     pthread_once(&sffx_frame_once,sffx_frame_configure);
+    if(sffx_frame_dimensions){
+        pthread_mutex_lock(&sffx_frame_lock);
+        unsigned i;
+        for(i=0;i<sffx_frame_size_count;i++)
+            if(sffx_frame_sizes[i][0]==ctx->width&&sffx_frame_sizes[i][1]==ctx->height&&
+               sffx_frame_sizes[i][2]==flip)break;
+        if(i==sffx_frame_size_count&&i<8){
+            sffx_frame_sizes[i][0]=ctx->width;sffx_frame_sizes[i][1]=ctx->height;
+            sffx_frame_sizes[i][2]=flip;sffx_frame_size_count++;
+            fprintf(stderr,"FXFRAMEGEOMETRY pid=%d size=%dx%d flip=%d surface=%u monotonic_ms=%.6f readback_bytes=0\n",
+                getpid(),ctx->width,ctx->height,flip,
+                pd_iosurface.surfaceID?pd_iosurface.surfaceID(surface):0,pd_cgl_now());
+        }
+        pthread_mutex_unlock(&sffx_frame_lock);
+    }
     int *g=sffx_frame_geometry;
     if(!sffx_frame_enabled||ctx->width!=g[0]||ctx->height!=g[1])return;
     pthread_mutex_lock(&sffx_frame_lock);

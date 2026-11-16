@@ -12,7 +12,7 @@
              glBlitFramebuffer(rx,ry,rx+rw,ry+rh,rx,flip?ctx->height-ry:ry,rx+rw,
                  flip?ctx->height-ry-rh:ry+rh,GL_COLOR_BUFFER_BIT,GL_NEAREST);
              glFinish();good=glGetError()==GL_NO_ERROR;
-+            if(good)sffx_frame_export(ctx,surface,copy_fbo);
++            if(good)sffx_frame_export(ctx,surface,copy_fbo,flip);
              if(verify){glBindFramebuffer(GL_READ_FRAMEBUFFER,copy_fbo);glReadPixels(ctx->width/4,ctx->height/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,dest_pixel);}
          }
      }

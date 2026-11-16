@@ -5,7 +5,9 @@ NV12 and cache options as the admitted CGL cohort. The default derivation does
 not include this code. This is diagnostic CPU readback, not an optimization.
 
 Use only a fresh owned Firefox instance and the media agent's committed
-900-frame fixture (`bc253d91f`). First collect its paused frame-zero actual GPU
+900-frame fixture (`bc253d91f`). `SFFX_FRAME_ID_DIMENSIONS=1` alone reports up to
+eight distinct export size/flip combinations, with no pixel readback or guessed
+rectangle. First collect its paused frame-zero actual GPU
 image, DOM/video rectangle, DPR and export dimensions. Admit the marker geometry
 and orientation against that image before the next private run. No coordinates
 are inferred from a title or a different browser instance.

@@ -17,6 +17,28 @@ spec.loader.exec_module(daily)
 
 
 class LaunchPlanPolicy(unittest.TestCase):
+    def test_image_cache_is_explicit_and_cannot_leak_from_a_shell(self):
+        os.environ['SFFX_GPU_IMAGE_CACHE'] = '1'
+        _, env = self.plan()
+        self.assertNotIn('SFFX_GPU_IMAGE_CACHE', env)
+        self.manifest.update(system_ui=True, system_gpu_providers=True, gpu_image_cache=True)
+        command, env = self.plan()
+        self.assertEqual(env['SFFX_GPU_IMAGE_CACHE'], '1')
+        self.assertEqual(command[1], '/usr/libexec/iosurfaced')
+        self.assertEqual(env['MOZ_CRASHREPORTER_DISABLE'], '1')
+        self.manifest['gpu_image_cache'] = False
+        self.assertNotIn('SFFX_GPU_IMAGE_CACHE', self.plan()[1])
+
+    def test_image_cache_rejects_unqualified_cohorts_and_non_booleans(self):
+        self.manifest['gpu_image_cache'] = True
+        with self.assertRaises(ValueError):
+            self.plan()
+        self.manifest.update(system_ui=True, system_gpu_providers=True)
+        for value in [0, 1, 'true', []]:
+            self.manifest['gpu_image_cache'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
+
     def test_versioned_audio_family_preserves_system_ui_and_selected_graphics(self):
         self.manifest.update(system_ui=True, graphics_override=str(self.root/'overrides/nv12-v1'),
                              audio_override=str(self.root/'overrides/audio-clock-v1/Frameworks'),
