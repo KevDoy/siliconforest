@@ -29,6 +29,8 @@ def measure(client, snapshot, directory, deadline):
     output = directory / 'composition-workloads.json'
     result = dict(complete=False, phases=[], workload_seconds=10,
                   performance_comparison_only=True, owner_policy_changed=False)
+    policy = Path('/private/var/db/desktop-state/chonkstep/policy')
+    result['compositor_policy_before'] = policy.read_text() if policy.exists() else None
     def script(source):
         return client.command('WebDriver:ExecuteScript', dict(script=source, args=[], newSandbox=False))
     client.command('Marionette:SetContext', {'value': 'chrome'})
@@ -93,7 +95,7 @@ def measure(client, snapshot, directory, deadline):
                 (round(px*65535/2559),round(py*65535/1599)))
             time.sleep(2)
             media = '''const v=document.querySelector('video'),q=v?.getVideoPlaybackQuality();
-              return {url:location.href,title:document.title,visibility:document.visibilityState,scrollY,
+              return {sampleWall:performance.now(),url:location.href,title:document.title,visibility:document.visibilityState,scrollY,
                 video:v?{time:v.currentTime,width:v.videoWidth,height:v.videoHeight,paused:v.paused,
                   decoded:q?.totalVideoFrames,dropped:q?.droppedVideoFrames,error:v.error?.code||null}:null};'''
             row['page_before'] = script(media)
@@ -140,6 +142,10 @@ def measure(client, snapshot, directory, deadline):
                 a,b=row['page_before']['video'],row['page_after']['video']
                 row['video_frames'] = b['decoded']-a['decoded']
                 row['video_dropped'] = b['dropped']-a['dropped']
+                # DOM observations bracket the stats/CPU probes as well as the
+                # ten-second input wait. Report their actual clock interval.
+                row['video_observed_seconds'] = (row['page_after']['sampleWall']-
+                                                  row['page_before']['sampleWall'])/1000
                 row['complete'] &= row['video_frames']>500 and not b['paused'] and not b['error']
         except Exception as error:
             row['error'] = repr(error)
@@ -154,6 +160,9 @@ def measure(client, snapshot, directory, deadline):
                 pass
             output.write_text(json.dumps(result,indent=2)+'\n')
     result['complete'] = len(result['phases'])==4 and all(p.get('complete')for p in result['phases'])
-    result['timing_qualified'] = result['complete'] and all(p.get('timing_qualified')for p in result['phases'])
+    result['compositor_policy_after'] = policy.read_text() if policy.exists() else None
+    result['policy_unchanged'] = result['compositor_policy_before']==result['compositor_policy_after']
+    result['timing_qualified'] = (result['complete'] and result['policy_unchanged'] and
+                                  all(p.get('timing_qualified')for p in result['phases']))
     output.write_text(json.dumps(result,indent=2)+'\n')
     return result
