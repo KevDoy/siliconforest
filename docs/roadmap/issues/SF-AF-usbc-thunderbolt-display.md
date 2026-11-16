@@ -3898,3 +3898,31 @@ em/igc are SDK-built and are not loaded in this image. Kernel 46 is normal,
 qualified 45 is rollback, and all install locks/UART were released. Wi-Fi
 power-save latency is the next authorized Firefox kernel priority, using the
 same kernel 46 cohort and command line; see `m1-wifi-pm/README.md`.
+
+### 2026-11-16: kernel 47 Wi-Fi priority installed, dock trials still paused
+
+The next authorized Firefox cycle changes only PDBwfm from qualified 46;
+the core and 56 other module UUIDs are identical, with the same 599-byte
+command line and `pdm1tpscroll=20`. FXNET's power-save port uses the exact
+deployed SDK source, with a byte-identical baseline reproduction and narrow
+request-validation/firmware-error reporting corrections. Full SDK, actual
+function sanitizer controls, required host checks and the disposable QEMU
+PCI/USB/storage rehearsal passed before installation. QEMU links the new
+Wi-Fi driver but has no matching Broadcom firmware.
+
+| Path | Observed on the M1 | Built or pending |
+| --- | --- | --- |
+| Wi-Fi PM | Firmware GET mode 2, timeout 2000; runtime 200/2000 works | Real page-load and idle-power comparison belongs to FXNET |
+| Radio latency | Same boot, one-second ping: median 179 to 5.85 ms; max 289 to 6.66 ms; 18 replies per setting, discard first three, no loss | Short comparison; ambient traffic uncontrolled, no Linux-parity claim |
+| Desktop/GPU | Standard DESK10 `.next`, scroll conversion 0.206 mm; GL/Vulkan five each; clone slots three used, zero failures after tests | Initial desktop job exited 1; supported job start recovered it; cause remains open |
+| Firefox | Three desktop and three SSH local pages mapped/painted/readable, all captures inspected, no input injected | Not arbitrary website, video, frame-rate or shutdown qualification |
+| PCI/USB upstream ports | Source and SDK/QEMU coverage; retained in 46/47 | No additional physical dock enumeration or USB-device evidence |
+| Dock Ethernet | No new packet evidence | em/igc bundles SDK-only; full collection variant exceeds fixed slot; no I210/DART fix claimed |
+| DP/HPD/hotplug | No new evidence | Hardware work remains paused until the owner opens a dock window |
+
+Qualified 46 is the immediate verified rollback. Clean shutdown reached
+Linux on the second probe without external reset. The read-only filesystem
+check retained its known error classes; no repair or clean-root claim.
+UART and install locks were released at the logged return to SiliconForest.
+AVE remains paused. See `integrations/puredarwin/m1-wifi-pm/README.md` for
+reproduction, exact test scopes and the unresolved startup observation.

@@ -821,3 +821,27 @@ The first 46 package stopped in the bootloader on oversized boot arguments,
 not a kernel panic. The corrected package was qualified and made normal;
 qualified 45 rollback remains. Wi-Fi47 is being prepared as a single-driver
 replacement; it does not change GPU/core or claim video/FPS improvements.
+
+### 2026-11-16: kernel 47 Wi-Fi-only native check
+
+Kernel 47 preserves the qualified 46 core and all 56 other executable module
+UUIDs. Only PDBwfm changes. Firmware timeout GET and runtime A/B pass; short
+same-boot one-second ping median falls from 179 to 5.85 ms with timeout 2000.
+Five GL-hash and five Vulkan checks pass, with clone slots returning to three
+used and zero failures (519 allocations, 516 frees, peak seven). Three desktop
+and three SSH Firefox launches paint their distinct local test pages with
+readable text and the expected colours; all six captures were inspected.
+These tests inject no input and establish neither video/FPS nor page-load
+performance. AVD/import and GPU inputs remain unchanged.
+
+The first desktop launch job exited 1 before starting the session; a supported
+launchd job-start retry recovered the standard desktop. Its cause remains open,
+with raw evidence and a source retry-policy request filed to DESK. There was no
+kernel panic or external reset. Successful post-recovery Firefox launches do
+not erase that startup failure or the earlier intermittent bootstrap issue.
+Desktop-route owned identities disappeared on quit in 1.33–1.38 seconds.
+The SSH harness did not reap/poll its direct Popen launcher or record its state
+before identity cleanup; a remaining PID is therefore not exit-hang evidence.
+No exit-status qualification is claimed. Kernel 47 is normal with 46 rollback,
+UART stopped and install locks released; private receipts are in
+`runs/sftb/firefox-install-0047/`.

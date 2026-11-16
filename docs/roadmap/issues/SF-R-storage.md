@@ -707,3 +707,22 @@ image conversion passes both header/table CRCs, preserves both partition byte
 spans and full content SHA256 hashes (805306368 and536870912bytes). This is an
 offline image-format test, not a T8103 boot or authorization for table writes.
 Ports, tests and isolated recipes: integrations/puredarwin/upstream-12377/.
+
+### 2026-11-16 kernel 47 Wi-Fi cycle: filesystem unchanged
+
+The clean SiliconForest shutdown reached Linux on the second strict-key SSH
+probe (first timed out); no external reset was used. Before the normal SFBOOT
+installer, the unmounted root identity was checked and `e2fsck -fn -E
+no_optimize_extents` returned 4. The extent/i_size/bitmap/count classes match
+the retained kernel 46 precheck, with one previous QA-file finding absent;
+there were no new findings in this comparison. No repair was performed and
+the root is not claimed clean. Kernel 47 preserves the exact qualified 45/46
+ext4 driver and changes only Wi-Fi PM. The normal installer verified 47 and
+qualified 46 rollback; no partition/GPT or default-boot change was made.
+
+The additional failures first recorded after the root ENOSPC episode remain
+under offline investigation. The actual frozen writer's partial allocation
+and failed extending-write paths are now explicit hypotheses with disposable
+VM low-space/failure controls planned in `m1-ext4-eof/README.md`. FXNET's
+13–33 ms buffered-append tail is a separate stage-timing task. No owner-root
+space exhaustion, storage error injection or barrier reduction is proposed.

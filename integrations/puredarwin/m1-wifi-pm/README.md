@@ -59,3 +59,50 @@ nix-build --extra-experimental-features 'nix-command flakes' integrations/pureda
 nix-build --extra-experimental-features 'nix-command flakes' integrations/puredarwin/m1-wifi-pm/build-kc.nix --no-out-link
 python3 integrations/puredarwin/upstream-12377/run-qemu.py --image-recipe integrations/puredarwin/m1-wifi-pm/build-qemu-image.nix --output runs/sftb/wifi-pm/new-qemu-run
 ```
+
+## Native qualification: kernel 47, 2026-11-16
+
+Installed through the normal SFBOOT installer, retaining qualified 46 as
+rollback. Firmware GET reports fast mode and `pm2_sleep_ret=2000`; runtime
+changes to 200 and back to 2000 are read back correctly. No init refusal was
+logged. The setting was restored to 2000 before release.
+
+Same-boot workstation-to-M1 ping at one-second intervals, 18 replies per
+setting, discarding the first three:
+
+| Firmware timeout | Median | Maximum | Loss |
+| --- | ---: | ---: | ---: |
+| 200 ms control | 179 ms | 289 ms | 0/18 |
+| 2000 ms candidate | 5.85 ms | 6.66 ms | 0/18 |
+
+This establishes the radio latency improvement in this short comparison.
+Ambient traffic was not controlled. It does not establish real page-load
+speed, idle power, Linux parity or long-term stability; FXNET owns those
+follow-up measurements.
+
+Five GL-hash and five Vulkan checks passed. Clone slots returned to three
+used, zero failures (519 allocations, 516 frees, peak seven). Three desktop
+and three SSH Firefox launches mapped and painted the correct unique local
+page, readable text and all three colour regions; all six captures were
+visually checked. No synthetic input was used. The current AppKit,
+WindowServer, QuartzCore and Firefox launcher hashes stayed unchanged during
+the kernel test. These are paint checks, not general website/video/FPS proof.
+
+An initial desktop launch job exited with status 1 before starting the session.
+The supported `launchctl start org.siliconforest.desktop` retry restored the
+standard DESK10 `.next` desktop and responsive stats. That command's reply
+reported a connection reset even though the job started. The original startup
+failure remains unexplained and was filed with DESK; it is not a boot-autostart
+pass or attributed to the Wi-Fi patch. No kernel panic or external reset was
+required. The read-only Linux filesystem check returned 4 with the retained
+error classes; there were no new findings in comparison with the prior check,
+no repair and no whole-root cleanliness claim.
+
+Desktop-route owned process identities disappeared within 1.33–1.38 seconds
+of quit. SSH-route checks retained only the direct launcher PID after ten
+seconds, but the parent harness had not polled/reaped its Popen child and did
+not record process state. A zombie is possible; this does not prove a stuck
+client or qualify its exit status. The raw cleanup attempts remain recorded.
+UART capture was stopped, all install locks released, and kernel 47 left
+normal with the standard desktop responsive. Private receipts:
+`runs/sftb/firefox-install-0047/`.
