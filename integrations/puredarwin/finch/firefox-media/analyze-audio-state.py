@@ -9,6 +9,7 @@ This is an output-boundary test, not acoustic output or an underrun test.
 import argparse
 from collections import defaultdict
 import json
+import hashlib
 import math
 from pathlib import Path
 import statistics
@@ -86,7 +87,17 @@ def analyze(result,text):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('run',type=Path);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();result=analyze(json.loads((a.run/'result.json').read_text()),(a.run/'firefox.log').read_text(errors='replace'))
+    p.add_argument('--native-log',type=Path,help='Explicit recovered original own runtime stdout, retained separately from the empty outer log')
+    a=p.parse_args();raw=json.loads((a.run/'result.json').read_text());text=(a.run/'firefox.log').read_text(errors='replace')
+    if raw.get('native_log_collection_error'):raise ValueError('Incomplete native log collection')
+    for row in raw.get('native_log_files',[]):
+        path=(a.run/row['path']).resolve()
+        if not path.is_relative_to(a.run.resolve()):raise ValueError('Native log escapes own run')
+        data=path.read_bytes()
+        if len(data)!=row['bytes'] or hashlib.sha256(data).hexdigest()!=row['sha256']:raise ValueError('Native log receipt mismatch')
+        text+='\n'+data.decode(errors='replace')
+    if a.native_log:text+='\n'+a.native_log.read_text(errors='replace')
+    result=analyze(raw,text)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
     return int(not result['output_boundary_passed'])
 

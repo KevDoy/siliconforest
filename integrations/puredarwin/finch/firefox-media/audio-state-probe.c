@@ -9,9 +9,38 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include "PDAudioClient.h"
 #include "audio-state.h"
 struct source { uint64_t frames;double phase,rate; };
+static pid_t load_children[4];
+static void stop_load(void)
+{
+    for(unsigned i=0;i<4;i++)if(load_children[i]>0){
+        int status;pid_t found=waitpid(load_children[i],&status,WNOHANG);
+        /* An unreaped child cannot have its PID reused. Never signal a PID
+         * after reaping it or when waitpid does not establish ownership. */
+        if(found==0){kill(load_children[i],SIGTERM);waitpid(load_children[i],&status,0);}
+    }
+}
+static void start_load(void)
+{
+    mach_timebase_info_data_t tb;mach_timebase_info(&tb);
+    uint64_t deadline=mach_absolute_time()+(uint64_t)(8e9*tb.denom/tb.numer);
+    if(atexit(stop_load))exit(1);
+    for(unsigned i=0;i<4;i++){
+        pid_t child=fork();if(child<0)exit(1);
+        if(child==0){
+            volatile uint64_t value=i+1;
+            while(mach_absolute_time()<deadline)
+                for(unsigned j=0;j<100000;j++){value^=value<<13;value^=value>>7;value^=value<<17;}
+            _exit(0);
+        }
+        load_children[i]=child;
+    }
+    puts("AUDIO_STATE_LOAD owned-cpu-children=4 bounded-seconds=8 no-policy-or-affinity-change=1");
+}
 static void need(int good,const char *reason){if(!good){fprintf(stderr,"AUDIO_STATE_FAIL %s\n",reason);exit(1);}}
 static OSStatus render(void *opaque,AudioUnitRenderActionFlags *flags,const AudioTimeStamp *stamp,
     UInt32 bus,UInt32 frames,AudioBufferList *data)
@@ -54,6 +83,13 @@ static struct sf_pcm_state read_state(unsigned index,int reset)
 }
 static double report(const char *name,unsigned index,struct source *source,int expect_sound)
 {
+    if(load_children[0]>0){
+        for(unsigned i=0;i<4;i++){
+            int status;pid_t found=waitpid(load_children[i],&status,WNOHANG);
+            if(found>0)load_children[i]=0;
+            need(found==0,"all own load workers still active through phase end");
+        }
+    }
     struct sf_pcm_state s=read_state(index,1);mach_timebase_info_data_t tb;mach_timebase_info(&tb);
     double power=s.samples?s.square_sum/s.samples:0;
     printf("AUDIO_STATE phase=%s context=%u calls=%llu frames=%llu client-frames=%llu client-rate=%.0f power=%.12g peak=%.9g errors=%llu bad-buffers=%llu nonfinite=%llu max-gap-ms=%.6f\n",name,index,
@@ -71,11 +107,14 @@ static void cycle(AudioUnit one,AudioUnit two)
     need(AudioOutputUnitStop(one)==0,"stop first");
     if(two)need(AudioOutputUnitStop(two)==0,"stop second");
 }
-int main(void)
+int main(int argc,char **argv)
 {
     setvbuf(stdout,NULL,_IOLBF,0);
+    int load=argc==2&&!strcmp(argv[1],"--load");
+    if(argc!=1&&!load)return 64;
     if(access("/dev/pdavd",F_OK)){fprintf(stderr,"M1-only owned HAL test; no reference-Mac output\n");return 77;}
     need(setenv("SF_HAL_PCM_AUDIT","1",1)==0,"enable own diagnostic");
+    if(load)start_load();
     AudioObjectPropertyAddress a={kAudioHardwarePropertyDefaultOutputDevice,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};
     AudioDeviceID device=0;UInt32 bytes=sizeof(device);
     need(AudioObjectGetPropertyData(kAudioObjectSystemObject,&a,0,NULL,&bytes,&device)==0&&device,"default output query");

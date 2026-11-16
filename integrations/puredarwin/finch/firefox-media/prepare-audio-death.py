@@ -25,6 +25,7 @@ subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
     str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/'lib'),str(a.stage/'portable-observers.json')],check=True)
 shutil.copy2(here/'audio-death-browser.py',a.stage/'audio-death-browser.py')
 shutil.copy2(here/'audio_state_controls.py',a.stage/'audio_state_controls.py')
+shutil.copy2(here/'audio_logs.py',a.stage/'audio_logs.py')
 for file in sorted((here.parents[1]/'firefox').iterdir()):
     if file.is_file() and file.suffix in ['.py','.html','.js','.json']:
         shutil.copy2(file,a.stage/'tools'/file.name)

@@ -29,14 +29,35 @@ observations, not audible output, glitch-free playback or acoustic sync.
 Both test browsers returned139 on normal Quit, with no family left before
 cleanup and no cleanup signals; this does not qualify clean shutdown.
 
-The first installed-outer comparison has no native meter observations and
-is refused. `audio-plan-export.patch` is a hand-over to FX: the current
-`--sf-plan` JSON drops the diagnostic flags and, critically, the selected
-`SF_AU_NORMALIZE_HAL_CLOCK` enable. Six temporary-tree controls execute actual
-`plan()`/`main()` and reproduce the old omission, then test selected/false clock
-policy and private observer scoping with the patch. No shared launcher is
-changed by these tests. Do not activate the clock family until its enable
-survives the installed carrier and the actual runtime marker is observed.
+The first installed-outer analysis refused the empty inherited stdout log.
+The launcher actually redirects stdout into the NEW test HOME. Recovering
+those original logs qualifies both original installed-provider executions:
+all ten phases pass, half/full power0.2499733/0.2498880. The empty logs and
+initial failed analyses remain; this is corrected analysis of the same runs.
+`audio_logs.py` now collects bounded original runtime logs with receipts from
+only that run's HOME. The analyzer validates them, or accepts an explicitly
+named recovered log with `--native-log`.
+The collector's data-only M1 control copies178951 bytes from that original
+owned run; its SHA-256 matches the separately recovered log. No browser is
+relaunched for this control.
+
+`audio-plan-export.patch` remains a real hand-over to FX: `--sf-plan` JSON
+omits diagnostic flags and the selected `SF_AU_NORMALIZE_HAL_CLOCK` enable.
+Six temporary-tree controls execute actual `plan()`/`main()` and reproduce
+that omission, then test selected/false clock policy and observer scoping.
+**Direct launches use the full environment, so this JSON omission did not
+cause the missing observations and does not block direct-launch activation.**
+No shared launcher is changed here. Private-meter `SFFX_HAL_PCM_AUDIT/TRACE`
+aliases and its own wall/monotonic pair also support plan consumers.
+
+The native controls also pass with four owned CPU workers active through
+every phase, on both installed and private normalized audio. Maximum callback
+entry gaps are31.955/33.018ms, respectively; no callback/layout/nonfinite errors,
+and the own48k rings accept and consume frames. `--load` requires gui.lock
+then bench so another agent's measurements cannot overlap. Workers have an8s
+deadline, are forked before opening audio, and cleanup signals only unreaped
+own children. This does not measure per-client hardware underruns or prove
+glitch-free/acoustic output. No scheduling policy or affinity is changed.
 
 ## Per-stream audio controls
 

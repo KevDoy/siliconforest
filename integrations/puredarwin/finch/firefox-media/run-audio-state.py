@@ -18,6 +18,7 @@ def main():
     p.add_argument('--audio-family',type=Path,required=True)
     p.add_argument('--stage',type=Path,required=True)
     p.add_argument('--trace',action='store_true',help='Enable bounded background publication diagnostic')
+    p.add_argument('--load',action='store_true',help='Four bounded own CPU workers; caller must additionally hold gui.lock')
     a=p.parse_args();repo=Path(__file__).resolve().parents[4]
     if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold tools/bench.sh')
     a.stage=a.stage.resolve()
@@ -37,7 +38,7 @@ def main():
     log=repo/'runs/m1-coord/log.txt'
     def note(body):
         with log.open('a') as f:f.write(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')+' CODEX '+body+'\n')
-    note('audio-state CLI START <=70s; own quiet per-stream clients only, no GUI/input/install/systemvolume change.')
+    note('audio-state CLI START <=70s; own quiet per-stream clients only, cpu-load='+str(a.load)+' (four own bounded workers if true), no GUI/input/install/systemvolume change.')
     try:
         dest='/private/var/db/sffx/'+a.stage.name
         subprocess.run(['python3',str(repo/'integrations/puredarwin/firefox/put.py'),
@@ -58,7 +59,7 @@ for mode in ['installed','normalized-private']:
   env.update(DYLD_FRAMEWORK_PATH=str(root/'Frameworks'),SF_AU_NORMALIZE_HAL_CLOCK='1')
  start=time.monotonic()
  try:
-  r=subprocess.run([str(root/'bin/audio-state-probe')],env=env,capture_output=True,text=True,timeout=12)
+  r=subprocess.run([str(root/'bin/audio-state-probe')]+(['--load'] if LOAD_ENABLED else []),env=env,capture_output=True,text=True,timeout=12)
   row=dict(mode=mode,returncode=r.returncode,stdout=r.stdout,stderr=r.stderr,seconds=time.monotonic()-start)
  except subprocess.TimeoutExpired as e:
   row=dict(mode=mode,returncode=None,timeout=True,seconds=time.monotonic()-start,
@@ -66,7 +67,7 @@ for mode in ['installed','normalized-private']:
  rows.append(row)
 (root/'audio-state-results.json').write_text(json.dumps(rows,indent=2)+'\\n')
 print(json.dumps(rows))
-'''.replace('DEST',repr(dest)).replace('TRACE_ENABLED',repr(a.trace))
+'''.replace('DEST',repr(dest)).replace('TRACE_ENABLED',repr(a.trace)).replace('LOAD_ENABLED',repr(a.load))
         r=subprocess.run(ssh+[shlex.join(['python3','-c',script])],capture_output=True,text=True,timeout=40)
         (a.stage/'transport.stderr').write_text(r.stderr)
         (a.stage/'transport.stdout').write_text(r.stdout)

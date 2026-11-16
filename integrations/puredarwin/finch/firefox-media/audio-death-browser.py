@@ -144,8 +144,13 @@ def main():
                 try:process.wait(timeout=2)
                 except subprocess.TimeoutExpired:pass
             result['launcher_final_exit']=process.poll()
+        try:
+            import audio_logs
+            result['native_log_files']=audio_logs.collect(a.run,home)
+        except (OSError,ValueError) as error:result['native_log_collection_error']=repr(error)
         observe();save();fixture.close()
-    return int(bool(result.get('error') or not result.get('diagnostic_complete') or result.get('before_cleanup_owned')))
+    return int(bool(result.get('error') or result.get('native_log_collection_error') or
+                    not result.get('diagnostic_complete') or result.get('before_cleanup_owned')))
 
 
 if __name__=='__main__':raise SystemExit(main())
