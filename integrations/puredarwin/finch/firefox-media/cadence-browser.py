@@ -64,6 +64,7 @@ def main():
     p.add_argument('--frame-id-geometry',help='Explicit private-CGL seven-field marker geometry; bounds are not pixel admission')
     p.add_argument('--frame-id-cgl',action='store_true',help='Packaged private CGL only; keep installed media/GLAPI/IOSurface/broker/UI plan')
     p.add_argument('--frame-id-dimensions-only',action='store_true',help='Paused preview/private CGL export dimensions only; no geometry/readback/15s run')
+    p.add_argument('--frame-id-quiet-rollouts',action='store_true',help='Disable Nimbus rollout/study work only in this fresh owned test profile')
     a=p.parse_args()
     if a.frame_id and (not a.installed_media or not a.without_trace or a.youtube or a.codec_matrix or a.mse or a.rate_control or a.lifetime_control):
         raise ValueError('Frame identity requires its separate installed-media no-trace case')
@@ -74,6 +75,8 @@ def main():
     elif a.frame_id_cgl and not a.frame_id_dimensions_only:raise ValueError('Private marker hook requires explicit geometry or paused dimensions preflight')
     if a.frame_id_dimensions_only and (not a.frame_id or not a.frame_id_cgl or a.frame_id_geometry):
         raise ValueError('Paused dimensions preflight requires private CGL and no geometry')
+    if a.frame_id_quiet_rollouts and (not a.frame_id or a.frame_id_dimensions_only):
+        raise ValueError('Rollout control requires the owned timed frame-ID case')
     if a.frame_id_cgl and (not a.frame_id or a.graphics_override or a.staged_media):
         raise ValueError('Private marker CGL must retain installed media and graphics plan')
     if a.view_state and (not a.mse or not a.without_trace):
@@ -221,11 +224,18 @@ def main():
                     'script':'''const p=Components.classes["@mozilla.org/preferences-service;1"]
                       .getService(Components.interfaces.nsIPrefBranch),result={};
                       for(const [name,kind] of [["browser.tabs.inTitlebar","int"],
-                        ["webgl.disable-angle","bool"],["gfx.webrender.compositor","bool"],["media.av1.enabled","bool"]]){
+                        ["webgl.disable-angle","bool"],["gfx.webrender.compositor","bool"],["media.av1.enabled","bool"],
+                        ["nimbus.rollouts.enabled","bool"],["app.shield.optoutstudies.enabled","bool"]]){
                         try{result[name]={value:kind==="int"?p.getIntPref(name):p.getBoolPref(name),
                           userValue:p.prefHasUserValue(name)}}catch(e){result[name]={error:String(e)}}
                       }return result;''','args':[],'newSandbox':True})
                 (a.run/'owned-startup-preferences.json').write_text(json.dumps(observed,indent=2)+'\n')
+                if a.frame_id_quiet_rollouts:
+                    checks={name:observed.get(name,{}).get('value') is False and observed.get(name,{}).get('userValue') is True
+                            for name in ['nimbus.rollouts.enabled','app.shield.optoutstudies.enabled']}
+                    (a.run/'rollout-control-admission.json').write_text(json.dumps(dict(checks=checks,
+                        passed=all(checks.values()),test_profile_only=True,installed_preferences_changed=False),indent=2)+'\n')
+                    if not all(checks.values()):raise RuntimeError('Own rollout control not applied')
                 if a.installed_codec_policy:
                     settings=(a.run/'browser/profile/user.js').read_text()
                     value='true' if a.av1_switchback else 'false'
@@ -522,6 +532,7 @@ def main():
         mse_programmatic_scroll=a.mse_scroll,
         view_state_diagnostic=a.view_state,
         known_frame_id_fixture=a.frame_id,gecko_media_profile=a.profile_video,
+        owned_rollout_control=a.frame_id_quiet_rollouts,
         private_frame_identity_graphics=a.frame_id_cgl,
         frame_identity_geometry=a.frame_id_geometry,
         frame_identity_dimensions_only=a.frame_id_dimensions_only,
@@ -542,6 +553,8 @@ def main():
           '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
+    if a.frame_id_quiet_rollouts:
+        argv+=['--pref','nimbus.rollouts.enabled=false','--pref','app.shield.optoutstudies.enabled=false']
     if a.youtube_1080 and not a.installed_codec_policy:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
     if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
     if (a.installed_media or a.youtube_1080) and not a.frame_id_cgl:argv+=['--expect-system-gpu']

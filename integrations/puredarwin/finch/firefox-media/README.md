@@ -330,6 +330,21 @@ the existing Gecko media/renderer profiler to this owned diagnostic. It keeps
 the frame-ID trace and clocks for locating specific gaps in the retained stacks;
 the profiled CPU/FPS values never qualify production speed.
 
+The first such profile locates three54–119ms export gaps in Firefox's main-thread
+XPI download/hash/write path while Nimbus installs a4.5MB New Tab update. The
+decoder is not the sampled blocking path. `--frame-id-quiet-rollouts` controls
+`nimbus.rollouts.enabled` and `app.shield.optoutstudies.enabled` only in the fresh
+owned test profile and requires both live user preferences to be false. It does
+not change installed launcher or owner preferences. The profile must separately
+show whether XPI traffic disappears. Compare conditions inside one shared lock
+hold and require actual provider identities to match: the initial unpaired
+control crossed an AppKit install, so its timing delta remains unqualified.
+
+The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
+CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
+transport counters. Their exact API and lifetime handoff is with the QuartzCore
+and CGL owners; shared decoder output alone is not whole-browser zero CPU copy.
+
 `context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
 libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
 kernel's additive128-byte/version1/capability17 contract only at successful
