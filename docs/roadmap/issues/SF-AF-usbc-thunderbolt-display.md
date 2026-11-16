@@ -3834,3 +3834,40 @@ as well as both installed Firefox routes painting before promotion.
 
 DESK9 staged .next002 (8ed7da8a…) and daily002 (39dff5bd…) for the next boot.
 The compositor running during this follow-up remains001; no relaunch occurred.
+
+
+## Selected upstream12377 ports, 2026-11-16 (offline first)
+
+Base stays c713d8fb; eight selected original commits apply cleanly in order to
+a temporary fixture. No rebase, shared pin change, Nix reorganisation or NVIDIA
+work is imported. Per-commit conflicts, SDK/host evidence, storage/image/tool
+and Security details: `integrations/puredarwin/upstream-12377/README.md`.
+
+| Port | Built/tested | What is still unobserved |
+| --- | --- | --- |
+| a25f0365 PCI scan | arm64 IOPCIFamily and literal fallback controls; emulated root-port xHCI publishes USB/HID and reads8MiB exactly. | No M1 bridge trial. kPCIHotPlugTunnel is excluded; an ordinary downstream bridge could qualify. This is not an I210 no-packets fix. |
+| 2617f566 shared PCI/iflib/igc | arm64 em+igc SDKs and actual helper controls pass; full M1 em+igc variant fails the frozen16MiB KC slot (payload0x1250000), retained. ix is x86-only and unbuilt. | igc is I225/I226, not the I210. No change to descriptors/tails/DART sync/MSI; I210 packet cause remains open. Source/bundles stay staged until the dock track solves its image budget. |
+| aaf3604d composites/heap tables | Generic and exact frozen deployed-source xHCI SDKs pass; unpatched frozen source reproduces SDK SHA65b7c308… byte for byte. Port uses offsets only/no fuzz. Actual helper/descriptor/IAD controls and dedicated QEMU USB reads/HID publication pass. | No physical dock USB device, keyboard typing, storage mount or cable cycle qualification. Shared PHY/DART/lifetime implementation is preserved. |
+
+Observed versus built: the M1 still has qualified45 at this source checkpoint.
+The default next candidate379sk links57 executable modules with the SAME core,
+three changed executable UUIDs (PCI/xHCI/AVD diagnostics), one metadata change
+(composite match) and54 unchanged executable UUIDs. em/igc are not loaded in
+that candidate and no endpoint matching is enabled. Do not move the qualified
+core or remove unrelated filesystem/GPU drivers just to force dormant dock
+modules into a Firefox boot. The full59-module placement failure is separate
+from successful driver compilation.
+
+QEMU004 is a real disposable emulated root-port/xHCI/USB8MiB exact-read test,
+with published USB HID nodes,28 filesystem I/O cases/7 resize steps, clean
+unmount,29 independent Linux debugfs byte oracles and fsck-fn0. The raw4096-byte
+node gives old ext4.util254 versus patched253; the earlier buffered-node control
+accepted both and remains a failed full run. This is no M1 DART/MSI/physical HID
+or DP evidence. Earlier output-namespace and missing boot-flag failures remain.
+
+Next Firefox cycle notice is posted; no installation is claimed here. It will
+keep45 rollback, use locks/UART/normal installer and both painted Firefox routes,
+and couple pdm1tpscroll=20 to DESK10 (remove the argument with a desk9 rollback).
+Thunderbolt hardware trials still require the owner's exclusive window; AVE
+remains paused. The source survey does not close DHCP, dock keyboard, Samsung
+DP or ten-cycle hotplug milestones.

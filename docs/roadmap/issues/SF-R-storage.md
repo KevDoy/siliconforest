@@ -685,3 +685,25 @@ repair was attempted because this exceeds the current conditional bitmap/count
 repair permission. Normal SFBOOT installation, one-time bless and subsequent
 SiliconForest root mount succeeded; this is not a clean filesystem qualification.
 The kernel rollback remains CIO29.
+
+
+## Upstream raw-device superblock and4KiB image review (2026-11-16)
+
+Selected ca1fd5ed ports ext4.util's read_superblock to whole logical device
+blocks from offset0, copying the superblock at byte1024. It is a userspace
+probe change, separate from kernel45's EOF allocation fix. Real arm64 build
+and actual-source sanitized controls pass. Dedicated QEMU004 probes the raw
+4096-byte scratch partition: old utility returns254/unrecognized, new253/IO
+success; the initial cooked-node control accepted both. No installed utility
+or owner-root probe result is claimed from that rehearsal.
+
+Upstream aa82116c converts a newly created512-byte GPT image to4096-byte GPT
+units without moving its partition bytes; its T8103 image recipe selects this
+format. Our installer already checks4096-byte primary/backup GPT and exact
+existing partition spans, then installs SFBOOT files without rewriting GPT.
+Do not run the converter on the owner's disk. Its source assumes valid input
+and a standard layout; it is no general repair tool. A built1.34GB regular virt
+image conversion passes both header/table CRCs, preserves both partition byte
+spans and full content SHA256 hashes (805306368 and536870912bytes). This is an
+offline image-format test, not a T8103 boot or authorization for table writes.
+Ports, tests and isolated recipes: integrations/puredarwin/upstream-12377/.

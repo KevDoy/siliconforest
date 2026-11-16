@@ -779,3 +779,27 @@ as well as both installed Firefox routes painting before promotion.
 
 DESK9 staged .next002 (8ed7da8a…) and daily002 (39dff5bd…) for the next boot.
 The compositor running during this follow-up remains001; no relaunch occurred.
+
+
+### Selected upstream candidate over45 (2026-11-16, not yet installed)
+
+Offline collection379sk preserves the exact qualified45 core and57-module
+cohort. Only PCI/xHCI/AVD executable UUIDs change; the USB composite matching
+metadata adds IAD support. AVD adds the reviewed versioned context-statistics
+ioctl, with live-capture-only memory scope; no decoder/cache policy changes.
+The other54 UUIDs and52 kext sources match45, debug stripping proves every
+non-debug section unchanged, devfs/cache linkage and overlap checks pass.
+No endpoint admission, AVE, filesystem or wait-policy change is introduced.
+
+The separately attempted59-module variant also embeds newly built em/igc
+(with PCI matching removed), but fails the fixed core's16MiB prelink slot:
+payload0x1250000. That full image must not be installed. Do not move the frozen
+core or discard unrelated drivers to hide the failure. Network sources remain
+SDK-built/staged for the paused dock track. The default candidate omits them.
+
+Actual host controls, arm64 builds and QEMU004 root-port USB/storage/FS gates
+pass; receipts are runs/sftb/upstream-12377/. Kernel46 notice is posted, but
+installation/native acceptance has not occurred at this checkpoint. It must
+verify both installed painted Firefox routes and standard DESK10 state, with
+pdm1tpscroll=20 only for desk10-or-newer and45 as rollback. No physical scroll
+or native per-context attribution proof follows from these offline checks.
