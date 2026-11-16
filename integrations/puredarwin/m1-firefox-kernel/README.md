@@ -6,7 +6,7 @@ strict shared capture PANICKED during IOMemoryDescriptor teardown. It was rolled
 back. No zero-copy or physical-pinch claim. Full evidence and recovery are below.
 
 build-final-kc.nix produces the next safe image43: devfs+K14/HID, reviewed
-killable GPU waits (KERN0f446bdcd) and speaker cap (KERN7590d2cf4); exactly7
+killable GPU waits (KERN0f446bdcd) and optional speaker-cap boot argument (default0 per owner); exactly7
 changed modules/50 unchanged versus CIO29. The ORIGINAL CIO29 AVD is retained,
 with its exact module UUID verified by verify-baseline-avd.py. The failed
 AVD import/CMO/IRQ module is excluded, so the import-only cache-link gate is
@@ -226,3 +226,14 @@ reviewed killable-wait PDAgx/PDDcp and speaker cap25 half-dB steps (control176),
 and requires exactly7 changed modules/50 unchanged against CIO29. Source/SDK/
 link/host evidence is separate from the forthcoming native wait/speaker gate.
 The UPL fix is being prepared independently; no assertion or complete call is removed.
+
+
+Owner update2026-11-16 01:38Z: extra speaker cap defaults OFF. The current model
+passes comparison testing with zero violations; the owner explicitly withdrew
+the interim volume reduction. The boot argument pdspeaker_cap_steps remains
+available, with default0; model/probe safety limits remain unchanged. The first
+cap25 image43 reservation was cancelled before ANY M1 action; its kit is retained
+privately. The replacement image43 uses sound SDK c5zjb6pd…, collection gif6ishr…,
+capsule11f6f53b2089f2a6…, prelink0C63FD93-8845-4DE8-85E5-C317D51928A0.
+It still has7 changed modules/50 unchanged against CIO29 and ORIGINAL AVD.
+Native default-cap0 / K14 / killable-wait qualification is pending.

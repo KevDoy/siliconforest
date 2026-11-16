@@ -47,4 +47,4 @@ assert not any('ave' in k.lower() for k in b)
 print(json.dumps({'baseline':str(old),'candidate':str(new),'baseline_modules':a,'candidate_modules':b,
                   'changed':changes,'unchanged_modules':50,'module_count':57,
                   'candidate_sha256':hashlib.sha256(new.read_bytes()).hexdigest(),
-                  'installed':False,'hardware_qualified':False,'priority':'K14/HID, killable waits, interim speaker cap; original AVD'},indent=2))
+                  'installed':False,'hardware_qualified':False,'priority':'K14/HID, killable waits, optional speaker cap default OFF; original AVD'},indent=2))

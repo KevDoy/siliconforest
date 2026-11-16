@@ -79,12 +79,13 @@
 #define SPK_STEPS_LOCKED    200     /* register 0xc8: -100 dB */
 #define SPK_PROBE_STEPS     40      /* 20 dB down until the sense data is believed */
 /*
- * Interim cap until a tone test on this machine confirms the sense scale the model is fed
- * with: never louder than 12.5 dB below full (25 steps; 176 on speakersafetyd's 0..201
- * volume scale, which model-test compares). The boot argument pdspeaker_cap_steps=<n>
- * sets another floor (0 lifts the cap; above 200 is 200); nothing at run time lowers it.
+ * Optional additional cap, disabled by default by the owner's 2026-11-16 decision:
+ * the current speaker model passes its comparison tests without violations. The boot
+ * argument pdspeaker_cap_steps=<n> enables a floor (25 = -12.5 dB, control176 on the
+ * daemon's scale; 0 disables this extra cap; above200 is200). The model/probe limits
+ * remain in force, and nothing at run time lowers an enabled cap.
  */
-#define SPK_CAP_STEPS       25
+#define SPK_CAP_STEPS       0
 #define SPK_VOLUME_REG(steps) ((uint8_t)(steps))       /* PLAY_CFG_REG2: half-dB steps below 0 dB */
 /* a full-scale sample at 0 dB is 10^(18.5/20) V RMS * sqrt(2) = 11.9 V peak; the voltage sense reads 14 V at 32768 */
 #define SPK_FULL_SCALE_COUNTS 27853

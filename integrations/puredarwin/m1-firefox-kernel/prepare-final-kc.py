@@ -20,4 +20,4 @@ avd=Path(os.environ['SF_FINAL_BASELINE_AVD'])/'PDAppleAVD.kext'
 assert (avd/'Contents/MacOS/PDAppleAVD').is_file()
 s=s.replace(old,'-kext \"'+str(avd)+'\"')
 output.write_text(s)
-print('FINAL_KC retains devfs/K14/HID, original CIO29 AVD; replaces PDAgx/PDDcp waits and PDAppleSound cap25 steps')
+print('FINAL_KC retains devfs/K14/HID, original CIO29 AVD; replaces PDAgx/PDDcp waits and PDAppleSound optional cap default0/bootarg retained')
