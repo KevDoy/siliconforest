@@ -14,6 +14,15 @@ prove on-screen blank media. Preserve the original files and failed verdicts
 for audit; reclassify their visibility evidence as unqualified. Decoder hashes,
 PTS, kernel jobs, CPU and transport counters are independent observations.
 
+For a private frame-ID trace, `analyze-frame-id-exports.py --run RUN --output
+RESULT --clock-before BEFORE --clock-after AFTER` can also align native export
+samples with the own page's measurement window. Both receipts must come from
+the C `clock_gettime(CLOCK_MONOTONIC)` bridge on the same actual boot and bracket
+the exports. The analyzer rejects excessive realtime/native drift and retains
+the full offset uncertainty. Python's monotonic epoch is not substituted for
+CGL's clock. JavaScript's epoch mapping remains an explicit assumption; this
+diagnostic alignment does not establish completed compositor or panel delivery.
+
 The corrected runner keeps a separate `cpu-scene.ppm` and uses the existing
 Firefox `renderer_capture.capture` helper for actual GPU readback. It requires
 its `source=renderer` log/receipt before accepting the route. This sends only a
