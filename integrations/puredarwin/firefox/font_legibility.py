@@ -58,14 +58,14 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             const range=document.createRange();range.selectNodeContents(node);
             const boxes=[...range.getClientRects()].map(r=>visibleBox(r,node.parentElement)).filter(Boolean);
             if(!boxes.length){excluded.push({text:node.textContent.trim().slice(0,120),reason:'No complete viewport rectangle, hidden content, or empty accessibility clip'});continue;}
-            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor});
+            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor,transitionProperty:s.transitionProperty,transitionDuration:s.transitionDuration});
           }
           return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
             fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};'''
         row=script(collect_source)
-        from legibility_documents import discover, document, translate_runs, mask
+        from legibility_documents import discover, document, translate_runs, mask, freeze_transitions
         documents, skipped = discover(client, script)
         row['frame_documents']=[]
         row['unsupported_frames']=skipped
@@ -79,27 +79,30 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             row['frame_documents'].append(dict(url=child['url'],offset=item['offset'],clip=item['clip'],
                 measured_runs=len(child_runs),fontsStatus=child['fontsStatus']))
         row['per_page_virtual_admission']=admission
-        from renderer_capture import capture
-        from screen_calibration import calibrate
-        anchors=script('''const anchors=[{x:5,y:5,width:8,color:[17,241,113]},{x:101,y:101,width:8,color:[233,19,157]}];
-          window.__sffxLegibilityAnchors=anchors.map(a=>{const n=document.createElement('div');n.style.cssText=`all:initial!important;position:fixed!important;left:${a.x}px!important;top:${a.y}px!important;width:${a.width}px!important;height:${a.width}px!important;background:rgb(${a.color.join(',')})!important;z-index:2147483647!important;pointer-events:none!important`;document.documentElement.append(n);return n});return anchors;''')
-        try:
-            paint();capture(directory/(image_prefix+'-calibration.ppm'))
-            row['calibration']=calibrate(directory/(image_prefix+'-calibration.ppm'),anchors,row['devicePixelRatio'])
-        finally:
-            script('window.__sffxLegibilityAnchors?.forEach(n=>n.remove());delete window.__sffxLegibilityAnchors;return true;')
-        paint();shot(directory/(image_prefix+'-visible.png'))
-        capture(directory/(image_prefix+'-visible-renderer.ppm'))
-        try:
-            mask(client,script,documents,True)
-            paint();shot(directory/(image_prefix+'-hidden.png'))
-            capture(directory/(image_prefix+'-hidden-renderer.ppm'))
-        finally:
-            mask(client,script,documents,False)
-        paint()
-        from renderer_capture import capture
-        row['renderer']=capture(directory/(image_prefix+'-renderer.ppm'))
-        row['renderer_images']={'visible':image_prefix+'-visible-renderer.ppm','text_hidden':image_prefix+'-hidden-renderer.ppm'}
+        row['transitions_suppressed_during_capture']=True
+        with freeze_transitions(client,script,documents):
+            from renderer_capture import capture
+            from screen_calibration import calibrate
+            anchors=script('''const anchors=[{x:5,y:5,width:8,color:[17,241,113]},{x:101,y:101,width:8,color:[233,19,157]}];
+              window.__sffxLegibilityAnchors=anchors.map(a=>{const n=document.createElement('div');n.style.cssText=`all:initial!important;position:fixed!important;left:${a.x}px!important;top:${a.y}px!important;width:${a.width}px!important;height:${a.width}px!important;background:rgb(${a.color.join(',')})!important;z-index:2147483647!important;pointer-events:none!important`;document.documentElement.append(n);return n});return anchors;''')
+            try:
+                paint();capture(directory/(image_prefix+'-calibration.ppm'))
+                row['calibration']=calibrate(directory/(image_prefix+'-calibration.ppm'),anchors,row['devicePixelRatio'])
+            finally:
+                script('window.__sffxLegibilityAnchors?.forEach(n=>n.remove());delete window.__sffxLegibilityAnchors;return true;')
+            paint();shot(directory/(image_prefix+'-visible.png'))
+            capture(directory/(image_prefix+'-visible-renderer.ppm'))
+            try:
+                mask(client,script,documents,True)
+                paint();shot(directory/(image_prefix+'-hidden.png'))
+                capture(directory/(image_prefix+'-hidden-renderer.ppm'))
+            finally:
+                mask(client,script,documents,False)
+            paint()
+            from renderer_capture import capture
+            row['renderer']=capture(directory/(image_prefix+'-renderer.ppm'))
+        row['renderer_images']={'visible':image_prefix+'-visible-renderer.ppm',
+            'text_hidden':image_prefix+'-hidden-renderer.ppm','restored':image_prefix+'-renderer.ppm'}
         row['content_images_readback_only']=True
         row['content_images']={'visible':image_prefix+'-visible.png','text_hidden':image_prefix+'-hidden.png'}
         row['loaded_only']=True;row['legibility_qualified']=False;row['visual_review_pending']=True

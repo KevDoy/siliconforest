@@ -9,6 +9,19 @@ challenge/loading pages cannot qualify ordinary page content.
 import argparse
 import json
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+
+def page_key(url):
+    parts=urlsplit(url)
+    query=parse_qsl(parts.query,keep_blank_values=True)
+    # Reddit leaves its solved, per-session JS challenge token in the address
+    # of the ordinary feed. Preserve real search/navigation parameters.
+    if parts.hostname in ['reddit.com','www.reddit.com'] and ('js_challenge','1') in query:
+        transient={'solution','js_challenge','jsc_token','jsc_orig_r'}
+        query=[(key,value) for key,value in query if key not in transient]
+        return urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode(query),parts.fragment))
+    return url
 
 
 def main():
@@ -16,14 +29,16 @@ def main():
     ap.add_argument('--on',type=Path,required=True)
     ap.add_argument('--off',type=Path,required=True)
     ap.add_argument('--output',type=Path,required=True)
+    ap.add_argument('--on-prefix',default='legibility')
+    ap.add_argument('--off-prefix',default='legibility')
     args=ap.parse_args()
-    def read(root):
-        rows=json.loads((root/'legibility-text-pixel-coverage.json').read_text())
-        indexed={row['url']:row for row in rows}
+    def read(root,prefix):
+        rows=json.loads((root/(prefix+'-text-pixel-coverage.json')).read_text())
+        indexed={page_key(row['url']):row for row in rows}
         if len(indexed)!=len(rows):
             raise ValueError('Repeated actual URLs cannot qualify distinct requested sites')
         return indexed
-    on,off=read(args.on),read(args.off)
+    on,off=read(args.on,args.on_prefix),read(args.off,args.off_prefix)
     if on.keys()!=off.keys():raise ValueError('Paired captures must cover the same final URLs')
     rows=[]
     for url,a in on.items():
@@ -36,7 +51,8 @@ def main():
             return found
         ar,br=runs(a),runs(b);common=ar.keys()&br.keys()
         missing=[text for text in sorted(common) if not all(ar[text]) and all(br[text])]
-        rows.append(dict(url=url,on_eligible=a['eligible_runs'],on_painted=a['runs_with_ink'],
+        rows.append(dict(url=url,actual_on_url=a['url'],actual_off_url=b['url'],
+            on_eligible=a['eligible_runs'],on_painted=a['runs_with_ink'],
             off_eligible=b['eligible_runs'],off_painted=b['runs_with_ink'],
             on_coverage=a['coverage'],off_coverage=b['coverage'],common_texts=len(common),
             missing_only_with_web_fonts=missing,paint_controls_pass=bool(common) and not missing and

@@ -97,6 +97,7 @@ def main():
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--pipeline-profile', action='store_true', help='diagnostic native/JS/IPC Gecko profile of this browser family')
     ap.add_argument('--site-legibility', action='store_true', help='capture text paint masks and actual renderer for owned ordinary pages')
+    ap.add_argument('--paired-site-legibility', action='store_true', help='font-on/off paint controls in the same owned profile')
     ap.add_argument('--page-down-captures', action='store_true', help='four owned HTTPS tabs, five trusted virtual-seat Page Downs each; inspected pixels required')
     ap.add_argument('--composition-workloads', action='store_true', help='four ten-second installed composition controls, retaining per-window WMPACING and family CPU')
     ap.add_argument('--font-logs', action='store_true', help='bounded font activation diagnostics for owned legibility controls')
@@ -124,6 +125,8 @@ def main():
     ap.add_argument('--scene-reference', action='store_true')
     ap.add_argument('--finish-after-scene-reference', action='store_true', help='bounded functional renderer/provider control')
     args = ap.parse_args()
+    if args.paired_site_legibility:
+        args.site_legibility = True
     if args.functional_qa and (args.benchmark or args.measure_fixture or args.measure_video or args.measure_all_videos):
         raise ValueError('Functional QA does not qualify benchmark or video/frame timings')
     if args.finish_after_scene_reference and not (args.functional_qa and args.scene_reference):
@@ -440,7 +443,10 @@ def main():
                                 result['page_down_captures'] = measure_page_down(client, args.run, deadline)
                                 deadline = min(deadline, time.monotonic()+2)
                             if args.site_legibility:
-                                from font_legibility import measure as measure_legibility
+                                if args.paired_site_legibility:
+                                    from paired_legibility import measure as measure_legibility
+                                else:
+                                    from font_legibility import measure as measure_legibility
                                 result['legibility']=measure_legibility(client,args.run,
                                                                        seat_activity=args.presentation_seat)
                                 if not args.popup_stress:

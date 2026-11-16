@@ -78,3 +78,19 @@ def mask(client, script, documents, enabled):
                   document.documentElement.append(style);window.__sffxLegibilityMask=style;return true;''')
             else:
                 script('window.__sffxLegibilityMask?.remove();delete window.__sffxLegibilityMask;return true;')
+
+
+@contextmanager
+def freeze_transitions(client, script, documents):
+    """Keep color transitions from turning our paint control into a fade."""
+    try:
+        for item in documents:
+            with document(client, item['path']):
+                script('''if(window.__sffxLegibilityTransitions)throw new Error('Transition control already exists');
+                  const style=document.createElement('style');style.textContent='*{transition:none!important}';
+                  document.documentElement.append(style);window.__sffxLegibilityTransitions=style;return true;''')
+        yield
+    finally:
+        for item in documents:
+            with document(client, item['path']):
+                script('window.__sffxLegibilityTransitions?.remove();delete window.__sffxLegibilityTransitions;return true;')

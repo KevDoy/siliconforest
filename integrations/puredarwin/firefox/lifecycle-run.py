@@ -38,8 +38,12 @@ def main():
     ap.add_argument('--observer', type=Path)
     ap.add_argument('--loss-observer', type=Path)
     ap.add_argument('--runtime-plan', action='store_true', help='diagnostic comparison; bypass installed outer launcher')
+    ap.add_argument('--quit-menu-control', action='store_true',
+                    help='windowless-quit diagnostic: invoke the app-owned Quit menu; cannot qualify desktop routing')
     ap.add_argument('--sample-path', default='/private/var/db/sffx/probes-v3/sf-sample')
     args = ap.parse_args()
+    if args.quit_menu_control and args.action != 'windowless-quit':
+        raise ValueError('Quit menu control is limited to the windowless diagnostic')
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target-only diagnostic')
     for path in [args.run, args.ui_prefix, args.observer, args.loss_observer]:
@@ -220,8 +224,18 @@ def main():
                 current = identity()
                 if parent not in current or current[parent][1] != owned[parent]:
                     raise RuntimeError('Browser already ended; windowless desktop Quit was not exercised')
-                result['native_action'] = dict(route='compositor-app-request', pid=parent,
-                    response=_request(inject, 'app %d quit' % parent))
+                if args.quit_menu_control:
+                    menu = native_menu(parent)
+                    result['prequit_menu'] = menu
+                    items = [m for m in re.finditer(r'^item ([\d.]+) \d+ (\S+) (\S+) (.*)$', menu, re.M)
+                             if m[3] == 'cmd+q' and 'd' not in m[2] and 's' not in m[2]]
+                    if len(items) != 1:
+                        raise RuntimeError('Expected one enabled app-owned Quit item')
+                    result['native_action'] = dict(route='app-owned-menu-control', pid=parent,
+                        item=items[0][1], title=items[0][4], response=native_menu(parent, 'invoke ' + items[0][1]))
+                else:
+                    result['native_action'] = dict(route='compositor-app-request', pid=parent,
+                        response=_request(inject, 'app %d quit' % parent))
             elif args.action in ['close-box', 'cmd-w']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')

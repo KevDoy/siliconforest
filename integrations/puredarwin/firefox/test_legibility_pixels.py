@@ -57,6 +57,23 @@ class TextPaintClassifier(unittest.TestCase):
             self.fixture(Path(d),missing_last=True);r=analyze(Path(d))[0]
             self.assertFalse(r['paint_check_pass']);self.assertEqual(r['runs_with_ink'],4)
 
+    def test_restored_text_must_recover_original_pixels(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);self.fixture(root)
+            rows=json.loads((root/'legibility.json').read_text())
+            rows[0]['renderer_images']['restored']='restored.ppm'
+            (root/'legibility.json').write_text(json.dumps(rows))
+            (root/'restored.source.json').write_text(json.dumps(dict(source='renderer')))
+            visible=(root/'visible.ppm').read_bytes()
+            (root/'restored.ppm').write_bytes(visible)
+            self.assertTrue(analyze(root)[0]['restore_check_pass'])
+            header,pixels=visible.split(b'255\n',1)
+            (root/'restored.ppm').write_bytes(header+b'255\n'+bytes(128 if p==0 else p for p in pixels))
+            result=analyze(root)[0]
+            self.assertTrue(result['ink_check_pass'])
+            self.assertFalse(result['restore_check_pass'])
+            self.assertFalse(result['paint_check_pass'])
+
     def test_content_screenshot_cannot_qualify_renderer(self):
         with tempfile.TemporaryDirectory() as d:
             self.fixture(Path(d),source='content-readback')
