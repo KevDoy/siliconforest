@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Synthetic host classifier tests; no native display or font claims."""
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,6 +25,21 @@ class TextPaintClassifier(unittest.TestCase):
         row=dict(url='https://synthetic.invalid/',calibration=dict(complete=True,scale=1,origin=[0,0]),runs=runs,
                  renderer_images=dict(visible='visible.ppm',text_hidden='hidden.ppm'))
         (root/'legibility.json').write_text(json.dumps([row]))
+
+    def test_paired_gate_rejects_capturing_the_first_site_twice(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            for name in ['on','off']:
+                folder=root/name;folder.mkdir()
+                rows=[{'url':'https://first.synthetic.invalid/'}]*2
+                (folder/'legibility-text-pixel-coverage.json').write_text(json.dumps(rows))
+            output=root/'comparison.json'
+            result=subprocess.run([sys.executable,str(Path(__file__).with_name('compare-legibility.py')),
+                '--on',str(root/'on'),'--off',str(root/'off'),'--output',str(output)],
+                capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Repeated actual URLs',result.stderr)
+            self.assertFalse(output.exists())
 
     def test_empty_text_paint_fails(self):
         with tempfile.TemporaryDirectory() as d:

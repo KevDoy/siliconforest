@@ -33,7 +33,9 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             # Admit each page's actual window, just as in the Page Down gate,
             # rather than assuming the initial tab's admission covers it.
             from presentation_seat import admit
-            admission=admit(client,directory/(image_prefix+'-admission.json'),fixture=False)
+            admission=admit(client,directory/(image_prefix+'-admission.json'),fixture=False,handle=handle)
+            if client.command('WebDriver:GetWindowHandle') != handle:
+                raise RuntimeError('Presentation admission changed the requested legibility tab')
         row=script('''const runs=[],excluded=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
           function visibleBox(rect,element){
             // A partially offscreen glyph is not a measurable complete run.
@@ -89,6 +91,7 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
         row['content_images_readback_only']=True
         row['content_images']={'visible':image_prefix+'-visible.png','text_hidden':image_prefix+'-hidden.png'}
         row['loaded_only']=True;row['legibility_qualified']=False;row['visual_review_pending']=True
+        row['requested_handle']=handle
         rows.append(row);(directory/(prefix+'.json')).write_text(json.dumps(rows,indent=2)+'\n')
     if not rows:raise RuntimeError('No owned ordinary page found for legibility checks')
     from legibility_pixels import analyze

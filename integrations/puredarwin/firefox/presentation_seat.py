@@ -76,13 +76,16 @@ def _request(inject, lines, _virtual_handshake=False, timeout=6):
     return status
 
 
-def admit(client, output, fixture=True, verify_renderer=True):
+def admit(client, output, fixture=True, verify_renderer=True, handle=None):
     def script(source, args=None):
         return client.command('WebDriver:ExecuteScript', dict(script=source, args=args or [], newSandbox=False))
 
     client.command('Marionette:SetContext', {'value': 'content'})
-    for handle in client.command('WebDriver:GetWindowHandles'):
-        client.command('WebDriver:SwitchToWindow', {'handle': handle})
+    available = client.command('WebDriver:GetWindowHandles')
+    if handle is not None and handle not in available:
+        raise RuntimeError('Requested owned admission tab no longer exists')
+    for candidate in ([handle] if handle is not None else available):
+        client.command('WebDriver:SwitchToWindow', {'handle': candidate})
         if not fixture or script('return typeof fxMeasureFrames === "function";'):
             break
     else:
@@ -135,6 +138,7 @@ def admit(client, output, fixture=True, verify_renderer=True):
       if(arguments[2]===null)delete window.fxTitleOverride;else window.fxTitleOverride=arguments[2];}return true;''',
            [previous['title'], previous['video'], previous['override']])
     result = dict(complete=True, synthetic_seat_input=True, admitted_unique_title=marker,
+                  requested_handle=handle, admitted_handle=candidate,
                   frame=values, window_id=int(re.match(r"window (\d+) ", matches[0])[1]),
                   focused=focused, renderer=renderer)
     output.write_text(json.dumps(result, indent=2)+'\n')

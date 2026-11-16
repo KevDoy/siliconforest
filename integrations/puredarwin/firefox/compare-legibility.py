@@ -18,7 +18,11 @@ def main():
     ap.add_argument('--output',type=Path,required=True)
     args=ap.parse_args()
     def read(root):
-        return {row['url']:row for row in json.loads((root/'legibility-text-pixel-coverage.json').read_text())}
+        rows=json.loads((root/'legibility-text-pixel-coverage.json').read_text())
+        indexed={row['url']:row for row in rows}
+        if len(indexed)!=len(rows):
+            raise ValueError('Repeated actual URLs cannot qualify distinct requested sites')
+        return indexed
     on,off=read(args.on),read(args.off)
     if on.keys()!=off.keys():raise ValueError('Paired captures must cover the same final URLs')
     rows=[]
