@@ -3800,3 +3800,37 @@ errors, but desktop3 has paragraph glyph corruption (s appears as dots), so
 this is launch availability, not full visual quality. The other five reviewed
 scenes are correct. The launchd1/sshd4/session5 parent relationships also match
 the saved44 boot; complete service timing/state equality is not established.
+
+
+### Decoder context attribution candidate and DESK crash follow-up, 2026-11-16
+
+The urgent launch check retains45; no further reboot occurred. FX subsequently
+recovered DESK's exact minidump and matched the loaded binary UUIDs: a null
+CFRunLoop yields fault address0x10 in CFRunLoopRemoveSource during AppRestart /
+xpcom-shutdown. A network-reachability caller is in that path. This is a distinct
+observed failure from MachCheckIn timeout, not evidence of GPU/devfs wedging;
+the teardown cause remains open with the framework owners.
+
+Source-only candidate integrations/puredarwin/m1-avd-context-stats adds ABI1
+cap17 and a versioned128-byte context-owned read-only ioctl7. Real synchronous
+session counters distinguish own jobs/results from concurrent decoding; no
+IRQ writer, allocation, hardware programming, timer or teardown is added by a
+query. PID/task ownership and a generation token reject foreign or recycled
+contexts. The six existing ioctl sizes/opcodes are unchanged on host and the
+actual arm64 SDK. Capture backing/IOVA/prepared byte fields describe ONLY the
+live capture set, not all decoder allocations or post-destroy retirement.
+An absent context is not proof of zero DART mappings or GPU quiescence.
+
+The literal patched getter and decode function pass ASan/UBSan with fake
+providers, including rejection atomicity, two-session interleaving and decode
+success/HOLD/error/timeout/sync branches. The real kext SDK build and old/new
+arm64 ABI assertions pass. These are offline results, not native attribution
+or real DMA/interrupt tests. Media/KERN have the source-review contract; no
+collection, install or machine test is reserved for it. Private build/test
+receipts are under runs/sftb/avd-context-stats/. Kernel45 retains its original
+AVD module. Native acceptance will require two real owned contexts, independent
+packet/pixel/PTS counts, ownership/generation refusal and live capture queries,
+as well as both installed Firefox routes painting before promotion.
+
+DESK9 staged .next002 (8ed7da8a…) and daily002 (39dff5bd…) for the next boot.
+The compositor running during this follow-up remains001; no relaunch occurred.
