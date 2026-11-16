@@ -342,6 +342,12 @@ Synthetic input to my own instances only; details of the install and the gates a
   clicks), random input Activity Monitor 240 actions alive, `sf_compat_push.sh check` 18/18. Terminal's random input on
   the installed files was stopped by the owner's arrival (22:35:45Z). Revert: `ln -f <path>.pre-c14 <path>.back &&
   mv -f <path>.back <path>` for the four paths.
+- **c18 (installed 00:09Z, see SF-Y)**: the column divider now asks the compositor for its "ew-resize" shape (observed:
+  DEFAULT then EW_RESIZE over the divider with `PD_CURSOR_TRACE`); the rest of c18 is for Firefox.
+- **Not done this round**: the column drag at one frame (TERM6's method, installed and c14 alternating: motion -> frame
+  median 33.9-35.3 ms, 2.0-2.1 frames; AppKit's step 21.1-21.8 ms - the step itself is longer than a frame; my profile
+  of it came back empty, the profiler build in my test area was the wrong one); the inspector's minimise rounds by my
+  test (its tile pick); GPU History (no counters from the driver: the empty graph is the truthful state).
 - **GPU History empty**: Activity Monitor finds GPUs through Metal (`MTLCopyAllDevicesWithObserver`), IORegistry and
   IOReport; the canonical Metal answers no device unless `SF_METAL_ENABLE_REAL_DEVICE=1`, and the AGX driver exposes no
   utilisation counter to user space (no IOAccelerator PerformanceStatistics, no sysctl, no busy time in the DRM port).
