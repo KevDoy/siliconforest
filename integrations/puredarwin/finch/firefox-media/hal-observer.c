@@ -125,10 +125,10 @@ static void *observe(void *unused){
       ring->sampleRate>=8000&&ring->sampleRate<=384000){
     uint64_t read=__atomic_load_n(&ring->readFrame,__ATOMIC_ACQUIRE);
     uint64_t written=__atomic_load_n(&ring->writeFrame,__ATOMIC_ACQUIRE);
-    fprintf(stderr,"SFMEDIA_RING pid=%d device=%u monotonic=%.6f read=%llu write=%llu running=%u rate=%u period=%u capacity=%u read-host=%llu active-tracked-units=%u protocol=%u note=own-process-read-only-ring-not-acoustic\n",
+    fprintf(stderr,"SFMEDIA_RING pid=%d device=%u monotonic=%.6f read=%llu write=%llu running=%u rate=%u period=%u capacity=%u read-host=%llu active-tracked-units=%u protocol=%u ring-address=%p note=own-process-read-only-ring-not-acoustic\n",
      getpid(),(unsigned)devices[i],clock_seconds(CLOCK_MONOTONIC),(unsigned long long)read,(unsigned long long)written,
      __atomic_load_n(&ring->running,__ATOMIC_ACQUIRE),ring->sampleRate,ring->periodFrames,ring->frames,
-     (unsigned long long)__atomic_load_n(&ring->readHostTime,__ATOMIC_ACQUIRE),active[i],ring->version);
+     (unsigned long long)__atomic_load_n(&ring->readHostTime,__ATOMIC_ACQUIRE),active[i],ring->version,(void *)ring);
    }else fprintf(stderr,"SFMEDIA_RING pid=%d device=%u unavailable=1 extension=%u\n",getpid(),(unsigned)devices[i],connected_session!=NULL);
   }
   usleep(250000);

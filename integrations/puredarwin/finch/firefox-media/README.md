@@ -93,7 +93,8 @@ Actual GPU output was inspected. RDD CPU is62.793% and matched family186.395%
 of one core; MediaCapabilities reports supported/smooth true and powerEfficient
 false, with no decoder hardware jobs. Ordinary Quit returns0 with the family
 gone in2.743s. This demonstrates real-time software decoding for this interval,
-not low CPU, all AV1 content or panel60fps. No AV1 preference is installed.
+not low CPU, all AV1 content or panel60fps. This first run preceded the
+hardware-codec default qualified below.
 
 `mse-installed` and `mse-scroll` use the selected installed family and the same
 local H264/AAC files/content/layout. Only the50ms programmatic scrolling timer
@@ -149,6 +150,42 @@ generated software AV1 frames, zero drops, actual providers/GPU output and
 natural status0/family disappearance. Both GPU images still require inspection.
 FX owns selection and checked rollback; this command changes no installed file.
 The opt-in demonstrates switchback, not default support for AV1-only content.
+
+FX subsequently selected that reversible policy. All30 default and20 opt-in
+checks passed, and both actual GPU pictures were inspected. The fresh default
+uses VP9 hardware at1920×1080/60fps with900/0 reported drops and shared output;
+the explicit AV1 opt-in completes600/0 software frames. Ordinary Quit returns0,
+with both owned families gone within2.944s and no cleanup signals. The deliberate
+tradeoff is that AV1-only content needs the opt-in. The earlier matched
+same-profile AV1→VP9 comparison measures RDD58.819→7.761% and complete family
+170.757→125.876% of one core, with identical resolution/rate/color metadata.
+Its128×72 paused sample PSNR40.858dB and inspected full GPU images do not prove
+lossless or all-scene equivalence. The fresh installed gate is not another
+matched CPU measurement. rVFC remains about40ms; panel cadence stays separate.
+
+`audio-session-watch.nix` builds a read-only exact-client metadata observer.
+The private packet supplies the original daemon's UUID, `_sClients` offset from
+its preferred text address, and original Linux-built artifact hash. The helper
+requires that UUID at the actual `/usr/sbin/coreaudiod` dyld image and checks
+that the64-client table fits its writable segment. It matches the admitted own
+Firefox ring to exactly one server slot by V2 shared-memory object identity and
+offset, reads only the48-byte ring header, then releases the client task port
+before exit. It retains no audio session/memory-entry right, suspends no process,
+writes no process memory and reads no PCM. Only two consecutive all-zero reads
+of that matched40-byte slot qualify removal; reuse or partial transitions fail.
+The M1 self-test has matched two aliases of our own memory object, without
+opening the daemon. This is not yet an exact Firefox-slot runtime result.
+
+`prepare-audio-death.py --session-watch BINARY --audio-server PRIVATE_SPEC ...`
+freezes it with the qualified HAL/Wayland-loss observers. Under GUI→core-shared
+→bench, `run-audio-exit.py --stage <fresh-firefox-audio-exit-packet>` uses the
+installed outer launcher and selected normalized audio, admits its own fresh
+profile/parent, and requires active own48k ring counters before disconnecting
+only that client's Wayland FD. The helper must match before that action. The
+admission retains the raw clock bridge/removal interval, actual audio providers,
+whole-family liveness and cleanup signals. No daemon restart or installed file
+change occurs. Exact slot destruction would establish server-client cleanup,
+not acoustic silence, output-buffer drain time or every crash mode.
 
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never

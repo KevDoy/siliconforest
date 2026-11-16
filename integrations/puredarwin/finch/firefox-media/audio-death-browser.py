@@ -23,9 +23,12 @@ def main():
     p.add_argument('--audio-clock-family',action='store_true',help='Private full AudioToolbox comparison, never changes installed selection')
     p.add_argument('--state-controls',action='store_true',help='Own media volume/mute/pause/two-tab controls and normal quit, no disconnect')
     p.add_argument('--expect-installed-clock',action='store_true',help='Require the selected installed normalized AudioToolbox family, never override it')
+    p.add_argument('--watch-server-client',action='store_true',help='Read-only exact own shared-ring server-slot removal; installed clock only')
     a=p.parse_args()
-    if a.expect_installed_clock and (not a.state_controls or a.audio_clock_family):
-        raise ValueError('Installed clock gate requires installed state controls, no private selection')
+    if a.expect_installed_clock and (not (a.state_controls or a.watch_server_client) or a.audio_clock_family):
+        raise ValueError('Installed clock gate requires state controls or exact client watch, no private selection')
+    if a.watch_server_client and (not a.expect_installed_clock or a.state_controls):
+        raise ValueError('Exact client watch requires installed-clock abnormal exit, not state controls')
     root=Path(__file__).resolve().parent
     if os.uname().sysname!='Darwin' or not root.is_relative_to(Path('/private/var/db/sffx')):
         raise ValueError('Cold private SiliconForest packet required')
@@ -50,7 +53,7 @@ def main():
            'browser.preonboarding.enabled':False,'app.update.auto':False,'browser.tabs.inTitlebar':0,
            'webgl.disable-angle':True,'dom.ipc.processPrelaunch.enabled':False}
     (profile/'user.js').write_text(''.join('user_pref(%s,%s);\n'%(json.dumps(k),json.dumps(v)) for k,v in prefs.items()))
-    fixture=AudioFixture(a.run);owned={};client=None;process=None
+    fixture=AudioFixture(a.run);owned={};client=None;process=None;watch=None
     server=Path('/var/log/coreaudiod.log');offset=0;inode=None;server_rows=[]
     result=dict(synthetic_input=False,installed_outer_launcher=not a.audio_clock_family,audio_stop_qualified=False,
                 normalized_audio_family=a.audio_clock_family,
@@ -137,9 +140,17 @@ def main():
                 try:result['quit_reply']=client.command('Marionette:Quit',{'flags':[]})
                 except (OSError,EOFError) as error:result['quit_transport_end']=type(error).__name__
             else:
-                pause(2);result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
+                pause(2)
+                if a.watch_server_client:
+                    from audio_session_watch import Watch
+                    watch=Watch(root,a.run,parent,owned[parent],identities,pause)
+                    result['audio_session_watch_admission']=watch.result
+                result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
                 (a.run/'wayland-disconnect.trigger').write_text('Disconnect only this admitted own Firefox client\n')
             pause(8);result['exit_before_cleanup']=process.poll();result['before_cleanup_owned']=result['timeline'][-1]['own_alive']
+            if watch:
+                result['audio_session_watch']=watch.finish(result['action_epoch'])
+                result['server_slot_removal_qualified']=result['audio_session_watch'].get('qualified',False)
             result['diagnostic_complete']=True;save()
     except Exception as error:result['error']=repr(error)
     finally:
@@ -161,7 +172,8 @@ def main():
         except (OSError,ValueError) as error:result['native_log_collection_error']=repr(error)
         observe();save();fixture.close()
     return int(bool(result.get('error') or result.get('native_log_collection_error') or
-                    not result.get('diagnostic_complete') or result.get('before_cleanup_owned')))
+                    not result.get('diagnostic_complete') or result.get('before_cleanup_owned') or
+                    (a.watch_server_client and not result.get('server_slot_removal_qualified'))))
 
 
 if __name__=='__main__':raise SystemExit(main())

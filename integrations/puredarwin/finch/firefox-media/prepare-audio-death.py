@@ -15,17 +15,24 @@ p.add_argument('--stage',type=Path,required=True)
 p.add_argument('--clock-family',type=Path,help='Optional complete normalized AudioToolbox family for a prefix-only comparison')
 p.add_argument('--aac-fixture',type=Path,help='Our generated AAC .m4a instead of the generated WAV document')
 p.add_argument('--pcm-observer',type=Path,help='Optional bounded native output meter for own state controls')
+p.add_argument('--session-watch',type=Path,help='Linux-built read-only exact client-slot observer')
+p.add_argument('--audio-server',type=Path,help='Private exact original installed daemon UUID/table-offset/source-hash specification')
 a=p.parse_args();here=Path(__file__).resolve().parent
+if bool(a.session_watch)!=bool(a.audio_server):raise ValueError('Exact daemon specification and observer must be paired')
 if a.stage.exists():raise ValueError('Fresh packet required')
 a.stage.mkdir();(a.stage/'lib').mkdir();(a.stage/'tools').mkdir()
 for source,name in [(a.hal_observer,'SFFirefoxMediaObserver.dylib'),(a.loss_observer,'SFFirefoxWaylandLoss.dylib')]:
     shutil.copy2(source,a.stage/'lib'/name)
 if a.pcm_observer:shutil.copy2(a.pcm_observer,a.stage/'lib/SFHALPCMTrace.dylib')
+if a.session_watch:
+    (a.stage/'bin').mkdir();shutil.copy2(a.session_watch,a.stage/'bin/audio-session-watch')
+    shutil.copy2(a.audio_server,a.stage/'audio-server.json')
 subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
     str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/'lib'),str(a.stage/'portable-observers.json')],check=True)
 shutil.copy2(here/'audio-death-browser.py',a.stage/'audio-death-browser.py')
 shutil.copy2(here/'audio_state_controls.py',a.stage/'audio_state_controls.py')
 shutil.copy2(here/'audio_logs.py',a.stage/'audio_logs.py')
+shutil.copy2(here/'audio_session_watch.py',a.stage/'audio_session_watch.py')
 shutil.copy2(here/'media_images.py',a.stage/'media_images.py')
 for file in sorted((here.parents[1]/'firefox').iterdir()):
     if file.is_file() and file.suffix in ['.py','.html','.js','.json']:
