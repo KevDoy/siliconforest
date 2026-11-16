@@ -17,7 +17,7 @@ int main(void) {@autoreleasepool {
   if(name)CFRelease(name);if(font)CFRelease(font);
  }
  CTFontRef base=CTFontCreateWithName(CFSTR("system-ui"),18,NULL);
- const char *languages[]={"en","el","ar","hi","zh-Hans","ja","ko"};UniChar samples[]={0x0041,0x03b1,0x0627,0x0915,0x4e2d,0x3042,0xac00};
+ const char *languages[]={"en","el","ar","hi","zh-Hans","ja","ko","th"};UniChar samples[]={0x0041,0x03b1,0x0627,0x0915,0x4e2d,0x3042,0xac00,0x0e20};
  for(unsigned i=0;i<sizeof(samples)/sizeof(*samples);i++){
   CFStringRef language=(CFStringRef)[NSString stringWithUTF8String:languages[i]];CFArrayRef requested=CFArrayCreate(NULL,(const void **)&language,1,&kCFTypeArrayCallBacks);
   CFArrayRef cascade=CTFontCopyDefaultCascadeListForLanguages(base,requested);unsigned covered=0;

@@ -12,6 +12,52 @@ import secrets
 import time
 
 
+def menu_button_in_renderer(path, frame):
+    """Locate the three purple menu strokes in the admitted light chrome.
+
+    This deliberately refuses an absent/ambiguous icon. Firefox's reported
+    screen origin is incorrect on this platform; trusted button events below
+    independently confirm that the physical click reached the intended control.
+    """
+    data = path.read_bytes()
+    header = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', data)
+    if not header:
+        raise ValueError('Expected actual renderer P6 capture')
+    width, height = map(int, header.groups())
+    pixels = memoryview(data)[header.end():]
+    if len(pixels) != width*height*3:
+        raise ValueError('Invalid renderer pixel count')
+    fx, fy, fw, fh = frame
+    rows = {}
+    for y in range(max(0, fy+45), min(height, fy+250, fy+fh)):
+        start = None
+        for x in range(max(0, fx+fw-100), min(width, fx+fw-12)):
+            r, g, b = pixels[(y*width+x)*3:(y*width+x)*3+3]
+            ink = b >= r+6 and b >= g+6 and r < 230 and g < 230
+            if ink and start is None:
+                start = x
+            if not ink and start is not None:
+                if 8 <= x-start <= 32:
+                    rows.setdefault((start, x-start), []).append(y)
+                start = None
+    clusters = []
+    for (x, length), ys in rows.items():
+        for y in ys:
+            for spacing in range(3, 13):
+                if y+spacing in ys and y+2*spacing in ys:
+                    point = (x+(length-1)/2, y+spacing)
+                    for cluster in clusters:
+                        if abs(point[0]-cluster[0][0]) < 2 and abs(point[1]-cluster[0][1]) <= 3:
+                            cluster.append(point)
+                            break
+                    else:
+                        clusters.append([point])
+    candidates = [(sum(p[0] for p in c)/len(c), sum(p[1] for p in c)/len(c)) for c in clusters]
+    if len(candidates) != 1:
+        raise RuntimeError('Expected one unambiguous three-stroke menu icon in the admitted renderer frame')
+    return dict(x=candidates[0][0], y=candidates[0][1], method='actual-renderer-three-stroke-light-chrome-icon')
+
+
 def measure(client, output, deadline, admission=None):
     from presentation_seat import admit, _request
     from renderer_capture import capture
@@ -56,34 +102,17 @@ def measure(client, output, deadline, admission=None):
         result['before'] = state()
         if result['before']['windows'] != 1:
             raise RuntimeError('Expected one owned browser window')
-        anchors = chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
+        chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
           const b=w.document.getElementById("PanelUI-menu-button");
           if(!b)throw new Error("No application menu button");
           w.__sffxPopupEvents=[];
           b.addEventListener("mousedown",e=>w.__sffxPopupEvents.push({trusted:e.isTrusted,button:e.button}),true);
-          const anchors=[];
-          for(const [index,color] of [[253,1,251],[1,253,173]].entries()){
-            const e=w.document.createElementNS("http://www.w3.org/1999/xhtml","div");
-            e.id="sffx-popup-anchor-"+index;
-            e.style.cssText=`all:initial;position:fixed;left:${64+32*index}px;top:${32+32*index}px;width:8px;height:8px;display:block;background:rgb(${color.join(',')});z-index:2147483647;pointer-events:none`;
-            w.document.documentElement.appendChild(e);const r=e.getBoundingClientRect();
-            anchors.push({x:r.x,y:r.y,width:r.width,height:r.height,color});
-          }
-          return {anchors,scale:w.devicePixelRatio};''')
-        time.sleep(.3)
+          return true;''')
         calibration_path = output.with_name('popup-chrome-calibration.ppm')
         result['chrome_capture'] = capture(calibration_path)
-        from screen_calibration import calibrate
-        result['chrome_calibration'] = calibration = calibrate(calibration_path, anchors['anchors'], anchors['scale'])
-        chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
-          w.document.querySelectorAll('[id^="sffx-popup-anchor-"]').forEach(e=>e.remove());return true;''')
+        result['button_pixel_location'] = point = menu_button_in_renderer(calibration_path, values)
         save()
         for index in range(20):
-            point = chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
-              const r=w.document.getElementById("PanelUI-menu-button").getBoundingClientRect();
-              return {x:r.x+r.width/2,y:r.y+r.height/2};''')
-            point = {axis: calibration['origin'][i] + point[axis]*calibration['scale']
-                     for i, axis in enumerate(['x', 'y'])}
             x, y, width, height = result['current_frame']
             px, py = point['x'], point['y']
             if not (0 <= px <= 2559 and 0 <= py <= 1599 and x <= px < x+width and y <= py < y+height):

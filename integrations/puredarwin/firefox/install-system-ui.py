@@ -106,9 +106,20 @@ def main():
             providers[name] = Path('/System/Library/Frameworks') / (name + '.framework/Versions/A') / name
         if not Path('/usr/libexec/iosurfaced').is_file():
             raise FileNotFoundError('Canonical IOSurface broker is not installed')
+        providers['iosurfaced'] = Path('/usr/libexec/iosurfaced')
         manifest['system_gpu_providers'] = True
         manifest.pop('surface_override', None)
     uuids = {name: dict(path=str(path), uuid=image_uuid(path)) for name, path in providers.items()}
+    if args.system_gpu:
+        identity_path = source / 'canonical-gpu-identities.json'
+        if sha(identity_path) != cold['sha256'].get(identity_path.name):
+            raise ValueError('Canonical GPU identity receipt is not cold-verified')
+        expected = json.loads(identity_path.read_text())
+        if set(expected['identities']) != {'IOSurface', 'iosurfaced'}:
+            raise ValueError('Canonical surface and broker identities are both required')
+        for name, identity in expected['identities'].items():
+            if uuids[name]['uuid'] != identity['uuid']:
+                raise ValueError('Canonical GPU cohort is not installed: ' + name)
     # A future system install can supersede c18; record the actual metadata and
     # verify loaded paths in the browser gate instead of pinning stale hashes.
     manifest['system_ui'] = True

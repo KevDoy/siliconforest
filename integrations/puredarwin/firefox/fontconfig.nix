@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Private process font configuration, including one pinned OFL fallback font.
-{ prefix ? "/private/var/db/sffx/fonts-v3" }:
+{ prefix ? "/private/var/db/sffx/fonts-v3", thaiFallback ? false }:
 let
  a=import ../cocoa/arm64.nix;
  fonts=import ./noto-fonts.nix {pkgs=a.pkgs;};
 in a.pkgs.runCommand "sffx-private-font-configuration" {} ''
  mkdir -p $out/cache
  cp ${fonts.font} $out/NotoSansDevanagari-Regular.ttf
+ ${a.pkgs.lib.optionalString thaiFallback ''cp ${fonts.thai} $out/NotoSansThai-Regular.ttf''}
  cp ${fonts.license} $out/OFL.txt
  cat > $out/fonts.conf <<'EOF'
  <?xml version="1.0"?>
