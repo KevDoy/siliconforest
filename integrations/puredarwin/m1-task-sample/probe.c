@@ -22,10 +22,19 @@ static pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
 static volatile sig_atomic_t owned_child=-1;
 static void timed_out(int sig){pid_t pid=(pid_t)owned_child;if(pid>1)kill(pid,SIGKILL);_exit(128+sig);}
 static void *idle(void *arg){(void)arg;pthread_mutex_lock(&mutex);for(;;)pthread_cond_wait(&cond,&mutex);return NULL;}
+static void *ipc_idle(void *arg){
+ (void)arg;mach_port_t port=MACH_PORT_NULL;
+ kern_return_t kr=mach_port_allocate(mach_task_self(),MACH_PORT_RIGHT_RECEIVE,&port);
+ if(kr!=KERN_SUCCESS){printf("TASK_SAMPLE IPC allocate=%d\n",kr);_exit(94);}
+ mach_msg_header_t msg;memset(&msg,0,sizeof msg);
+ /* No sender and no RCV_INTERRUPT/TIMEOUT option. Report unexpected returns. */
+ kr=mach_msg(&msg,MACH_RCV_MSG,0,sizeof msg,port,MACH_MSG_TIMEOUT_NONE,MACH_PORT_NULL);
+ printf("TASK_SAMPLE IPC unexpected_receive_return=0x%x\n",kr);_exit(95);
+}
 static uint64_t ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+t.tv_nsec;}
-static void child(int ready){
+static void child(int ready,int ipc){
  alarm(30);pthread_t workers[32];
- for(unsigned i=0;i<32;i++)if(pthread_create(&workers[i],NULL,idle,NULL))_exit(91);
+ for(unsigned i=0;i<32;i++)if(pthread_create(&workers[i],NULL,ipc&&(i&1)?ipc_idle:idle,NULL))_exit(91);
  if(write(ready,"R",1)!=1)_exit(92);close(ready);
  for(;;)usleep(10000);
 }
@@ -46,11 +55,12 @@ static int walk(task_t task,thread_t thread,int frames,unsigned long *reads){
 int main(int argc,char **argv){
  setbuf(stdout,NULL);signal(SIGALRM,timed_out);alarm(25);
  char uuid[128]={0};size_t size=sizeof uuid;
- if(argc!=2||sysctlbyname("kern.kernelcacheuuid",uuid,&size,NULL,0)||strcmp(uuid,argv[1])){fputs("REFUSED: exact kernel UUID required; only forks its own target\n",stderr);return 77;}
+ if((argc!=2&&argc!=3)||(argc==3&&strcmp(argv[2],"ipc"))||sysctlbyname("kern.kernelcacheuuid",uuid,&size,NULL,0)||strcmp(uuid,argv[1])){fputs("REFUSED: exact kernel UUID required; only forks its own target\n",stderr);return 77;}
+ int ipc=argc==3;
  for(int mode=0;mode<4;mode++){
   int pipefd[2];if(pipe(pipefd))return 2;pid_t pid=fork();if(pid<0)return 3;
-  if(!pid){close(pipefd[0]);child(pipefd[1]);_exit(93);}close(pipefd[1]);char ready=0;
-  owned_child=pid;printf("TASK_SAMPLE START mode=%d owned_pid=%d\n",mode,pid);
+  if(!pid){close(pipefd[0]);child(pipefd[1],ipc);_exit(93);}close(pipefd[1]);char ready=0;
+  owned_child=pid;printf("TASK_SAMPLE START mode=%d owned_pid=%d ipc_workers=%d\n",mode,pid,ipc?16:0);
   if(read(pipefd[0],&ready,1)!=1||ready!='R'){kill(pid,SIGKILL);waitpid(pid,NULL,0);return 4;}close(pipefd[0]);
   task_t task=MACH_PORT_NULL;kern_return_t kr=task_for_pid(mach_task_self(),pid,&task);
   if(kr!=KERN_SUCCESS){kill(pid,SIGKILL);waitpid(pid,NULL,0);printf("TASK_SAMPLE FAIL task_for_pid=%d\n",kr);return 5;}
