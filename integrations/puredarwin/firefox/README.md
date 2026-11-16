@@ -35,3 +35,14 @@ qualified image. It checks both prior text hashes, the original cold payload,
 and the executed image's load-command UUID. It preserves the original backup
 and never treats lowered executed Mach-O bytes as a new pristine image. A
 changed launcher or runtime manifest prevents both retry and rollback.
+
+## Temporary QA data
+
+Native QA directories can contain large renderer captures and fresh browser
+caches. `retire-owned-run.py --run runs/firefox/<run>` verifies the collected
+archive by reading every file and plans retirement of that exact remote run.
+With `--apply`, use the shared GUI or core lock: it checks coordination again,
+refuses live process and installed-runtime references, and records before/after
+free space. It never removes a tool or provider prefix. The workstation archive
+and extracted evidence remain available; executed image bytes in an archive
+remain diagnostic evidence, not a pristine build source.

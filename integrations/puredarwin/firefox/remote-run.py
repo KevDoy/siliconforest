@@ -188,7 +188,11 @@ def main():
     profile.mkdir(mode=0o700)
     home = args.run / 'home'
     home.mkdir(mode=0o700)
-    prefs = {'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False,
+    # Private wrappers can call daily.plan() without daily.main()'s profile
+    # preparation. Match the installed window path; --pref still permits
+    # explicit CSD/ANGLE controls below.
+    prefs = {'browser.tabs.inTitlebar': 0, 'webgl.disable-angle': True,
+             'browser.shell.checkDefaultBrowser': False, 'browser.aboutwelcome.enabled': False,
              'browser.preonboarding.enabled': False, 'browser.startup.homepage_override.mstone': 'ignore',
              'startup.homepage_welcome_url': '', 'startup.homepage_welcome_url.additional': '',
              'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False,
