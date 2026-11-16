@@ -30,6 +30,67 @@ independent hashes/PTS, GPU completion and browser rate/copy measurements pass.
 The earlier149/150 frame-hash failure remains open; a later600-frame exact run
 did not reproduce it or prove the uninstalled IRQ fix works on hardware.
 
+## FX-035 cadence boundaries
+
+All five FXQA clips deliver rVFC callbacks around25Hz despite30/60fps input
+and zero reported drops. This remains a defect, not a60fps pass. The selected
+CoreVideo family retains PD's pthread display link; Finch's dispatch-timer
+implementation is excluded by `CoreVideo/pd-displaylink.nix`. An isolated60Hz
+callback test does not establish Firefox's actual vsync provider or delivery.
+
+`cadence-trace.c` is a process-local, opt-in diagnostic enabled by
+`SF_MEDIA_CADENCE_TRACE=1`. It observes CV display-link callback entry/duration,
+VT output callback entry/PTS/duration and CGL IOSurface plane-bind duration.
+Arguments, return values, image references and pacing are forwarded unchanged.
+It adds no pixel access, GPU wait or per-callback I/O. A4Hz sampler drains a
+bounded32,768-event table;64 stable contexts remain until process exit. Do not
+unload the image. Missing/interposition-bypassed hooks are unobserved, not free.
+This selected CV provider has no `CVDisplayLinkSetOutputHandler` export; the
+tracer does not introduce that dependency.
+
+Linux-built M5 controls passed2026-11-16 around01:04Z: baseline and observed
+CV programs printed identical properties and216 callbacks/zero forwarding
+errors. The trace contains all216 callbacks at119.981Hz on that controller.
+An HEVC Main10 admission-only control returned0/session-present with one
+observed VT-create event. These establish callback/control transparency on
+that Mac, not decoded-output/CGL forwarding, M1 cadence or Firefox performance.
+All files were SHA-256 checked before execution in a fresh temporary directory;
+each program had a30s timeout, no DYLD overrides and subsequent cleanup.
+
+`prepare-cadence.py` packages those Linux outputs and a snapshot of the shared
+Firefox diagnostic sources. `run-cadence.py` requires caller-held gui.lock and
+bench, then checks the current coordination gate. Its `control` phase copies
+and cold-verifies the packet; `browser` and `profile` use the recorded receipt.
+`cadence-browser.py` uses the installed launcher's explicit isolated-profile
+observer hook and refuses if that hook is absent. It records owner activity
+without waiting, injects no keys/pointer events and runs only its own Firefox
+family. The optional Gecko profile is diagnostic, not a performance result.
+
+`analyze-cadence.py` uses each process's actual Mach timebase and accepts an
+epoch interval matching the browser fixture. Decoder prefetch/bursts are not
+presentation FPS; CGL bind completion is not proof of panel presentation. Eight
+synthetic controls cover60/25Hz discrimination, missing hooks/timebases,
+duplicate identities, overflow and measurement-window selection. The browser
+result option aligns each fixture interval and distinguishes callback frequency
+from reported picture-serial jumps; those jumps are not labeled dropped frames.
+No25Hz cause
+or fix is established until the same browser run observes the boundaries.
+
+`clocked-corevideo.nix` composes TERM9's compositor-clock provider with our
+pixel-buffer lifetime addition as ONE full CoreVideo family. It is staged,
+not selected by default: the default lifetime recipe resolves to the exact
+previous Nix artifact. TERM owns clock qualification and FX owns coherent
+browser activation; a clock/export build alone is not a cadence fix.
+
+`prepare-shared-capture.py` creates the strict native kernel-qualification
+packet: own600-frame1080p H264 and300-frame4K HEVC fixtures, independent
+NV12 hashes/PTS, GPU FD/plane/DATA-offset checks and a picture held64 callbacks.
+It uses FX's current NV12 surface/broker with the finalizing-surface lookup fix,
+and the single CV/VT producer payload. Each case saves kernel counters around
+its own bounded decoder/broker group. `SF_VT_ZERO_COPY=require` rejects copy
+fallback. This tests capture correctness, not GPU sampling/fences, presentation
+FPS or browser performance; CODEX-TB owns its new-kernel execution gate.
+
 ## Audio lifecycle observer
 
 `hal-observer.c` observes API-boundary Start/Stop/Uninitialize/Dispose, exact

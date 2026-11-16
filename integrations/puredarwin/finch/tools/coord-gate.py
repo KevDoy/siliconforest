@@ -31,7 +31,7 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 active.pop((owner, 'recovery-freeze'), None)
             # A kernel owner's dated reservation blocks new work immediately.
             # It is not an actual reboot epoch and has no timeout-based release.
-            scheduled = re.match(r'^notice\s+[a-z0-9_-]+\s+earliest\s*(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
+            scheduled = re.match(r'^notice\s+.+?\bearliest\s*(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
             if scheduled:
                 active[(owner, 'scheduled-reboot')] = (line, [], owner)
                 offered_until.pop(owner, None)
@@ -39,7 +39,7 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 # earliest boot. This is permission from that actual notice,
                 # never an inferred expiration or a fabricated completion.
                 compact = re.sub(r'\s+', '', lower_body)
-                offer = re.search(r'(?:^|[.;])otheragentsmayusem1normallybefore(\d{2}):(\d{2})(?::(\d{2}))?z?(?:[.;]|$)', compact)
+                offer = re.search(r'(?:^|[.;])otheragentsmayusem1normallybefore(\d{2}):(\d{2})(?::(\d{2}))?z?(?:[.;,]|$)', compact)
                 if offer:
                     try:
                         announced = datetime.fromisoformat(line.split()[0].replace('Z', '+00:00'))

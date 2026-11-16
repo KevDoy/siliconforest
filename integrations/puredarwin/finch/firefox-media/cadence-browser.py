@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Target-only, finite installed-Firefox trace in a fresh isolated profile.
+
+Caller holds gui.lock and bench and checks coord-gate immediately beforehand.
+Uses the shared Firefox runner without changing its sources or installed files.
+No pointer/key injection, default profile, preferences outside this run or signals
+to processes outside the runner's identity-checked child family.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import runpy
+import sys
+import types
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--run',type=Path,required=True)
+    p.add_argument('--profile-video',action='store_true')
+    a=p.parse_args()
+    root=Path(__file__).resolve().parent
+    private=Path('/private/var/db/sffx')
+    if os.uname().sysname!='Darwin':raise ValueError('SiliconForest target only')
+    if (not a.run.is_absolute() or '..' in a.run.parts or
+            not a.run.is_relative_to(private) or a.run.exists()):
+        raise ValueError('Fresh explicit private run required')
+    library=root/'lib/SFMediaCadenceTrace.dylib'
+    if not root.is_relative_to(private) or not library.is_file():
+        raise ValueError('Cold-verified private trace packet required')
+    # Current durable policy records input and missing markers, never waits for
+    # owner idle. Keep this local adapter out of the shared Firefox runner.
+    sys.path.insert(0,str(root))
+    from owner_input import OwnerActivityRecorder
+    class RecordOnlyGuard(OwnerActivityRecorder):
+        def __init__(self,*args,require_idle=False,**kwargs):
+            del require_idle
+            super().__init__(*args,**kwargs)
+    guard=types.ModuleType('owner_guard');guard.OwnerInputGuard=RecordOnlyGuard
+    sys.modules['owner_guard']=guard
+    tools=root/'tools';sys.path.insert(0,str(tools))
+    os.environ.update(SFFX_DIAGNOSTIC_OBSERVER=str(library),
+                      SF_MEDIA_CADENCE_TRACE='1',SF_MEDIA_CADENCE_SECONDS='120')
+    runtime=Path('/usr/local/lib/siliconforest/firefox/160-system1')
+    # Confirm the installed launcher supports the isolated-profile hook. A
+    # missing hook is a refusal, never a claim that a trace was installed.
+    launcher=Path('/Applications/Firefox.app/Contents/MacOS/firefox-sf')
+    if not launcher.is_file() or 'SFFX_DIAGNOSTIC_OBSERVER' not in launcher.read_text():
+        raise ValueError('Installed launcher lacks isolated diagnostic hook')
+    manifest=json.loads((runtime/'release.json').read_text())
+    a.run.mkdir(parents=True)
+    (a.run/'cadence-launch.json').write_text(json.dumps(dict(
+        release=manifest,diagnostic_only=True,timing_qualified=False,
+        synthetic_input=False,owner_idle_wait=False,trace_library=str(library)),indent=2)+'\n')
+    # The shared runner requires a nonexistent destination.
+    destination=a.run/'browser'
+    argv=[str(tools/'remote-run.py'),'--bundle','/Applications/Firefox.app',
+          '--executable','firefox-sf','--run',str(destination),'--seconds','120',
+          '--quiet-trace','--measure-all-videos','--page-load-strategy','none',
+          '--pref','media.autoplay.default=0']
+    if a.profile_video:argv+=['--profile-video']
+    for clip in ['pattern-1080p60-h264.mp4','pattern-4k30-hevc.mp4']:
+        argv+=['--url','file://'+str(tools/'video-page.html')+
+               '?src=file:///private/var/db/sffx/media-highrate-v1/'+clip+
+               '&deferred=1&deadline=25000']
+    sys.argv=argv
+    runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+
+
+if __name__=='__main__':main()

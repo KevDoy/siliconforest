@@ -8,6 +8,16 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_multiword_kernel_notice_is_a_real_reservation(self):
+        from datetime import datetime,timezone
+        text=('2026-11-16T01:05:09Z CODEX-TB NOTICE next Firefox kernel install '
+              'earliest01:07:30Z (2min+). Otheragents mayuseM1normally before01:07:30, then honorlocks; source continues.\n')
+        self.assertIsNotNone(gate.pending_hold(text,now=datetime(2026,11,16,1,8,tzinfo=timezone.utc)))
+        self.assertIsNone(gate.pending_hold(text,now=datetime(2026,11,16,1,6,tzinfo=timezone.utc),max_seconds=60))
+        self.assertIsNotNone(gate.pending_hold(text,now=datetime(2026,11,16,1,6,tzinfo=timezone.utc),max_seconds=91))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB clean reboot to Linux\nV CODEX-TB M1 back in SiliconForest\n'))
+
     def test_devfs_exhaustion_needs_the_exact_installed_fix_marker(self):
         text="T COORDINATOR: GPU device slots exhausted AGAIN; until 'M1 back in SiliconForest' is logged.\n"
         self.assertIsNotNone(gate.pending_hold(text))
