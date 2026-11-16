@@ -447,23 +447,80 @@ diagnostic observation, not a usable preference recommendation. FX's activated
 interactive fixture paints with the same graphics cohort; no-input first-show
 and the additional staged CV clock remain isolated next controls.
 
-The actual installed-browser connection-loss test completed without cleanup
-signals: closing only its own qualified Wayland connection made the parent
-exit within149.6ms and the complete owned family within380.1ms. No pointer/key
-input or foreign process control was used. Server aggregate mixing ended;
-its log does not identify the client slot, so per-client reclamation and
-acoustic stop are not fully established. The new optional `--audio-clock-family`
-comparison packages the complete forwarding AudioToolbox family, verifies the
-actual main and PD output-child image paths and can use our generated AAC
-fixture. The prepared normalized-AAC test has not run: the fresh coordination
-gate refused77 during TB's kernel45 reservation. No browser-clock selection,
-latency or abnormal-death result is inferred from preparation.
+The actual installed-browser connection-loss baseline naturally ends the parent
+within149.6ms and the complete owned family within380.1ms, without cleanup
+signals. This is distinct from acoustic stop or exact server-slot attribution.
 
-The optional `prepare-cadence.py --codec-fixtures OUR_DIRECTORY` checks our
-Linux-generated AV1/VP9/10-bit-PQ fixture hashes and freezes them with their
-manifest. `run-cadence.py ... codecs` measures each using the installed runtime
-without boundary tracing or altered codec preferences. It captures actual
-process CPU and kernel job deltas, and queries MediaCapabilities after the first
-timed measurement. Declaration results do not prove hardware, speed or HDR
-rendering. Rejected media stays a recorded failure; correct offscreen pixels
-still do not qualify a visible window. The first native matrix is queued.
+The optional generated-codec matrix freezes Linux hashes and probes each bitstream
+using installed media. MediaCapabilities declarations, actual decoder jobs,
+CPU, offscreen pixels and visible rendering are kept as separate observations.
+Rejected media remains a recorded failure; no codec preferences are altered.
+
+## Verified audio variant and integration request
+
+The full-family AAC/browser test subsequently passed actual selection of both
+AudioToolbox and its PD output child, retained canonical AudioUnit/CoreAudio,
+and logged `SF_AU_CLOCK normalized=1`. Its last observer sample has244 successful
+callbacks/no errors,124419 requested frames and125440 frames written to its own
+48k HAL ring. Those are distinct counters, not an acoustic observation. Closing
+only its own Wayland connection naturally ended the parent within172.33ms and
+its complete family within404.80ms, with no cleanup signals. The server mixed
+128000 frames/zero underruns and later closed its output; no client-slot/PID line
+was logged, so resource reclamation and acoustic stop remain unqualified.
+
+`audio-runtime-plan.patch` records the exact request for FX's launcher owner.
+FX integrated it in commit536ca8013; owner selection remains unchanged. `audio_override` selects a complete versioned
+AudioToolbox family and `audio_output_clock=true` enables only the audited PD
+clock. Seven namespace/type refusals and two valid plans pass on the host.
+The main library remains byte-identical; its retained PD child supplies the
+clock correction. `stage-audio-clock.py` copies only that family to a NEW
+inactive prefix after the recorded two-minute notice, verifies every file on
+M1 before any execution and records an install ledger. It refuses replacement
+and partial retries, changes no canonical provider/launcher/daemon and leaves
+selection to FX's integrated browser gate. Startup's32ms clock-floor outlier
+and perceptual A/V sync are still open.
+
+The private existing-PD-timer control(v13) and canonical-CV plus forced-copy
+control(v14) both still show a transparent browser client, despite600/300
+complete decoding, zero reported drops and matching final offscreen hashes.
+Thus neither the staged CV clock nor its added lifetime implementation is
+required to reproduce this no-input visible failure. These controls do not fix
+Gecko's40ms notifications or qualify panel playback.
+
+The first v14 collection timed out copying its complete fresh user profile;
+that partial archive/failure stays recorded. A separate CLI retrieval recovered
+results/captures without rerunning Firefox. Future bounded collections exclude
+`*/profile`, retaining that profile and any minidumps on the M1 for a separate
+retrieval. Result logs, captures and Gecko diagnostic profiles outside the user
+profile are still collected; collection timeout is explicit and does not erase
+completed native execution or become a pass.
+
+`client-exit-probe.nix` builds our no-output native resource control. Eighty
+fresh exec children each connect an actual HAL ring, verify running0 and call
+`_exit` without Close/Stop/Dispose/atexit. All80 succeed on M1 in2.529s; the
+reviewed server source has64 slots, so finite session capacity is recycled
+across abrupt task death. This does not identify a particular Firefox slot,
+prove all80 resources are immediately destroyed, or measure acoustic stop.
+Other audio was active; its aggregate server counters are not attributed to
+these silent queries. No server/kernel/device setting is changed.
+
+## Installed-runtime high-rate codecs and public YouTube
+
+AV1 1080p60's generated pattern completes600/0 in10.208s with no decoder jobs;
+RDD58.67%/family179.22% of one core. VP9 4K30 completes300/0 in10.280s,
+RDD27.25%/family151.05%,313 hardware jobs (including codec subframes; audit
+required before exact attribution). Both retain40.04ms median video callbacks;
+VP9's first gap is144.82ms. These short patterns do not establish all-site speed.
+AV1 declarations correctly say not power efficient; no disable/preference follows.
+
+The public YouTube control uses only its own fresh profile and verifies the
+requested non-ad video before muted programmatic play, without consent/account
+or pointer/key interaction. A separate `youtube-profile` phase adds a Gecko
+media profile and must never supply performance qualification. CPU deltas bracket
+playback rather than readiness; collection excludes the browser user profile.
+The admitted BBB clip advances15.022s in15.024s at1280x720,901frames/0reported
+drops. Complete family133.80%,RDD29.38%; hardware jobs do not increase, and the
+codec identity was not captured. rVFC median40.04/p9550/max66.70ms. The compositor
+capture was inspected and remains transparent inside the Firefox client. This
+is a failed visible-playback gate, even with installed media providers. No panel
+FPS, perceived A/V sync, or full-owner experience claim follows.

@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile'])
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
@@ -32,6 +32,8 @@ ssh=['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTi
      '-o','UserKnownHostsFile='+str(Path.home()/'.ssh/known_hosts_m1_siliconforest'),
      '-o','HostKeyAlias=m1-siliconforest','root@10.1.1.211']
 receipt=a.stage/'target-cold-verified.json'
+result=None
+collection_error=None
 def log(message):
     with (repo/'runs/m1-coord/log.txt').open('a') as f:
         f.write(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')+' CODEX '+message+'\n')
@@ -55,6 +57,9 @@ try:
         if a.phase=='profile':argv+=['--profile-video']
         if a.phase=='rates':argv+=['--rate-control']
         if a.phase=='codecs':argv+=['--codec-matrix','--without-trace']
+        if a.phase in ['youtube','youtube-profile']:
+            argv+=['--youtube','--without-trace']
+            if a.phase=='youtube-profile':argv+=['--youtube-profile']
         if a.phase in ['copy','shared']:
             argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy','--without-trace']
         if a.graphics_override:
@@ -70,15 +75,24 @@ try:
 finally:
     names=['cold-verified.json','control-results.json'] if a.phase=='control' else [a.phase+'-run']
     archive=out/'evidence.tar.gz'
-    with archive.open('wb') as stream:
-        r=subprocess.run(ssh+[shlex.join(['tar','-C',dest,'-czf','-']+names)],
-                         stdout=stream,stderr=subprocess.PIPE,timeout=60)
-    (out/'collection.stderr').write_bytes(r.stderr)
-    if r.returncode==0:
+    r=None
+    try:
+        with archive.open('wb') as stream:
+            r=subprocess.run(ssh+[shlex.join(['tar','-C',dest,'--exclude=*/profile','-czf','-']+names)],
+                             stdout=stream,stderr=subprocess.PIPE,timeout=30)
+    except subprocess.TimeoutExpired as error:
+        collection_error=str(error)
+    (out/'collection.stderr').write_bytes(r.stderr if r else b'Collection timed out; partial archive retained\n')
+    (out/'collection-status.json').write_text(json.dumps(dict(
+        returncode=r.returncode if r else None,error=collection_error,
+        excluded=['*/profile'],profile_retained_on_target=True,
+        scope='Results, logs, captures and diagnostic profiles outside the Firefox user profile; user profile/minidumps retained on target'))+'\n')
+    if r is not None and r.returncode==0:
         with tarfile.open(archive) as t:
             members=t.getmembers()
             (out/'evidence-links.json').write_text(json.dumps([dict(name=m.name,target=m.linkname)
                 for m in members if m.issym() or m.islnk()])+'\n')
             t.extractall(out,members=[m for m in members if not m.issym() and not m.islnk()],filter='data')
-    log('media cadence '+a.phase+' END; evidence collected, no installed changes/input.')
+    log('media cadence '+a.phase+' END; collection '+('OK' if r is not None and r.returncode==0 else 'FAILED')+', no installed changes/input.')
+if collection_error:raise RuntimeError(collection_error)
 raise SystemExit(result.returncode or r.returncode)

@@ -30,7 +30,11 @@ def main():
     p.add_argument('--no-native-compositor',action='store_true',help='Own-profile diagnostic: one full-window layer instead of native tile layers')
     p.add_argument('--timer-control',action='store_true',help='Own-process comparison using the existing PD_CV_TIMER escape hatch')
     p.add_argument('--codec-matrix',action='store_true',help='Owned AV1/VP9/PQ fixtures; declarations remain separate from decode')
+    p.add_argument('--youtube',action='store_true',help='Own public non-DRM YouTube tab, no account/consent/ad interaction')
+    p.add_argument('--youtube-profile',action='store_true',help='Separate diagnostic Gecko media profile; excludes performance qualification')
     a=p.parse_args()
+    if a.youtube_profile and not a.youtube:raise ValueError('YouTube profile requires its owned playback case')
+    if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
     if a.frame_mode=='require' and not a.staged_media:
         raise ValueError('Strict sharing requires the reviewed staged VT producer')
     if a.graphics_override and (not a.staged_media or '..' in a.graphics_override.parts or
@@ -69,6 +73,37 @@ def main():
             if port is not None and port!=chosen_port:
                 raise ValueError('A shared Marionette port is not allowed')
             super().__init__(port=chosen_port,timeout=timeout)
+
+        def command(self,name,parameters=None):
+            # This is our frozen streaming.py's single bounded playback RPC,
+            # after video identity/ad/consent admission. CPU excludes readiness
+            # and network loading. Never instrument arbitrary page scripts.
+            source=(parameters or {}).get('script','')
+            if not (a.youtube and name=='WebDriver:ExecuteAsyncScript' and
+                    'startMedia=v.currentTime' in source and 'v.requestVideoFrameCallback' in source):
+                return super().command(name,parameters)
+            import process_cpu
+            before=self.cpu_snapshot();admission=None
+            if a.youtube_profile:
+                import pipeline_profile
+                admission=pipeline_profile.start(self,media=True)
+            try:playback=super().command(name,parameters)
+            finally:
+                if admission:
+                    directory=a.run/'youtube-gecko-profile';directory.mkdir()
+                    profile=pipeline_profile.stop(self,directory,admission)
+            after=self.cpu_snapshot()
+            playback['owned_process_cpu']=dict(before=before,after=after,comparison=process_cpu.compare(before,after))
+            playback['profile_diagnostic_only']=a.youtube_profile
+            if admission:playback['gecko_profile']=profile
+            try:
+                capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(a.run/'youtube-renderer.ppm')],
+                    capture_output=True,text=True,timeout=5,
+                    env=dict(os.environ,XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',WAYLAND_DISPLAY='wayland-0'))
+                playback['renderer_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
+                    file=str(a.run/'youtube-renderer.ppm'),input_injected=False,visible_playback_qualified=False)
+            except Exception as error:playback['renderer_capture_error']=str(error)
+            return playback
 
         def start(self,*args,**kwargs):
             result=super().start(*args,**kwargs)
@@ -168,6 +203,7 @@ def main():
         native_compositor_disabled=a.no_native_compositor,
         cv_timer_control=a.timer_control,
         codec_matrix=a.codec_matrix,
+        youtube=a.youtube,youtube_profile=a.youtube_profile,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
@@ -176,11 +212,11 @@ def main():
           '--quiet-trace','--measure-all-videos','--page-load-strategy','none',
           '--sample-path','/private/var/db/sffx/probes-v3/sf-sample',
           '--expect-appkit-prefix','/System/Library/Frameworks/AppKit.framework',
-          '--pref','media.autoplay.default=0','--pref','marionette.port='+str(port),
+          '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
-    if (tools/'gpu-counters.json').is_file():
+    if (tools/'gpu-counters.json').is_file() and not a.youtube:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
                '--policy-probe-path',str(root/'bin/thread-policy-probe')]
     if a.staged_media:
@@ -196,13 +232,26 @@ def main():
            [('pattern-1080p60-h264.mp4',1),('pattern-4k30-hevc.mp4',1)])
     if a.codec_matrix:
         if a.rate_control:raise ValueError('Codec and rate comparisons are separate measurements')
-        clips=[(name,1) for name in ['av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm']]
+        names=['av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm']
+        selection=root/'media/codecs/selection.json'
+        if selection.exists():
+            names=json.loads(selection.read_text())
+            allowed={'av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm','av1-1080p60.webm','vp9-4k30.webm'}
+            if not names or len(names)>4 or len(names)!=len(set(names)) or any(name not in allowed for name in names):
+                raise ValueError('Invalid frozen codec selection')
+        clips=[(name,1) for name in names]
     for clip,rate in clips:
         source=root/'media/codecs'/clip if a.codec_matrix else Path('/private/var/db/sffx/media-highrate-v1')/clip
         if a.codec_matrix and not source.is_file():raise ValueError('Missing generated codec fixture: '+clip)
         argv+=['--url','file://'+str(tools/'video-page.html')+
                '?src='+source.as_uri()+
                '&deferred=1&deadline=25000&rate='+str(rate)]
+    if a.youtube:
+        # Keep only the owned public tab. No user-account or consent state is
+        # imported; streaming.py refuses if the requested non-ad video is absent.
+        first=argv.index('--url');argv=argv[:first]
+        argv.remove('--measure-all-videos')
+        argv+=['--streaming','--url','https://www.youtube.com/watch?v=aqz-KE-bpKQ']
     sys.argv=argv
     runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
 

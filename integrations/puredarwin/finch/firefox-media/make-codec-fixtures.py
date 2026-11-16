@@ -5,6 +5,7 @@ import argparse,hashlib,json,subprocess
 from pathlib import Path
 
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('destination',type=Path)
+p.add_argument('--high-rate',action='store_true',help='Separate actual60Hz AV1 and4K30 VP9 sources, not repeated/upsampled frames')
 a=p.parse_args();a.destination.mkdir(exist_ok=False)
 version=subprocess.check_output(['ffmpeg','-version'],text=True).splitlines()[0]
 video=[
@@ -13,6 +14,10 @@ video=[
  ('hevc-main10-pq.mp4',1280,720,30,2,['-vf','format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc','-pix_fmt','yuv420p10le','-c:v','libx265','-preset','ultrafast','-x265-params','pools=2:frame-threads=2:log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc','-crf','28','-tag:v','hvc1','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc']),
  ('vp9-profile2-pq.webm',1280,720,30,2,['-vf','format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc','-pix_fmt','yuv420p10le','-c:v','libvpx-vp9','-profile:v','2','-deadline','realtime','-cpu-used','8','-threads','4','-b:v','3M','-color_primaries','bt2020','-color_trc','smpte2084','-colorspace','bt2020nc'])]
 commands=[]
+if a.high_rate:
+    video=[
+      ('av1-1080p60.webm',1920,1080,60,10,['-c:v','libsvtav1','-preset','12','-crf','35','-svtav1-params','lp=4']),
+      ('vp9-4k30.webm',3840,2160,30,10,['-c:v','libvpx-vp9','-deadline','realtime','-cpu-used','8','-row-mt','1','-threads','4','-b:v','16M'])]
 for name,width,height,rate,seconds,options in video:
     argv=['ffmpeg','-hide_banner','-loglevel','error','-nostdin','-f','lavfi','-i',f'testsrc2=size={width}x{height}:rate={rate}','-t',str(seconds),'-an',*options,str(a.destination/name)]
     commands.append(argv)

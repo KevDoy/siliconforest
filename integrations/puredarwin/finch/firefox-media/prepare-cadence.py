@@ -17,6 +17,7 @@ p.add_argument('--providers',type=Path,help='Reviewed media payload only; graphi
 p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exact runtime provider path/UUID and Linux symbol offset')
 p.add_argument('--policy-probe',type=Path,help='Linux-built read-only Mach helper, required with --gpu-counter-spec')
 p.add_argument('--codec-fixtures',type=Path,help='Our generated codec matrix with its Linux hash/probe manifest')
+p.add_argument('--codec-profile',choices=['basic','highrate'],default='basic')
 a=p.parse_args();here=Path(__file__).resolve().parent
 if bool(a.gpu_counter_spec)!=bool(a.policy_probe):raise ValueError('Counter specification and read-only helper required together')
 if a.stage.exists():raise ValueError('Fresh destination required')
@@ -30,6 +31,7 @@ if a.codec_fixtures:
     manifest=json.loads((a.codec_fixtures/'manifest.json').read_text())
     rows={row['file']:row for row in manifest['fixtures']}
     names=['av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm']
+    if a.codec_profile=='highrate':names=['av1-1080p60.webm','vp9-4k30.webm']
     target=a.stage/'media/codecs';target.mkdir()
     for name in names:
         source=a.codec_fixtures/name
@@ -37,6 +39,7 @@ if a.codec_fixtures:
             raise ValueError('Generated codec fixture hash changed: '+name)
         shutil.copy2(source,target/name)
     shutil.copy2(a.codec_fixtures/'manifest.json',target/'manifest.json')
+    (target/'selection.json').write_text(json.dumps(names)+'\n')
     shutil.copy2(here/'codec-capabilities.js',a.stage/'codec-capabilities.js')
 if a.policy_probe:shutil.copy2(a.policy_probe,a.stage/'bin/thread-policy-probe')
 for directory in ['bin','lib']:
