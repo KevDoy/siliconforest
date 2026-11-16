@@ -468,6 +468,9 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0177  AppKit (TERM11, clipboard): an application's write to the general board is not replaced by another client's
+#         selection that arrives before the write's offer is out (within a second; the desk's clipboard keeper re-offers
+#         the previous copy): the offer went out with the other client's types and none of the data
 #   0176  AppKit (TERM11, clipboard): data written after its type was offered goes at once into what paste requests are
 #         answered from, and a new declaration empties it (Firefox's offer went out before its data: 0 bytes / a BOM)
 #   0175  AppKit (TERM11): a view that has a layer context keeps it (a second one replaced it without invalidating it; a
@@ -690,6 +693,7 @@ let
     ./patches/0174-appkit-pasteboard-trace.patch
     ./patches/0175-appkit-view-keeps-its-layer-context-clipboard-fallback.patch
     ./patches/0176-appkit-clipboard-offered-data-follows-writes.patch
+    ./patches/0177-appkit-clipboard-write-not-replaced-before-its-offer.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
