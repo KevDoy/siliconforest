@@ -316,6 +316,20 @@ only the observer source input, `postPatch` and generated output path may change
 This keeps moving UI recipes out of the diagnostic. The resulting CGL is private
 and unselected; no canonical provider, launcher or production setting changes.
 
+The explicit-flush variant subsequently passes29 M1 diagnostic gates: complete
+921-record trace, both GPU images inspected as0/899, and ordinary Quit0 with no
+owned family or cleanup signals after1.544s. It observes880 distinct IDs and20
+missing export IDs while rVFC remains25Hz. The largest331ms0→4 image interval
+includes a frame0 exported65ms before the JS measurement and startup preroll;
+separate4→13 and45→52 gaps remain154/119ms. Its t11b UI cohort differs from the
+earlier trace, so this is not a causal before/after FPS comparison. Tiny GPU
+readback remains intrusive. Completed compositor/panel delivery is unproved.
+
+`frame-id --frame-id-cgl --frame-id-geometry GEOMETRY --frame-id-profile` adds
+the existing Gecko media/renderer profiler to this owned diagnostic. It keeps
+the frame-ID trace and clocks for locating specific gaps in the retained stacks;
+the profiled CPU/FPS values never qualify production speed.
+
 `context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
 libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
 kernel's additive128-byte/version1/capability17 contract only at successful

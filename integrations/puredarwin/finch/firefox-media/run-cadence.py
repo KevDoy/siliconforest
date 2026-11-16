@@ -23,6 +23,7 @@ p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort
 p.add_argument('--frame-id-geometry',help='Explicit private-CGL marker geometry; actual frame0 must qualify it')
 p.add_argument('--frame-id-cgl',action='store_true',help='Only the packaged private CGL; retains installed media/GLAPI/surface/broker/UI')
 p.add_argument('--frame-id-dimensions-only',action='store_true',help='Private CGL paused dimensions preflight, no geometry/readback/playback')
+p.add_argument('--frame-id-profile',action='store_true',help='Gecko media/renderer stacks for the owned frame-ID diagnostic; never speed qualification')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
 p.add_argument('--lifetime-control',action='store_true',help='Owned strict playback end/unload observation')
@@ -38,6 +39,8 @@ if a.frame_id_cgl and (a.phase!='frame-id' or a.graphics_override or not (a.fram
     raise ValueError('Private frame-ID CGL requires explicit geometry and no graphics/media cohort override')
 if a.frame_id_dimensions_only and (not a.frame_id_cgl or a.frame_id_geometry):
     raise ValueError('Dimensions-only requires private CGL and no geometry')
+if a.frame_id_profile and (a.phase!='frame-id' or not a.frame_id_cgl or a.frame_id_dimensions_only):
+    raise ValueError('Frame-ID profiling requires its private timed marker case')
 if (a.reuse_media_profile or a.start_media is not None or a.compare_pixels) and a.phase not in ['youtube1080','youtubehw']:
     raise ValueError('Own profile/seek/pixel controls require their1080 streaming case')
 if a.view_state and a.phase!='mse':raise ValueError('View-state requires separate MSE phase')
@@ -106,6 +109,7 @@ try:
         if a.frame_id_geometry:argv+=['--frame-id-geometry',a.frame_id_geometry]
         if a.frame_id_cgl:argv+=['--frame-id-cgl']
         if a.frame_id_dimensions_only:argv+=['--frame-id-dimensions-only']
+        if a.frame_id_profile:argv+=['--profile-video']
         if a.no_native_compositor:argv+=['--no-native-compositor']
         if a.timer_control:argv+=['--timer-control']
         if a.lifetime_control:argv+=['--lifetime-control']

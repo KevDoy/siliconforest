@@ -521,7 +521,7 @@ def main():
         mse_representation_control=a.mse,
         mse_programmatic_scroll=a.mse_scroll,
         view_state_diagnostic=a.view_state,
-        known_frame_id_fixture=a.frame_id,
+        known_frame_id_fixture=a.frame_id,gecko_media_profile=a.profile_video,
         private_frame_identity_graphics=a.frame_id_cgl,
         frame_identity_geometry=a.frame_id_geometry,
         frame_identity_dimensions_only=a.frame_id_dimensions_only,
