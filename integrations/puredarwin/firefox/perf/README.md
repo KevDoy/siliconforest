@@ -150,3 +150,9 @@ with the opt-in env off vs on, quiet warm profile (background services off for e
 - pixel compare (marker-cropped, same layout): scrolled page 0 differing pixels (X1, X2), unscrolled tile page 0 (X2),
   scrolled tile page 0 (X1; X2's two runs ended at different scroll offsets). On three static pages a position:fixed
   marker is missing in BOTH variants (reported to TERM10/FXLEAD), so they could not be compared: 3 pages compared, not 6.
+- pacing, more runs (A12/A13 anim 6+6, A14 with PD_WS_TRACE): across all variants 9 of 41 runs fell into the ~30-46
+  shown/s mode (damage+cache 6/21, whole-frame 1/6 then 2/3 in A14, damage without the image cache 1/6, old timer
+  1/3); slow runs do not track compositor CPU. In A14 the whole-frame path logged 285-412 "no frame free" deferrals per
+  10 s (the window server's 4 output frames all held by the compositor; presents deferred to the next release), the
+  damage path 8-10: starvation is a mechanism of the old path that the damage path mostly removes; the damage path's
+  own occasional slow runs are unexplained. The image cache by itself: parent 28.2 -> 22.2 % on the anim page (A12).
