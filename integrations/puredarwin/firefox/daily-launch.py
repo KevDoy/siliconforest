@@ -5,8 +5,79 @@ import json
 import os
 from pathlib import Path
 import socket
+import tempfile
 import sys
 import time
+
+
+# This block owns one platform workaround, never the rest of an owner's file.
+COMPOSITOR_BEGIN = '// BEGIN SiliconForest FX-011/012 compositor preference\n'
+COMPOSITOR_END = '// END SiliconForest FX-011/012 compositor preference\n'
+COMPOSITOR_KEY = 'gfx.webrender.compositor'
+
+
+def native_compositor_preference(manifest, environment):
+    value = manifest.get('native_compositor')
+    if value is not None and type(value) is not bool:
+        raise ValueError('native_compositor must be a boolean when selected')
+    override = environment.get('SFFX_NATIVE_COMPOSITOR')
+    if override is not None:
+        if override not in ['0', '1']:
+            raise ValueError('SFFX_NATIVE_COMPOSITOR must be 0 or 1')
+        value = override == '1'
+    return value
+
+
+def update_compositor_preference(settings, value):
+    """Manage our marked block only; preserve explicit user choices and bytes."""
+    if value is None:
+        return 'unmanaged'
+    if type(value) is not bool:
+        raise ValueError('Expected a boolean compositor preference')
+    if settings.is_symlink():
+        raise ValueError('Refusing to replace a symlinked user.js')
+    original = settings.read_bytes() if settings.exists() else b''
+    begin, end = COMPOSITOR_BEGIN.encode(), COMPOSITOR_END.encode()
+    if original.count(begin) != original.count(end) or original.count(begin) > 1:
+        raise ValueError('Malformed SiliconForest preference block; leave user.js intact')
+    if begin in original:
+        first, last = original.index(begin), original.index(end)
+        if last < first:
+            raise ValueError('Reversed SiliconForest preference markers')
+        last += len(end)
+        prefix, suffix = original[:first], original[last:]
+    else:
+        prefix, suffix = original, b''
+    if COMPOSITOR_KEY.encode() in prefix + suffix:
+        # An explicit owner/test preference wins. Remove our previous block
+        # too, or its later assignment could override that explicit choice.
+        if begin not in original:
+            return 'explicit-user-preference'
+        updated = prefix + suffix
+    else:
+        if prefix and not prefix.endswith(b'\n'):
+            prefix += b'\n'
+        block = begin + ('user_pref(%s,%s);\n' %
+            (json.dumps(COMPOSITOR_KEY), json.dumps(value))).encode() + end
+        updated = prefix + block + suffix
+    if updated == original:
+        return 'unchanged'
+    mode = settings.stat().st_mode & 0o777 if settings.exists() else 0o600
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=settings.parent, prefix='.sffx-user-', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(updated)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(mode)
+        if settings.is_symlink() or (settings.read_bytes() if settings.exists() else b'') != original:
+            raise RuntimeError('user.js changed while preparing the platform preference')
+        os.replace(temporary, settings)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return 'updated'
 
 
 def selected_profile(args):
@@ -29,6 +100,7 @@ def plan(root, args, manifest=None):
             args[index] = '--profile=' + str(Path(arg.partition('=')[2]).expanduser().resolve())
     if manifest is None:
         manifest = json.loads((root / 'release.json').read_text())
+    native_compositor_preference(manifest, os.environ)  # validate even dry launch plans
     diagnostic = manifest.get('diagnostics', {})
     if diagnostic:
         allowed = {'PD_WS_TRACE','PD_WS_TIMING','PD_CA_TRACE','PD_SANDBOX_TRACE','MOZ_REMOTE_ALLOW_SYSTEM_ACCESS'}
@@ -51,6 +123,9 @@ def plan(root, args, manifest=None):
             raise ValueError('Graphics cohort requires system UI and a versioned private runtime prefix')
     env = os.environ.copy()
     env.update(diagnostic.get('environment',{}))
+    compositor = native_compositor_preference(manifest, env)
+    if compositor is not None:
+        env['SFFX_NATIVE_COMPOSITOR'] = '1' if compositor else '0'
     for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
                         ('gpu_vector_compare', 'SFFX_GPU_VECTOR_COMPARE'), ('gpu_cache_lookups', 'SFFX_GPU_CACHE_LOOKUPS'),
                         ('gpu_dirty_frames', 'SFFX_GPU_DIRTY_FRAMES'), ('gpu_export_cache', 'SFFX_GPU_EXPORT_CACHE'),
@@ -205,6 +280,7 @@ def main():
     if not settings.exists() or (manifest.get('system_layout') and settings.read_text() == legacy):
         settings.write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v))
                                    for k, v in preferences.items()))
+    update_compositor_preference(settings, native_compositor_preference(manifest, os.environ))
     logs = (Path.home() / 'Library/Logs/SiliconForest/Firefox') if manifest.get('system_layout') else root / 'logs'
     logs.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(logs / ('firefox-%d-%d.log' % (time.time(), os.getpid())), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

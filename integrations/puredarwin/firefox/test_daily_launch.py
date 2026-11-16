@@ -161,5 +161,83 @@ class LaunchPlanPolicy(unittest.TestCase):
         self.assertNotIn(str(self.root / 'appkit/Frameworks'),env['DYLD_FRAMEWORK_PATH'].split(':'))
 
 
+class CompositorPreferenceSafety(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.settings = Path(self.temporary.name) / 'user.js'
+
+    def test_unselected_policy_never_creates_or_modifies_preferences(self):
+        daily.update_compositor_preference(self.settings, None)
+        self.assertFalse(self.settings.exists())
+        self.settings.write_bytes(b'// owner settings without a final newline')
+        daily.update_compositor_preference(self.settings, None)
+        self.assertEqual(self.settings.read_bytes(), b'// owner settings without a final newline')
+
+    def test_switch_back_preserves_unrelated_bytes_and_permissions(self):
+        original = b'// owner \xff\nuser_pref("browser.zoom.full",false);\n'
+        self.settings.write_bytes(original)
+        self.settings.chmod(0o640)
+        daily.update_compositor_preference(self.settings, False)
+        first = self.settings.read_bytes()
+        self.assertTrue(first.startswith(original))
+        self.assertIn(b'user_pref("gfx.webrender.compositor",false);', first)
+        daily.update_compositor_preference(self.settings, True)
+        self.assertEqual(self.settings.read_bytes(), first.replace(b'compositor",false', b'compositor",true'))
+        self.assertEqual(self.settings.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(daily.update_compositor_preference(self.settings, True), 'unchanged')
+
+    def test_explicit_owner_or_test_choice_wins(self):
+        original = b"user_pref('gfx.webrender.compositor', true);\n// other choice\n"
+        self.settings.write_bytes(original)
+        daily.update_compositor_preference(self.settings, False)
+        self.assertEqual(self.settings.read_bytes(), original)
+
+    def test_owner_override_removes_our_old_assignment_without_touching_the_override(self):
+        prefix = b'user_pref("browser.zoom.full",false);\n'
+        self.settings.write_bytes(prefix)
+        daily.update_compositor_preference(self.settings, False)
+        suffix = b'user_pref("gfx.webrender.compositor", true);\n// owner addition\n'
+        self.settings.write_bytes(self.settings.read_bytes() + suffix)
+        daily.update_compositor_preference(self.settings, False)
+        self.assertEqual(self.settings.read_bytes(), prefix + suffix)
+
+    def test_malformed_or_duplicate_markers_fail_without_rewriting(self):
+        for text in [daily.COMPOSITOR_BEGIN, daily.COMPOSITOR_END + daily.COMPOSITOR_BEGIN,
+                     (daily.COMPOSITOR_BEGIN + daily.COMPOSITOR_END) * 2]:
+            self.settings.write_text(text)
+            with self.assertRaises(ValueError):
+                daily.update_compositor_preference(self.settings, False)
+            self.assertEqual(self.settings.read_text(), text)
+
+    def test_symlink_target_is_not_replaced_or_modified(self):
+        target = self.settings.with_name('owner.js')
+        target.write_bytes(b'// owner')
+        self.settings.symlink_to(target)
+        with self.assertRaises(ValueError):
+            daily.update_compositor_preference(self.settings, False)
+        self.assertTrue(self.settings.is_symlink())
+        self.assertEqual(target.read_bytes(), b'// owner')
+
+    def test_failed_atomic_replace_keeps_original_and_removes_temporary_file(self):
+        self.settings.write_bytes(b'// owner\n')
+        with patch.object(daily.os, 'replace', side_effect=OSError('disk error')):
+            with self.assertRaises(OSError):
+                daily.update_compositor_preference(self.settings, False)
+        self.assertEqual(self.settings.read_bytes(), b'// owner\n')
+        self.assertEqual(sorted(p.name for p in self.settings.parent.iterdir()), ['user.js'])
+
+    def test_policy_and_switch_are_strict_booleans(self):
+        self.assertIsNone(daily.native_compositor_preference({}, {}))
+        self.assertIs(daily.native_compositor_preference({'native_compositor': False}, {}), False)
+        self.assertIs(daily.native_compositor_preference({'native_compositor': False},
+                       {'SFFX_NATIVE_COMPOSITOR': '1'}), True)
+        for value in [0, 1, 'false', []]:
+            with self.assertRaises(ValueError):
+                daily.native_compositor_preference({'native_compositor': value}, {})
+        with self.assertRaises(ValueError):
+            daily.native_compositor_preference({}, {'SFFX_NATIVE_COMPOSITOR': 'false'})
+
+
 if __name__ == '__main__':
     unittest.main()

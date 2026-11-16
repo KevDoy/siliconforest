@@ -22,7 +22,8 @@ def main():
     parser.add_argument('--software', action='store_true')
     parser.add_argument('--kill-first-gpu', action='store_true')
     parser.add_argument('--provider-control', choices=['current', 'system-gpu', 'system-gpu-private-gl-api',
-                        'system-surface-private-gl', 'system-gl-private-surface', 'nv12-cohort'], default='current')
+                        'system-surface-private-gl', 'system-gl-private-surface', 'nv12-cohort',
+                        'system-surface-candidate-gl'], default='current')
     parser.add_argument('--fixture-reference', action='store_true')
     args = parser.parse_args()
     if os.uname().sysname != 'Darwin':
@@ -56,6 +57,14 @@ def main():
         environment['DYLD_LIBRARY_PATH'] = str(root / 'gl/lib') + ':' + environment['DYLD_LIBRARY_PATH']
     if args.provider_control == 'system-surface-private-gl':
         environment['DYLD_FRAMEWORK_PATH'] = str(root / 'gl/Frameworks') + ':' + environment['DYLD_FRAMEWORK_PATH']
+    if args.provider_control == 'system-surface-candidate-gl':
+        # Cold staged only: qualify our canonical-prefix CGL/API against the
+        # real SYSTEM IOSurface and broker without selecting it for the owner.
+        gl = Path('/private/var/db/sffx/canonical-nv12-v1/gl')
+        if not (gl / 'Frameworks/OpenGL.framework/Versions/A/OpenGL').is_file():
+            raise ValueError('Cold candidate CGL must be staged before this control')
+        environment['DYLD_FRAMEWORK_PATH'] = str(gl / 'Frameworks') + ':' + environment['DYLD_FRAMEWORK_PATH']
+        environment['DYLD_LIBRARY_PATH'] = str(gl / 'lib') + ':' + environment['DYLD_LIBRARY_PATH']
     if args.provider_control == 'system-gl-private-surface':
         environment['DYLD_FRAMEWORK_PATH'] = str(root / 'overrides/surface-lookup-v1/Frameworks') + ':' + environment['DYLD_FRAMEWORK_PATH']
     # Keep the same provider paths in every mode. In particular, disabling
