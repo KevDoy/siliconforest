@@ -607,6 +607,71 @@ Figures from runs judged by DESK7's real-input counters before and after (unchan
 - Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
   the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
+## TERM9 round (16 November, night): Firefox on the system frameworks
+Tools in `runs/sf-term9` (not committed; TERM8's gates with `target` lines for DESK8's bound keys). Synthetic input only,
+on DESK8's virtual seat, to my own windows. Firefox checks use my own instance of the INSTALLED app (its launcher's
+plan, own fresh profile under /private/var/db/sft8/ff), never the owner's.
+
+### One set of frameworks for Firefox (item 1)
+The installed Firefox loaded CODEX-FX's private AppKit/QuartzCore/libWindowServer/CoreText/Onyx2D. Its Firefox-only Cocoa
+patches are now in the main series (numbers kept; regenerated after 0147): 0206 (class geometry counts the menu strip),
+0208/0213/0216/0219q (QuartzCore GPU frame export, lookups, reuse, its own 0219), 0209 (AppKit registers GPU layers; the
+presenter is looked up once and never called without SFFX_GPU_PRESENT=1), 0209w (WindowServer whole-window GPU
+presenter, `sffx_gpu_present.h`), and the IOSurface transport as 0230-0233 (`iosurface.nix`: per-session broker,
+dma-buf storage, NV12 planes, FXLEAD's lookup fix) with 0151 (libdrm dlopen()ed on the first GPU surface: the private
+copy linked @rpath/libdrm, which in the system file would have stopped every program that loads IOSurface). Every
+GPU piece acts only with the launcher's SFFX_* variables. CODEX-FX switched the installed launcher to the system
+AppKit/Onyx2D/CoreText/QuartzCore/libWindowServer at 01:04Z (its parent and GPU image lists checked); the launcher's
+plan now has no private copy of those five (DYLD paths: IOSurface `surface-lookup-v1`, AVFoundation, gl, compat stubs,
+sandbox/io interposers remain; CODEX-FX's prepared switch drops IOSurface and gl next).
+
+### Frame pacing (item 2)
+0148w: libWindowServer asks, for every frame it commits, the flip that shows it: wp_presentation feedback for a GPU
+(dma-buf) frame, a wl_surface frame callback for the others (DESK8's desk answers wp_presentation only for dma-buf
+commits); the latest flip in host time, the measured refresh and the commits in flight are the display clock
+(`_windowServerDisplayClock`, `_windowServerDisplayClockWait`; at most 32 questions open, written off after 1 s).
+0149 (CoreVideo, CODEX's pd-displaylink build with only PD's CVDisplayLink.m changed: `cocoa/corevideo-displaylink.nix`):
+the display link ticks right after the flip that showed the app's last frame (inNow = flip, inOutputTime = + refresh),
+waits for a frame in flight up to two refreshes, else ticks on the display's phase; PD_CV_TIMER=1 = the old timer.
+My probe (`probe/pacing.m`, an SHM window redrawn from the link, 6 s, no input): installed (timer) 59.8 ticks/s, tick
+interval p95 19.8 ms, no flips known; c19 58.7 flips/s reported, p95 16.7 ms, but 70 ticks/s: a flip the timer had
+already predicted ticked again - fixed (CoreVideo f62ffb61; not re-measured before the install). Firefox with c19:
+the desk's WMPACING shows its dma-buf commits (example.com 50 commits/49 shown, about:support 56/55, idle pages); the
+60 fps scroll/video acceptance is CODEX-FX's/DESK8's measurement on these files.
+FX-001: about:support's "@0Hz" is Firefox's own on macOS (XUL imports no refresh-rate API; its vsync rate comes from
+CVDisplayLinkGetNominalOutputVideoRefreshPeriod, 60 Hz here). 2561x1601 = 1707 pt x 1.5: the desk's logical output
+size is an integer (asked of DESK8 whether 1706 would do); not changed.
+
+### Installed c19 (01:57Z, direct, the file of before kept as `<path>.pre-t9`)
+AppKit 56099510, QuartzCore.pd 95e0c621, /usr/lib/libWindowServer.dylib 7133efed, CoreVideo f62ffb61, IOSurface
+323e14c5, new /usr/libexec/iosurfaced d84411d1 (= the Firefox runtime's own), new /System/Library/Fonts/NotoThai (Noto
+Sans Thai regular/bold, Noto Serif Thai; OFL 1.1, licence beside them; `cocoa/fonts-thai.nix`). Also in it: 0150
+(FX-023: NSEvent timestamps are seconds since start-up, mach_absolute_time, not since 2001) and FXLEAD's 0153 (FX-036:
+-[CALayer display] asks a view that wants -updateLayer for it; Firefox ends its commit suspension there: the stale
+first "New Tab" picture). Gates before: visual check installed vs c19 (looked at: same but the figures), Activity
+Monitor 3 minutes with the layout cache forced small, random input Activity Monitor 240 / Terminal 216 actions
+(MallocScribble, cache forced small): alive, no report; compat 18/18. After: visual check of the installed files
+(looked at). Firefox (my own, installed app, 02:1xZ): my local page, example.com and about:support painted (captures
+looked at), the Thai line renders, FXWSPRESENT transport=dmabuf 240 frames 0 failures, 261 presentation feedbacks.
+Not shown yet: FX-022 (a Terms-of-Use modal of the fresh profile kept the menu from opening; repeat with c20).
+Revert: `ln -f <path>.pre-t9 <path>.back && mv -f <path>.back <path>`; iosurfaced and NotoThai: remove.
+Found on the way: with the c18 system files (no presenter) Firefox's blank page was not the glyph cache (0146): my
+installed Firefox with the Onyx2D before 0146 showed the same stale picture.
+
+### c20 (FX-011/012 and font memory)
+FXLEAD's second QuartzCore patch as 0155 (an IOSurface that is a layer's contents is marked in use, as the window server
+does on macOS; -dealloc releases the last contents): FXLEAD's A/B on the installed c19, Wikipedia/BBC/GitHub after five
+Page Downs, stale/foreign tiles 3/3 -> correct 3/3. FXPERF's 0154 (Onyx2D maps an installed font file once per process:
+Firefox's parent held ten private 30 MB copies of the CJK collection; footprint 921 -> 634 MB). QuartzCore.pd d2ecc6eb
+(byte-identical to FXLEAD's build), Onyx2D 8dabe746.
+
+### FX-003 (a crash report at every Firefox exit): cause, fix not built
+Breakpad symbols: nsNetworkLinkService::Shutdown() calls CFRunLoopRemoveSource(mCFRunLoop = NULL): Init() gave up when
+our SystemConfiguration's SCNetworkReachabilitySetCallback returned FALSE (PureDarwin's pd_sc_reachability.c answers
+FALSE to SetCallback/Schedule/Unschedule), before it had its run loop. macOS returns TRUE. `cocoa/patches/0152` (TRUE;
+no notification ever fires). Not built: the installed SystemConfiguration is the tip root's and the tip's Security does
+not build here; for the root/rebase owner. Not a CoreFoundation fault.
+
 ## Performance: optimised core libraries (15 November, night; PERF)
 PureDarwin builds every libSystem component and dyld with `CMAKE_BUILD_TYPE=Debug` and no `-O` of its own (CMake's
 Debug flags are `-g`): -O0 code, each local stored to the stack and loaded again. Compile database of the default
