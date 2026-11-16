@@ -803,3 +803,21 @@ installation/native acceptance has not occurred at this checkpoint. It must
 verify both installed painted Firefox routes and standard DESK10 state, with
 pdm1tpscroll=20 only for desk10-or-newer and45 as rollback. No physical scroll
 or native per-context attribution proof follows from these offline checks.
+
+### 2026-11-16 kernel 46 native qualification
+
+Kernel 46 retained the exact qualified 45 core, ext4, GPU and DCP inputs.
+Five GL-hash and five Vulkan runs passed; three desktop and three SSH
+Firefox launches produced mapped, readable test documents with all three
+colour regions, confirmed by capture inspection. No input was injected.
+The new AVD per-context API passed two-context isolation, foreign PID/task,
+generation and malformed-request checks with API-error counts 1 versus 2.
+These probes submitted zero actual decode jobs. Live capture bytes exclude
+other buffers and post-destroy state; real decode/import/fence retirement
+attribution remains for the media test. The earlier intermittent launch
+failure is still open; six successful launches do not prove it eliminated.
+
+The first 46 package stopped in the bootloader on oversized boot arguments,
+not a kernel panic. The corrected package was qualified and made normal;
+qualified 45 rollback remains. Wi-Fi47 is being prepared as a single-driver
+replacement; it does not change GPU/core or claim video/FPS improvements.

@@ -3871,3 +3871,30 @@ and couple pdm1tpscroll=20 to DESK10 (remove the argument with a desk9 rollback)
 Thunderbolt hardware trials still require the owner's exclusive window; AVE
 remains paused. The source survey does not close DHCP, dock keyboard, Samsung
 DP or ten-cycle hotplug milestones.
+
+### 2026-11-16: selected upstream fixes now qualified in Firefox kernel 46
+
+The source-port checkpoint above was followed by an actual M1 installation.
+The 57-module image changes IOPCIFamily, RavynXHCIPort and AVD context
+statistics; the core and ext4 are byte-identical to qualified kernel 45.
+Native GL hash/Vulkan checks passed five times each, and three desktop plus
+three SSH Firefox launches painted the test document and its three colours;
+all six captures were visually inspected. No synthetic input was used.
+The new context API passed owned-context isolation and error-count tests with
+zero real decode jobs. This does not qualify decode/import/fence retirement.
+DESK10 reports the requested scroll conversion (0.206 mm steps).
+
+The first package was rejected before XNU because its 621-byte command line
+exceeded firmware revision 2's 608-byte capacity. The same kernel booted with
+599 bytes after removing only `serial_video_mirror=0`: the exact ARM platform
+source defaults that option to zero and takes the same console branch.
+The rejected package and UART evidence remain private. Host packing now
+checks revision-specific capacity before creating or truncating output.
+
+Thunderbolt/AVE hardware trials remain paused: no new dock enumeration,
+I210 traffic, dock USB typing, HPD/DP or hotplug evidence was obtained. The
+full network-module variant remains blocked by the fixed collection slot;
+em/igc are SDK-built and are not loaded in this image. Kernel 46 is normal,
+qualified 45 is rollback, and all install locks/UART were released. Wi-Fi
+power-save latency is the next authorized Firefox kernel priority, using the
+same kernel 46 cohort and command line; see `m1-wifi-pm/README.md`.
