@@ -103,6 +103,8 @@ def main():
     ap.add_argument('--sample-parent', action='store_true', help='also sample this owned browser parent')
     ap.add_argument('--gpu-startup-fault', choices=['stop', 'kill'],
                     help='diagnostic only: signal the first GPU helper of this isolated launch')
+    ap.add_argument('--functional-qa', action='store_true',
+                    help='owner-authorized functional checks without idle waits; no qualified timings')
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
@@ -115,6 +117,8 @@ def main():
     ap.add_argument('--gpu-coalesce-ticks', action='store_true', help='experimental60Hz GPU notification batching')
     ap.add_argument('--scene-reference', action='store_true')
     args = ap.parse_args()
+    if args.functional_qa and (args.benchmark or args.measure_fixture or args.measure_video or args.measure_all_videos):
+        raise ValueError('Functional QA does not qualify benchmark or video/frame timings')
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
     if bool(args.surface_session) != bool(args.surface_broker):
@@ -265,7 +269,11 @@ def main():
     result['surface_session'] = dict(wrapper=args.surface_session, broker=args.surface_broker,
                                     service=env.get('SFFX_IOSURFACE_SERVICE'))
     from owner_guard import OwnerInputGuard
-    owner_guard=OwnerInputGuard()
+    owner_guard=OwnerInputGuard(require_idle=not args.functional_qa)
+    if args.functional_qa:
+        from presentation_seat import functional_qa
+        functional_qa()
+        result.update(functional_qa=True,timing_qualified=False)
     result['owner_input_before']=owner_guard.before
     owned = {}
     start = time.monotonic()

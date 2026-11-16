@@ -86,6 +86,8 @@ def measure(client, output, deadline, clipboard_guard=None, native_drag=False, c
     owned_line = next(line for line in dump.splitlines() if marker in line and 'mapped=true' in line)
     window_id = int(re.match(r'window (\d+) ', owned_line)[1])
     result['admitted_window_id'] = window_id
+    from presentation_seat import target_window
+    target_window(window_id)
     from renderer_capture import capture as capture_renderer
     tx, ty = x + width // 2, y + 10
     if tx > 2559 or ty > 1599:

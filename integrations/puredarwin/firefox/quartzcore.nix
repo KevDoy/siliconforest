@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Private backing-pixel render target; wrapper identity follows terminal-app.
 { skipUnchangedTransactions ? false, detachInvalidatedLayers ? true, gpuPresentation ? false,
-  releaseContextResources ? false, coalesceNotifications ? false, baseSource ? null }:
+  releaseContextResources ? false, coalesceNotifications ? false, baseSource ? null,
+  baseHasGPUFixes ? baseSource == null }:
 let
  a = import ../cocoa/arm64.nix;
  p = import ../cocoa/patched.nix;
@@ -10,15 +11,12 @@ let
   cp -r ${if baseSource == null then p.quartzcoreSrc else baseSource} $out/src/Frameworks/QuartzCore
   chmod -R u+w $out
   cd $out
-  ${a.pkgs.lib.optionalString (baseSource == null && gpuPresentation) ''
-    # Main 0219 is the non-exporting adaptation. Replace it with our complete
-    # exporting lifetime patch below, rather than freeing the same objects twice.
-    ${a.pkgs.patch}/bin/patch --batch -R -p1 < ${../cocoa/patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch}
-  ''}
   ${a.pkgs.lib.optionalString (!detachInvalidatedLayers) ''
     ${a.pkgs.patch}/bin/patch -R -p1 < ${./cocoa-patches/0207-layer-context-detaches-retained-tree.patch}
   ''}
-  ${a.pkgs.lib.optionalString gpuPresentation ''
+  # TERM9's main source already has 0208/0213/0216/0219q. Only explicitly
+  # selected older snapshots need the private exporting series again.
+  ${a.pkgs.lib.optionalString (gpuPresentation && !baseHasGPUFixes) ''
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0208-layer-context-exportable-gpu-frame.patch}
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0213-cache-gpu-frame-export-provider-lookups.patch}
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch}
@@ -28,6 +26,9 @@ let
     ${a.pkgs.lib.optionalString releaseContextResources ''
       ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch}
     ''}
+  ''}
+  ${a.pkgs.lib.optionalString (gpuPresentation && baseHasGPUFixes && coalesceNotifications) ''
+    ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0218-opt-in-gpu-notification-refresh-coalescing.patch}
   ''}
   ${a.pkgs.lib.optionalString skipUnchangedTransactions ''
     ${a.pkgs.patch}/bin/patch -p1 < ${./cocoa-patches/0205-layer-transactions-skip-unchanged-contents.patch}

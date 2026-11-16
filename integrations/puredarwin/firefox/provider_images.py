@@ -13,7 +13,9 @@ import subprocess
 def inspect(sample, output, identities, parent_pid, expected_appkit):
     if not sample or not sample.startswith('/private/var/db/sffx/'):
         raise ValueError('Provider inspection requires a private sampler')
-    if (not expected_appkit.startswith('/private/var/db/sffx/') and expected_appkit != '/usr/local/lib/siliconforest/firefox/160-system1/appkit') or '..' in Path(expected_appkit).parts:
+    if (not expected_appkit.startswith('/private/var/db/sffx/') and expected_appkit not in [
+            '/usr/local/lib/siliconforest/firefox/160-system1/appkit',
+            '/System/Library/Frameworks/AppKit.framework']) or '..' in Path(expected_appkit).parts:
         raise ValueError('Expected AppKit must be a private prefix')
     result = dict(diagnostic_sampling_seconds=.05, expected_appkit=expected_appkit, processes=[])
     for pid, start in sorted(identities.items()):
@@ -30,11 +32,25 @@ def inspect(sample, output, identities, parent_pid, expected_appkit):
         text = destination.read_text() if destination.exists() else ''
         images = text.partition('\nBinary Images:\n')[2].splitlines()
         selected = [line.strip() for line in images if re.search(
-            r'\s(?:AppKit|CoreText|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
+            r'\s(?:AppKit|Onyx2D|CoreText|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
         appkit = [line.rsplit('> ', 1)[-1] for line in selected if re.search(r'\sAppKit\s+<', line)]
-        result['processes'].append(dict(pid=pid, role='gpu' if gpu else 'parent', status=sampled.returncode,
+        row=dict(pid=pid, role='gpu' if gpu else 'parent', status=sampled.returncode,
             images=selected, appkit=appkit, passed=sampled.returncode == 0 and len(appkit) == 1 and
-            appkit[0].startswith(expected_appkit.rstrip('/') + '/')))
+            appkit[0].startswith(expected_appkit.rstrip('/') + '/'))
+        if expected_appkit == '/System/Library/Frameworks/AppKit.framework':
+            required = {name: '/System/Library/Frameworks/' + name + '.framework/'
+                        for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
+            required['libWindowServer.dylib'] = '/usr/lib/libWindowServer.dylib'
+            actual = {}
+            for name, prefix in required.items():
+                paths = [line.rsplit('> ', 1)[-1] for line in selected
+                         if re.search(r'\s' + re.escape(name) + r'\s+<', line)]
+                actual[name] = paths
+                row['passed'] &= len(paths) == 1 and paths[0].startswith(prefix)
+            pd = [line.rsplit('> ', 1)[-1] for line in selected if re.search(r'\sQuartzCore\.pd\s+<', line)]
+            row['passed'] &= all(path.startswith('/System/Library/Frameworks/QuartzCore.framework/') for path in pd)
+            row['system_providers'] = actual
+        result['processes'].append(row)
     result['complete'] = bool(any(row['role'] == 'parent' for row in result['processes']) and
         any(row['role'] == 'gpu' for row in result['processes']) and all(row['passed'] for row in result['processes']))
     output.write_text(json.dumps(result, indent=2) + '\n')

@@ -6,6 +6,22 @@ from pathlib import Path
 import re
 import secrets
 import time
+from contextvars import ContextVar
+
+_allow_owner_activity=ContextVar('sffx_functional_qa',default=False)
+_target_window=ContextVar('sffx_owned_virtual_target',default=None)
+
+
+def functional_qa(enabled=True):
+    """Owner-authorized functional checks record activity; timings stay unqualified."""
+    _allow_owner_activity.set(bool(enabled))
+
+
+def target_window(window_id):
+    """Set only after this caller admits its own unique window in the dump."""
+    if type(window_id) is not int or window_id<=0:
+        raise ValueError('Expected an admitted window ID')
+    _target_window.set(window_id)
 
 
 def owner_idle(inject, require_virtual=False):
@@ -14,7 +30,8 @@ def owner_idle(inject, require_virtual=False):
         if require_virtual:raise RuntimeError('Virtual seat not installed: refuse pointer/key injection')
         return
     text=marker.read_text()
-    if 'DESK7' not in text or not re.search(r'^active=0$',text,re.MULTILINE):
+    active=re.search(r'^active=([01])$',text,re.MULTILINE)
+    if 'DESK7' not in text or active is None or (active[1]!='0' and not _allow_owner_activity.get()):
         raise RuntimeError('Owner input active or unrecognized: stop synthetic input/capture')
 
 
@@ -25,11 +42,14 @@ def _request(inject, lines, _virtual_handshake=False):
     if mutating and not _virtual_handshake:
         owner_idle(inject,require_virtual=True)
         status=_request(inject,'seat virtual\nstats',_virtual_handshake=True)
-        if not re.search(r'owner_seen_active=0\b',status) or not re.search(r'owner_active=0\b',status):
+        if not _allow_owner_activity.get() and (not re.search(r'owner_seen_active=0\b',status) or not re.search(r'owner_active=0\b',status)):
             raise RuntimeError('Compositor did not confirm idle-owner virtual-seat protocol')
         owner_idle(inject,require_virtual=True)
         if any(line.strip()=='seat owner' for line in lines.splitlines()):raise RuntimeError('Owner seat forbidden in Firefox diagnostics')
-        lines='seat virtual\n'+lines
+        target=_target_window.get()
+        if target is None:
+            raise RuntimeError('Admit an owned window before synthetic input')
+        lines='seat virtual\ntarget %d\n'%target+lines
     if (inject / 'request').exists() or (inject / 'request.part').exists():
         raise RuntimeError('Another inject request is pending')
     (inject / 'done').unlink(missing_ok=True)
@@ -42,7 +62,7 @@ def _request(inject, lines, _virtual_handshake=False):
     status = (inject / 'done').read_text()
     if not re.search(r'errors=0\b', status):
         raise RuntimeError(status)
-    if mutating and (re.search(r'owner_seen_active=1\b',status) or re.search(r'owner_active=1\b',status)):
+    if mutating and not _allow_owner_activity.get() and (re.search(r'owner_seen_active=1\b',status) or re.search(r'owner_active=1\b',status)):
         raise RuntimeError('Real owner input interrupted this synthetic request; discard and stop')
     return status
 
@@ -81,6 +101,7 @@ def admit(client, output, fixture=True, verify_renderer=True):
     matches = [line for line in dump.splitlines() if marker in line and 'mapped=true' in line and 'org.mozilla.firefox' in line]
     if len(matches) != 1:
         raise RuntimeError('Expected exactly one uniquely titled owned fixture frame')
+    target_window(int(re.match(r'window (\d+)',matches[0])[1]))
     frame = re.search(r'frame=Some\((.*?)\)', matches[0])
     values = tuple(map(int, re.findall(r'-?\d+', frame[1]))) if frame else ()
     if len(values) != 4:
@@ -95,7 +116,7 @@ def admit(client, output, fixture=True, verify_renderer=True):
             (round(tx*65535/2559), round(ty*65535/1599)))
     client.command('Marionette:SetContext', {'value': 'chrome'})
     focused = script('const w=Services.wm.getMostRecentWindow("navigator:browser");return !!w&&w.document.hasFocus();')
-    if not focused:
+    if not focused and not _allow_owner_activity.get():
         raise RuntimeError('Admitted Firefox did not acquire focus')
     from renderer_capture import capture
     renderer = capture(output.with_suffix('.ppm')) if verify_renderer else None

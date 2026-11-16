@@ -34,5 +34,11 @@ class OwnerGuardPolicy(unittest.TestCase):
         self.fields['updated_unix_ms']=200000;self.write()
         with self.assertRaises(RuntimeError):OwnerInputGuard(self.path,120000)
 
+    def test_functional_checks_record_active_owner_without_waiting(self):
+        self.fields['active']=1;self.write()
+        guard=OwnerInputGuard(self.path,100001,require_idle=False)
+        self.fields['real_key_records']+=1;self.write()
+        self.assertEqual(guard.check(100002)['real_key_records'],3)
+
 
 if __name__=='__main__':unittest.main()

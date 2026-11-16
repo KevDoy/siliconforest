@@ -73,6 +73,8 @@ def measure(client, output, deadline):
             row.update(passed=False, error='No admitted frame')
             break
         x, y, width, height = map(int, values)
+        from presentation_seat import target_window
+        target_window(int(re.match(r'window (\d+)',admitted[0])[1]))
         tx, ty = x + width // 2, y + 10
         if not (0 <= tx < 2560 and 0 <= ty < 1600):
             row.update(passed=False, error='Picker title is off screen')

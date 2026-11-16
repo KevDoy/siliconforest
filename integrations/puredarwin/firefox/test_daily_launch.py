@@ -79,6 +79,31 @@ class LaunchPlanPolicy(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.plan()
 
+    def test_system_ui_cannot_reselect_legacy_private_overrides(self):
+        self.manifest.update(system_ui=True,
+            ui_override=str(self.root / 'overrides/ui-c17-v1'),
+            coretext_override=str(self.root / 'overrides/memory-font-v1/Frameworks'),
+            onyx_override=str(self.root / 'overrides/glyph-generation-v1/Frameworks'))
+        _, env = self.plan()
+        paths = env['DYLD_FRAMEWORK_PATH'].split(':') + env['DYLD_LIBRARY_PATH'].split(':')
+        for path in paths:
+            self.assertFalse(any(part in Path(path).parts for part in
+                ['appkit', 'quartz', 'onyx', 'coretext', 'windowserver', 'overrides']))
+        self.assertIn('/System/Library/Frameworks', paths)
+        self.assertIn(str(self.root / 'surface/Frameworks'), paths)
+        self.assertIn(str(self.root / 'gl/Frameworks'), paths)
+        self.assertEqual(env['FONTCONFIG_FILE'], str(self.root / 'fonts/fonts.conf'))
+        self.assertIn(str(self.root / 'sandbox/libsffx-sandbox.dylib'), env['DYLD_INSERT_LIBRARIES'])
+
+    def test_system_ui_requires_boolean_and_installed_layout(self):
+        for value in ['system', 1, None]:
+            self.manifest['system_ui'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
+        self.manifest.update(system_ui=True, system_layout=False)
+        with self.assertRaises(ValueError):
+            self.plan()
+
 
 if __name__ == '__main__':
     unittest.main()

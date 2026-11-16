@@ -37,6 +37,9 @@ def plan(root, args, manifest=None):
         args = diagnostic.get('args',[]) + args
     if str(root) != manifest['target']:
         raise RuntimeError('Runtime moved: rebuild its CGL/sandbox paths for the new prefix')
+    system_ui = manifest.get('system_ui', False)
+    if type(system_ui) is not bool or (system_ui and not manifest.get('system_layout')):
+        raise ValueError('System UI selection requires an installed system runtime')
     env = os.environ.copy()
     env.update(diagnostic.get('environment',{}))
     for field, name in [('gpu_presentation', 'SFFX_GPU_PRESENT'), ('gpu_presentation', 'SFFX_IOSURFACE_GPU'),
@@ -65,7 +68,7 @@ def plan(root, args, manifest=None):
                 not ui.is_relative_to(root / 'overrides') or ui == root / 'overrides'):
             raise ValueError('UI override must be a versioned provider inside this app runtime')
         frames[2] = ui / 'appkit/Frameworks'
-    coretext_source = manifest.get('coretext_source', 'private')
+    coretext_source = 'system' if system_ui else manifest.get('coretext_source', 'private')
     if coretext_source not in ['private', 'system']:
         raise ValueError('Unknown CoreText selection')
     if manifest.get('private_fonts', False):
@@ -84,6 +87,14 @@ def plan(root, args, manifest=None):
         root / 'quartz/Frameworks/QuartzCore.framework/Versions/A', root / 'gl/lib', root / 'compat/usr/lib']
     if manifest.get('gpu_presentation', False):
         libraries.insert(0, (ui or root) / 'windowserver/usr/lib')
+    if system_ui:
+        # The missing-provider tree contains no AppKit, Onyx2D, CoreText or
+        # QuartzCore. Remove private library directories too: QuartzCore.pd
+        # and libWindowServer must follow the selected system frameworks.
+        frames = [root / (name + '/Frameworks') for name in ['surface', 'avfoundation', 'gl']]
+        frames += [root / 'compat/System/Library/Frameworks', Path('/System/Library/Frameworks')]
+        libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
+                     root / 'gl/lib', root / 'compat/usr/lib']
     env.update(DYLD_FRAMEWORK_PATH=':'.join(map(str, frames)),
         DYLD_LIBRARY_PATH=':'.join(map(str, libraries)) + ':/usr/local/lib/mesa-asahi',
         DYLD_INSERT_LIBRARIES=str(root / 'sandbox/libsffx-sandbox.dylib') + ':' + str(root / 'io/libsffx-io-policy.dylib'),
