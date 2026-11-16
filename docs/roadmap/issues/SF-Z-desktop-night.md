@@ -1685,7 +1685,7 @@ old step's units. `WMSCROLL gesture` (one line per gesture: records, steps, trav
 mean factor, units sent, units per mm, the lift's delay) always; `WMSCROLLRAW` per record with policy `scroll_trace`.
 Policy (live, `desk_m1.sh policy ...`): `trackpad_scroll` (on; off = the wheel notches of before), `scroll_speed`
 (25..400 %, default 100: the one speed setting, like macOS's scrolling-speed slider), `natural_scroll` (on),
-`scroll_trace` (off; **on since 06:10Z** to record the owner's own scrolling once desk10 runs). Inject (`.next`):
+`scroll_trace` (off; on 06:10-08:40Z to record the owner's own scrolling). Inject (`.next`):
 `touchwheel <n>`, `stream touchwheel <n> <count> <ms>`, `stream touchswipe <mm> <ms> <every> flat|ease` (the driver's
 records of a swipe at the running kernel's step size, from a thread, as the device gives them).
 **Measured (host, `scroll.rs` tests; 5 cm at a constant speed, the driver's records every 8 ms, at 150 %):**
@@ -1725,20 +1725,37 @@ two-finger swipe from the inject's thread on the virtual seat, the page's scroll
 | 500 ms, slowing to a stop | 975 units (factor 1.44) | 975 CSS px | 513 ms |
 | 5 mouse-wheel notches | (wheel, unchanged) | 100 CSS px, 20 a notch (no regression) | - |
 
+**With the 0.21 mm driver steps and the momentum** (CODEX-TB's kernel 46/47 boot with `pdm1tpscroll=20`, 07:56Z: the
+desk logged `step_mm=0.206 (pdm1tpscroll)`; TERM10's t10s7 - finger frames precise for every app, momentum - installed
+08:08Z): runs sc10d (08:00Z, before t10s7) and sc10f (08:23Z, with it), same method:
+
+| 5 cm swipe | desk sent (0.21 mm steps) | Firefox, no momentum (sc10d) | Firefox with t10s7: end of contact / +0.3 s / +1 s / +2.5 s (sc10f) | lift seen after |
+|---|---|---|---|---|
+| 20 mm/s, steady | 679 units | 679 px | 662 / 679 / 679 / 679 px (no coast: a slow lift) | 41-42 ms |
+| 150 mm/s, steady | 1097-1098 units (factor 1.61) | 1098 px | 1097 / 1704 / 2102 / **2173** px | 40-44 ms |
+| 440 mm/s, steady | 1991-2001 units (factor 2.93) | 2001 px | 1991 / 5194 / 7293 / **7702** px | 43 ms |
+| 500 ms, slowing to a stop | 990-994 units | 994 px | 990 / 1155 / 1275 / 1289 px | 44-260 ms |
+| 5 mouse-wheel notches | - | 100 px | 100 px (lines, no momentum) | - |
+
+So on the M1, in my own Firefox: slow drags track the fingers (679 points for 5 cm), faster swipes are accelerated, a
+flick coasts after the lift and stops by itself, a slow lift does not coast, and the mouse wheel is as before. A fast
+5 cm flick coasts far (7702 px, about 7 screens): whether that is too much is for the owner's hand (`scroll_speed`, or a
+cap on the release velocity in TERM10's momentum).
 Firefox moves exactly what the desk sends (1 unit = 1 CSS px = 1 point at zoom 1); before desk10 the same 5 cm moved 280
 CSS px at any speed (TERM10's measurement on the installed path). Its scrollY lags the visible position during the
 gesture (APZ scrolls asynchronously; the title caught up within a second of the lift). No momentum with the installed
-libWindowServer (the totals equal what was sent); TERM10's t10s7 (finger frames precise for every app + momentum,
-`answers-from-TERM.md` 06:35Z) was not measured: my run refused itself while the owner was active, and at 07:31Z the M1's
-disk was full (no new launches).
-**The owner's own scrolling** (his hands; `WMSCROLL gesture seat=owner` since 07:04Z, `m1/owner-scroll-1.txt`, no
-content, only steps and timing): 36 gestures; the trackpad is device 0, as assumed. He flicks: per gesture median 8
-driver steps = 28.5 mm (p10 14, p90 39, max 46 mm) in 128 ms (p90 183), mean finger speed median 202 mm/s (p90 298,
-peaks up to 437); the curve's factor median 1.6 (max 2.4); **594 points per swipe at the median (p90 1189, max 1505)**,
-where desk9 gave about 160 (8 notches of 20); lift seen 79 ms after his last record (median; p90 118). For flicks like his
-the momentum (TERM10's, on its way) matters as much as the curve.
-**Not done:** horizontal scrolling (the driver has none: asked of CODEX-TB); an exact lift (driver: asked); Terminal's
-scrolling not measured (its finger frames are lines until TERM10's build is installed).
+libWindowServer at that time (the totals equal what was sent); with t10s7, see the table above.
+**The owner's own scrolling** (his hands; `WMSCROLL gesture seat=owner`, 07:04-07:39Z with the 3.57 mm steps,
+`m1/owner-scroll-2.txt`, no content, only steps and timing; none since the reboots): 51 gestures; the trackpad is
+device 0, as assumed. He flicks: per gesture median 8 driver steps = 28.5 mm (p10 14, p90 39, max 50 mm) in 136 ms
+(p90 185), mean finger speed median 195 mm/s (p90 291, peaks up to 437); records 17 ms apart (median); the curve's
+factor median 1.6 (max 2.4); **594 points per swipe at the median (p90 1077, max 1505)** during the contact, where
+desk9 gave about 160 (8 notches of 20); lift seen 83 ms after his last record (median; p90 183). For flicks like his
+the momentum matters as much as the curve: by sc10f a 150 mm/s swipe about doubles after the lift (not measured with
+his hand yet).
+**Not done:** horizontal scrolling (the driver has none: asked of CODEX-TB); an exact lift (driver: asked; the finer
+steps already cut the delay to ~40 ms); Terminal's scrolling not measured by me (no Terminal instance of my own; the
+finger path in libWindowServer is the same for every app since t10s7).
 
 ### 2. FX-022 (≡ gives no menu, a second click kills Firefox's window): the compositor's half
 - **dma-bufs on popups and layer surfaces** (patch 32): the desk read every popup buffer as shared memory and refused
@@ -1758,9 +1775,11 @@ scrolling not measured (its finger frames are lines until TERM10's build is inst
   configure that answers it, then attach; ack on the xdg_surface the configure came on; never an older-than-acked or
   never-sent serial. On the M1 since desk10 started (07:04-07:31Z: CODEX-FX's 20-click installed ≡ run, TERM10's and
   FXPERF2's runs, the owner's own use): **no "wrong configure serial" and no protocol-error disconnect** in the desk's
-  log (only ordinary connection closes), popups mapped; whether the ≡ panel is usable is CODEX-FX's/TERM10's to judge
-  (their run's result was being analysed); FX-022's blank first panel (TERM10: Firefox hides the panel before it paints)
-  is the client's.
+  log (only ordinary connection closes), popups mapped. CODEX-FX's installed ≡ gates on desk10 (07:27Z, and 08:35Z with
+  TERM10's t10s7): **"parent alive / no serial fatal"** both times - the window no longer dies; the menu itself still
+  fails: Firefox hides the panel 26-30 ms after showing it, before the mouse-up (client side: TERM10/CODEX-FX, traced).
+  The desk keeps a press's implicit grab while a popup maps under the pointer (smithay's click grab), so it sends the
+  parent no leave in that moment.
 
 ### 3. Client damage and partial repaint over many frames (on desk9-001, partial_repaint on)
 **Correctness soak** (`m1/partial10.sh`, run pr10c, 06:30Z; my own Firefox on a long static page whose title changes
@@ -1792,9 +1811,12 @@ request and says its number and whether newer changes were pending.
   not reach libWindowServer's data source. Filed with CODEX-FX and TERM10 (requests-for-CODEX-FX.md, 06:45Z). The desk
   now asks a source again (250 ms, 1 s) when its first answer was empty, and keeps nothing when every type is empty
   (patch 34, wire test `a_clipboard_first_answered_with_nothing_is_asked_again_and_kept`).
-- **`app <pid> quit` leaving a windowless Firefox alive** (DESK9's observation): the desk sends nothing more to an
-  application that answered `ok` (macOS's Dock does not either); asked of TERM10 to make AppKit's `quit` the
-  `kAEQuitApplication` path (`-terminate:`) rather than the Quit menu item, which with no key window reaches nothing.
+- **`app <pid> quit` leaving a windowless Firefox alive**: reproduced on desk10 with TERM10's t10s7 installed (08:55Z,
+  `lf10a`, my own Firefox, synthetic): the frame's close for my window only -> windowless; `app <pid> quit` (what the
+  dock tile's and the switcher's Quit send) -> AppKit answered `ok`; **still alive 20 s later**. Who acts: the client -
+  TERM10 says AppKit's `quit` already calls `-terminate:`, and Firefox answers it by quitting itself, so its own quit
+  does not finish when it has no window (a main-thread `sample` will say where; asked, the script is ready). The desk
+  sends nothing more to an application that answered `ok` (macOS's Dock does not either).
 - **Restart/Quit of a leftover after a relaunch**: not exercised (no relaunch happened; AppKit 0143w ends an
   application with its connection, so leftovers no longer arise from a relaunch).
 - **FX-027** (a modal file panel lands away from the centre): the desk now speaks libWindowServer's
@@ -1813,12 +1835,14 @@ fresh copy of the `desk9-next-003` build source give the build sources of desk10
 (`diff -r`, `runs/m1-desktop-010/desk10-patchcheck`).
 
 ### On the disk and how to go back
-- Running: desk10-next-003 `554e8da2...` (inject) since 07:04Z (the coordinator's relaunch); `/usr/bin/chonkstep-darwin-desktop`
-  = desk10-daily-003 `2efe6e06...` (hashes on the M1 right after each copy). `.before-desk10` = DESK9's 003 pair
+- Running: desk10-next-003 `554e8da2...` (inject): since the coordinator's relaunch at 07:04Z and again after CODEX-TB's
+  kernel 46 and 47 boots (07:56Z, ~08:16Z; boot argument `pdm1tpscroll=20`); `/usr/bin/chonkstep-darwin-desktop` =
+  desk10-daily-003 `2efe6e06...` (hashes on the M1 right after each copy). `.before-desk10` = DESK9's 003 pair
   (`dc2002ad`/`b36a9f0c`), `.before-desk10-002`/`-003` = desk10's 001/002 pairs (never ran), `.safe` untouched
-  (`b1104b75`). Policy file: `partial_repaint=on` (DESK9's), `scroll_trace=on` (mine, 06:10Z; desk9 ignores the key).
+  (`b1104b75`). Policy file: `partial_repaint=on` (DESK9's), `scroll_trace=off` (mine: on 06:10-08:40Z for the owner's scrolls).
 - Revert: `desk_m1.sh policy trackpad_scroll=off` (the old wheel notches, live); `scroll_trace=off`; the binaries:
-  `ln -f <path>.before-desk10 <path>.back && mv -f <path>.back <path>` for both names, then the next reboot.
+  `ln -f <path>.before-desk10 <path>.back && mv -f <path>.back <path>` for both names, then the next reboot - and then
+  `pdm1tpscroll=20` must leave the boot arguments (desk9 would scroll 17x too far a step).
 - Source: patches 32-34 in `integrations/puredarwin/terminal-app/compositor/` (README); `desk_m1.sh policy` takes
   `scroll_speed=<n>`.
 
@@ -1829,8 +1853,8 @@ fresh copy of the `desk9-next-003` build source give the build sources of desk10
    round: `natural_scroll=off`. Back to the old feel: `trackpad_scroll=off`.
 3. Click Firefox's ≡ button twice: the window must not vanish (the menu itself also needs TERM10's half).
 4. Copy text in Firefox and paste it in Terminal: today it pastes nothing (Firefox's side, filed).
-5. Your scrolls are being recorded as `WMSCROLL` lines in /var/log/desktop-session.log (no content, only steps and
-   timing); `desk_m1.sh policy scroll_trace=off` stops the per-record lines.
+5. Each of your scroll gestures leaves one `WMSCROLL gesture` line in /var/log/desktop-session.log (no content, only
+   steps and timing); `desk_m1.sh policy scroll_trace=on` adds a line per record when a closer look is wanted.
 
 ### Taken from Finch (DESK10)
 Nothing.
