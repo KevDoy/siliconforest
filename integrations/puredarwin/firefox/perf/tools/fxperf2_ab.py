@@ -7,23 +7,39 @@ the compositor's WMPACING lines for that window, the parent's loaded images (reg
 
   fxperf2_ab.py push [<result>:<dir> ...]    copy runs/fxperf2/build/result-<result> to the M1's <prefix>/<dir>
                                              (default true:cand false:base)
-  fxperf2_ab.py warm <url>                   make the warm profile template (one launch, 40 s), inside a hold
+  fxperf2_ab.py warm <url> [secs]            make the warm profile template (one launch, 40 s), inside a hold
   fxperf2_ab.py run <tag> <url> <runs> <settle> <stat> <name>=<ENV,...> [<name>=<ENV,...> ...] [capture]
   fxperf2_ab.py grid <tag> <trials> <name>=<ENV,...> [...]  FXLEAD's self-scrolling tile page (served from the prefix's
                                              www on 127.0.0.1:8776), capture when its title says done, every cell checked
+  fxperf2_ab.py pix <tag> <a>=<ENV> <b>=<ENV> [url ...]  the same static local pages (PIX_PAGES, tile page) in both
+                                             variants, captures compared pixel for pixel over the window's content
   fxperf2_ab.py tabs <tag> <rounds> <name>=<ENV,...> [...]  tab switches (FXPERF's method): 10 static tabs given on the
                                              command line, 12 Command-number switches into the own window per round;
                                              each page posts visibilitychange / 1st / 2nd rAF times (Date.now, the M1's
                                              clock, as the inject request time)
 ENV entries KEY=VAL (commas separate; '%' stands for a comma inside a value). 'capture' takes one capture of each
 variant's window in its first run (compositor capture, for the visual check); 'sample' takes a 5 s sf-sample of
-the parent after each run's stat (profiling run: its CPU numbers are not used)."""
+the parent after each run's stat (profiling run: its CPU numbers are not used); 'wheel' sends a wheel notch every
+33 ms into the own window during the stat (DESK9's scroll case; use with /scroll9.html)."""
 import json, re, subprocess, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fxp2 import *
 
 TEMPLATE = B + '/p1-warm'
+# background services of a young profile (safe-browsing lists, plugin downloads, studies, add-on updates, telemetry,
+# region and connectivity checks) restart in every copy of the template and fill cache2/IndexedDB on the slow disk:
+# off for every variant alike (they are unrelated to drawing)
+QUIET = USERJS + ''.join('user_pref("%s", %s);\n' % kv for kv in [
+    ('browser.safebrowsing.malware.enabled', 'false'), ('browser.safebrowsing.phishing.enabled', 'false'),
+    ('browser.safebrowsing.downloads.enabled', 'false'), ('browser.safebrowsing.blockedURIs.enabled', 'false'),
+    ('media.gmp-manager.updateEnabled', 'false'), ('media.gmp-widevinecdm.enabled', 'false'),
+    ('media.gmp-gmpopenh264.enabled', 'false'), ('extensions.update.enabled', 'false'),
+    ('extensions.getAddons.cache.enabled', 'false'), ('app.normandy.enabled', 'false'),
+    ('app.shield.optoutstudies.enabled', 'false'), ('datareporting.healthreport.uploadEnabled', 'false'),
+    ('toolkit.telemetry.unified', 'false'), ('browser.region.update.enabled', 'false'),
+    ('network.captive-portal-service.enabled', 'false'), ('network.connectivity-service.enabled', 'false'),
+    ('browser.newtabpage.activity-stream.feeds.topsites', 'false'), ('browser.newtabpage.activity-stream.feeds.section.topstories', 'false')])
 
 
 def compositor_pid():
@@ -56,7 +72,7 @@ def quit_own(win):
     return left
 
 
-def one(tag, name, env, url, settle, stat, capture, sample=False):
+def one(tag, name, env, url, settle, stat, capture, sample=False, wheel=False):
     RO = '%s/out/%s/%s' % (B, tag, name)
     r = dict(variant=name, env=env, url=url)
     before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
@@ -71,7 +87,17 @@ def one(tag, name, env, url, settle, stat, capture, sample=False):
     time.sleep(settle)
     comp = compositor_pid()
     d1 = int(sh('wc -l < /var/log/desktop-session.log').stdout.split()[0])
-    r['stat'] = json.loads(sh(T + ' stat %g %s/stat.json %s | head -1' % (stat, RO, comp)).stdout.strip().splitlines()[0])
+    if wheel:
+        # DESK9's scroll case: one wheel notch down every 33 ms into the own window during the stat
+        st = subprocess.Popen(SSH + [T + ' stat %g %s/stat.json %s | head -1' % (stat, RO, comp)], stdout=subprocess.PIPE, text=True)
+        time.sleep(0.3)
+        try:
+            inj('target %d\n' % win['id'] + 'wheel -1\nwait 33\n' * int(stat * 30 - 15), timeout=int(stat) + 20)
+        except Exception as e:
+            r['wheel_error'] = str(e)[:200]
+        r['stat'] = json.loads(st.communicate(timeout=stat + 60)[0].strip().splitlines()[0])
+    else:
+        r['stat'] = json.loads(sh(T + ' stat %g %s/stat.json %s | head -1' % (stat, RO, comp)).stdout.strip().splitlines()[0])
     d2 = int(sh('wc -l < /var/log/desktop-session.log').stdout.split()[0])
     st = json.loads(sh('cat %s/stat.json' % RO).stdout)
     for p in st['procs']:
@@ -211,6 +237,18 @@ class H(http.server.SimpleHTTPRequestHandler):
 http.server.ThreadingHTTPServer(('127.0.0.1', 8776), H).serve_forever()
 '''
 ORDER = [2, 3, 4, 5, 1, 6, 7, 8, 2, 3, 9, 4]
+# a deterministic stand-in for an animating news page: static text plus three small CSS animations (a spinner, a
+# ticker, a pulsing box), as cnn.com's are, without its network and ad variance
+ANIM_HTML = '''<!doctype html><meta charset=utf-8><title>FXPERF2 anim</title>
+<style>body{font:18px/1.5 serif;margin:30px 60px;background:#fafafa}h1{font:bold 34px sans-serif}
+#spin{position:absolute;left:900px;top:140px;width:120px;height:120px;background:#c33;animation:r 2s linear infinite}
+#tick{position:absolute;left:60px;top:300px;width:700px;height:34px;overflow:hidden;background:#222;color:#fff}
+#tick span{display:inline-block;white-space:nowrap;animation:t 8s linear infinite;font:20px/34px sans-serif}
+#pulse{position:absolute;left:1000px;top:420px;width:220px;height:110px;background:#36c;animation:p 1.5s ease-in-out infinite alternate}
+@keyframes r{to{transform:rotate(360deg)}}@keyframes t{from{transform:translateX(700px)}to{transform:translateX(-900px)}}
+@keyframes p{from{opacity:.25}to{opacity:1}}</style>
+<h1>FXPERF2 animation page</h1><div id=spin></div><div id=tick><span>Markets: DOW +0.4 % NASDAQ +0.7 % S&amp;P +0.5 % - Weather: clear, 12 C - Sports: home team 3, visitors 1</span></div>
+<div id=pulse></div><div style="margin-top:420px;width:760px">''' + ''.join('<p>Paragraph %d. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>' % i for i in range(12)) + '</div>'
 
 
 def tabs_one(tag, name, env, resdir):
@@ -249,6 +287,71 @@ def tabs_one(tag, name, env, resdir):
     return r
 
 
+# static pages for the pixel comparison: every one draws a magenta marker at its top left, finishes by itself and then
+# says so in its title ('pix-done'), so two variants can be compared pixel for pixel from the marker
+PIX_PAGES = {
+ 'still.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{font:18px/1.5 serif;margin:30px 60px;background:#fafafa}
+#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+.b{display:inline-block;width:180px;height:120px;margin:10px;border-radius:18px;box-shadow:4px 6px 12px rgba(0,0,0,.4)}
+</style><div id=mk></div><h1>Static mix</h1><div class=b style="background:linear-gradient(45deg,#c33,#36c)"></div>
+<div class=b style="background:#3a3;opacity:.55"></div><div class=b style="background:radial-gradient(#ff0,#f80)"></div>
+<div class=b style="background:#123;transform:rotate(7deg)"></div>''' + ''.join('<p>Paragraph %d: <b>bold</b> <i>italic</i> <code>code()</code> text, more text, numbers 0123456789.</p>' % i for i in range(30)) + '''
+<script>addEventListener('load',()=>setTimeout(()=>document.title='pix-done',1500))</script>''',
+ 'scrolled.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{margin:0;font:16px sans-serif}
+#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+#bar{position:fixed;left:12px;right:0;top:0;height:40px;background:#334;color:#fff;z-index:8;line-height:40px;padding-left:10px}
+.r{height:90px;border-bottom:1px solid #ccc;padding:20px 40px;box-sizing:border-box}</style><div id=mk></div><div id=bar>fixed bar</div>
+''' + ''.join('<div class=r style="background:hsl(%d,60%%,85%%)">Row %d - scrolled content with a fixed bar over it</div>' % (i * 37 % 360, i) for i in range(120)) + '''
+<script>addEventListener('load',()=>{let n=0;const s=()=>{scrollBy(0,700);if(++n<6)setTimeout(s,250);else setTimeout(()=>document.title='pix-done',1500)};setTimeout(s,800)})</script>''',
+ 'nested.html': '''<!doctype html><meta charset=utf-8><title>pix</title><style>body{margin:0;font:15px sans-serif;background:#eee}
+#mk{position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9}
+.box{position:absolute;overflow:auto;width:420px;height:300px;border:2px solid #444;border-radius:12px;background:#fff}
+.in{height:1400px;background:repeating-linear-gradient(0deg,#fff 0 20px,#dde 20px 40px)}</style><div id=mk></div>
+<div class=box id=a style="left:40px;top:60px"><div class=in>scroll box A</div></div>
+<div class=box id=b style="left:520px;top:120px"><div class=in>scroll box B</div></div>
+<div class=box id=c style="left:1000px;top:60px;border-radius:0"><div class=in>scroll box C</div></div>
+<script>addEventListener('load',()=>setTimeout(()=>{a.scrollTop=333;b.scrollTop=777;c.scrollTop=555;setTimeout(()=>document.title='pix-done',1500)},800))</script>''',
+}
+PIX_URLS = ['http://127.0.0.1:8776/still.html', 'http://127.0.0.1:8776/scrolled.html', 'http://127.0.0.1:8776/nested.html',
+            'http://127.0.0.1:8776/tiles.html?steps=0', 'http://127.0.0.1:8776/tiles.html', 'http://127.0.0.1:8776/anim.html?still=1']
+
+
+def pix_one(tag, name, env, url, n):
+    r = dict(variant=name, url=url)
+    before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
+    sh('rm -rf {p} && cp -a {t} {p}'.format(p=PROFILE, t=TEMPLATE), check=True)
+    r['launch'] = sh(T + " launch %s '_LAUNCHER=%s/bin/firefox-perf2,%s' '%s'" % (PROFILE, B, env, url), check=True).stdout.strip()
+    win = None; t0 = time.time()
+    while time.time() - t0 < 40:
+        ws, _t = wins()
+        new = [w for w in ws if w['app'] == 'org.mozilla.firefox' and w['mapped'] and w['id'] not in before]
+        if new and ('pix-done' in new[0]['title'] or 'tiles-done' in new[0]['title'] or (url.endswith('still=1') and time.time() - t0 > 8)):
+            win = new[0]; break
+        time.sleep(1)
+    if win is None:
+        r['error'] = 'not done'; r['left'] = quit_own(None); return r
+    time.sleep(1.5)
+    try:
+        inj('target %d\nkey e1 down\nkey e1 up\nwait 400\ncapture fxperf2-%s-%s-%d' % (win['id'], tag, name, n), timeout=40)
+        cap = fetch('fxperf2-%s-%s-%d' % (tag, name, n), OUT / tag / ('pix-%s-%d.png' % (name, n)))
+        r['capture'] = str(cap); r['win'] = dict(x=win['x'], y=win['y'], w=win['w'], h=win['h'])
+    except Exception as e:
+        r['capture_error'] = str(e)[:200]
+    r['left'] = quit_own(win)
+    return r
+
+
+def pix_compare(a, b):
+    from PIL import Image, ImageChops
+    ia, ib = Image.open(a['capture']).convert('RGB'), Image.open(b['capture']).convert('RGB')
+    wa, wb = a['win'], b['win']
+    w, h = min(wa['w'], wb['w']), min(wa['h'], wb['h'])
+    ca = ia.crop((wa['x'], wa['y'], wa['x'] + w, wa['y'] + h)); cb = ib.crop((wb['x'], wb['y'], wb['x'] + w, wb['y'] + h))
+    d = ImageChops.difference(ca, cb).convert('L').point(lambda v: 255 if v > 8 else 0)
+    box = d.getbbox()
+    return dict(size=(w, h), differing=sum(1 for v in d.getdata() if v), bbox=box)
+
+
 def main():
     a = sys.argv[1:]
     if a[0] == 'push':
@@ -262,13 +365,42 @@ def main():
         return
     if a[0] == 'warm':
         with hold(2, 'warm profile template for own Firefox (no input)'):
-            sh('rm -rf %s %s && mkdir -p %s && cat > %s/user.js' % (PROFILE, TEMPLATE, PROFILE, PROFILE), inp=USERJS, check=True)
+            sh('rm -rf %s %s && mkdir -p %s && cat > %s/user.js' % (PROFILE, TEMPLATE, PROFILE, PROFILE), inp=QUIET, check=True)
             before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
             print(sh(T + " launch %s '_LAUNCHER=%s/bin/firefox-perf2' %s" % (PROFILE, B, a[1]), check=True).stdout)
             win = own_window(before)
-            time.sleep(40)
+            time.sleep(float(a[2]) if len(a) > 2 else 40)
             print('left', quit_own(win))
             sh('cp -a %s %s' % (PROFILE, TEMPLATE), check=True)
+        return
+    if a[0] == 'pix':
+        tag = a[1]
+        variants = [x.split('=', 1) for x in a[2:] if '=' in x]
+        urls = [x for x in a[2:] if x.startswith('http')] or PIX_URLS
+        (OUT / tag).mkdir(parents=True, exist_ok=True)
+        res = []
+        with hold(max(1, round(len(urls) * len(variants) * 20 / 60)), 'FXPERF2 pix %s: own Firefox on %d static pages x %s, Shift tap + capture of own window' % (
+                tag, len(urls), '/'.join(n for n, _ in variants))):
+            sh('mkdir -p %s/www && cat > %s/www/anim.html' % (B, B), inp=ANIM_HTML.replace('<title>FXPERF2 anim</title>', '<title>pix</title><style>*{animation-play-state:paused!important;animation-delay:-1s!important}</style><div style="position:fixed;left:0;top:0;width:12px;height:12px;background:#f0f;z-index:9"></div>'), check=True)
+            for fn, html in PIX_PAGES.items():
+                sh('cat > %s/www/%s' % (B, fn), inp=html, check=True)
+            sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
+            srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
+            time.sleep(1.5)
+            try:
+                for n, url in enumerate(urls):
+                    pair = []
+                    for name, env in variants:
+                        r = pix_one(tag, name, env, url, n); r['name'] = name; res.append(r); pair.append(r)
+                    if len(pair) == 2 and all('capture' in x for x in pair):
+                        pair[1]['compare'] = pix_compare(pair[0], pair[1])
+                    print(now(), url, json.dumps([x.get('compare') or x.get('error') or x.get('capture_error') for x in pair])[:300], flush=True)
+                    json.dump(res, open(OUT / tag / 'pix.json', 'w'), indent=1)
+            finally:
+                if sh(T + ' mine').stdout.strip():
+                    sh(T + ' quitall')
+                sh("pkill -f 'sffxperf2/tools/serve.py' || true")
+                srv.terminate()
         return
     if a[0] == 'tabs':
         import statistics
@@ -331,25 +463,44 @@ def main():
         variants = [x.split('=', 1) for x in a[6:] if '=' in x]
         capture = 'capture' in a[6:]
         sample = 'sample' in a[6:]
+        wheel = 'wheel' in a[6:]
         (OUT / tag).mkdir(parents=True, exist_ok=True)
         res = []
         what = 'FXPERF2 A/B %s: %s, %d x %s (own Firefox, no input but Command-Q/capture to own window)' % (
             tag, url, runs, '/'.join(n for n, _ in variants))
         est = max(1, round(runs * len(variants) * (settle + stat + 25) / 60))
+        local = url.startswith('http://127.0.0.1:8776/')
         with hold(est, what):
+            if local:
+                sh('mkdir -p %s/www && cat > %s/www/anim.html' % (B, B), inp=ANIM_HTML, check=True)
+                # DESK9's scroll and 1080p60 video pages (runs/m1-desktop-010/desk9-tests/m1), the video served from here
+                for fn in ('scroll9.html', 'stats9.js', 'video9.html'):
+                    src = REPO / 'runs/m1-desktop-010/desk9-tests/m1' / fn
+                    if src.exists():
+                        sh('cat > %s/www/%s' % (B, fn), inp=src.read_text().replace(
+                            'file:///private/var/db/sffinch/gpu-nv12-one-copy-v2/fixtures/', '/'), check=True)
+                sh('ln -sf /private/var/db/sffinch/gpu-nv12-one-copy-v2/fixtures/pattern-1080p60-h264.mp4 %s/www/pattern-1080p60-h264.mp4' % B)
+                sh('cat > %s/tools/serve.py' % B, inp=SERVE, check=True)
+                srv = shbg('exec python3 %s/tools/serve.py %s/www %s/results' % (B, B, B), OUT / tag / 'http.log')
+                time.sleep(1.5)
             try:
                 for i in range(runs):
                     for name, env in variants:
                         print(now(), 'run', i, name, flush=True)
-                        r = one(tag, '%s-%d' % (name, i), env, url, settle, stat, capture and i == 0, sample)
+                        r = one(tag, '%s-%d' % (name, i), env, url, settle, stat, capture and i == 0, sample, wheel)
                         r['i'] = i; r['name'] = name; res.append(r)
                         print(json.dumps({k: r.get(k) for k in ('name', 'i', 'parent_pct', 'parent_main_ms', 'roles', 'wmpacing', 'error')})[:900], flush=True)
                         json.dump(res, open(OUT / tag / 'ab.json', 'w'), indent=1)
             finally:
                 if sh(T + ' mine').stdout.strip():
                     print('cleanup TERM'); sh(T + ' quitall')
+                if local:
+                    sh("pkill -f 'sffxperf2/tools/serve.py' || true")
+                    srv.terminate()
         r = subprocess.run(SSH + ['tar -C %s/out -cf - %s' % (B, tag)], capture_output=True, timeout=900)
         subprocess.run(['tar', '-C', str(OUT), '-xf', '-'], input=r.stdout, check=True)
+        # the M1's disk is small and shared: the pulled run and the last profile copy go
+        sh('rm -rf %s/out/%s %s' % (B, tag, PROFILE))
         return
     raise SystemExit(__doc__)
 

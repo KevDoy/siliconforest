@@ -86,3 +86,39 @@ parent's commit is not explained yet (not a busy thread: the GPU Renderer and th
 
 ### Start-up (installed c19 path, warm profile, 3 runs)
 exec -> first presented frame 2.00 / 1.75 / 1.82 s (median 1.82 s); window listed by the compositor ~2.6 s (polled).
+
+## FXPERF2: the damage-only frame path (patches 0300-0303, opt-in, own instance only so far)
+Built by `patches/fxperf2-build.nix` against the committed Cocoa series (QuartzCore, AppKit, libWindowServer) and the
+installed canonical CGL (`cgl-gpu.nix` canonical + NV12, byte-identical to the installed 52bff2c2); measured with
+`tools/fxperf2_ab.py` (own Firefox `-no-remote`, copy of a warm profile per run, interleaved variants in one gui.lock
+hold, loaded image paths checked per run) and `tools/fxperf2_sum.py`.
+- 0300 QuartzCore (`SFFX_GPU_DAMAGE=1`, with `SFFX_GPU_PRESENT=1`): before a frame, a walk of the layer tree (no GL)
+  gives every layer its window box and a signature (paint-order neighbour, depth, matrix, size/clip, contents and both
+  seeds, opacity/colours, border/shadow/mask). Changed, added and removed layers give the damage rectangle; the frame
+  is drawn into the retained drawable with the scissor on it, layers wholly outside it are not drawn, and a
+  rectangular axis-aligned clip is a scissor box with the stencil's exact pixel coverage instead of a stencil pass
+  with a full-window stencil clear. No damage: no frame (AppKit then presents nothing). The export copies only what
+  the frame being overwritten lacks (buffer age of the two export surfaces). The renderer reads geometry through
+  properties when a layer has no animations (KVC boxed every value in NSValue/NSInvocation).
+- 0301 AppKit: the GPU layer is registered with its damage; a layer-only flush with nothing drawn into the window's
+  backing store says so to the window server.
+- 0302w WindowServer: the CPU backing store is compared/uploaded only when AppKit may have drawn (by changed rows);
+  each output frame is brought up to date with the damage since the picture it holds (scissored compose); the same
+  picture is not presented again; `wl_surface.damage_buffer` carries the real rectangle; one texture per alternating
+  layer surface.
+- 0303 CGL: `CGLSFFXCopyFramebufferRect`; with `SFFX_GPU_IMAGE_CACHE=1` an IOSurface's EGLImage is kept per surface
+  (global iosurfaced ID), so a texture re-pointed at a known surface does not import and VM-bind the dma-buf again.
+- Kernel limit found on the way: every flush that touches a shared dma-buf waits for the GPU on this kernel (no dma-buf
+  sync-file ioctls, `../../m1-mesa-asahi/KERNEL-NEEDS.md` #1), so replacing the export `glFinish` with a fence alone
+  removes no wait; the gain comes from less GPU work and fewer imports/flushes per frame.
+
+| cnn.com idle, % of one core, median [range] of 3 runs | series baseline | 0300-0303 |
+|---|---|---|
+| family (A2) | 101.0 [99.6-106.2] | 71.3 [70.0-71.9] |
+| parent process | 55.7 [54.9-57.2] | 22.0 [21.3-22.8] |
+| parent main thread | 48.4 [47.7-49.9] | 18.7 [18.3-19.1] |
+| GPU / content process | 21.2 / 16.6 | 23.2 / 18.3 |
+| compositor commits / shown / replaced-unshown per s | 85.2 / 59.2 / 26.2 | 59.9 / 58.6 / 1.3 |
+| damage per presented frame | 11.06 MB (whole window) | 3.0 MB |
+A1 (earlier build, pointer-keyed image cache, base compared every frame): parent 54.7 -> 40.0, main 47.4 -> 32.5.
+A3 (cand vs QuartzCore -O2) is void: cnn.com was loading (parent Cache2 I/O 13-18 %) in 5 of 6 runs.

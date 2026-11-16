@@ -6,7 +6,8 @@
 # series: the cocoa directory whose patch lists give the sources (default this tree's; FXPERF2 passes an export of
 # the committed HEAD so builds do not follow uncommitted series work)
 # qcOptimised: QuartzCore compiled -O2 -fno-strict-aliasing as the other frameworks are (upstream's recipe has no -O)
-{ damage ? true, series ? ../../../cocoa, qcOptimised ? false }:
+# rebased: the series already carries 0300/0301/0302w (TERM10's a0407114b): only the deltas 0304/0305w go on top
+{ damage ? true, series ? ../../../cocoa, qcOptimised ? false, rebased ? false }:
 let
   C = ../../../cocoa;
   F = ../..;
@@ -23,9 +24,9 @@ let
     cp -r src/Frameworks/${name} $out
   '';
   sel = l: if damage then l else [ ];
-  qcSrc = patchSrc "QuartzCore" ps.quartzcoreSrc (sel [ ./0300-quartzcore-damage-only-frames.patch ]);
-  wsSrc = patchSrc "WindowServer" ps.windowserverSrc (sel [ ./0302w-windowserver-damage-only-compose-and-commit.patch ]);
-  akSrc = patchSrc "AppKit" ps.appkitSrc (sel [ ./0301-appkit-gpu-layer-registered-with-its-damage.patch ]);
+  qcSrc = patchSrc "QuartzCore" ps.quartzcoreSrc (sel (if rebased then [ ] else [ ./0300-quartzcore-damage-only-frames.patch ]));
+  wsSrc = patchSrc "WindowServer" ps.windowserverSrc (sel (if rebased then [ ./0305w-windowserver-backing-store-compared-only-after-drawing.patch ] else [ ./0302w-windowserver-damage-only-compose-and-commit.patch ]));
+  akSrc = patchSrc "AppKit" ps.appkitSrc (sel (if rebased then [ ./0304-appkit-layer-only-flush-says-backing-store-unchanged.patch ] else [ ./0301-appkit-gpu-layer-registered-with-its-damage.patch ]));
   q = a.pd.quartzcore-msm-arm64.override { src = qcSrc; };
   qp = q.overrideAttrs (old: { buildPhase = builtins.replaceStrings
     ([ "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore" ] ++ (if qcOptimised then [ "$cc $cflags -c" ] else [ ]))
