@@ -45,6 +45,9 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                         announced = datetime.fromisoformat(line.split()[0].replace('Z', '+00:00'))
                         deadline = announced.replace(hour=int(offer[1]), minute=int(offer[2]), second=int(offer[3] or 0), microsecond=0)
                         earliest = announced.replace(hour=int(scheduled[1]), minute=int(scheduled[2]), second=int(scheduled[3] or 0), microsecond=0)
+                        explicit_date = re.search(r'\bearliest\s*(\d{4}-\d{2}-\d{2})t', lower_body)
+                        if explicit_date:
+                            earliest = datetime.fromisoformat(explicit_date[1]+'T'+earliest.strftime('%H:%M:%S')+'+00:00')
                         dated = re.search(r'\d{4}-\d{2}-\d{2}t', scheduled[0])
                         if dated:
                             earliest = datetime.fromisoformat(dated[0][:-1]+'T'+earliest.strftime('%H:%M:%S')+'+00:00')

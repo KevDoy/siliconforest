@@ -8,6 +8,14 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_iso_offer_uses_actual_earliest_calendar_date(self):
+        from datetime import datetime,timezone
+        notice='2026-11-16T23:58:00Z CODEX-TB NOTICE next Firefox install earliest2026-11-17T00:02:00Z. Otheragents mayuseM1normallybefore23:59; owner offer.\n'
+        self.assertIsNone(gate.pending_hold(notice,now=datetime(2026,11,16,23,58,10,tzinfo=timezone.utc),max_seconds=20))
+        # A past calendar date cannot turn into a new same-day permission.
+        notice='2026-11-16T21:00:00Z CODEX-TB NOTICE next Firefox install earliest2026-11-15T23:00:00Z. Otheragents mayuseM1normallybefore21:05; owner offer.\n'
+        self.assertIsNotNone(gate.pending_hold(notice,now=datetime(2026,11,16,21,1,tzinfo=timezone.utc),max_seconds=20))
+
     def test_iso_dated_kernel_notice_blocks_until_its_real_recovery(self):
         text='2026-11-16T03:26:50Z CODEX-TB NOTICE next Firefox kernel install earliest 2026-11-16T03:28:50Z: Firefox45 reserved\n'
         self.assertIsNotNone(gate.pending_hold(text))
