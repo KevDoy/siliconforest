@@ -24,7 +24,7 @@ let
     cp -r src/Frameworks/${name} $out
   '';
   sel = l: if damage then l else [ ];
-  qcSrc = patchSrc "QuartzCore" ps.quartzcoreSrc (sel (if rebased then [ ] else [ ./0300-quartzcore-damage-only-frames.patch ]));
+  qcSrc = patchSrc "QuartzCore" ps.quartzcoreSrc (sel (if rebased then [ ./0306-quartzcore-video-planes-uploaded-as-red-green.patch ] else [ ./0300-quartzcore-damage-only-frames.patch ]));
   wsSrc = patchSrc "WindowServer" ps.windowserverSrc (sel (if rebased then [ ./0305w-windowserver-backing-store-compared-only-after-drawing.patch ] else [ ./0302w-windowserver-damage-only-compose-and-commit.patch ]));
   akSrc = patchSrc "AppKit" ps.appkitSrc (sel (if rebased then [ ./0304-appkit-layer-only-flush-says-backing-store-unchanged.patch ] else [ ./0301-appkit-gpu-layer-registered-with-its-damage.patch ]));
   q = a.pd.quartzcore-msm-arm64.override { src = qcSrc; };

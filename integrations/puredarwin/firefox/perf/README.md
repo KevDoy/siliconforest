@@ -122,3 +122,30 @@ hold, loaded image paths checked per run) and `tools/fxperf2_sum.py`.
 | damage per presented frame | 11.06 MB (whole window) | 3.0 MB |
 A1 (earlier build, pointer-keyed image cache, base compared every frame): parent 54.7 -> 40.0, main 47.4 -> 32.5.
 A3 (cand vs QuartzCore -O2) is void: cnn.com was loading (parent Cache2 I/O 13-18 %) in 5 of 6 runs.
+
+Later measurements, rebased set (series 20bbd0b17 carrying 0300-0302w + deltas 0304/0305w + 0303), one framework set
+with the opt-in env off vs on, quiet warm profile (background services off for every variant):
+- cnn.com idle (A6, 3+3): parent 58.9 -> 39.7 %, main thread 52.5 -> 36.2 %, family 111.0 -> 88.6 %, replaced 11.0 ->
+  0.6/s. Today's cnn.com is heavier (content 21-23 %, damage 5.3 MB/frame) than in A2. Profile P2 of the "on" run:
+  444 of 1038 main-thread samples were Mesa converting the autoplay video's NV12 planes, uploaded as
+  GL_LUMINANCE/LUMINANCE_ALPHA, pixel by pixel (`_mesa_format_convert`) -> 0306 uploads them as R8/RG8 (copy path).
+- local animation page (A7, 3+3): parent 44.1 -> 21.6 %, main 38.2 -> 19.2 %; presented frames bistable in both
+  variants (2/3 "on" and 1/3 "off" runs at ~33/s with bursts: shown->shown p50 16.7 ms, gaps to ~145 ms).
+- example.com idle (A8, 3+3): family 0.4 / 0.5 % of a core, no commits in either: FX-031's 6.6/13 % is profile
+  background work (first-run IndexedDB/cache, safe browsing, ...), not drawing.
+- tab switch (T1, 24+24 Command-number switches): 2nd rAF p50 107 -> 104 ms, p95 131 -> 129 ms: unchanged; FX-030 is
+  not the parent's frame cost.
+- correctness: FXLEAD's self-checking tile page after 5 scroll steps, 12/12 "off" and 12/12 "on" trials with every
+  visible cell right (G1, G2); pixel compare of the final window (marker-cropped) on static pages: scrolled page and
+  scrolled tile page 0 differing pixels (X1; X2 pending).
+- 0306 QuartzCore (always on): an NV12/x420 video surface CARenderer cannot bind on the GPU is uploaded as R8/RG8
+  (R16/RG16) planes, which Mesa copies, instead of LUMINANCE/LUMINANCE_ALPHA, which it converted pixel by pixel. 1080p60
+  H.264 (V2, damage on in both, 3+3): parent 69.1 -> 29.4 %, main thread 64.4 -> 24.6 %, family 101.5 -> 63.0 %;
+  colour bars sampled identical (same RGB). Applies to the whole-frame path too.
+- presented frames: with the display link on the compositor clock (0149) 4 of 9 "on" runs and 1 of 3 "off" runs fell
+  into a bursty ~30-35 shown/s mode (anim A7, video V1, A9); with PD_CV_TIMER=1 (the old 60 Hz timer) 3/3 runs at
+  59.2-59.8/s (A9). 0149 waits up to two refreshes for a pending frame's flip before ticking; with commit->flip ~22 ms
+  that loop can lock at half rate. Scroll (S3): 53.5 / 53.9 shown/s in both variants (below 59.5 with or without).
+- pixel compare (marker-cropped, same layout): scrolled page 0 differing pixels (X1, X2), unscrolled tile page 0 (X2),
+  scrolled tile page 0 (X1; X2's two runs ended at different scroll offsets). On three static pages a position:fixed
+  marker is missing in BOTH variants (reported to TERM10/FXLEAD), so they could not be compared: 3 pages compared, not 6.
