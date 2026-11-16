@@ -158,8 +158,10 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
                 raise RuntimeError('Application menu did not receive the trusted virtual-seat click')
             if not row['menu_stayed_open'] and not observe_auto_close:
                 raise RuntimeError('Application menu did not stay open after the trusted virtual-seat click')
-            if index in [0, 4, 9, 14, 19]:
+            if index in [0, 4, 9, 14, 19] and row['menu_stayed_open']:
                 row['capture'] = capture(output.with_name('popup-%02d-renderer.ppm' % (index+1)))
+            elif index in [0, 4, 9, 14, 19]:
+                row['capture_omitted'] = 'Protocol-only diagnostic: menu already closed; no menu pixel proof'
             request('key 29 down\nkey 29 up\nwait 150')
             row['closed'] = state()
             name = 'sffx-popup-' + secrets.token_hex(5)
