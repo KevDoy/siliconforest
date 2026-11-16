@@ -94,3 +94,20 @@ own mappings/handles. Three rounds, no GPU/decoder jobs and a30s outer alarm.
 Missing import capability, wrong kernel ID or a pre-existing decoder context
 refuses before allocation. This tests the producer-unmap/death edge separately
 from normal destroy; it still does not establish a GPU-consumer fence.
+
+
+The first native task-probe (v1) failed at its immediate post-exit INFO predicate
+after its child was reaped. It did not reach the post-death consumer check.
+Fresh later INFO/stats were healthy, contexts/DART allocations0, import still
+available, no panic/errors. The exact failed subcondition was not recorded;
+its printed errno can be stale because the predicate also checked fields.
+The failure remains private under runs/sftb/firefox-task-death-0044.
+
+Frozen PDAppleAVD.cpp documents that a process cannot close the shared node
+while another client holds it: reap_contexts runs on CREATE, and last close
+retires all contexts. INFO does not reap. Revised task-probe records the exact
+post-exit fields, checks its consumer, writes a marker only after the producer
+is dead (no jobs), then invokes the REAL CREATE reaper and checks the surviving
+consumer again under new allocation pressure. It destroys that new owned
+context and requires contexts/DART allocations0. This is explicit lazy retirement,
+not an immediate-on-death claim. Revised native execution is pending.
