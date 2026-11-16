@@ -454,6 +454,9 @@
 #         display link ticks right after the flip that showed the application's last frame (inNow = that flip,
 #         inOutputTime = the next), waits for a frame still in flight (at most two refreshes), else ticks on the
 #         display's phase; the 60 Hz timer only without the clock (PD_CV_TIMER=1 keeps it); the measured refresh
+#   0153  QuartzCore (FXLEAD, FX-036, the blank page): -[CALayer display] asks a delegate that wants to update its layer
+#         itself (-wantsUpdateLayer, NSView) for -updateLayer, as AppKit's -displayLayer: does on macOS; Firefox ends the
+#         suspension of its layer commits there (a stale first picture, then nothing); inert for views that answer NO
 #   0150  AppKit (TERM9, FX-023): NSEvent timestamps are seconds since the system started (mach_absolute_time), as on
 #         macOS, not since 2001 (Firefox's Event.timeStamp was 26 years ahead of performance.now())
 #   0230-0233 IOSurface (./iosurface.nix; CODEX-FX's iosurface-patches 0001-0004, FXLEAD's 0004): the per-session broker
@@ -645,6 +648,7 @@ let
     ./patches/0213-cache-gpu-frame-export-provider-lookups.patch
     ./patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch
     ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
+    ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
