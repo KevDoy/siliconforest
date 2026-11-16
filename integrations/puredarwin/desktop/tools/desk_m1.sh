@@ -24,6 +24,7 @@
 #   desk_m1.sh preflight                   those checks alone
 #   desk_m1.sh policy [key=value ...]      the desk's switches that change without a relaunch (DESK8, policy.rs):
 #                                          shown, or set in /private/var/db/desktop-state/chonkstep/policy
+#                                          (DESK10: also scroll_speed=25..400, the trackpad's scrolling speed in %)
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
 #                                          wait for SiliconForest with .next and the inject directory (gui.lock first)
 set -euo pipefail
@@ -65,7 +66,7 @@ case "${1:-}" in
     if [ $# = 0 ]; then "${SF[@]}" 'cat /private/var/db/desktop-state/chonkstep/policy 2>/dev/null || echo "(no policy file: defaults)"; grep -a WMPOLICY /var/log/desktop-session.log | tail -3'
     else
       lines=$(printf '%s\n' "$@")
-      printf '%s\n' "$lines" | grep -qvE '^[a-z_]+=(on|off)$' && { echo "key=on|off only" >&2; exit 2; }
+      printf '%s\n' "$lines" | grep -qvE '^[a-z_]+=(on|off)$|^scroll_speed=[0-9]+$' && { echo "key=on|off or scroll_speed=25..400 only" >&2; exit 2; }
       printf '%s\n' "$lines" | "${SF[@]}" 'P=/private/var/db/desktop-state/chonkstep/policy; T=$P.desk-new; [ -e $P ] && cp $P $T || : > $T
         while read -r l; do k=${l%%=*}; grep -v "^$k=" $T > $T.2; echo "$l" >> $T.2; mv $T.2 $T; done; mv $T $P; cat $P'
       echo "$(date -u +%FT%TZ) DESK policy $* (no relaunch; policy.rs)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
