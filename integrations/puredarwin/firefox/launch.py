@@ -31,10 +31,13 @@ def main():
         raise ValueError('Tools must be in the private target prefix')
     repo = Path(__file__).resolve().parents[3]
     out = repo / 'runs/firefox' / args.run
+    remote = '/private/var/db/sffx/' + args.run
+    tool_path, run_path = Path(args.tools), Path(remote)
+    if tool_path.is_relative_to(run_path) or run_path.is_relative_to(tool_path):
+        raise ValueError('Tool and run directories must be separate, non-overlapping prefixes')
     if out.exists():
         raise FileExistsError(out)
     out.mkdir(parents=True)
-    remote = '/private/var/db/sffx/' + args.run
     ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=yes',
            '-o', 'HostKeyAlias=m1-siliconforest', '-o',
            'UserKnownHostsFile=' + str(Path.home() / '.ssh/known_hosts_m1_siliconforest'),
