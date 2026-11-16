@@ -81,3 +81,16 @@ The fixed image is retained normal with speaker extra cap0 and qualified43
 rollback. This is capture correctness, not a GPU-consumer fence, task-death,
 real browser presentation or60fps qualification; those gates remain pending.
 Private machine receipts are under runs/sftb/firefox-install-0044, never in git.
+
+
+task-probe.c / build-task-probe.nix add a separate native lifetime gate,
+SDK-built but not yet run. Parent creates real writeback BOs and keeps the
+consumer mappings/handles. A new child opens its OWN AVD descriptor, creates
+and imports captures using its inherited shared BO mappings, then unmaps all
+its GPU VAs and closes its inherited DRM FD while keeping AVD alive. Parent
+checks the surviving consumer, kills ONLY that known child, requires reap in2s,
+checks context/import availability and the consumer again, then releases its
+own mappings/handles. Three rounds, no GPU/decoder jobs and a30s outer alarm.
+Missing import capability, wrong kernel ID or a pre-existing decoder context
+refuses before allocation. This tests the producer-unmap/death edge separately
+from normal destroy; it still does not establish a GPU-consumer fence.

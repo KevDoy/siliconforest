@@ -3618,7 +3618,8 @@ prelink9ACED54D…. Speaker extra cap remains0 with its enabling boot argument,
 and K14/HID plus the qualified killable-wait drivers remain unchanged.
 
 Observed on the M1:3 no-job rounds each imported/destroyed14 real writeback GPU
-BOs of6965056 bytes (42616KiB DATA pages), with distinct duplicate mappings,
+BOs carrying6965056 image bytes (426 padded16KiB DATA pages plus a header),
+with distinct duplicate mappings,
 alias unmap, original mapping alive and header canaries preserved. The real
 complete/unpin path ran without the prior UPL overflow. DART allocations,
 contexts and quarantine returned to zero; no decoder or GPU job was submitted.
