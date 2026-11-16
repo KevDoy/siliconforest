@@ -26,12 +26,22 @@ def main():
     if not names or names-{'CoreVideo.framework','VideoToolbox.framework','AudioToolbox.framework'}:
         raise ValueError('Only reviewed media frameworks may be selected')
     runtime=Path('/usr/local/lib/siliconforest/firefox/160-system1')
-    command,env=daily.plan(runtime,sys.argv[1:])
+    manifest=json.loads((runtime/'release.json').read_text())
+    graphics=os.environ.get('SF_MEDIA_GRAPHICS_OVERRIDE')
+    if graphics:
+        # The FX plan validates and selects framework, GLAPI and broker as one
+        # cohort. This is a copy of the manifest, never an installed mutation.
+        manifest['graphics_override']=graphics
+    command,env=daily.plan(runtime,sys.argv[1:],manifest)
     env['DYLD_FRAMEWORK_PATH']=str(frameworks)+':'+env['DYLD_FRAMEWORK_PATH']
     (profile.parent/'private-media-launch.json').write_text(json.dumps(dict(
         command=command,frameworks=sorted(names),installed_outer_launcher=False,
         installed_runtime_plan=True,owner_profile=False,
+        graphics_override=graphics,
         environment={k:v for k,v in env.items() if k.startswith(('DYLD_','SF_VT_','SF_AU_'))}),indent=2)+'\n')
+    # Match the installed launcher: relative bundle resources must be resolved
+    # from the real Mozilla executable directory, not our diagnostic wrapper.
+    os.chdir(Path(manifest.get('original_bundle',str(runtime/'original/Firefox.app')))/'Contents/MacOS')
     os.execvpe(command[0],command,env)
 
 

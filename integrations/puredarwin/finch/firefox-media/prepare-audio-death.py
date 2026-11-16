@@ -12,6 +12,8 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--hal-observer',type=Path,required=True)
 p.add_argument('--loss-observer',type=Path,required=True)
 p.add_argument('--stage',type=Path,required=True)
+p.add_argument('--clock-family',type=Path,help='Optional complete normalized AudioToolbox family for a prefix-only comparison')
+p.add_argument('--aac-fixture',type=Path,help='Our generated AAC .m4a instead of the generated WAV document')
 a=p.parse_args();here=Path(__file__).resolve().parent
 if a.stage.exists():raise ValueError('Fresh packet required')
 a.stage.mkdir();(a.stage/'lib').mkdir();(a.stage/'tools').mkdir()
@@ -23,6 +25,18 @@ shutil.copy2(here/'audio-death-browser.py',a.stage/'audio-death-browser.py')
 for file in sorted((here.parents[1]/'firefox').iterdir()):
     if file.is_file() and file.suffix in ['.py','.html','.js','.json']:
         shutil.copy2(file,a.stage/'tools'/file.name)
+if a.clock_family:
+    shutil.copytree(a.clock_family/'Frameworks/AudioToolbox.framework',a.stage/'Frameworks/AudioToolbox.framework',symlinks=True)
+    shutil.copy2(here/'media-launch.py',a.stage/'media-launch.py')
+    shutil.copy2(here/'media_images.py',a.stage/'media_images.py')
+if a.aac_fixture:
+    (a.stage/'media').mkdir();shutil.copy2(a.aac_fixture,a.stage/'media/tone-aac.m4a')
+    tool=a.stage/'tools/lifecycle_observer.py';text=tool.read_text()
+    anchor='tone = stream.getvalue()'
+    if text.count(anchor)!=1 or text.count("tone, 'audio/wav'")!=1:raise ValueError('Own audio fixture source changed')
+    text=text.replace(anchor,"tone = (Path(__file__).parents[1]/'media/tone-aac.m4a').read_bytes()")
+    text=text.replace("tone, 'audio/wav'","tone, 'audio/mp4'").replace('tone.wav','tone.m4a');tool.write_text(text)
+    page=a.stage/'tools/lifecycle-page.html';page.write_text(page.read_text().replace('tone.wav','tone.m4a'))
 rows={str(f.relative_to(a.stage)):hashlib.sha256(f.read_bytes()).hexdigest()
       for f in sorted(a.stage.rglob('*')) if f.is_file()}
 (a.stage/'packet-files.json').write_text(json.dumps(rows,indent=2)+'\n')

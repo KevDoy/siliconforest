@@ -19,7 +19,9 @@ import time
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True)
+    p.add_argument('--audio-clock-family',action='store_true',help='Private full AudioToolbox comparison, never changes installed selection')
+    a=p.parse_args()
     root=Path(__file__).resolve().parent
     if os.uname().sysname!='Darwin' or not root.is_relative_to(Path('/private/var/db/sffx')):
         raise ValueError('Cold private SiliconForest packet required')
@@ -40,7 +42,8 @@ def main():
     (profile/'user.js').write_text(''.join('user_pref(%s,%s);\n'%(json.dumps(k),json.dumps(v)) for k,v in prefs.items()))
     fixture=AudioFixture(a.run);owned={};client=None;process=None
     server=Path('/var/log/coreaudiod.log');offset=0;inode=None;server_rows=[]
-    result=dict(synthetic_input=False,installed_outer_launcher=True,audio_stop_qualified=False,
+    result=dict(synthetic_input=False,installed_outer_launcher=not a.audio_clock_family,audio_stop_qualified=False,
+                normalized_audio_family=a.audio_clock_family,
                 acoustic_stop_proved=False,cleanup_signals=[],timeline=[],port=port)
     def save():
         result['document']=fixture.snapshot();result['coreaudiod_observations']=server_rows
@@ -75,7 +78,12 @@ def main():
             SFFX_TEST_WAYLAND_LOSS='1',SF_FIREFOX_MEDIA_TRACE='1',SF_FIREFOX_MEDIA_TRACE_SECONDS='50',
             MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1',MOZ_NO_REMOTE='1',MOZ_CRASHREPORTER_DISABLE='1',
             HOME=str(home),CFFIXED_USER_HOME=str(home))
-        command=['/Applications/Firefox.app/Contents/MacOS/firefox-sf','--no-remote','--profile',str(profile),'--marionette',fixture.url]
+        arguments=['--no-remote','--profile',str(profile),'--marionette',fixture.url]
+        if a.audio_clock_family:
+            if not (root/'Frameworks/AudioToolbox.framework').is_dir():raise ValueError('Full staged AudioToolbox family required')
+            command=[sys.executable,str(root/'media-launch.py')]+arguments
+            env['SF_AU_NORMALIZE_HAL_CLOCK']='1'
+        else:command=['/Applications/Firefox.app/Contents/MacOS/firefox-sf']+arguments
         with (a.run/'firefox.log').open('w') as out:
             process=subprocess.Popen(command,env=env,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
             result.update(command=command,launcher_pid=process.pid,launch_monotonic=time.monotonic())
@@ -100,6 +108,12 @@ def main():
                 args=[],newSandbox=False,scriptTimeout=8000))
             if result['audio_started'].get('error') or result['audio_started'].get('paused') or result['audio_started'].get('muted'):
                 raise RuntimeError('Unmuted own document did not start')
+            if a.audio_clock_family:
+                import media_images
+                directory=a.run/'media-providers';directory.mkdir()
+                result['media_providers']=media_images.inspect(
+                    [dict(pid=parent,type='browser',os_start_identity=owned[parent])],directory,root/'Frameworks')
+                if not result['media_providers']['complete']:raise RuntimeError('Full normalized AudioToolbox family not selected')
             pause(2);result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
             (a.run/'wayland-disconnect.trigger').write_text('Disconnect only this admitted own Firefox client\n')
             pause(8);result['exit_before_cleanup']=process.poll();result['before_cleanup_owned']=result['timeline'][-1]['own_alive']

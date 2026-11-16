@@ -16,8 +16,9 @@ pictures with zero reported drops. CGL CPU upload/readback is0; VT still copies
 over10s are not60fps presentation. Isolated M1 CV callbacks run approximately
 60Hz; there is no evidence supporting a speculative CV timer change.
 
-**Those are private-cohort numbers.** The owner's installed160-system1 still
-selects older surface/CGL providers. `providers.nix` packages corrected CV
+**Those are historical private-cohort numbers.** At03:08:52 UTC on16November,
+FX selected the qualified NV12 surface/CGL cohort for160-system1. The five
+canonical UI providers remain selected; media activation is still pending. `providers.nix` packages corrected CV
 and the shared-capture VT producer, wrapped with the existing additive decoder
 queries so the installed symbol family is retained. AudioToolbox stays
 canonical. FX supplies and qualifies its matching surface/CGL and versioned
@@ -396,3 +397,64 @@ Family liveness, independent document events and coreaudiod append observations
 are recorded against monotonic time for8s before cleanup. Server slot identity
 can be ambiguous with other clients; missing/ambiguous drops cannot be declared
 audio-stop proof. Source/preparation alone do not qualify abnormal death cleanup.
+
+The full forwarding-family CLI gate subsequently passed14/14 on M1. WAV and
+AAC each decoded/queued/completed12000 stereo frames at48k with12 queue callbacks
+and no converter error; raw ASC/ESDS float AAC decoded13312 identical frames.
+WAVE/AAC/ALAC/MP3 file decode and converter checks passed. The two-unit silent
+stop/restart probe saw152 callbacks. Full-family timestamp A/B measured median
+under-report10.661/15.956ms ->0 at48/44.1k with unchanged181.333ms fixed properties;
+the32.003ms startup over-report remains. Browser selection, acoustic sync and
+abnormal-death cleanup do not follow from this CLI result.
+
+A new current-graphics forced-copy browser baseline decoded600 H264 and300 HEVC
+frames with zero reported drops, but observed BOTH decoder row copies and CGL
+CPU uploads:1.86624/3.73248GB at EACH boundary. Family CPU was114.66/149.59% of a
+core; parent83.40/108.87%, RDD9.51/17.44%, GPU13.75/18.59%. Counter identities were
+complete with no turnover; rVFC medians stayed40.04ms. These are new-cohort
+observations, not improvement over the older different-cohort baseline. Strict
+sharing on that older graphics family failed with zero frames/-12910; zero
+copied bytes with zero output is not a pass. Its renderer capture failed using
+the wrong XDG socket path and is retained as failed. The next fresh packet uses
+an explicit complete FX-qualified NV12 graphics override and desktop capture
+runtime. `media-launch.py` changes only an in-memory manifest for its own profile;
+it never installs a selector or mixes a surface from a different broker/CGL.
+
+
+The coherent NV12 browser comparison (packet-v10) subsequently decoded all
+600 H2641080p and300 HEVC4K pictures with zero reported drops in both modes.
+Strict sharing measured zero VT pixel-copy bytes and zero CGL CPU upload or
+readback, with exact job/done deltas and no new kernel faults/quarantine. Final
+64x36 canvas hashes match forced copy: `b424348` and `88999ae5`. GPU plane
+blits still occur; this is zero CPU pixel transport, not zero GPU copies.
+
+| One-core CPU % |1080p60 copy|1080p60 shared|4K30 copy|4K30 shared|
+|---|---:|---:|---:|---:|
+| Complete family|120.262|120.380|148.098|151.077|
+| Parent|87.125|87.582|106.022|111.860|
+| RDD|13.803|8.737|25.736|16.205|
+| GPU|12.381|18.137|12.337|19.241|
+
+RDD CPU falls about37%; complete-family CPU does not improve. Strict rVFC
+medians remain40.02/40.04ms. The actual compositor captures were inspected:
+**the Firefox client is transparent/blank in both modes**, despite updating
+titles and correct offscreen video pixels. This is a failed visible-playback
+gate; no canonical media replacement or owner selector follows. Matching the
+installed launcher's Mozilla working directory (v11) and disabling native tile
+composition only in the owned profile (v12) both retain the blank client, full
+600/300 decode and zero CPU transport. v12's lower family82.978/100.970% is a
+diagnostic observation, not a usable preference recommendation. FX's activated
+interactive fixture paints with the same graphics cohort; no-input first-show
+and the additional staged CV clock remain isolated next controls.
+
+The actual installed-browser connection-loss test completed without cleanup
+signals: closing only its own qualified Wayland connection made the parent
+exit within149.6ms and the complete owned family within380.1ms. No pointer/key
+input or foreign process control was used. Server aggregate mixing ended;
+its log does not identify the client slot, so per-client reclamation and
+acoustic stop are not fully established. The new optional `--audio-clock-family`
+comparison packages the complete forwarding AudioToolbox family, verifies the
+actual main and PD output-child image paths and can use our generated AAC
+fixture. The prepared normalized-AAC test has not run: the fresh coordination
+gate refused77 during TB's kernel45 reservation. No browser-clock selection,
+latency or abnormal-death result is inferred from preparation.

@@ -26,9 +26,15 @@ def main():
     p.add_argument('--staged-media',action='store_true')
     p.add_argument('--frame-mode',choices=['copy','require'],default='copy')
     p.add_argument('--without-trace',action='store_true')
+    p.add_argument('--graphics-override',type=Path,help='FX-qualified complete cohort under the runtime overrides directory')
+    p.add_argument('--no-native-compositor',action='store_true',help='Own-profile diagnostic: one full-window layer instead of native tile layers')
+    p.add_argument('--timer-control',action='store_true',help='Own-process comparison using the existing PD_CV_TIMER escape hatch')
     a=p.parse_args()
     if a.frame_mode=='require' and not a.staged_media:
         raise ValueError('Strict sharing requires the reviewed staged VT producer')
+    if a.graphics_override and (not a.staged_media or '..' in a.graphics_override.parts or
+            not a.graphics_override.is_relative_to(Path('/usr/local/lib/siliconforest/firefox/160-system1/overrides'))):
+        raise ValueError('Explicit reviewed runtime graphics cohort required')
     root=Path(__file__).resolve().parent
     private=Path('/private/var/db/sffx')
     if os.uname().sysname!='Darwin':raise ValueError('SiliconForest target only')
@@ -119,7 +125,8 @@ def main():
                 if a.staged_media:
                     try:
                         capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(directory/'renderer.ppm')],
-                                               capture_output=True,text=True,timeout=5)
+                                               capture_output=True,text=True,timeout=5,
+                                               env=dict(os.environ,XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',WAYLAND_DISPLAY='wayland-0'))
                         video['renderer_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
                                                      file=str(directory/'renderer.ppm'),input_injected=False,
                                                      timing='After measurement; visibility/pixels still require inspection')
@@ -140,11 +147,16 @@ def main():
         raise ValueError('Installed launcher lacks isolated diagnostic hook')
     manifest=json.loads((runtime/'release.json').read_text())
     if a.staged_media:os.environ['SF_VT_COPY_COUNTS']='1'
+    if a.timer_control:os.environ['PD_CV_TIMER']='1'
+    if a.graphics_override:os.environ['SF_MEDIA_GRAPHICS_OVERRIDE']=str(a.graphics_override)
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
         release=manifest,diagnostic_only=True,timing_qualified=False,
         synthetic_input=False,owner_idle_wait=False,rate_control=a.rate_control,
         staged_media=a.staged_media,frame_mode=a.frame_mode,boundary_trace=not a.without_trace,
+        graphics_override=str(a.graphics_override) if a.graphics_override else None,
+        native_compositor_disabled=a.no_native_compositor,
+        cv_timer_control=a.timer_control,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
@@ -156,6 +168,7 @@ def main():
           '--pref','media.autoplay.default=0','--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
+    if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file():
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
                '--policy-probe-path',str(root/'bin/thread-policy-probe')]

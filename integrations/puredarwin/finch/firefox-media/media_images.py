@@ -25,10 +25,13 @@ def inspect(processes,directory,frameworks=None):
                 images.append(line.strip());selected.setdefault(match[1],[]).append(match[2])
         checks={}
         if frameworks:
-            for name in ['CoreVideo','VideoToolbox']:
+            for name in ['CoreVideo','VideoToolbox','AudioToolbox']:
                 if (frameworks/(name+'.framework')).is_dir():
                     paths=selected.get(name,[])
                     checks[name]=len(paths)==1 and paths[0].startswith(str(frameworks/(name+'.framework'))+'/')
+                    if name=='AudioToolbox':
+                        children=selected.get('AudioToolbox.output-pd',[])
+                        checks['AudioToolbox.output-pd']=len(children)==1 and children[0].startswith(str(frameworks/'AudioToolbox.framework')+'/')
         rows.append(dict(pid=pid,type=process['type'],status=sample.returncode,images=images,
                          selected=selected,staged_media_checks=checks,
                          passed=sample.returncode==0 and bool(images) and all(checks.values())))

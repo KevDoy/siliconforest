@@ -16,6 +16,9 @@ import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared'])
+p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
+p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
+p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
 if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold gui.lock then bench')
 if not a.stage.name.startswith('firefox-media-cadence-packet-'):raise ValueError('Own cadence packet required')
@@ -53,6 +56,11 @@ try:
         if a.phase=='rates':argv+=['--rate-control']
         if a.phase in ['copy','shared']:
             argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy','--without-trace']
+        if a.graphics_override:
+            if a.phase not in ['copy','shared']:raise ValueError('Graphics comparisons require staged-media copy/shared phase')
+            argv+=['--graphics-override',a.graphics_override]
+        if a.no_native_compositor:argv+=['--no-native-compositor']
+        if a.timer_control:argv+=['--timer-control']
         limit=165
     with (out/'launcher.log').open('w') as stream:
         result=subprocess.run(ssh+[shlex.join(argv)],stdout=stream,stderr=subprocess.STDOUT,timeout=limit)
