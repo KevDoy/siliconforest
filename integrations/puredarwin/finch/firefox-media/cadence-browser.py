@@ -60,7 +60,10 @@ def main():
     p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
     p.add_argument('--mse-scroll',action='store_true',help='Own fixture programmatic viewport scrolling; no pointer/key input')
     p.add_argument('--view-state',action='store_true',help='Main-queue read-only window/view getter diagnostic, no focus/input/drawing')
+    p.add_argument('--frame-id',action='store_true',help='Own900-frame Gray-code fixture, preview calibration then15s playback; not a panel-rate claim')
     a=p.parse_args()
+    if a.frame_id and (not a.installed_media or not a.without_trace or a.youtube or a.codec_matrix or a.mse or a.rate_control or a.lifetime_control):
+        raise ValueError('Frame identity requires its separate installed-media no-trace case')
     if a.view_state and (not a.mse or not a.without_trace):
         raise ValueError('View-state requires separate MSE without cadence trace (three observer limit)')
     if a.mse and (a.youtube or a.codec_matrix or a.rate_control or a.lifetime_control):
@@ -241,7 +244,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -311,10 +314,26 @@ def main():
             # Snapshot outside the fixture interval. No profiler, per-frame
             # sampling or dependency on zero counters being valid CPU time.
             import process_cpu
+            marker_preparation=None
+            if a.frame_id:
+                if handle is None:raise ValueError('Exact owned marker tab handle required')
+                self.command('WebDriver:SwitchToWindow',{'handle':handle})
+                self.command('Marionette:SetContext',{'value':'content'})
+                marker_preparation=self.command('WebDriver:ExecuteAsyncScript',dict(
+                    script='const done=arguments[arguments.length-1]; window.fxPrepareFrameID().then(done,e=>done({error:String(e)}));',
+                    args=[],scriptTimeout=16000,newSandbox=False))
+                if marker_preparation.get('error'):raise RuntimeError('Own marker calibration failed: '+str(marker_preparation))
+                marker_preparation['renderer_capture']=renderer_readback(a.run/'frame-id-calibration.ppm')
+                marker_preparation['owned_parent']=self.owned_parent
+                marker_preparation['owned_parent_start']=self.owned_parent_start
+                (a.run/'frame-id-calibration.json').write_text(json.dumps(marker_preparation,indent=2)+'\n')
             cpu={}
             try:cpu['before']=self.cpu_snapshot()
             except Exception as error:cpu['before_error']=str(error)
             video=super().measure_video(handle)
+            if a.frame_id:
+                video['frame_identity_calibration']=marker_preparation
+                video['frame_identity_limits']='Known encoded IDs and calibrated own video rectangle. JS decode/rVFC and one GPU capture do not qualify per-export or completed shown-frame cadence. Initial preview outside interval; native readback is diagnostic.'
             try:
                 cpu['after']=self.cpu_snapshot()
                 if 'before' in cpu:cpu['comparison']=process_cpu.compare(cpu['before'],cpu['after'])
@@ -403,6 +422,7 @@ def main():
         mse_representation_control=a.mse,
         mse_programmatic_scroll=a.mse_scroll,
         view_state_diagnostic=a.view_state,
+        known_frame_id_fixture=a.frame_id,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
         youtube_1080=a.youtube_1080,
         youtube_disable_av1=a.disable_av1,reused_media_profile=str(a.reuse_media_profile) if a.reuse_media_profile else None,
@@ -450,12 +470,21 @@ def main():
         if a.av1_switchback:names=['av1-1080p60.webm']
         clips=[(name,1) for name in names]
     if a.mse:clips=[]
+    if a.frame_id:clips=[('frame-id-1080p60.mp4',1)]
     for clip,rate in clips:
         source=root/'media/codecs'/clip if a.codec_matrix else Path('/private/var/db/sffx/media-highrate-v1')/clip
         if a.lifetime_control:
             source=root/'media'/clip
             if not source.is_file():raise ValueError('Missing frozen lifetime fixture: '+clip)
         if a.codec_matrix and not source.is_file():raise ValueError('Missing generated codec fixture: '+clip)
+        if a.frame_id:
+            import hashlib
+            folder=root/'media/frame-id';source=folder/clip
+            frozen=json.loads((folder/'manifest.json').read_text())
+            if frozen.get('file')!=clip or hashlib.sha256(source.read_bytes()).hexdigest()!=frozen.get('sha256'):
+                raise ValueError('Frozen frame-identity fixture mismatch')
+            argv+=['--url',(folder/'index.html').as_uri()]
+            continue
         argv+=['--url','file://'+str(tools/'video-page.html')+
                '?src='+source.as_uri()+
                '&deferred=1&deadline=25000&rate='+str(rate)]

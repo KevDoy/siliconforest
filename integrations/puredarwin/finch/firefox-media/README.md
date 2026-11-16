@@ -199,6 +199,52 @@ providers match the installed selection. This verifies exact server cleanup for
 one active-audio connection-loss path. It does not measure acoustic silence,
 queued device-audio drain or every abnormal window/termination path.
 
+## Distinct video images and owned decoder telemetry
+
+`make-frame-id-fixture.py FRESH_DIRECTORY` generates our15s H2641080p60
+testsrc2 movie with900 distinct frame identities. The18-cell marker contains
+fixed sync guards and10 Gray-code bits, with a complementary second row. Its
+manifest preserves the command, movie hash, stream metadata and decoder identity.
+Linux decoding verifies every ID0..899 in order at320×180 and160×90 after
+bilinear scaling. `frame_marker.py` and `frame-id-decode.h` refuse ambiguous
+levels, missing guards, mixed/complement-invalid rows and IDs outside the file.
+The C control passes7200 scaled IDs under ASan/UBSan. These are offline image
+identity checks, not a target playback or presentation result.
+
+Add `--frame-id-fixture DIRECTORY` to `prepare-cadence.py`, then use the
+`frame-id` phase after cold-copy/control under GUI→core-shared→bench. The
+installed outer/strict shared case pauses on the first frame for actual GPU
+capture and own video-rectangle/DPR/window geometry calibration, then runs the
+finite15s page. It preserves the preview counters outside the measured interval,
+JS decode/rVFC observations, actual providers, final GPU capture and natural
+Quit separately. A preview plus899 subsequently decoded frames must not be
+reported as900 newly decoded inside the interval.
+
+For a private CGL post-completion observer, sample two packed RGBA/BGRA rows
+spanning source X88..1816 at source Y120 and232, scaled and translated with the
+video rectangle. The decoder samples each of18 equal cell segments and ignores
+alpha. At source scale this is13824 diagnostic readback bytes/frame, rather
+than another full-window copy. CGL integration belongs to FX; no hook or
+performance flag is installed by this source. Parent-export frame IDs still
+need completed compositor shown/source-buffer correlation before any panel-rate
+claim. Diagnostic readback time/bytes remain separate from production pacing.
+
+`context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
+libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
+kernel's additive128-byte/version1/capability17 contract only at successful
+create/import and immediately before destroy. Discovery retains the nonzero
+generation; later snapshots must match. Default-off and recording paths add no
+queries, and there is no per-frame query even when enabled. Snapshot failures
+remain explicit and never become zero job/mapping counts. Diagnostics preserve
+the API's result and errno, including failed destroy. The literal patched user
+library passes sanitizer controls with fake ioctls and builds for arm64 on
+Linux. It has not yet been qualified on the M1 or selected for Firefox.
+
+Those counters describe the owned LIVE context and its current capture backing,
+IOVA and prepared bytes. They exclude coded/private/firmware allocations and
+post-destroy retirement; they are not unique physical-memory usage or GPU-fence
+proof. EINVAL after destruction must never be interpreted as zero mappings.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

@@ -12,6 +12,7 @@ p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--probes',type=Path,required=True)
 p.add_argument('--admission',type=Path,required=True)
 p.add_argument('--fixture',type=Path,required=True)
+p.add_argument('--frame-id-fixture',type=Path,help='Own Linux-verified900-frame Gray-code movie and manifest')
 p.add_argument('--stage',type=Path,required=True)
 p.add_argument('--providers',type=Path,help='Reviewed media payload only; graphics and broker remain selected by FX')
 p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exact runtime provider path/UUID and Linux symbol offset')
@@ -51,6 +52,14 @@ if a.view_state:
     shutil.copy2(a.view_state/'bin/view-state-control',a.stage/'bin/view-state-control')
 shutil.copy2(a.admission/'bin/vt-codec-admission',a.stage/'bin/vt-codec-admission')
 shutil.copy2(a.fixture,a.stage/'media/hevc-main10-pq.mp4')
+if a.frame_id_fixture:
+    folder=a.frame_id_fixture;frozen=json.loads((folder/'manifest.json').read_text())
+    name='frame-id-1080p60.mp4';source=folder/name
+    if frozen.get('file')!=name or hashlib.sha256(source.read_bytes()).hexdigest()!=frozen.get('sha256'):
+        raise ValueError('Frame identity fixture changed')
+    target=a.stage/'media/frame-id';target.mkdir()
+    shutil.copy2(source,target/name);shutil.copy2(folder/'manifest.json',target/'manifest.json')
+    shutil.copy2(here/'frame-id-page.html',target/'index.html')
 if a.codec_fixtures:
     manifest=json.loads((a.codec_fixtures/'manifest.json').read_text())
     rows={row['file']:row for row in manifest['fixtures']}
