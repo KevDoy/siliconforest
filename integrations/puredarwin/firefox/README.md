@@ -131,4 +131,14 @@ Inspect all three first-round renderer captures. Keep failed runs, natural-exit
 failures and below-threshold rates; they cannot be replaced by cleanup success
 or a selected subset of the twelve rounds.
 
+For a steady-state control, `--settle-seconds 60 --automatic-intervals` keeps
+normal services enabled while the process settles, then observes 22 seconds
+per workload without stats/dump/input requests. It discards the first automatic
+compositor interval, which can overlap warmup, and takes the last complete
+interval by a rule fixed before collection. All intervals remain in the raw
+receipt. Scrolling continues for 60 seconds and the video loops. CPU deltas
+cover the full observation; presentation covers the selected interval. Report
+these separately from startup results. A successful warm control does not
+erase startup stalls or qualify twelve repetitions.
+
 The optional `av1_enabled` runtime policy has a strict `SFFX_AV1=0|1` switch. On this M1, disabling AV1 lets sites negotiate hardware VP9/H264/HEVC instead of software AV1; it does not request a lower resolution or frame rate. Explicit `media.av1.enabled` entries outside the launcher's marked `user.js` block win. `SFFX_AV1=1` enables software AV1 when needed for an AV1-only source. Removing the manifest policy removes only that managed block on the next launch. `install-codec-policy.py` admits the matched native comparison and inspected renderer pictures, keeps a checked rollback, and requires an immediate installed-launcher acceptance without a test preference overriding the default. The measured YouTube pair is one clip, not a universal codec quality or panel cadence claim.

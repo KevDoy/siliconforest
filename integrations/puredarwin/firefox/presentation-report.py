@@ -53,6 +53,7 @@ def summarize(root):
                 shown=pacing['shown'], replaced=pacing['replaced_before_shown'],
                 over_ms=pacing['over_ms'], video_frames=phase.get('video_frames'),
                 video_drops=phase.get('video_drops'), per_flush_intervals=per_flush,
+                cpu_interval_seconds=elapsed,
                 family_cpu_percent=100 * sum(after[p] - t for p, t in before.items() if p in after) / elapsed,
                 exited_before_final_snapshot=sorted(set(before) - set(after)),
                 born_after_initial_snapshot=sorted(set(after) - set(before))))

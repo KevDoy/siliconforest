@@ -9,7 +9,8 @@ animation:move 2s linear infinite alternate}
 video{width:960px;max-width:95vw;height:auto;display:block}
 </style><header id="heading">SiliconForest presentation gate</header><section id="work"></section>
 <script>
-const kind=new URL(location.href).searchParams.get('case'),work=document.querySelector('#work');
+const parameters=new URL(location.href).searchParams,kind=parameters.get('case'),
+ automatic=parameters.get('automatic')==='1',work=document.querySelector('#work');
 let token=0,until=0,distance=0,previousY=0,started=0;
 if(kind==='scroll'){
  const fragment=document.createDocumentFragment();
@@ -33,7 +34,7 @@ window.fxBenchState=()=>{
    decoded:q.totalVideoFrames,dropped:q.droppedVideoFrames,error:v.error?.code||null}:null};
 };
 window.fxBenchStart=async()=>{
- started=performance.now();distance=0;previousY=scrollY;until=started+20000;
+ started=performance.now();distance=0;previousY=scrollY;until=started+(automatic?60000:20000);
  if(kind==='scroll'){
   scrollTo(0,0);previousY=0;
   const tick=now=>{if(now>=until)return;scrollTo(0,(now-started)*2);
@@ -44,7 +45,7 @@ window.fxBenchStart=async()=>{
   const v=document.querySelector('video'),deadline=performance.now()+10000;
   while(v.readyState<2&&!v.error){if(performance.now()>deadline)throw Error('Video readiness deadline');await new Promise(r=>setTimeout(r,25));}
   if(v.error||v.videoWidth!==1920||v.videoHeight!==1080)throw Error('Wrong video fixture');
-  v.currentTime=0;await v.play();started=performance.now();
+  v.loop=automatic;v.currentTime=0;await v.play();started=performance.now();
  }
  return fxBenchState();
 };

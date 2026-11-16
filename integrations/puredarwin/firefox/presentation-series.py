@@ -40,9 +40,13 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--root',type=Path,required=True)
     ap.add_argument('--round',type=int,required=True)
+    ap.add_argument('--automatic-intervals',action='store_true',
+                    help='Observe 22s without stats requests; use the last full automatic interval after discarding the first')
+    ap.add_argument('--settle-seconds',type=int,default=0,
+                    help='Normal services remain enabled during a bounded pre-workload settle')
     args=ap.parse_args();root=args.root
     if (os.uname().sysname!='Darwin' or root.parent!=Path('/private/var/db/sffx') or
-            '..' in root.parts or not 1<=args.round<=12):raise ValueError('Owned target round required')
+            '..' in root.parts or not 1<=args.round<=12 or not 0<=args.settle_seconds<=120):raise ValueError('Owned target round and bounded settle required')
     functional_qa();guard=OwnerInputGuard(require_idle=False)
     def check_owner():
         after=guard.check()
@@ -70,7 +74,8 @@ def main():
     result=dict(round=args.round,complete=False,installed_outer=True,input_injected=False,
                 timed_input_injected=False,pointer_input_injected=False,
                 programmatic_scroll=True,manifest=manifest,phases=[],owned_profile=str(profile),test_preferences=prefs,
-                owner_input_before=guard.before)
+                owner_input_before=guard.before,automatic_intervals=args.automatic_intervals,
+                normal_services_settle_seconds=args.settle_seconds)
     owned={};process=None;client=None
     def save():(run/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     def identities():
@@ -88,7 +93,8 @@ def main():
         env=os.environ.copy();env.update(HOME=str(home),CFFIXED_USER_HOME=str(home),MOZ_NO_REMOTE='1',
                 MOZ_CRASHREPORTER_DISABLE='1',MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1')
         for key in ['SFFX_GPU_DAMAGE','SFFX_GPU_IMAGE_CACHE','PD_CV_TIMER',
-                    'SFFX_FRAME_ID_GEOMETRY','SFFX_FRAME_ID_DIMENSIONS']:
+                    'SFFX_FRAME_ID_GEOMETRY','SFFX_FRAME_ID_DIMENSIONS',
+                    'SFFX_GPU_RENDER_THREAD','PD_CA_FRAME_TRACE']:
             env.pop(key,None)
         with(run/'launcher.log').open('w')as log:
             process=subprocess.Popen(['/Applications/Firefox.app/Contents/MacOS/firefox-sf','--no-remote',
@@ -105,9 +111,11 @@ def main():
         identities()
         if parent not in owned:raise RuntimeError('Parent outside owned family')
         result['parent_pid']=parent
+        save();wait(args.settle_seconds)
         for case in ['scroll','css','video']:
             client.command('Marionette:SetContext',{'value':'content'})
             url=(root/'presentation-series.html').as_uri()+'?case='+case
+            if args.automatic_intervals:url+='&automatic=1'
             client.command('WebDriver:Navigate',{'url':url})
             end=time.monotonic()+12
             while not script('return location.href===arguments[0] && typeof fxBenchStart==="function";',[url]):
@@ -132,13 +140,22 @@ def main():
             wait(2 if case=='video' else (3 if args.round>1 else 5))
             row=dict(case=case,window_id=window,start=started,programmatic_scroll=case=='scroll');result['phases'].append(row)
             row['before']=script('return fxBenchState();')
-            row['cpu_before']=cpu();flush_command('stats');log=Path('/var/log/desktop-session.log');info=log.stat()
+            row['cpu_before']=cpu()
+            if not args.automatic_intervals:flush_command('stats')
+            log=Path('/var/log/desktop-session.log');info=log.stat()
             began=time.monotonic();row['begin_monotonic']=began
-            wait(10)
-            flush_command('stats');row['end_monotonic']=time.monotonic();row['cpu_after']=cpu()
+            wait(22 if args.automatic_intervals else 10)
+            if not args.automatic_intervals:flush_command('stats')
+            row['end_monotonic']=time.monotonic();row['cpu_after']=cpu()
             if log.stat().st_ino!=info.st_ino:raise RuntimeError('Desktop log rotated')
             with log.open('rb')as stream:stream.seek(info.st_size);raw=stream.read().decode(errors='replace')
             (run/(case+'-desktop.log')).write_text(raw);row['presentation']=pacing(raw,window)
+            if args.automatic_intervals:
+                row['automatic_all']=row['presentation']
+                lines=row['automatic_all']['lines']
+                if len(lines)<2:raise RuntimeError('Need two automatic intervals; first overlaps warmup')
+                row['automatic_selected_rule']='Last automatic interval after discarding the first, chosen in advance; no stats/dump/input during 22s observation.'
+                row['presentation']=pacing(lines[-1],window)
             row['after']=script('return fxBenchState();');script('return fxBenchStop();')
             row['active_interval']=row['before']['visibility']=='visible' and row['after']['visibility']=='visible'
             if case=='scroll':row['active_interval'] &= row['after']['active'] and row['after']['distance']-row['before']['distance']>10000
