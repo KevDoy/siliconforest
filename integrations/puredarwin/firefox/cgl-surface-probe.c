@@ -27,7 +27,8 @@ int main(int argc,char **argv){
  int child=argc==6&&!strcmp(argv[1],"child"),selected=argc==5&&!strcmp(argv[1],"case");
  unsigned target=child?(unsigned)strtoul(argv[3],0,0):0;
  int profile=child?(int)strtol(argv[4],0,0):0,require=child?atoi(argv[5]):(argc==2&&!strcmp(argv[1],"--require-gpu"));
- void *lib=dlopen("/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",RTLD_NOW|RTLD_LOCAL);
+ const char *library=getenv("SFFX_CGL_PROBE_LIBRARY");
+ void *lib=dlopen(library&&*library?library:"/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",RTLD_NOW|RTLD_LOCAL);
  if(!lib){fprintf(stderr,"CGL: %s\n",dlerror());return 2;}
  LOAD(int,CGLChoosePixelFormat,(const int *,CGLPixelFormatObj *,int *));
  LOAD(int,CGLCreateContext,(CGLPixelFormatObj,CGLContextObj,CGLContextObj *));

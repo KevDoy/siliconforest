@@ -64,7 +64,8 @@ static void fill(IOSurfaceRef s,int revision){
 }
 static int child(int fd,uint32_t id,int profile){
  alarm(20);IOSurfaceRef s=IOSurfaceLookup(id);REQUIRE(s&&IOSurfaceGetPlaneCount(s)==2&&IOSurfaceGetUseCount(s)==0&&IOSurfaceIsInUse(s));
- void *lib=dlopen("/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",RTLD_NOW|RTLD_LOCAL);REQUIRE(lib);
+ const char *library=getenv("SFFX_CGL_PROBE_LIBRARY");
+ void *lib=dlopen(library&&*library?library:"/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",RTLD_NOW|RTLD_LOCAL);REQUIRE(lib);
  LOAD(int,CGLChoosePixelFormat,(const int *,void **,int *));LOAD(int,CGLCreateContext,(void *,void *,void **));
  LOAD(int,CGLSetCurrentContext,(void *));LOAD(int,CGLDestroyContext,(void *));LOAD(int,CGLDestroyPixelFormat,(void *));
  LOAD(int,CGLTexImageIOSurface2D,(void *,unsigned,unsigned,int,int,unsigned,unsigned,void *,unsigned));

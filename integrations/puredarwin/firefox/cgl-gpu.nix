@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: MIT
 # GPU IOSurface bridge; private prefix by default, explicit canonical packaging.
 {prefix ? "/private/var/db/sffx/gl-gpu-v3", canonical ? false, nv12Backing ? false,
- contextLocalFBO ? false, imageCache ? false}:
+ contextLocalFBO ? false, imageCache ? false, frameIdentity ? false}:
 let base=import ./cgl.nix {inherit prefix canonical;};
 in base.overrideAttrs(old:{patches=old.patches++[./cgl-patches/0002-gpu-iosurface-alias-and-rectangle-blit.patch ./cgl-patches/0003-export-framebuffer-and-import-layer-gpu-storage.patch ./cgl-patches/0004-opt-in-export-framebuffer-resource-cache.patch]++
  (if nv12Backing then [./cgl-patches/0005-nv12-rectangle-gpu-planes-and-completion-lease.patch] else [])++
  (if contextLocalFBO then [./cgl-patches/0006-framebuffer-tracking-is-context-local.patch] else [])++
  (if imageCache then [./perf/patches/0303-cgl-rectangle-export-and-image-per-surface.patch
-                     ./cgl-patches/0007-bound-iosurface-image-cache-and-snapshot-lock.patch] else []);})
+                     ./cgl-patches/0007-bound-iosurface-image-cache-and-snapshot-lock.patch] else [])++
+ (if frameIdentity then [./cgl-patches/0008-private-exported-video-frame-identity.patch] else []);
+}//(if frameIdentity then {postPatch=(old.postPatch or "")+''
+   cp ${./frame-id-export.h} src/Frameworks/OpenGL/sffx-frame-id-export.h
+   cp ${../finch/firefox-media/frame-id-decode.h} src/Frameworks/OpenGL/sffx-frame-id-decode.h
+ ''; } else {}))
