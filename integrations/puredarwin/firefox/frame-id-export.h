@@ -11,6 +11,7 @@ static int sffx_frame_sizes[8][3];
 static unsigned sffx_frame_size_count;
 static unsigned sffx_frame_count;
 static double sffx_frame_started;
+static double sffx_frame_previous_emit_ms;
 static void sffx_frame_configure(void){
     const char *dimensions=getenv("SFFX_FRAME_ID_DIMENSIONS");
     sffx_frame_dimensions=dimensions&&!strcmp(dimensions,"1");
@@ -82,15 +83,26 @@ static void sffx_frame_export(CGLContextObj ctx,IOSurfaceRef surface,GLuint fbo,
     double after=pd_cgl_now();
     int frame=error?-1:sf_media_frame_id_rgba(rows[0],rows[1],(unsigned)pixels);
     uint32_t id=pd_iosurface.surfaceID?pd_iosurface.surfaceID(surface):0;
-    flockfile(stderr);
-    fprintf(stderr,"FXFRAMEID pid=%d sequence=%u surface=%u size=%dx%d fbo=%u before_ms=%.6f after_ms=%.6f readback_bytes=%d frame=%d gl_error=%u reason=%s rows=",
-        getpid(),sequence,id,ctx->width,ctx->height,fbo,before,after,pixels*8,frame,error,
+    char line[1024];
+    int size=snprintf(line,sizeof(line),"FXFRAMEID pid=%d sequence=%u surface=%u size=%dx%d fbo=%u before_ms=%.6f after_ms=%.6f previous_emit_ms=%.6f readback_bytes=%d frame=%d gl_error=%u reason=%s rows=",
+        getpid(),sequence,id,ctx->width,ctx->height,fbo,before,after,sffx_frame_previous_emit_ms,pixels*8,frame,error,
         error?"gl_error":frame<0?"marker_rejected":"ok");
-    if(!error)for(int row=0;row<2;row++)for(unsigned column=0;column<18;column++){
+    size_t used=size>0&&(size_t)size<sizeof(line)?(size_t)size:0;
+    if(used&&!error)for(int row=0;row<2;row++)for(unsigned column=0;column<18;column++){
         unsigned x=(2*column+1)*(unsigned)pixels/36,sum=0;
         for(int d=-1;d<=1;d++)for(unsigned c=0;c<3;c++)sum+=rows[row][4*(x+d)+c];
-        fprintf(stderr,"%s%u",row||column?",":"",sum/9);
+        size=snprintf(line+used,sizeof(line)-used,"%s%u",row||column?",":"",sum/9);
+        if(size<0||(size_t)size>=sizeof(line)-used)goto frame_emit_done;
+        used+=(size_t)size;
     }
-    fputc('\n',stderr);funlockfile(stderr);
+    if(used&&used<sizeof(line)){
+        line[used++]='\n';
+        double emit_started=pd_cgl_now();
+        // stderr is unbuffered: many fprintf calls would become many tiny
+        // filesystem writes. Emit the complete diagnostic record once.
+        (void)write(STDERR_FILENO,line,used);
+        sffx_frame_previous_emit_ms=pd_cgl_now()-emit_started;
+    }
+frame_emit_done:
     pthread_mutex_unlock(&sffx_frame_lock);
 }

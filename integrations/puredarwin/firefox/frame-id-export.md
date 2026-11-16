@@ -23,7 +23,9 @@ After the existing export completion, two one-pixel RGBA rows are read. The
 helper restores the read framebuffer, its read buffer, pack-buffer binding,
 alignment, row length and pixel/row skips. It emits `FXFRAMEID` with PID,
 sequence, export IOSurface ID, dimensions, framebuffer, monotonic timestamps,
-bytes, decoded identity, GL error and 36 raw marker levels. Invalid guards,
+bytes, decoded identity, GL error and 36 raw marker levels. Each complete record
+uses one bounded write; `previous_emit_ms` records the previous write's cost
+(the final write's cost is not included). Invalid guards,
 complements or levels yield identity `-1`. Collection stops at 1,200 samples or
 35 seconds after the first matching export.
 
