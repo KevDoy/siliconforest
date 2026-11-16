@@ -24,7 +24,10 @@ def analyze(directory):
     if not checks['finite_precleanup_interval']:
         return output
     rows = []
-    for line in (directory / 'firefox.log').read_text(errors='replace').splitlines():
+    log = directory / 'launcher-runtime.log'
+    if not log.exists():
+        log = directory / 'firefox.log'
+    for line in log.read_text(errors='replace').splitlines():
         if not line.startswith(('SFMEDIA_AU ', 'SFMEDIA_CALLBACK ')):
             continue
         fields = dict(re.findall(r'([\w-]+)=([^\s]+)', line))
@@ -37,7 +40,7 @@ def analyze(directory):
     checks['audio_unit_started_before_action'] = bool(starts)
     callbacks = [r for r in rows if r['kind'] == 'SFMEDIA_CALLBACK']
     checks['callbacks_ran_before_action'] = any(r['time'] < begin and int(r.get('successes', 0)) > 0 for r in callbacks)
-    closing = action in ['close-tab', 'close-window', 'close-box', 'cmd-w', 'quit']
+    closing = action in ['close-tab', 'close-window', 'close-box', 'cmd-w', 'quit', 'connection-loss']
     owned_alive = result.get('after_action_owned_alive', {})
     owned_before = result.get('before_action_owned_identities', {})
     unit_checks = []
@@ -66,13 +69,23 @@ def analyze(directory):
     admission = result.get('admission', {})
     window_id = admission.get('window_id')
     native = result.get('after_action_native_windows', '')
-    mapped = any(re.match(r'window %s ' % window_id, line) and 'mapped=true' in line for line in native.splitlines())
+    own_rows = [line for line in native.splitlines() if re.match(r'window %s ' % window_id, line)]
+    mapped = any('mapped=true' in line for line in own_rows)
     checks['native_window_observation'] = type(window_id) is int and 'stack [' in native
     checks['closed_window_not_mapped'] = not mapped if closing else True
+    if action in ['hide', 'minimize']:
+        checks['hidden_or_minimized_before_reopen'] = bool(own_rows) and all(
+            'mapped=false' in line or ('lifecycle=' in line and 'lifecycle=Normal' not in line) for line in own_rows)
     reopened = result.get('after_reopen_windows', [])
-    checks['reopen_available_or_quit'] = (not owned_alive if action == 'quit' else bool(reopened))
-    if action != 'quit':
+    ending_process = action in ['quit', 'connection-loss']
+    checks['reopen_available_or_quit'] = (not owned_alive if ending_process else bool(reopened))
+    if action == 'connection-loss':
+        loss = log.read_text(errors='replace')
+        checks['single_owned_connection_lost'] = bool(re.search(r'SFFX_WAYLAND_LOSS pid=%d fd=\d+ shutdown=0 errno=0\b' % result.get('parent_pid', -1), loss))
+        checks['fatal_connection_exit'] = result.get('exit_before_cleanup') == 70
+    if not ending_process:
         checks['reopened_native_window_reachable'] = result.get('reopen_admission', {}).get('complete') is True
+        checks['single_live_browser_after_reopen'] = len(reopened) == 1 and not reopened[0].get('closed', False)
         document_url = result.get('document', {}).get('url')
         tabs = [t for w in reopened for t in w.get('tabs', [])]
         checks['reopen_fresh_or_original_tabs'] = bool(tabs) and (

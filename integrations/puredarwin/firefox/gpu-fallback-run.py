@@ -21,6 +21,9 @@ def main():
     parser.add_argument('--mode', choices=['full', 'dirty-off', 'export-off', 'presentation-off', 'cpu'], required=True)
     parser.add_argument('--software', action='store_true')
     parser.add_argument('--kill-first-gpu', action='store_true')
+    parser.add_argument('--provider-control', choices=['current', 'system-gpu', 'system-gpu-private-gl-api',
+                        'system-surface-private-gl', 'system-gl-private-surface'], default='current')
+    parser.add_argument('--fixture-reference', action='store_true')
     args = parser.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target-only diagnostic')
@@ -37,11 +40,20 @@ def main():
         return result
     root = Path('/usr/local/lib/siliconforest/firefox/160-system1')
     manifest = json.loads((root / 'release.json').read_text())
+    if args.provider_control != 'current':
+        manifest['system_ui'] = True
+        manifest['system_gpu_providers'] = True
     original = Path(manifest['original_bundle'])
     if original != Path('/Applications/Firefox.app/Contents/Resources/Mozilla.app'):
         raise ValueError('Unexpected installed Mozilla payload')
-    _, environment = module('daily', 'daily-launch.py').plan(root,
+    planned, environment = module('daily', 'daily-launch.py').plan(root,
         ['--no-remote', '--profile', str(args.run / 'profile')], manifest=manifest)
+    if args.provider_control in ['system-gpu-private-gl-api', 'system-surface-private-gl']:
+        environment['DYLD_LIBRARY_PATH'] = str(root / 'gl/lib') + ':' + environment['DYLD_LIBRARY_PATH']
+    if args.provider_control == 'system-surface-private-gl':
+        environment['DYLD_FRAMEWORK_PATH'] = str(root / 'gl/Frameworks') + ':' + environment['DYLD_FRAMEWORK_PATH']
+    if args.provider_control == 'system-gl-private-surface':
+        environment['DYLD_FRAMEWORK_PATH'] = str(root / 'overrides/surface-lookup-v1/Frameworks') + ':' + environment['DYLD_FRAMEWORK_PATH']
     # Keep the same provider paths in every mode. In particular, disabling
     # presentation must not silently select the canonical WindowServer too.
     controls = dict(presentation=manifest.get('gpu_presentation', False) and args.mode not in ['presentation-off', 'cpu'],
@@ -57,16 +69,22 @@ def main():
     os.environ.update(environment)
     options = ['remote-run.py', '--bundle', str(original), '--run', str(args.run),
         '--seconds', '60', '--functional-qa', '--page-load-strategy', 'none', '--quiet-trace',
-        '--capture-renderer', '--capture-pages', '--presentation-seat', '--site-legibility',
+        '--capture-renderer', '--capture-pages', '--presentation-seat',
         '--sample-parent', '--sample-path', '/private/var/db/sffx/probes-v3/sf-sample',
+        '--expect-appkit-prefix', '/System/Library/Frameworks/AppKit.framework',
         '--framework-path', environment['DYLD_FRAMEWORK_PATH'],
         '--library-path', environment['DYLD_LIBRARY_PATH'],
         '--insert-library', environment['DYLD_INSERT_LIBRARIES'],
         '--font-config', environment['FONTCONFIG_FILE'],
         '--surface-session', str(root / 'surface/bin/surface-session'),
-        '--surface-broker', str(root / 'surface/bin/iosurfaced'),
+        '--surface-broker', planned[1],
         '--pref', 'webgl.disable-angle=true', '--pref', 'browser.tabs.inTitlebar=0',
-        '--url', 'https://example.com/']
+        '--pref', 'termsofuse.bypassNotification=true',
+        '--url', (args.tools / 'test-page.html').as_uri() if args.fixture_reference else 'https://example.com/']
+    if args.fixture_reference:
+        options += ['--scene-reference', '--finish-after-scene-reference']
+    else:
+        options += ['--site-legibility']
     for enabled, option in [(controls['presentation'], '--gpu-presentation'),
             (controls['storage'], '--gpu-surfaces'), (manifest.get('gpu_vector_compare', False), '--gpu-vector-compare'),
             (manifest.get('gpu_cache_lookups', False), '--gpu-cache-lookups'), (controls['dirty'], '--gpu-dirty-frames'),
@@ -79,6 +97,8 @@ def main():
         options += ['--gpu-startup-fault', 'kill', '--pref', 'layers.gpu-process.max_restarts=0',
                     '--pref', 'layers.gpu-process.max_launch_attempts=0']
     selection = dict(mode=args.mode, forced_software=args.software, kill_first_gpu=args.kill_first_gpu,
+                     provider_control=args.provider_control, fixture_reference=args.fixture_reference,
+                     framework_path=environment['DYLD_FRAMEWORK_PATH'], library_path=environment['DYLD_LIBRARY_PATH'],
                      launcher_kind='installed-payload-runtime-plan-control', installed_outer_or_dock=False,
                      controls=controls,
                      environment_controls={k: v for k, v in environment.items() if k.startswith('SFFX_')})

@@ -117,14 +117,18 @@ def plan(root, args, manifest=None):
         SFFX_IOSURFACE_SERVICE='org.puredarwin.iosurfaced.sffx.' + str(os.getpid()))
     observer = env.get('SFFX_DIAGNOSTIC_OBSERVER')
     if observer:
-        requested = Path(observer)
+        observers = observer.split(':')
         explicit_profile = selected_profile(args)
         private = Path('/private/var/db/sffx')
-        if (not requested.is_absolute() or '..' in requested.parts or
-                not requested.is_relative_to(private) or requested.suffix != '.dylib' or
-                explicit_profile is None or not explicit_profile.is_relative_to(private)):
+        if (not 1 <= len(observers) <= 4 or explicit_profile is None or
+                not explicit_profile.is_relative_to(private)):
             raise ValueError('Diagnostic audio observer requires an explicit isolated Firefox profile')
-        env['DYLD_INSERT_LIBRARIES'] += ':' + str(requested)
+        for name in observers:
+            requested = Path(name)
+            if (not name or not requested.is_absolute() or '..' in requested.parts or
+                    not requested.is_relative_to(private) or requested.suffix != '.dylib'):
+                raise ValueError('Every diagnostic observer must be inside the private test prefix')
+        env['DYLD_INSERT_LIBRARIES'] += ':' + ':'.join(observers)
     for name in list(env):
         if name.startswith('MOZ_DISABLE_') and name.endswith('_SANDBOX'):
             raise RuntimeError('Refusing inherited disabled sandbox: ' + name)

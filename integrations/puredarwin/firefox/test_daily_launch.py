@@ -14,6 +14,15 @@ spec.loader.exec_module(daily)
 
 
 class LaunchPlanPolicy(unittest.TestCase):
+    def test_each_observer_in_a_combined_diagnostic_is_validated(self):
+        os.environ['SFFX_DIAGNOSTIC_OBSERVER'] = '/private/var/db/sffx/hal.dylib:/private/var/db/sffx/loss.dylib'
+        _, env = self.plan(['--profile', '/private/var/db/sffx/control/profile'])
+        self.assertTrue(env['DYLD_INSERT_LIBRARIES'].endswith(os.environ['SFFX_DIAGNOSTIC_OBSERVER']))
+        for suffix in ['/tmp/foreign.dylib', '/private/var/db/sffx/../foreign.dylib', '']:
+            os.environ['SFFX_DIAGNOSTIC_OBSERVER'] = '/private/var/db/sffx/hal.dylib:' + suffix
+            with self.assertRaises(ValueError):
+                self.plan(['--profile', '/private/var/db/sffx/control/profile'])
+
     def test_system_gpu_selection_removes_private_surface_and_gl_and_uses_system_broker(self):
         self.manifest.update(system_ui=True, system_gpu_providers=True,
                              surface_override=str(self.root / 'overrides/surface-old/Frameworks'))

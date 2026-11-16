@@ -35,7 +35,7 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
         text = destination.read_text() if destination.exists() else ''
         images = text.partition('\nBinary Images:\n')[2].splitlines()
         selected = [line.strip() for line in images if re.search(
-            r'\s(?:AppKit|Onyx2D|CoreText|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
+            r'\s(?:AppKit|Onyx2D|CoreText|QuartzCore(?:\.pd)?|OpenGL|IOSurface|libGL\.1\.dylib|libWindowServer\.dylib|AVFoundation(?:\.pd)?)\s+<', line)]
         appkit = [line.rsplit('> ', 1)[-1] for line in selected if re.search(r'\sAppKit\s+<', line)]
         row=dict(pid=pid, role='gpu' if gpu else 'parent', status=sampled.returncode,
             images=selected, appkit=appkit, passed=sampled.returncode == 0 and len(appkit) == 1 and

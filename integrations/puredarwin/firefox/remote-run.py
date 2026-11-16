@@ -118,9 +118,12 @@ def main():
     ap.add_argument('--gpu-export-cache', action='store_true')
     ap.add_argument('--gpu-coalesce-ticks', action='store_true', help='experimental60Hz GPU notification batching')
     ap.add_argument('--scene-reference', action='store_true')
+    ap.add_argument('--finish-after-scene-reference', action='store_true', help='bounded functional renderer/provider control')
     args = ap.parse_args()
     if args.functional_qa and (args.benchmark or args.measure_fixture or args.measure_video or args.measure_all_videos):
         raise ValueError('Functional QA does not qualify benchmark or video/frame timings')
+    if args.finish_after_scene_reference and not (args.functional_qa and args.scene_reference):
+        raise ValueError('Early scene exit requires a functional reference-scene control')
     if args.popup_stress and (not args.functional_qa or not args.presentation_seat or args.native_ui):
         raise ValueError('Popup stress requires a separate functional-QA presentation-seat run')
     if os.uname().sysname != 'Darwin':
@@ -412,7 +415,8 @@ def main():
                             if args.site_legibility:
                                 from font_legibility import measure as measure_legibility
                                 result['legibility']=measure_legibility(client,args.run)
-                                deadline=min(deadline,time.monotonic()+2)
+                                if not args.popup_stress:
+                                    deadline=min(deadline,time.monotonic()+2)
                             if args.benchmark:
                                 from benchmark import measure
                                 client.socket.settimeout(max(1, min(90, deadline - time.monotonic())))
@@ -582,6 +586,8 @@ def main():
                             if args.scene_reference:
                                 from scene_reference import measure
                                 result['scene_reference'] = measure(client, args.run / 'scene-reference.json')
+                                if args.finish_after_scene_reference:
+                                    deadline = min(deadline, time.monotonic()+2)
                             if args.gpu_export_cache and args.expect_appkit_prefix:
                                 from cgl_stats import inspect
                                 result['cgl_export_cache'] = inspect(client, result['providers'], args.run / 'cgl-export-cache.json')

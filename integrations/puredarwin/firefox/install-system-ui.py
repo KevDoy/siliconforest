@@ -168,8 +168,10 @@ def main():
                        rollback='Restore release.json and firefox-sf from this backup with Firefox closed.')
         (backup / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     except BaseException:
-        atomic(launcher, (backup / 'firefox-sf').read_bytes(), 0o755)
+        # The new launcher understands the previous manifest. Restore that
+        # policy before an older launcher can see fields it does not know.
         atomic(manifest_path, previous, 0o600)
+        atomic(launcher, (backup / 'firefox-sf').read_bytes(), 0o755)
         raise
     print(json.dumps(dict(installed=True, receipt=str(backup / 'receipt.json'))))
 

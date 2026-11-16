@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import time
 
@@ -31,16 +32,17 @@ def module(name, filename):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', type=Path, required=True)
-    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'close-box', 'cmd-w'], required=True)
+    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'close-box', 'cmd-w', 'connection-loss'], required=True)
     ap.add_argument('--ui-prefix', type=Path)
     ap.add_argument('--system-coretext', action='store_true')
     ap.add_argument('--observer', type=Path)
+    ap.add_argument('--loss-observer', type=Path)
     ap.add_argument('--runtime-plan', action='store_true', help='diagnostic comparison; bypass installed outer launcher')
     ap.add_argument('--sample-path', default='/private/var/db/sffx/probes-v3/sf-sample')
     args = ap.parse_args()
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target-only diagnostic')
-    for path in [args.run, args.ui_prefix, args.observer]:
+    for path in [args.run, args.ui_prefix, args.observer, args.loss_observer]:
         if path is not None and (not str(path).startswith('/private/var/db/sffx/') or '..' in path.parts):
             raise ValueError('Only the owned private target prefix is allowed')
     guard = OwnerInputGuard(require_idle=False)
@@ -56,6 +58,7 @@ def main():
              'browser.startup.homepage_override.mstone': 'ignore',
              'startup.homepage_welcome_url': '', 'startup.homepage_welcome_url.additional': '',
              'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False,
+             'termsofuse.bypassNotification': True,  # isolated test profile, not owner consent
              'webgl.disable-angle': True, 'browser.tabs.inTitlebar': 0,
              'marionette.port': 28290, 'media.autoplay.default': 0,
              'dom.ipc.processPrelaunch.enabled': False, 'dom.ipc.keepProcessesAlive.web': 0}
@@ -65,6 +68,10 @@ def main():
     manifest = json.loads((runtime / 'release.json').read_text())
     arguments = ['--no-remote', '--profile', str(profile), '--marionette', fixture.url]
     installed_outer = not (args.runtime_plan or args.ui_prefix or args.system_coretext)
+    if args.action == 'connection-loss' and not (installed_outer and args.observer and args.loss_observer):
+        raise ValueError('Connection loss requires the actual installed launcher and both qualified observers')
+    if args.loss_observer and args.action != 'connection-loss':
+        raise ValueError('Loss observer is only allowed in the explicit connection-loss action')
     if installed_outer:
         command = ['/Applications/Firefox.app/Contents/MacOS/firefox-sf'] + arguments
         env = os.environ.copy()
@@ -86,12 +93,18 @@ def main():
         else:
             env['DYLD_INSERT_LIBRARIES'] += ':' + str(args.observer)
         env.update(SF_FIREFOX_MEDIA_TRACE='1', SF_FIREFOX_MEDIA_TRACE_SECONDS='60')
+    if args.loss_observer:
+        if not args.loss_observer.is_file():
+            raise FileNotFoundError(args.loss_observer)
+        env['SFFX_DIAGNOSTIC_OBSERVER'] += ':' + str(args.loss_observer)
+        env['SFFX_TEST_WAYLAND_LOSS'] = '1'
     helpers = module('remote', 'remote-run.py')
     owned = {}
     result = dict(action=args.action,
                   launcher_kind=('installed-outer-launcher' if installed_outer else 'installed-runtime-plan-with-explicit-diagnostic-profile'),
                   installed_outer_or_dock=installed_outer, dock_launch=False, command=command, ui_prefix=str(args.ui_prefix),
                   requested_system_coretext=args.system_coretext, observer=str(args.observer),
+                  loss_observer=str(args.loss_observer),
                   owner_input_before=guard.before, audio_stop_qualified=False, complete=False,
                   functional_qa=True, timing_qualified=False)
     client = None
@@ -114,6 +127,7 @@ def main():
 
     try:
         with (args.run / 'firefox.log').open('w') as log:
+            result['launch_wall_seconds'] = time.time()
             process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             result['wrapper_pid'] = process.pid
             end = time.monotonic() + 25
@@ -185,7 +199,10 @@ def main():
             guard.check()
             result['action_wall_ms'] = time.time() * 1000
             result['action_monotonic'] = time.clock_gettime(time.CLOCK_MONOTONIC)
-            if args.action in ['close-box', 'cmd-w']:
+            if args.action == 'connection-loss':
+                (args.run / 'wayland-disconnect.trigger').write_text('Disconnect only this admitted private Firefox\n')
+                result['native_action'] = dict(own_wayland_shutdown_trigger=True, compositor_restarted=False)
+            elif args.action in ['close-box', 'cmd-w']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
                 if args.action == 'close-box':
@@ -257,6 +274,14 @@ def main():
                             pass
                 time.sleep(.5)
             result['wrapper_exit_after_cleanup'] = process.wait(timeout=5)
+            if installed_outer:
+                logs = [p for p in (home / 'Library/Logs/SiliconForest/Firefox').glob('firefox-*-%d.log' % process.pid)
+                        if p.stat().st_mtime >= result['launch_wall_seconds']-1]
+                if len(logs) == 1:
+                    shutil.copy2(logs[0], args.run / 'launcher-runtime.log')
+                    result['runtime_log_copied'] = True
+                else:
+                    result['runtime_log_error'] = 'Expected one owned installed-launcher log'
         try:
             result['owner_input_after'] = guard.check()
         except (OSError, RuntimeError) as error:
