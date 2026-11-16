@@ -58,22 +58,8 @@ def measure(client, output, deadline, clipboard_guard=None, native_drag=False, c
     def request(lines):
         if time.monotonic() > deadline - 8:
             raise RuntimeError('Native UI deadline')
-        # A live request belongs to somebody else; do not overwrite it.
-        if (inject / 'request').exists() or (inject / 'request.part').exists():
-            raise RuntimeError('Another inject request is pending')
-        (inject / 'done').unlink(missing_ok=True)
-        (inject / 'request.part').write_text(lines + '\n')
-        os.replace(inject / 'request.part', inject / 'request')
-        until = min(deadline - 4, time.monotonic() + 10)
-        while time.monotonic() < until:
-            if (inject / 'done').exists():
-                status = (inject / 'done').read_text()
-                errors = re.search(r'errors=(\d+)', status)
-                if not errors or int(errors[1]) != 0:
-                    raise RuntimeError('Inject failed: ' + status)
-                return status
-            time.sleep(.05)
-        raise RuntimeError('Inject completion timeout')
+        from presentation_seat import _request
+        return _request(inject, lines)
 
     request('dump ' + dumpname)
     dump = (inject / (dumpname + '.txt')).read_text()

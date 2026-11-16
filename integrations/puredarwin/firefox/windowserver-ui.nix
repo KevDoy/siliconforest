@@ -8,7 +8,7 @@ let
   chmod -R u+w $out
   cp ${./gpu-present.h} $out/sffx_gpu_present.h
   cd $out
-  ${a.pkgs.patch}/bin/patch --batch -p1 < ${./windowserver-patches/0001-opt-in-whole-window-gpu-layer-presentation.patch}
-  ${a.pkgs.patch}/bin/patch --batch -p1 < ${./windowserver-patches/0002-opt-in-finger-pixels-and-scroll-phase.patch}
+  ${a.pkgs.patch}/bin/patch --batch --forward -p1 < ${./windowserver-patches/0001-opt-in-whole-window-gpu-layer-presentation.patch}
+  # TERM8's main source already includes the finger pixel/phase bridge (0210w).
  '';
 in p.windowserver.override {inherit src;}

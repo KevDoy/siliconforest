@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Finite owned-profile native-menu/audio lifecycle diagnostic on SiliconForest.
+
+Caller holds gui.lock, checks coordination and cold-verifies these tools first.
+Runtime-plan launches reuse the installed providers and pristine Mozilla binary;
+they are labelled separately from the actual installed outer/dock launcher.
+"""
+import argparse
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import time
+
+from lifecycle_observer import AudioFixture, gecko_windows, native_menu
+from marionette import Marionette
+from owner_guard import OwnerInputGuard
+
+
+def module(name, filename):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(filename))
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--run', type=Path, required=True)
+    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'close-box', 'cmd-w'], required=True)
+    ap.add_argument('--ui-prefix', type=Path)
+    ap.add_argument('--system-coretext', action='store_true')
+    ap.add_argument('--observer', type=Path)
+    ap.add_argument('--sample-path', default='/private/var/db/sffx/probes-v3/sf-sample')
+    args = ap.parse_args()
+    if os.uname().sysname != 'Darwin':
+        raise RuntimeError('Target-only diagnostic')
+    for path in [args.run, args.ui_prefix, args.observer]:
+        if path is not None and (not str(path).startswith('/private/var/db/sffx/') or '..' in path.parts):
+            raise ValueError('Only the owned private target prefix is allowed')
+    guard = OwnerInputGuard()
+    args.run.mkdir(exist_ok=False)
+    profile = args.run / 'profile'
+    profile.mkdir()
+    home = args.run / 'home'
+    home.mkdir()
+    prefs = {'browser.shell.checkDefaultBrowser': False, 'app.update.auto': False,
+             'browser.aboutwelcome.enabled': False, 'browser.preonboarding.enabled': False,
+             'browser.startup.homepage_override.mstone': 'ignore',
+             'startup.homepage_welcome_url': '', 'startup.homepage_welcome_url.additional': '',
+             'datareporting.policy.dataSubmissionEnabled': False, 'toolkit.telemetry.enabled': False,
+             'webgl.disable-angle': True, 'browser.tabs.inTitlebar': 0,
+             'marionette.port': 28290, 'media.autoplay.default': 0,
+             'dom.ipc.processPrelaunch.enabled': False, 'dom.ipc.keepProcessesAlive.web': 0}
+    (profile / 'user.js').write_text(''.join('user_pref(%s,%s);\n' % (json.dumps(k), json.dumps(v)) for k, v in prefs.items()))
+    fixture = AudioFixture(args.run)
+    runtime = Path('/usr/local/lib/siliconforest/firefox/160-system1')
+    command, env = module('daily', 'daily-launch.py').plan(runtime,
+        ['--no-remote', '--profile', str(profile), '--marionette', fixture.url])
+    env.update(MOZ_NO_REMOTE='1', MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1', MOZ_CRASHREPORTER_DISABLE='1',
+               HOME=str(home), CFFIXED_USER_HOME=str(home))
+    if args.ui_prefix:
+        env['DYLD_FRAMEWORK_PATH'] = env['DYLD_FRAMEWORK_PATH'].replace(str(runtime / 'appkit'), str(args.ui_prefix / 'appkit'))
+        env['DYLD_LIBRARY_PATH'] = env['DYLD_LIBRARY_PATH'].replace(str(runtime / 'windowserver'), str(args.ui_prefix / 'windowserver'))
+    if args.system_coretext:
+        frames = [p for p in env['DYLD_FRAMEWORK_PATH'].split(':') if '/coretext/' not in p and '/overrides/memory-font-' not in p]
+        env['DYLD_FRAMEWORK_PATH'] = ':'.join(frames + ['/System/Library/Frameworks'])
+    if args.observer:
+        if not args.observer.is_file():
+            raise FileNotFoundError(args.observer)
+        env['DYLD_INSERT_LIBRARIES'] += ':' + str(args.observer)
+        env.update(SF_FIREFOX_MEDIA_TRACE='1', SF_FIREFOX_MEDIA_TRACE_SECONDS='60')
+    helpers = module('remote', 'remote-run.py')
+    owned = {}
+    result = dict(action=args.action, launcher_kind='installed-runtime-plan-with-explicit-diagnostic-profile',
+                  installed_outer_or_dock=False, command=command, ui_prefix=str(args.ui_prefix),
+                  requested_system_coretext=args.system_coretext, observer=str(args.observer),
+                  owner_input_before=guard.before, audio_stop_qualified=False, complete=False)
+    client = None
+    process = None
+
+    def save():
+        result['document'] = fixture.snapshot()
+        (args.run / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+
+    def identity():
+        current = helpers.process_identities()
+        owned.update({p: current[p][1] for p in helpers.descendants(process.pid, current) if p in current})
+        return current
+
+    def pause(seconds):
+        until = time.monotonic() + seconds
+        while time.monotonic() < until:
+            guard.check()
+            time.sleep(.05)
+
+    try:
+        with (args.run / 'firefox.log').open('w') as log:
+            process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            result['wrapper_pid'] = process.pid
+            end = time.monotonic() + 25
+            while time.monotonic() < end:
+                guard.check()
+                identity()
+                if process.poll() is not None:
+                    raise RuntimeError('Browser exited before session admission')
+                try:
+                    client = Marionette(timeout=1)
+                    break
+                except (OSError, EOFError):
+                    time.sleep(.2)
+            if client is None:
+                raise RuntimeError('Owned Marionette service did not start')
+            client.socket.settimeout(25)
+            session = client.start('none')
+            guard.check()
+            client.socket.settimeout(10)
+            parent = session['capabilities']['moz:processID']
+            current = identity()
+            if parent not in owned or current[parent][1] != owned[parent]:
+                raise RuntimeError('Marionette parent is outside this owned process family')
+            result.update(parent_pid=parent, session=session)
+            original = client.command
+
+            def guarded(*argv, **kwargs):
+                guard.check()
+                reply = original(*argv, **kwargs)
+                guard.check()
+                return reply
+
+            client.command = guarded
+            client.command('Marionette:SetContext', {'value': 'content'})
+            until = time.monotonic() + 8
+            while not client.command('WebDriver:ExecuteScript', dict(
+                    script='return typeof fxLifecycleStart === "function";', args=[], newSandbox=False)):
+                if time.monotonic() >= until:
+                    raise RuntimeError('Owned audio fixture did not become ready')
+                pause(.1)
+            started = client.command('WebDriver:ExecuteAsyncScript', dict(script='''
+              const done=arguments[arguments.length-1];
+              fxLifecycleStart().then(done,e=>done({error:String(e)}));''', args=[], newSandbox=False, scriptTimeout=8000))
+            if started.get('error') or started.get('paused') or started.get('muted'):
+                raise RuntimeError('Unmuted owned audio did not start: ' + repr(started))
+            pause(2)
+            from provider_images import inspect
+            identity()
+            expected = str((args.ui_prefix or runtime) / 'appkit')
+            result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned, parent, expected)
+            if not result['providers']['complete']:
+                raise RuntimeError('Actual owned parent/GPU provider check failed')
+            # DOM focus alone does not establish AppKit's key window. Native
+            # menu validation and keyboard actions need an admitted seat click.
+            from presentation_seat import admit, _request
+            result['admission'] = admit(client, args.run / 'native-admission.json', fixture=False, verify_renderer=False)
+            result['before_windows'] = gecko_windows(client)
+            result['before_menu'] = native_menu(parent)
+            if len(result['before_windows']) != 1 or len(result['before_windows'][0]['tabs']) != 1:
+                raise RuntimeError('Expected exactly one owned browser window and one audio tab')
+            guard.check()
+            result['action_wall_ms'] = time.time() * 1000
+            if args.action in ['close-box', 'cmd-w']:
+                admission = result['admission']
+                inject = Path('/private/var/run/gpu-desktop/inject')
+                if args.action == 'close-box':
+                    x, y, width, height = admission['frame']
+                    tx, ty = x + width - 15, y + 12
+                    if not (0 <= tx <= 2559 and 0 <= ty <= 1599):
+                        raise RuntimeError('Owned close box is outside the panel')
+                    lines = 'abs %d %d\nbuttons 1\nwait 60\nbuttons 0' % (round(tx * 65535 / 2559), round(ty * 65535 / 1599))
+                else:
+                    lines = 'key e3 down\nkey 1a down\nkey 1a up\nkey e3 up'
+                result['native_action'] = dict(virtual_seat=True, physical_input=False, response=_request(inject, lines))
+            else:
+                keys = {'close-tab': 'cmd+w', 'close-window': 'cmd+shift+w', 'hide': 'cmd+h',
+                        'minimize': 'cmd+m', 'quit': 'cmd+q'}
+                items = [m for m in re.finditer(r'^item ([\d.]+) \d+ (\S+) (\S+) (.*)$', result['before_menu'], re.M)
+                         if m[3] == keys[args.action] and 'd' not in m[2] and 's' not in m[2]]
+                if len(items) != 1:
+                    raise RuntimeError('Expected one enabled native menu item for ' + keys[args.action])
+                result['native_action'] = dict(item=items[0][1], title=items[0][4], key=keys[args.action],
+                                              response=native_menu(parent, 'invoke ' + items[0][1]))
+            save()
+            for _ in range(24):
+                guard.check()
+                identity()
+                if process.poll() is not None:
+                    break
+                pause(.25)
+            result['exit_before_cleanup'] = process.poll()
+            if process.poll() is None:
+                result['after_menu'] = native_menu(parent)
+                if args.action in ['hide', 'minimize', 'close-tab', 'close-window', 'close-box', 'cmd-w']:
+                    result['reopen_reply'] = native_menu(parent, 'reopen')
+                    pause(2)
+                    client.command('Marionette:SetContext', {'value': 'chrome'})
+                    handles = client.command('WebDriver:GetWindowHandles')
+                    if handles:
+                        client.command('WebDriver:SwitchToWindow', {'handle': handles[0]})
+                    result['after_reopen_windows'] = gecko_windows(client)
+            result['diagnostic_complete'] = True
+            result['audio_stop_qualified'] = False  # HAL/callback analysis is a separate evidence gate.
+            guard.check()
+    except BaseException as error:
+        result['error'] = repr(error)
+    finally:
+        if client is not None:
+            client.close()
+        if process is not None:
+            current = identity()
+            result['before_cleanup_processes'] = subprocess.run(['ps', '-p', ','.join(map(str, sorted(owned))), '-o', 'pid,ppid,time,stat,command'], capture_output=True, text=True).stdout
+            result['owned_pids'] = sorted(owned)
+            for sig in [signal.SIGTERM, signal.SIGKILL]:
+                current = helpers.process_identities()
+                for pid in sorted(owned, reverse=True):
+                    if pid in current and current[pid][1] == owned[pid]:
+                        try:
+                            os.kill(pid, sig)
+                        except ProcessLookupError:
+                            pass
+                time.sleep(.5)
+            result['wrapper_exit_after_cleanup'] = process.wait(timeout=5)
+        try:
+            result['owner_input_after'] = guard.check()
+        except (OSError, RuntimeError) as error:
+            result['qualification_invalidated'] = str(error)
+        save()
+        fixture.close()
+    print(json.dumps(result, indent=2))
+    return 0 if result.get('diagnostic_complete') and 'qualification_invalidated' not in result else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

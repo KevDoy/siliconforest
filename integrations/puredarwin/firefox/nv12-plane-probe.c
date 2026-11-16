@@ -108,10 +108,11 @@ int main(int argc,char **argv){
  if(argc==5&&!strcmp(argv[1],"child"))return child(atoi(argv[2]),(uint32_t)strtoul(argv[3],NULL,10),(int)strtol(argv[4],NULL,0));
  size_t (*offset)(IOSurfaceRef,size_t)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUGetPlaneOffset");REQUIRE(offset);
  for(int bad=1;bad<=4;bad++){IOSurfaceRef s=make(0x34323076,bad,bad==4);REQUIRE(!s);}
- for(int layout=0;layout<2;layout++)for(int p=0;p<2;p++)for(int range=0;range<2;range++){
+ const int profiles[]={0x3200,0x4100,0x1000};
+ for(int layout=0;layout<2;layout++)for(int p=0;p<3;p++)for(int range=0;range<2;range++){
   IOSurfaceRef s=make(range?0x34323066:0x34323076,0,layout);REQUIRE(s&&offset(s,0)==16384+(layout?512:0)&&offset(s,1)==16384+UVOFF&&offset(s,2)==0);
   int channel[2];REQUIRE(!socketpair(AF_UNIX,SOCK_STREAM,0,channel));
-  char fd[20],id[20],profile[20];snprintf(fd,sizeof(fd),"%d",channel[1]);snprintf(id,sizeof(id),"%u",IOSurfaceGetID(s));snprintf(profile,sizeof(profile),"%d",p?0x4100:0x3200);
+  char fd[20],id[20],profile[20];snprintf(fd,sizeof(fd),"%d",channel[1]);snprintf(id,sizeof(id),"%u",IOSurfaceGetID(s));snprintf(profile,sizeof(profile),"%d",profiles[p]);
   fill(s,0);IOSurfaceIncrementUseCount(s);
   char *args[]={argv[0],"child",fd,id,profile,NULL};pid_t pid=0;posix_spawn_file_actions_t actions;posix_spawn_file_actions_init(&actions);posix_spawn_file_actions_addclose(&actions,channel[0]);
   int error=posix_spawn(&pid,argv[0],&actions,NULL,args,environ);posix_spawn_file_actions_destroy(&actions);close(channel[1]);REQUIRE(!error);
@@ -126,5 +127,5 @@ int main(int argc,char **argv){
   printf("FXNV12 parent profile=%s range=%s odd_visible=%dx%d stride=%d y_offset=%d top_stride=%d uv_offset=%d padded_allocation=%d cross_exec=1 local_use=0 global_in_use=0 pass=1\n",profile,range?"full":"video",W,H,STRIDE,layout?512:0,layout?192:STRIDE,UVOFF,ALLOC);
   CFRelease(s);
  }
- printf("FXNV12 malformed_layouts_rejected=4 cases=8 pass=1\n");return 0;
+ printf("FXNV12 malformed_layouts_rejected=4 cases=12 pass=1\n");return 0;
 }

@@ -26,18 +26,34 @@ def measure(client, directory, handles=None, prefix="legibility"):
         url=client.command('WebDriver:GetCurrentURL')
         if urlsplit(url).scheme not in ['http','https','file']:continue
         time.sleep(4)
-        row=script('''const runs=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
+        row=script('''const runs=[],excluded=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
+          function visibleBox(rect,element){
+            // A partially offscreen glyph is not a measurable complete run.
+            if(rect.left<0||rect.top<0||rect.right>innerWidth||rect.bottom>innerHeight)return null;
+            const left=rect.left,top=rect.top,right=rect.right,bottom=rect.bottom;
+            for(let e=element;e;e=e.parentElement){
+              const s=getComputedStyle(e);
+              if(s.contentVisibility==='hidden')return null;
+              // Accessibility-only labels commonly use an empty legacy clip.
+              if(s.clip!=='auto'&&s.clip.startsWith('rect(')){
+                const values=s.clip.slice(5,-1).split(/[, ]+/).map(parseFloat);
+                if(values.length===4&&values.every(Number.isFinite)&&(values[1]<=values[3]||values[2]<=values[0]))return null;
+              }
+            }
+            return right-left>2&&bottom-top>2?{x:left,y:top,width:right-left,height:bottom-top}:null;
+          }
           while((node=walk.nextNode())&&runs.length<80){
             if(!node.textContent.trim()||!node.parentElement)continue;
             const s=getComputedStyle(node.parentElement);let opacity=1;for(let e=node.parentElement;e;e=e.parentElement)opacity*=Number(getComputedStyle(e).opacity);if(opacity<.01)continue;if(s.display==='none'||s.visibility!=='visible'||Number(s.opacity)===0)continue;
             const range=document.createRange();range.selectNodeContents(node);
-            const boxes=[...range.getClientRects()].filter(r=>r.width>2&&r.height>2&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight).map(r=>({x:r.x,y:r.y,width:r.width,height:r.height}));
+            const boxes=[...range.getClientRects()].map(r=>visibleBox(r,node.parentElement)).filter(Boolean);
+            if(!boxes.length){excluded.push({text:node.textContent.trim().slice(0,120),reason:'No complete viewport rectangle, hidden content, or empty accessibility clip'});continue;}
             if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor});
           }
           return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
-            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs};''')
+            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};''')
         image_prefix=prefix+'-%02d'%len(rows)
         from renderer_capture import capture
         from screen_calibration import calibrate

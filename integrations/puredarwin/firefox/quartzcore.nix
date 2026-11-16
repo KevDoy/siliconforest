@@ -10,6 +10,11 @@ let
   cp -r ${if baseSource == null then p.quartzcoreSrc else baseSource} $out/src/Frameworks/QuartzCore
   chmod -R u+w $out
   cd $out
+  ${a.pkgs.lib.optionalString (baseSource == null && gpuPresentation) ''
+    # Main 0219 is the non-exporting adaptation. Replace it with our complete
+    # exporting lifetime patch below, rather than freeing the same objects twice.
+    ${a.pkgs.patch}/bin/patch --batch -R -p1 < ${../cocoa/patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch}
+  ''}
   ${a.pkgs.lib.optionalString (!detachInvalidatedLayers) ''
     ${a.pkgs.patch}/bin/patch -R -p1 < ${./cocoa-patches/0207-layer-context-detaches-retained-tree.patch}
   ''}

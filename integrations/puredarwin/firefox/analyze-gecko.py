@@ -67,6 +67,8 @@ def native_symbols(manifest):
 
 
 def analyze(directory,symbols=None,native_manifest=None):
+    if (directory/'qualification-invalidated.json').exists():
+        raise ValueError('Run was invalidated; preserve raw artifacts and repeat it')
     run=json.loads((directory/'result.json').read_text())
     if 'fixture_measurement' in run:
         fixture=run['fixture_measurement'];start=fixture['timeOrigin']+fixture['wallStart'];end=fixture['timeOrigin']+fixture['wallEnd']
@@ -122,7 +124,7 @@ def analyze(directory,symbols=None,native_manifest=None):
                 for current,frame in reversed(pending):
                     value=value+[labels[frame]];chains[current]=value
                 return chains[index]
-            leaf_samples=Counter();leaf_cpu=Counter();inclusive=Counter();cpu_us=0;sample_count=0;cpu_rows=0;event_delays=[]
+            leaf_samples=Counter();leaf_cpu=Counter();inclusive=Counter();hot_stacks=Counter();cpu_us=0;sample_count=0;cpu_rows=0;event_delays=[]
             for sample in samples['data']:
                 at=cell(sample,samples['schema'],'time')
                 if at is None or not start<=base+at<=end:continue
@@ -135,7 +137,9 @@ def analyze(directory,symbols=None,native_manifest=None):
                 if weight is None:continue
                 if weight<0:raise ValueError('Negative thread CPU delta')
                 cpu_rows+=1;cpu_us+=weight
-                if stack:leaf_cpu[stack[-1]]+=weight
+                if stack:
+                    leaf_cpu[stack[-1]]+=weight
+                    hot_stacks[tuple(stack[-16:])]+=weight
                 for label in set(stack):inclusive[label]+=weight
             if not sample_count:continue
             qos=Counter();markers=Counter();marker_durations=Counter();mt=thread['markers']
@@ -153,7 +157,9 @@ def analyze(directory,symbols=None,native_manifest=None):
                 percent_one_core=cpu_us/((end-start)*1000)*100,
                 event_delay_p95_ms=event_delays[int((len(event_delays)-1)*.95)] if event_delays else None,
                 leaf_samples=leaf_samples.most_common(12),leaf_cpu_us=leaf_cpu.most_common(20),
-                inclusive_cpu_us=inclusive.most_common(25),markers=markers.most_common(15),
+                inclusive_cpu_us=inclusive.most_common(25),
+                hot_stacks_cpu_us=[dict(stack=list(stack),cpu_us=weight) for stack,weight in hot_stacks.most_common(12)],
+                markers=markers.most_common(15),
                 marker_duration_ms=marker_durations.most_common(12),gecko_requested_qos_markers=dict(qos)))
     rows.sort(key=lambda row:row['cpu_seconds'],reverse=True)
     return dict(fixture_epoch_ms=[start,end],diagnostic_only=True,timing_qualification=False,

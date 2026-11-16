@@ -32,18 +32,8 @@ def measure(client, output, deadline):
     def request(source):
         if time.monotonic() > deadline - 10:
             raise RuntimeError('Picker deadline')
-        if (inject / 'request').exists() or (inject / 'request.part').exists():
-            raise RuntimeError('Another inject request is pending')
-        (inject / 'done').unlink(missing_ok=True)
-        with (inject / 'request.part').open('x') as stream:
-            stream.write(source + '\n')
-        os.replace(inject / 'request.part', inject / 'request')
-        until = min(deadline - 5, time.monotonic() + 6)
-        while not (inject / 'done').exists() and time.monotonic() < until:
-            time.sleep(.05)
-        status = (inject / 'done').read_text()
-        if not re.search(r'errors=0\b', status):
-            raise RuntimeError('Picker input failed: ' + status)
+        from presentation_seat import _request
+        return _request(inject, source)
 
     for mode, filename in [(0, 'open-me.txt'), (1, 'save-me.txt')]:
         title = 'SF-FX picker-' + secrets.token_hex(6)
