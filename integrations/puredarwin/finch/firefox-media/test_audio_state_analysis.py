@@ -28,6 +28,14 @@ def fixture():
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_meter_can_supply_its_own_clock_bridge(self):
+        r,t=fixture();lines=[]
+        for line in t.splitlines()[1:]:
+            f=m.fields(line);epoch=float(f['monotonic'])+999910
+            lines.append(line+' epoch=%.6f'%epoch)
+        a=m.analyze(r,'\n'.join(lines))
+        self.assertTrue(a['output_boundary_passed'])
+        self.assertAlmostEqual(a['native_to_controller_seconds'][7],10)
     def test_clock_bridge_and_quarter_power(self):
         r,t=fixture();a=m.analyze(r,t)
         self.assertTrue(a['output_boundary_passed']);self.assertAlmostEqual(a['half_to_full_power_ratio'],.25)

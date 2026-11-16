@@ -81,7 +81,8 @@ def main():
             HOME=str(home),CFFIXED_USER_HOME=str(home))
         if a.state_controls:
             env.pop('SFFX_TEST_WAYLAND_LOSS',None)
-            env.update(SF_HAL_PCM_AUDIT='1',SF_HAL_PCM_TRACE='1')
+            env.update(SF_HAL_PCM_AUDIT='1',SF_HAL_PCM_TRACE='1',
+                       SFFX_HAL_PCM_AUDIT='1',SFFX_HAL_PCM_TRACE='1')
         arguments=['--no-remote','--profile',str(profile),'--marionette',fixture.url]
         if a.audio_clock_family:
             if not (root/'Frameworks/AudioToolbox.framework').is_dir():raise ValueError('Full staged AudioToolbox family required')

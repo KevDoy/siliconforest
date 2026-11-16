@@ -49,12 +49,13 @@ static void *worker(void *unused)
     double deadline=now.tv_sec+now.tv_nsec/1e9+90;
     for(;;){
         clock_gettime(CLOCK_MONOTONIC,&now);double t=now.tv_sec+now.tv_nsec/1e9;
+        struct timespec wall;clock_gettime(CLOCK_REALTIME,&wall);double epoch=wall.tv_sec+wall.tv_nsec/1e9;
         if(t>=deadline)break;
         for(unsigned i=0;i<CAPACITY;i++){
             struct context *c=&contexts[i];struct sf_pcm_state s;
             if(!__atomic_load_n(&c->published,__ATOMIC_ACQUIRE)||!c->valid||!published_state(c,&s))continue;
-            fprintf(stderr,"SFHAL_PCM pid=%d context=%u monotonic=%.6f calls=%llu frames=%llu samples=%llu square-sum=%.17g peak=%.9g errors=%llu bad-buffers=%llu nonfinite=%llu last-host=%llu\n",
-                getpid(),i,t,(unsigned long long)s.calls,(unsigned long long)s.frames,
+            fprintf(stderr,"SFHAL_PCM pid=%d context=%u monotonic=%.6f epoch=%.6f calls=%llu frames=%llu samples=%llu square-sum=%.17g peak=%.9g errors=%llu bad-buffers=%llu nonfinite=%llu last-host=%llu\n",
+                getpid(),i,t,epoch,(unsigned long long)s.calls,(unsigned long long)s.frames,
                 (unsigned long long)s.samples,s.square_sum,s.peak,(unsigned long long)s.errors,
                 (unsigned long long)s.bad_buffers,(unsigned long long)s.nonfinite,(unsigned long long)s.last_host);
         }
@@ -90,6 +91,7 @@ static OSStatus proxy(AudioObjectID device,const AudioTimeStamp *now,
 static OSStatus create(AudioObjectID device,AudioDeviceIOProc proc,void *data,AudioDeviceIOProcID *out)
 {
     const char *opt=getenv("SF_HAL_PCM_AUDIT");
+    if(!opt)opt=getenv("SFFX_HAL_PCM_AUDIT");
     if(!proc||!opt||strcmp(opt,"1"))return AudioDeviceCreateIOProcID(device,proc,data,out);
     AudioStreamBasicDescription f={0};UInt32 bytes=sizeof(f);
     AudioObjectPropertyAddress a={kAudioDevicePropertyStreamFormat,kAudioObjectPropertyScopeOutput,kAudioObjectPropertyElementMain};
@@ -104,6 +106,7 @@ static OSStatus create(AudioObjectID device,AudioDeviceIOProc proc,void *data,Au
     OSStatus result=AudioDeviceCreateIOProcID(device,proxy,c,out);c->valid=result==0;
     __atomic_store_n(&c->published,1,__ATOMIC_RELEASE);
     const char *trace=getenv("SF_HAL_PCM_TRACE");unsigned expected=0;
+    if(!trace)trace=getenv("SFFX_HAL_PCM_TRACE");
     if(trace&&!strcmp(trace,"1")&&__atomic_compare_exchange_n(&worker_started,&expected,1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){
         pthread_t thread;int error=pthread_create(&thread,NULL,worker,NULL);
         if(!error)pthread_detach(thread);

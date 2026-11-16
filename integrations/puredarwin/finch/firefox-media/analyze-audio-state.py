@@ -34,7 +34,9 @@ def analyze(result,text):
             if 'epoch' in f and 'monotonic' in f:c_offsets[int(f['pid'])].append(float(f['epoch'])-float(f['monotonic']))
         elif line.startswith('SFHAL_PCM '):
             f=fields(line)
-            if 'context' in f:meters.append(f)
+            if 'context' in f:
+                meters.append(f)
+                if 'epoch' in f:c_offsets[int(f['pid'])].append(float(f['epoch'])-float(f['monotonic']))
     if not meters:raise ValueError('Native PCM meter was not observed')
     offsets={}
     for pid,values in c_offsets.items():

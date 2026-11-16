@@ -7,6 +7,37 @@ CV/VT/audio producer and diagnostics. Shared claims/results live in
 `runs/m1-coord/firefox-defects.md` and the CODEX/FX/TB request files. No AVE,
 pointer/key injection, owner-profile attachment/signals or push.
 
+`audio-state-trace.c` is an opt-in, process-local output meter. It forwards
+the original HAL IOProc and records aggregate Float32 power/counters, never
+PCM. Render work is bounded and performs no logging/allocation/locking. A
+90-second background logger reads an atomic publication; direct read/reset
+requires stopped IOProcs. Contexts remain allocated until exit. Enable with
+`SF_HAL_PCM_AUDIT=1`; add `SF_HAL_PCM_TRACE=1` for logging. The `SFFX_` aliases
+survive the installed launcher's validated private-observer plan carrier.
+The logger records its own wall/monotonic pair: Darwin Python and C monotonic
+epochs differ here, so raw timestamps cannot be compared directly.
+
+M1 native controls pass on installed and private normalized audio: quarter
+power at half amplitude, exact-zero mute, stopped callback counts stable for
+250ms, independent concurrent streams and44.1→48k conversion after reinit.
+The first rate-change diagnostic failed by reading the retired IOProc;
+the corrected test reads the newly registered context. Preserve that failure.
+In the private normalized Firefox, all ten HTML/native-output state phases
+pass, including mute/pause, a surviving second tab and silence after the last
+media tab closes. Half/full power is0.2499133. These are software-boundary
+observations, not audible output, glitch-free playback or acoustic sync.
+Both test browsers returned139 on normal Quit, with no family left before
+cleanup and no cleanup signals; this does not qualify clean shutdown.
+
+The first installed-outer comparison has no native meter observations and
+is refused. `audio-plan-export.patch` is a hand-over to FX: the current
+`--sf-plan` JSON drops the diagnostic flags and, critically, the selected
+`SF_AU_NORMALIZE_HAL_CLOCK` enable. Six temporary-tree controls execute actual
+`plan()`/`main()` and reproduce the old omission, then test selected/false clock
+policy and private observer scoping with the patch. No shared launcher is
+changed by these tests. Do not activate the clock family until its enable
+survives the installed carrier and the actual runtime marker is observed.
+
 ## Per-stream audio controls
 
 `audio-state-probe.nix` builds our M1-only client and an explicitly needed,
