@@ -3581,3 +3581,29 @@ unchanged against CIO29 and only core+AVD differ from43; the real Force-CMO
 BL/stub/chained-pointer check passes. It is uninstalled. Its first hardware gate
 will be the bounded no-job GPU-BO pin/import/destroy probe, followed by strict
 frame/PTS/held64 checks only on success. No zero-copy or decoded-output claim.
+
+
+#### Next Firefox cycle44: announced02:19:50Z, earliest02:21:50Z
+
+This is a Firefox cycle under the standing authorization; dock/AVE trials stay
+paused. Post43 FX selector and media control/browser/rate slots completed before
+the notice. The candidate remains uninstalled while an earlier GUI holder runs.
+It changes only core and AVD relative to qualified43; the optional speaker cap
+stays0. The qualified43 capsule is the immediate rollback.
+
+| Phase | Exact action and gate | Budget |
+|---|---|---|
+| Baseline/shutdown | core/gui/bench, UART before supported /bin/reboot; capture43 ID, desktop and clone state |1min|
+| Linux | verify root identity/unmounted state, read-only fsck; no repair of the recorded extent errors |1min|
+| Requested Linux reference | installed Firefox/visible-session check in this same visit; fresh profile, stock Speedometer3.1/MotionMark1.3/JetStream2.2, record browser/geometry/scale/renderer/power; SKIP missing browser/desktop, never install a browser or substitute headless |0–10min|
+| Install/boot | normal installer, verify candidate+43 rollback, reroute UART, one-time bless; default Linux unchanged; verify .next004/socket/non-input stats |1min|
+| First native gate |3 rounds real writeback BOs, distinct duplicate mappings/alias unmap,16KiB DATA import and destroy; no GPU/decoder jobs, header canaries/original mapping alive, counters unchanged/contexts0 |<1min|
+| Strict shared capture | separate fresh cold prefixes per codec; all45files verified before loading; H264600 then HEVC300 pictures, independent full NV12 MD5+PTS, first picture held64 callbacks, copied bytes0, exact kernel-job deltas/no faults/quarantine/contexts |1min|
+| Retain or recover | GL hashes/Vulkan10, final caps/desktop; stop UART and release actual locks at return marker. Any failed prerequisite stops later codecs and restores43 through the normal installer |1min plus recovery if needed|
+
+Expected6min, at most16min with the bounded Linux reference. Raw Linux scores
+have uninstrumented owner-input interference and are not a matched-comparison
+claim; incomplete runs remain incomplete. No pointer/key injection is needed.
+A shared-capture PASS still does not prove actual GPU-consumer completion,
+browser60fps,4K30 delivery or physical pinch. Those remain the media/FX/DESK
+integration gates after the kernel returns. No extra Linux visit for benchmarks.
