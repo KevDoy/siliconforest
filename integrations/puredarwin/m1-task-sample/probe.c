@@ -54,7 +54,7 @@ int main(int argc,char **argv){
   if(read(pipefd[0],&ready,1)!=1||ready!='R'){kill(pid,SIGKILL);waitpid(pid,NULL,0);return 4;}close(pipefd[0]);
   task_t task=MACH_PORT_NULL;kern_return_t kr=task_for_pid(mach_task_self(),pid,&task);
   if(kr!=KERN_SUCCESS){kill(pid,SIGKILL);waitpid(pid,NULL,0);printf("TASK_SAMPLE FAIL task_for_pid=%d\n",kr);return 5;}
-  unsigned samples=0,errors=0;unsigned long reads=0;uint64_t held=0,worst=0,start=ns();int early=0,status=0;
+  unsigned samples=0,errors=0,min_threads=~0u,max_threads=0;unsigned long reads=0;uint64_t held=0,worst=0,start=ns();int early=0,status=0;
   while(ns()-start<1000000000ull){
    if(waitpid(pid,&status,WNOHANG)==pid){owned_child=-1;early=1;break;}
    uint64_t before=ns();int suspended=0;
@@ -63,6 +63,8 @@ int main(int argc,char **argv){
    kr=task_threads(task,&threads,&count);
    if(kr!=KERN_SUCCESS)errors++;
    else{
+    if(count<33)errors++;
+    if(count<min_threads)min_threads=count;if(count>max_threads)max_threads=count;
     for(mach_msg_type_number_t i=0;i<count;i++){
      if(mode>=2)errors+=(unsigned)walk(task,threads[i],mode==3,&reads);
      mach_port_deallocate(mach_task_self(),threads[i]);
@@ -80,7 +82,7 @@ int main(int argc,char **argv){
    if(got!=pid)return 6;
   }
   owned_child=-1;
-  printf("TASK_SAMPLE mode=%d samples=%u errors=%u reads=%lu suspended_us=%llu max_pause_us=%llu child_early=%d wait_status=%d\n",mode,samples,errors,reads,(unsigned long long)(held/1000),(unsigned long long)(worst/1000),early,status);
+  printf("TASK_SAMPLE mode=%d samples=%u errors=%u threads_min=%u threads_max=%u reads=%lu suspended_us=%llu max_pause_us=%llu child_early=%d wait_status=%d\n",mode,samples,errors,min_threads,max_threads,reads,(unsigned long long)(held/1000),(unsigned long long)(worst/1000),early,status);
   if(early||errors||samples==0)return 1;
  }
  puts("TASK_SAMPLE PASS owned pthread-idle children only; no Firefox/GPU/whole-desktop proof");return 0;
