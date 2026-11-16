@@ -58,12 +58,13 @@ def menu_button_in_renderer(path, frame):
     return dict(x=candidates[0][0], y=candidates[0][1], method='actual-renderer-three-stroke-light-chrome-icon')
 
 
-def measure(client, output, deadline, admission=None):
+def measure(client, output, deadline, admission=None, observe_auto_close=False):
     from presentation_seat import admit, _request
     from renderer_capture import capture
     inject = Path('/private/var/run/gpu-desktop/inject')
     result = dict(complete=False, synthetic_input=True, virtual_seat=True,
-                  requested_repetitions=20, repetitions=[], timing_qualified=False)
+                  requested_repetitions=20, repetitions=[], timing_qualified=False,
+                  protocol_diagnostic=observe_auto_close)
 
     def save():
         output.write_text(json.dumps(result, indent=2) + '\n')
@@ -142,13 +143,21 @@ def measure(client, output, deadline, admission=None):
             # a mousedown alone opened a native popup.
             opening_end = min(deadline-10, time.monotonic()+3)
             while row['opened'].get('panel') != 'open' and time.monotonic() < opening_end:
+                if observe_auto_close:
+                    presses = [e for e in row['opened'].get('input', []) if e['type'] == 'mousedown']
+                    if presses and any(e['type'] == 'popuphidden' and e['time'] >= presses[-1]['time']
+                                       for e in row['opened'].get('lifecycle', [])):
+                        break
                 time.sleep(.1)
                 row['opened'] = state()
             save()
             events = row['opened'].get('events', [])
-            if (row['opened'].get('panel') != 'open' or len(events) != index+1 or
+            row['menu_stayed_open'] = row['opened'].get('panel') == 'open'
+            if (len(events) != index+1 or
                     not all(event['trusted'] and event['button'] == 0 for event in events)):
-                raise RuntimeError('Application menu did not open after the trusted virtual-seat click')
+                raise RuntimeError('Application menu did not receive the trusted virtual-seat click')
+            if not row['menu_stayed_open'] and not observe_auto_close:
+                raise RuntimeError('Application menu did not stay open after the trusted virtual-seat click')
             if index in [0, 4, 9, 14, 19]:
                 row['capture'] = capture(output.with_name('popup-%02d-renderer.ppm' % (index+1)))
             request('key 29 down\nkey 29 up\nwait 150')
@@ -159,13 +168,16 @@ def measure(client, output, deadline, admission=None):
             output.with_name('popup-%02d-windows.txt' % (index+1)).write_text(dump)
             mapped = [line for line in dump.splitlines()
                       if re.match(r'window %d ' % admission['window_id'], line) and 'mapped=true' in line]
-            row['complete'] = bool(len(mapped) == 1 and row['closed'].get('windows') == 1 and
-                                   row['closed'].get('panel') == 'closed')
+            row['window_survived'] = bool(len(mapped) == 1 and row['closed'].get('windows') == 1 and
+                                          row['closed'].get('panel') == 'closed')
+            row['complete'] = row['menu_stayed_open'] and row['window_survived']
             save()
-            if not row['complete']:
+            if not row['window_survived']:
                 raise RuntimeError('Application menu close lost the browser window or left a popup open')
         result['after'] = state()
         result['complete'] = len(result['repetitions']) == 20 and all(row['complete'] for row in result['repetitions'])
+        result['protocol_cycles_survived'] = len(result['repetitions']) == 20 and all(
+            row['window_survived'] for row in result['repetitions'])
     finally:
         save()
     return result

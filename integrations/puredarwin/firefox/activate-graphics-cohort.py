@@ -90,7 +90,8 @@ def main():
             raise ValueError('Prepared graphics provider changed: ' + name)
     providers = browser.get('providers', {})
     rows = providers.get('processes', [])
-    if (providers.get('complete') is not True or
+    if (providers.get('complete') is not True or providers.get('private_windowserver_expected') or
+            providers.get('canonical_cocoa_complete') is False or
             {r.get('role') for r in rows} != {'parent', 'gpu'}):
         raise ValueError('Actual parent and GPU provider observations required')
     for row in rows:

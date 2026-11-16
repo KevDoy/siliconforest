@@ -37,6 +37,7 @@ int main(int argc,char **argv) {
  LOAD(void,glFramebufferTexture2D,(unsigned,unsigned,unsigned,unsigned,int));LOAD(unsigned,glCheckFramebufferStatus,(unsigned));
  LOAD(void,glDeleteFramebuffers,(int,const unsigned *));LOAD(void,glClearColor,(float,float,float,float));LOAD(void,glClear,(unsigned));
  LOAD(void,glFinish,(void));LOAD(unsigned,glGetError,(void));LOAD(const char *,glGetString,(unsigned));
+ LOAD(unsigned char,glIsTexture,(unsigned));LOAD(unsigned char,glIsFramebuffer,(unsigned));
  int failures=0;
  const int profiles[]={0x3200,0x4100};const unsigned targets[]={0x84f5,0x0de1};
  for(int profile=0;profile<2;profile++)for(int target=0;target<2;target++){
@@ -46,6 +47,7 @@ int main(int argc,char **argv) {
   unsigned textures[2]={0,0},fbos[2][16]={{0}};
   for(int i=0;i<2;i++){
    REQUIRE(!CGLSetCurrentContext(ctx[i]));REQUIRE(glGetString(0x1f01)&&strstr(glGetString(0x1f01),"Apple M1"));
+   if(i)printf("FXFBO sharing texture_a_visible=%d fbo_a_visible=%d version=%s\n",glIsTexture(textures[0]),glIsFramebuffer(fbos[0][0]),glGetString(0x1f02));
    /* Allocate FBO names BEFORE import's temporary FBOs, preserving a collision. */
    glGenFramebuffers(16,fbos[i]);glGenTextures(1,&textures[i]);glBindTexture(targets[target],textures[i]);
    glTexParameteri(targets[target],0x2801,0x2600);glTexParameteri(targets[target],0x2800,0x2600);
@@ -53,7 +55,10 @@ int main(int argc,char **argv) {
    glBindFramebuffer(0x8d40,fbos[i][0]);glFramebufferTexture2D(0x8d40,0x8ce0,targets[target],textures[i],0);
    REQUIRE(glCheckFramebufferStatus(0x8d40)==0x8cd5&&glGetError()==0);
   }
-  REQUIRE(fbos[0][0]==fbos[1][0]&&textures[0]!=textures[1]);
+  printf("FXFBO names context_a=%p context_b=%p fbo_a=%u fbo_b=%u texture_a=%u texture_b=%u\n",ctx[0],ctx[1],fbos[0][0],fbos[1][0],textures[0],textures[1]);
+  if(fbos[0][0]!=fbos[1][0]||textures[0]==textures[1]){
+   fprintf(stderr,"FXFBO collision_not_established=1; no pixel regression verdict\n");return 77;
+  }
   uint32_t before[2]={IOSurfaceGetSeed(surfaces[0]),IOSurfaceGetSeed(surfaces[1])};
   REQUIRE(!CGLSetCurrentContext(ctx[0]));glBindFramebuffer(0x8d40,fbos[0][0]);glClearColor(1,0,0,1);glClear(0x4000);glFinish();
   unsigned mismatch=0;IOSurfaceLock(surfaces[0],1,NULL);unsigned char *base=IOSurfaceGetBaseAddress(surfaces[0]);size_t stride=IOSurfaceGetBytesPerRow(surfaces[0]);

@@ -81,6 +81,7 @@ def main():
     ap.add_argument('--pinch-zoom', action='store_true', help='synthetic native pinch; observe real browser/visual viewport zoom')
     ap.add_argument('--native-ui', action='store_true', help='finite synthetic native seat/menu checks on the owned Firefox PID')
     ap.add_argument('--popup-stress', action='store_true', help='20 trusted virtual-seat application-menu open/close cycles on the owned browser')
+    ap.add_argument('--popup-observe-auto-close', action='store_true', help='protocol diagnostic only: continue recording after automatic popup closure; never qualifies menu usability')
     ap.add_argument('--clipboard-guard', help='RAM-only restore helper for native clipboard controls')
     ap.add_argument('--native-drag', action='store_true', help='native-UI owned DOM drag/drop through the real seat')
     ap.add_argument('--clipboard-empty', action='store_true', help='native copy/paste only after focused backend proves empty clipboard')
@@ -109,6 +110,7 @@ def main():
     ap.add_argument('--sample-path', help='private sf-sample; samples only owned GPU helpers')
     ap.add_argument('--expect-appkit-prefix', help='diagnostic dyld-list proof in parent/GPU; requires --sample-path')
     ap.add_argument('--expect-system-gpu', action='store_true', help='also require canonical IOSurface/OpenGL in parent/GPU image lists')
+    ap.add_argument('--expect-private-windowserver', help='explicit isolated protocol diagnostic provider, with the other UI frameworks canonical')
     ap.add_argument('--capture-after', type=float, help='one early renderer capture, seconds after exec')
     ap.add_argument('--font-config', help='private process fontconfig file')
     ap.add_argument('--gpu-dirty-frames', action='store_true', help='experimental generation-based GPU frame reuse')
@@ -126,6 +128,11 @@ def main():
         raise ValueError('Early scene exit requires a functional reference-scene control')
     if args.popup_stress and (not args.functional_qa or not args.presentation_seat or args.native_ui):
         raise ValueError('Popup stress requires a separate functional-QA presentation-seat run')
+    if args.popup_observe_auto_close and not args.popup_stress:
+        raise ValueError('Automatic-close observation is only a popup protocol diagnostic')
+    if args.expect_private_windowserver and (not args.functional_qa or
+            args.expect_appkit_prefix != '/System/Library/Frameworks/AppKit.framework'):
+        raise ValueError('Private WindowServer requires functional QA and canonical UI verification')
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Target must be SiliconForest')
     if bool(args.surface_session) != bool(args.surface_broker):
@@ -393,7 +400,8 @@ def main():
                                 current = process_identities()
                                 owned.update({pid: current[pid][1] for pid in descendants(p.pid, current) if pid in current})
                                 result['providers'] = inspect(args.sample_path, args.run / 'providers.json', owned,
-                                    result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix, args.expect_system_gpu)
+                                    result['marionette']['capabilities']['moz:processID'], args.expect_appkit_prefix,
+                                    args.expect_system_gpu, args.expect_private_windowserver)
                             if args.policy_probe_path:
                                 from scheduling_snapshot import inspect as inspect_policies
                                 current=process_identities()
@@ -488,7 +496,7 @@ def main():
                             if args.popup_stress:
                                 from popup_stress import measure as measure_popups
                                 result['popup_stress'] = measure_popups(client, args.run / 'popup-stress.json', deadline,
-                                                                        result['presentation_seat'])
+                                    result['presentation_seat'], args.popup_observe_auto_close)
                                 deadline = min(deadline, time.monotonic() + 2)
                             if args.pinch_zoom:
                                 from pinch_zoom import measure as measure_pinch

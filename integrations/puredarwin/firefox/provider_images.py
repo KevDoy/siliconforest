@@ -10,7 +10,7 @@ import re
 import subprocess
 
 
-def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=False):
+def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=False, private_windowserver=None):
     if not sample or not sample.startswith('/private/var/db/sffx/'):
         raise ValueError('Provider inspection requires a private sampler')
     if (not expected_appkit.startswith('/private/var/db/sffx/') and expected_appkit not in [
@@ -19,6 +19,14 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
         raise ValueError('Expected AppKit must be a private prefix')
     result = dict(diagnostic_sampling_seconds=.05, expected_appkit=expected_appkit, processes=[])
     result['expected_system_gpu'] = system_gpu
+    if private_windowserver is not None:
+        path = Path(private_windowserver)
+        if (not path.is_relative_to('/private/var/db/sffx') or '..' in path.parts or
+                path.name != 'libWindowServer.dylib' or
+                expected_appkit != '/System/Library/Frameworks/AppKit.framework'):
+            raise ValueError('Private WindowServer control requires a private library and canonical UI')
+        result['private_windowserver_expected'] = private_windowserver
+        result['canonical_cocoa_complete'] = False
     if system_gpu and expected_appkit != '/System/Library/Frameworks/AppKit.framework':
         raise ValueError('System GPU verification requires canonical Cocoa verification')
     for pid, start in sorted(identities.items()):
@@ -43,7 +51,7 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
         if expected_appkit == '/System/Library/Frameworks/AppKit.framework':
             required = {name: '/System/Library/Frameworks/' + name + '.framework/'
                         for name in ['AppKit', 'Onyx2D', 'CoreText', 'QuartzCore']}
-            required['libWindowServer.dylib'] = '/usr/lib/libWindowServer.dylib'
+            required['libWindowServer.dylib'] = private_windowserver or '/usr/lib/libWindowServer.dylib'
             if system_gpu:
                 for name in ['IOSurface', 'OpenGL']:
                     required[name] = '/System/Library/Frameworks/' + name + '.framework/'
@@ -52,10 +60,11 @@ def inspect(sample, output, identities, parent_pid, expected_appkit, system_gpu=
                 paths = [line.rsplit('> ', 1)[-1] for line in selected
                          if re.search(r'\s' + re.escape(name) + r'\s+<', line)]
                 actual[name] = paths
-                row['passed'] &= len(paths) == 1 and paths[0].startswith(prefix)
+                row['passed'] &= len(paths) == 1 and (paths[0] == prefix if name == 'libWindowServer.dylib'
+                                                     else paths[0].startswith(prefix))
             pd = [line.rsplit('> ', 1)[-1] for line in selected if re.search(r'\sQuartzCore\.pd\s+<', line)]
             row['passed'] &= all(path.startswith('/System/Library/Frameworks/QuartzCore.framework/') for path in pd)
-            row['system_providers'] = actual
+            row['ui_providers' if private_windowserver else 'system_providers'] = actual
         result['processes'].append(row)
     result['complete'] = bool(any(row['role'] == 'parent' for row in result['processes']) and
         any(row['role'] == 'gpu' for row in result['processes']) and all(row['passed'] for row in result['processes']))
