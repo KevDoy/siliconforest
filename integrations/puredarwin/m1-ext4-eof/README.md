@@ -57,7 +57,17 @@ com.apple.filesystems.ext4 differs from44 (9 changed/48 unchanged versus29),
 all55 other kext source paths identical, zero segment overlap and the real
 Force-CMO and devfs link checks pass. The first verifier mistakenly matched
 the separate RavynOS compatibility ID as well; its failure is retained before
-requiring the exact ext4 filesystem ID. The candidate is not yet installed. Linux fsck repairs remain
+requiring the exact ext4 filesystem ID. The candidate is installed normal as45 (capsule5c323fb6/prelink2BFF4349),
+with44 rollback. Native28 IO cases+7 resizes and29 host byte oracles pass.
+The initial data-only st_blocks assertion FAIL is retained: five fragmented
+files include extent metadata. map-tail.py uses the exact read-only
+F_LOG2PHYS_EXT ABI/BLOCKMAP flags0;247 initialized blocks and681 hole/unwritten
+tail blocks through128KiB pass. This does not inventory unwritten preallocation
+or establish physical-media readback/whole-root cleanliness. GL/Vulkan5 pass,
+cap0/import/ring2 and standard desktop respond; UART/all locks released03:45:05.
+Private receipts: runs/sftb/firefox-install-0045. No speed improvement is claimed;
+the descriptive postboot fsync/unlink sample is worse and needs stage timing.
+Linux fsck repairs remain
 outside the current bitmap-only permission for these extent cases.
 
 FXPERF also measured4KiB fsync/unlink near14–15ms. That timing is a separate
@@ -65,6 +75,16 @@ question: the installed journal already batches at64 metadata blocks/1s except
 explicit sync, so a universal per-unlink commit cannot be inferred. Commits do
 perform ordered journal and checkpoint flushes; no barrier/durability reduction
 is proposed. Measure those stages before selecting a performance change.
+
+The next latency measurement must separate mount-lock acquisition, dirty-page
+push, journal writes, first device flush, checkpoint writes and final flush,
+using one owned writer and recording transaction block counts. A before/after
+30-file4KiB sample can detect a regression but cannot attribute latency across
+boots/background work. Do not remove barriers based on that sample. The source
+also ignores writeback/commit/flush errors in fsync/fullfsync, and the journal
+commit cleanup drops its buffers on error; that is a separate failure-contract
+audit requiring injected-failure/VM tests, not an established native I/O fault
+or a change in this EOF candidate. No mounted owner filesystem fault injection.
 
 Original filesystem/XNU licences remain in their patched sources. These new
 build/host-fixture helpers are MIT. Source patches do not redistribute firmware,

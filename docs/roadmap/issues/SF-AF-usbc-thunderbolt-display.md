@@ -1,22 +1,35 @@
 # SF-AF: USB-C, Thunderbolt and external display on J293
 
-Owner: CODEX-TB. Survey started15 November2026; current update16 November01:29Z.
-Thunderbolt/dock trials and AVE remain paused. The owner's later standing grant
-permits immediate Firefox/desktop kernel installs with2-minute notice, locks,
-UART and rollback; there is no owner-idle or hourly wait.
+Owner: CODEX-TB. Survey started15 November2026; current update16 November03:45Z.
+Thunderbolt/dock trials and AVE remain paused. The standing Firefox/desktop
+kernel grant uses2-minute notice, locks, UART and rollback, without an owner-idle
+or hourly wait. Qualified45 is installed normal;44 remains the immediate rollback.
 
 | Piece | Observed on the M1 | Built / still pending |
 |---|---|---|
-| Devfs clone recovery | Installed normal devfs-only kernel;60000 reservations allocated/freed, slots3→3, zero failures; GL exact hash50 and Vulkan50 pass; standard DESK8-next003/inject responds | Broader LinuxKPI GPU-wait interruptibility remains separate |
-| Firefox launches |20 consecutive fresh profiles create mapped/captured windows and quit/reap; slots3 after each | All20 captures have blank page content/stale chrome: page-paint STRICTFAIL, FX/DESK investigating |
-| Shared decoder output / pinch | 42 INFO import bit16 and ring2 observed; no successful shared decode/physical pinch; rollback restored old AVD/HID | Image42 booted but strict shared capture PANICKED/rolled back; original AVD retained in next K14/readiness/killable-wait/speaker-cap image43 |
+| Devfs clone recovery | Qualified41/43:60000 reservations balanced, slots3→3/fail0; GL hash50/Vulkan50;44 GL/Vulkan10/slots3 | Actual browser helper/relaunch integration remains with FX |
+| Killable GPU waits |43:60 binary/timeline infinite-wait signal cases reap within2.6ms; same drivers retained44 | Every DMA/recovery wait is not qualified killable |
+| Shared decoder capture |44:3x14 BO pin/import/destroy; strict H264600+HEVC300 visible NV12 hashes+PTS match Linux, held64/copied0, jobs900/done900/no faults/remaining allocations | GPU consumer completion, coherent browser zero-copy/CPU/presentation remain media/FX gates |
+| Producer death |44:3 own children unmap/SIGKILL/reap2.53–2.54ms; next CREATE retires context, consumer data survives pressure; final allocations0 | Lazy CREATE retirement, not immediate exit cleanup or GPU-fence proof; v1 immediate-INFO predicate stays FAIL |
+| Pinch / speaker |44 ring776B/version2; extra speaker cap0 per owner, boot argument retained | Physical pinch and sense calibration unobserved; current model has0 violations |
+| ext4 EOF allocation |45:28 IO cases/7 resizes/29 byte oracles;247 initialized blocks+681 hole/unwritten tails pass; st_blocks data-only assertion FAIL preserved (extent metadata) | Real VM frozenRC4/fixedRC0; old errors unrepaired, no whole-root cleanliness or latency improvement |
+| Firefox rendering / FPS | Original41 fresh-launch20 mapped/quit/reap passed but all page paints failed | Parent-side rendering fixes and current presented-content metrics belong to FX/TERM/DESK; no kernel FPS claim |
 | TS3 router / PCIe | Earlier native trials authorize TS3, bring NHI/PCIe tunnel up and enumerate12 functions including4 xHCI and I210 | No new dock trials while paused |
 | Dock Ethernet | Earlier en1 link1Gb/s | No DHCP lease or demonstrated packets |
-| Dock USB / Samsung | No USB device/HID typing, HPD/EDID/external output or10-cycle hotplug qualification | Sources/host/SDK preparation only; DP provider graph missing |
+| Dock USB / Samsung | No USB device/HID typing, HPD/EDID/external output or10-cycle hotplug qualification | Source/host/SDK preparation only; DP provider graph missing |
 
-Private native evidence is in runs/sftb/devfs-install-0041/. Filesystem check
-returned4 with bitmap/count and two beyond-EOF SQLite extent records; no repair
-was performed. Root subsequently mounted; a clean filesystem is not claimed.
+Private qualification evidence is under runs/sftb/firefox-install-004{1,3,4}
+and firefox-task-death-0044{,-v2}. Current45 capsule5c323fb6/prelink2BFF4349, same
+DESK9-next001/socket/inject verified; all locks/UART released03:45:05. Root
+read-only fsck returns4 with two legacy EOF records and bitmap/count errors; no
+repair or clean-filesystem claim. The previous startup-cache record is absent
+from the pre45 check, so no improvement is credited to45.
+
+Next kernel work: obtain steady-state/stage timing for fsync/unlink before
+selecting a latency fix, and consume media/FX's actual GPU-consumer/presentation
+measurements. The descriptive postboot30-file sample is worse, not a speed win.
+No further install is scheduled. Dock/AVE machine work stays paused. The
+completed45 boot sequence and exact evidence are recorded at the end below.
 
 ## Historical target and observed state (owner change; updated15:20Z)
 
@@ -3670,3 +3683,45 @@ that mistaken expectation. Both runs remain private under
 runs/sftb/firefox-task-death-0044{,-v2}. Same qualified44 and DESK9-next001
 remained running; non-input stats responded, UART stopped, actual core/gui/bench
 released at03:18:01. No install, reboot, injection, dock or AVE trial.
+
+
+### Kernel45 ext4 EOF allocation qualified, 2026-11-16 03:45:05Z
+
+Capsule5c323fb6/prelink2BFF4349 is installed normal, source733332ef0. Only
+com.apple.filesystems.ext4 differs from qualified44:57 executable modules,
+9 changed/48 unchanged versus29,55 other kext sources and core retained.
+All6 required checks pass; real VM frozen/fixed controls give e2fsck RC4/0,
+28 mmap/write sizes+7 resize steps, clean unmount and29 independently dumped
+file bytes each. The source clips write BLOCKMAP requests at current/active
+extending EOF; journal ordering, flushes, NVMe and halt fences are unchanged.
+
+On the M1,28 own mmap/write cases+7 resizes/fsync/reopen and29 host byte
+oracles pass. The first native st_blocks==data-size assertion FAILS and remains
+a failed diagnostic: five fragmented files include extent-tree metadata, which
+the frozen ext4_ext_account_meta explicitly counts. Read-only F_LOG2PHYS_EXT
+(flags0, no allocation, packed20-byte ABI) then verifies247 initialized data
+blocks and681 hole/unwritten tail blocks across all29 files through128KiB.
+This establishes the tested absence of initialized rounded EOF tails, not absence
+of unwritten preallocation, physical-media readback, whole-filesystem cleanliness
+or power-loss safety. The original accounting failure was not relabeled PASS.
+
+GL exact hashes5/Vulkan5 pass; clone slots3/fail0. Import caps65543, gesture
+ring776B/version2 and extra speaker cap0 remain; no AVE/boot-arg change. No
+new decode/fence/browser-FPS or physical-pinch qualification is added.
+
+Clean /bin/reboot reached Linux without reset. Unmounted-root read-only fsck
+returns4 with two legacy EOF extents and known deleted-inode/bitmap/count
+errors; the earlier startup-cache record is not reported in this pre-install
+check. No repair, and no existing-error improvement is credited to45. Root
+mounts. Normal installer retains44 rollback; default Linux and one-time bless
+are preserved. Same DESK9-next001 df5a3290/socket/inject stats respond; UART
+reader/route stopped and actual core/gui/bench released by SystemExit at the
+03:45:05 back marker. Receipts: runs/sftb/firefox-install-0045, private.
+
+The30-file4KiB descriptive sample is worse after this cold boot: write p50
+0.288→1.459ms, fsync9.790→11.010ms, unlink11.262→20.358ms. Different boot,
+warmth and allocation state prevent causal attribution. This is not a speed
+improvement; stage timing/steady-state repeats are needed before a performance
+change. Source already batches64 metadata blocks/1s; no durability reduction.
+A separate source audit notes ignored fsync/flush errors and commit-error buffer
+cleanup, without a native I/O-error observation or a proposed45 journal change.

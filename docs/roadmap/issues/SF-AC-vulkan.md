@@ -628,3 +628,45 @@ that mistaken expectation. Both runs remain private under
 runs/sftb/firefox-task-death-0044{,-v2}. Same qualified44 and DESK9-next001
 remained running; non-input stats responded, UART stopped, actual core/gui/bench
 released at03:18:01. No install, reboot, injection, dock or AVE trial.
+
+
+### Kernel45 ext4 EOF allocation qualified, 2026-11-16 03:45:05Z
+
+Capsule5c323fb6/prelink2BFF4349 is installed normal, source733332ef0. Only
+com.apple.filesystems.ext4 differs from qualified44:57 executable modules,
+9 changed/48 unchanged versus29,55 other kext sources and core retained.
+All6 required checks pass; real VM frozen/fixed controls give e2fsck RC4/0,
+28 mmap/write sizes+7 resize steps, clean unmount and29 independently dumped
+file bytes each. The source clips write BLOCKMAP requests at current/active
+extending EOF; journal ordering, flushes, NVMe and halt fences are unchanged.
+
+On the M1,28 own mmap/write cases+7 resizes/fsync/reopen and29 host byte
+oracles pass. The first native st_blocks==data-size assertion FAILS and remains
+a failed diagnostic: five fragmented files include extent-tree metadata, which
+the frozen ext4_ext_account_meta explicitly counts. Read-only F_LOG2PHYS_EXT
+(flags0, no allocation, packed20-byte ABI) then verifies247 initialized data
+blocks and681 hole/unwritten tail blocks across all29 files through128KiB.
+This establishes the tested absence of initialized rounded EOF tails, not absence
+of unwritten preallocation, physical-media readback, whole-filesystem cleanliness
+or power-loss safety. The original accounting failure was not relabeled PASS.
+
+GL exact hashes5/Vulkan5 pass; clone slots3/fail0. Import caps65543, gesture
+ring776B/version2 and extra speaker cap0 remain; no AVE/boot-arg change. No
+new decode/fence/browser-FPS or physical-pinch qualification is added.
+
+Clean /bin/reboot reached Linux without reset. Unmounted-root read-only fsck
+returns4 with two legacy EOF extents and known deleted-inode/bitmap/count
+errors; the earlier startup-cache record is not reported in this pre-install
+check. No repair, and no existing-error improvement is credited to45. Root
+mounts. Normal installer retains44 rollback; default Linux and one-time bless
+are preserved. Same DESK9-next001 df5a3290/socket/inject stats respond; UART
+reader/route stopped and actual core/gui/bench released by SystemExit at the
+03:45:05 back marker. Receipts: runs/sftb/firefox-install-0045, private.
+
+The30-file4KiB descriptive sample is worse after this cold boot: write p50
+0.288→1.459ms, fsync9.790→11.010ms, unlink11.262→20.358ms. Different boot,
+warmth and allocation state prevent causal attribution. This is not a speed
+improvement; stage timing/steady-state repeats are needed before a performance
+change. Source already batches64 metadata blocks/1s; no durability reduction.
+A separate source audit notes ignored fsync/flush errors and commit-error buffer
+cleanup, without a native I/O-error observation or a proposed45 journal change.
