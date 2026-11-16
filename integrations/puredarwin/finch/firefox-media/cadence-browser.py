@@ -49,6 +49,10 @@ def main():
     p.add_argument('--youtube',action='store_true',help='Own public non-DRM YouTube tab, no account/consent/ad interaction')
     p.add_argument('--youtube-profile',action='store_true',help='Separate diagnostic Gecko media profile; excludes performance qualification')
     p.add_argument('--youtube-1080',action='store_true',help='Request1080 on the admitted own video; require actual dimensions before measurement')
+    p.add_argument('--disable-av1',action='store_true',help='Own1080 streaming profile only; never changes the installed preference')
+    p.add_argument('--reuse-media-profile',type=Path,help='Previously completed own1080 profile; requires the reviewed copy-only runner patch')
+    p.add_argument('--start-media',type=float,help='Own public1080 video seek before timing, seconds0..60')
+    p.add_argument('--compare-pixels',action='store_true',help='After measurement, seek own video to10s and read128x72 diagnostic pixels')
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
@@ -65,6 +69,9 @@ def main():
     os.environ['MOZ_CRASHREPORTER_DISABLE']='1'
     if a.youtube_profile and not a.youtube:raise ValueError('YouTube profile requires its owned playback case')
     if a.youtube_1080 and not a.youtube:raise ValueError('Quality admission requires its own YouTube case')
+    if (a.disable_av1 or a.reuse_media_profile or a.start_media is not None or a.compare_pixels) and not a.youtube_1080:
+        raise ValueError('Codec/profile/seek controls require our admitted1080 public video')
+    if a.start_media is not None and not 0<=a.start_media<=60:raise ValueError('Own content-window seek must be0..60s')
     if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
     if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):
         raise ValueError('Lifetime control requires separate strict owned fixtures')
@@ -122,7 +129,7 @@ def main():
             quality=None
             if a.youtube_1080:
                 import youtube_quality
-                quality=youtube_quality.prepare(self,'aqz-KE-bpKQ',a.run/'youtube-quality-admission.json')
+                quality=youtube_quality.prepare(self,'aqz-KE-bpKQ',a.run/'youtube-quality-admission.json',start_media=a.start_media)
             before=self.cpu_snapshot();admission=None
             if a.youtube_profile:
                 import pipeline_profile
@@ -152,6 +159,7 @@ def main():
                 playback['observed_decoded_frames_per_media_second']=frames/elapsed if elapsed>0 else None
                 playback['actual_1080p60_observed']=playback.get('width',0)>=1920 and playback.get('height',0)>=1080 and elapsed>=12 and frames/elapsed>=55
                 self.youtube_completed=playback.get('actual_1080p60_observed') is True and not playback.get('error') and playback.get('ad') is False
+                if a.compare_pixels:playback['diagnosticPixels']=youtube_quality.pixels(self,'aqz-KE-bpKQ')
             if admission:playback['gecko_profile']=profile
             try:
                 capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(a.run/'youtube-cpu-scene.ppm')],
@@ -187,7 +195,7 @@ def main():
                     'script':'''const p=Components.classes["@mozilla.org/preferences-service;1"]
                       .getService(Components.interfaces.nsIPrefBranch),result={};
                       for(const [name,kind] of [["browser.tabs.inTitlebar","int"],
-                        ["webgl.disable-angle","bool"],["gfx.webrender.compositor","bool"]]){
+                        ["webgl.disable-angle","bool"],["gfx.webrender.compositor","bool"],["media.av1.enabled","bool"]]){
                         try{result[name]={value:kind==="int"?p.getIntPref(name):p.getBoolPref(name),
                           userValue:p.prefHasUserValue(name)}}catch(e){result[name]={error:String(e)}}
                       }return result;''','args':[],'newSandbox':True})
@@ -361,6 +369,7 @@ def main():
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
         release=manifest,diagnostic_only=True,timing_qualified=False,
+        kernel_uuid=subprocess.check_output(['sysctl','-n','kern.kernelcacheuuid'],text=True,timeout=4).strip(),
         synthetic_input=False,owner_idle_wait=False,rate_control=a.rate_control,
         staged_media=a.staged_media,frame_mode=a.frame_mode,boundary_trace=not a.without_trace,
         installed_media=a.installed_media,
@@ -373,6 +382,8 @@ def main():
         view_state_diagnostic=a.view_state,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
         youtube_1080=a.youtube_1080,
+        youtube_disable_av1=a.disable_av1,reused_media_profile=str(a.reuse_media_profile) if a.reuse_media_profile else None,
+        requested_start_media=a.start_media,diagnostic_pixels=a.compare_pixels,
         lifetime_control=a.lifetime_control,retire_pool=a.retire_pool,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
@@ -385,6 +396,8 @@ def main():
           '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
+    if a.youtube_1080:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
+    if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
     if a.installed_media or a.youtube_1080:argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file() and not a.youtube:

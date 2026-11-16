@@ -2,16 +2,18 @@
 # SPDX-License-Identifier: MIT
 """Admit real1080p60 decoded streaming observations, never infer panel cadence."""
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
 import statistics
+import re
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from video_selection import installed_family
 
 
-def analyze(run):
+def analyze(run,require_hardware=False):
     launch=json.loads((run/'cadence-launch.json').read_text())
     raw=json.loads((run/'browser/result.json').read_text())
     streaming=raw.get('streaming',{});video=streaming.get('playback',{})
@@ -45,10 +47,36 @@ def analyze(run):
     quit=json.loads((run/'natural-quit.json').read_text()) if (run/'natural-quit.json').is_file() else {}
     checks['family_gone_before_cleanup']=quit.get('requested') is True and bool(quit.get('family_before')) and quit.get('family_remaining')==[] and quit.get('cleanup_signals')==[]
     gaps=[b['wall']-a['wall'] for a,b in zip(video.get('frames',[]),video.get('frames',[])[1:])]
+    native=(run/'browser/firefox.log').read_text(errors='replace')
+    log_receipt=run/'browser/native-logs.json'
+    for receipt in json.loads(log_receipt.read_text()) if log_receipt.exists() else []:
+        name=Path(receipt['path'])
+        if name.is_absolute() or '..' in name.parts or name.parent!=Path('native-output'):raise ValueError('Unowned native log')
+        data=(run/'browser'/name).read_bytes()
+        if len(data)!=receipt['bytes'] or hashlib.sha256(data).hexdigest()!=receipt['sha256']:raise ValueError('Native log receipt differs')
+        native+='\n'+data.decode(errors='replace')
+    footers=sorted({tuple(map(int,row)) for row in re.findall(r'SF_VT_GPU frames=(\d+) copied-bytes=(\d+) required=(\d+)',native)})
+    def counters(text):
+        words=(text or '').partition(': ')[2].split()
+        if len(words)%2:raise ValueError('Incomplete decoder counters')
+        return {words[i]:int(words[i+1],0) for i in range(0,len(words),2)}
+    a,b=counters(streaming.get('avd_before')),counters(streaming.get('avd_after'))
+    delta={k:b[k]-a[k] for k in ['jobs','done','errors','timeouts','dart_faults','quarantined_desc'] if k in a and k in b}
+    if require_hardware:
+        preferences=json.loads((run/'owned-startup-preferences.json').read_text())
+        checks['own_private_av1_disabled']=launch.get('youtube_disable_av1') is True and preferences.get('media.av1.enabled',{}).get('value') is False
+        checks['selected_hardware_codec']=bool(re.search(r'codecs="(?:vp09|vp9|avc1)',selected.get('mimeType','')))
+        positive=[row for row in footers if row[0]>0]
+        checks['owned_shared_frames']=any(row[0]>=frames for row in positive) and all(row[1]==0 for row in positive)
+        checks['hardware_jobs']=delta.get('jobs',-1)>=frames and delta.get('done',-1)>=frames and all(delta.get(k)==0 for k in ['errors','timeouts','dart_faults','quarantined_desc'])
+        checks['power_efficient_declaration']=video.get('quality_admission',{}).get('capabilities',{}).get('powerEfficient') is True
     return dict(passed=all(checks.values()),checks=checks,decoded_frames=frames,reported_dropped=drops,
         decoded_frames_per_media_second=fps,media_seconds=media,wall_seconds=video.get('wallSeconds'),
         dimensions=[video.get('width'),video.get('height')],quality=video.get('quality_admission'),
         selected_format_after=video.get('selected_format_after'),
+        reused_media_profile=launch.get('reused_media_profile'),private_av1_disabled=launch.get('youtube_disable_av1'),
+        start_media=video.get('startMedia'),end_media=video.get('endMedia'),diagnostic_pixels=video.get('diagnosticPixels'),
+        native_vt_counters=footers,decoder_delta=delta,
         owned_cpu=video.get('owned_process_cpu',{}).get('comparison'),
         rvfc=dict(count=len(gaps),median_ms=statistics.median(gaps) if gaps else None,max_ms=max(gaps) if gaps else None),
         avd_before=streaming.get('avd_before'),avd_after=streaming.get('avd_after'),
@@ -57,7 +85,7 @@ def analyze(run):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('run',type=Path);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();result=analyze(a.run);a.output.write_text(json.dumps(result,indent=2)+'\n')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('run',type=Path);p.add_argument('--require-hardware',action='store_true');p.add_argument('--output',type=Path,required=True)
+    a=p.parse_args();result=analyze(a.run,a.require_hardware);a.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({k:result[k] for k in ['passed','checks','decoded_frames','reported_dropped','decoded_frames_per_media_second','dimensions','rvfc']}))
     raise SystemExit(0 if result['passed'] else 1)

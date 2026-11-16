@@ -124,6 +124,19 @@ a profile lock or copies an owner's profile. The ordinary new-launch/owned
 Marionette ancestry admission remains required. This permits a subsequent
 same-own-profile codec comparison without changing the installed preference.
 
+The `youtubehw` phase disables AV1 only in that admitted own profile. Both
+`youtube1080` and `youtubehw` accept `--reuse-media-profile`, `--start-media 1`
+and `--compare-pixels`: timing covers the same content window, while a separate
+paused128×72 read at10s supplies a small diagnostic sample after measurement.
+The hardware admission additionally requires actual AVC/VP9 selection, the
+observed false AV1 preference, owned shared-frame counters without copied
+bytes, successful hardware jobs and a truthful power-efficiency declaration.
+`compare-youtube-codecs.py` checks identical manifest, kernel, actual media/GL
+images, profile,1920×1080/60fps/color metadata and content windows, plus lower
+RDD/family CPU and diagnostic-sample PSNR. Both actual renderer images still
+need inspection. Small samples are not lossless equality or a complete quality
+comparison, and one pair never installs a codec preference automatically.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

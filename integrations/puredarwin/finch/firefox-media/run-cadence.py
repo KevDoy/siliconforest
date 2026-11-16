@@ -15,7 +15,10 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','mse','mse-installed','mse-scroll'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','youtubehw','mse','mse-installed','mse-scroll'])
+p.add_argument('--reuse-media-profile',type=Path)
+p.add_argument('--start-media',type=float)
+p.add_argument('--compare-pixels',action='store_true')
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
@@ -24,6 +27,8 @@ p.add_argument('--retire-pool',action='store_true',help='Private retirement comp
 p.add_argument('--trace-media',action='store_true',help='Diagnostic CV/VT/CGL boundary tracing; never performance qualification')
 p.add_argument('--view-state',action='store_true',help='MSE-only read-only native view observation; excludes performance qualification')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
+if (a.reuse_media_profile or a.start_media is not None or a.compare_pixels) and a.phase not in ['youtube1080','youtubehw']:
+    raise ValueError('Own profile/seek/pixel controls require their1080 streaming case')
 if a.view_state and a.phase!='mse':raise ValueError('View-state requires separate MSE phase')
 if (a.lifetime_control or a.retire_pool) and a.phase!='shared':raise ValueError('Separate strict shared case required')
 if a.retire_pool and not a.lifetime_control:raise ValueError('Retirement requires lifetime control')
@@ -70,10 +75,14 @@ try:
             argv+=['--mse','--installed-media','--frame-mode','require','--without-trace']
             if a.phase=='mse-scroll':argv+=['--mse-scroll']
         if a.view_state:argv+=['--view-state']
-        if a.phase in ['youtube','youtube-profile','youtube1080']:
+        if a.phase in ['youtube','youtube-profile','youtube1080','youtubehw']:
             argv+=['--youtube','--without-trace']
             if a.phase=='youtube-profile':argv+=['--youtube-profile']
-            if a.phase=='youtube1080':argv+=['--youtube-1080']
+            if a.phase in ['youtube1080','youtubehw']:argv+=['--youtube-1080']
+            if a.phase=='youtubehw':argv+=['--disable-av1']
+        if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
+        if a.start_media is not None:argv+=['--start-media',str(a.start_media)]
+        if a.compare_pixels:argv+=['--compare-pixels']
         if a.phase in ['copy','shared']:
             argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy']
             if not a.trace_media:argv+=['--without-trace']

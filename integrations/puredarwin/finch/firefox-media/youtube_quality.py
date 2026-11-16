@@ -36,13 +36,42 @@ def capabilities(client,state):
     return result
 
 
+def seek(client,video_id,position):
+    return client.command('WebDriver:ExecuteAsyncScript',dict(script='''
+      const wanted=arguments[0],position=arguments[1],done=arguments[arguments.length-1];
+      const p=document.querySelector('#movie_player'),v=document.querySelector('video');
+      if(p?.getVideoData?.()?.video_id!==wanted||p?.classList.contains('ad-showing')||!v){
+        done({error:'Own video identity changed before seek'});return;}
+      v.pause();
+      const finish=()=>{clearTimeout(timer);v.removeEventListener('seeked',finish);
+        done({position:v.currentTime,paused:v.paused,readyState:v.readyState});};
+      const timer=setTimeout(()=>{v.removeEventListener('seeked',finish);done({error:'Own seek deadline'});},6000);
+      if(Math.abs(v.currentTime-position)<0.0005&&!v.seeking){finish();return;}
+      v.addEventListener('seeked',finish,{once:true});v.currentTime=position;
+      ''',args=[video_id,position],newSandbox=False,scriptTimeout=8000))
+
+
+def pixels(client,video_id,position=10):
+    state=seek(client,video_id,position)
+    if state.get('error'):return state
+    return client.command('WebDriver:ExecuteScript',dict(script='''
+      const v=document.querySelector('video'),canvas=document.createElement('canvas');
+      canvas.width=128;canvas.height=72;
+      try{const c=canvas.getContext('2d',{willReadFrequently:true});c.drawImage(v,0,0,128,72);
+        const rgba=c.getImageData(0,0,128,72).data,parts=[];
+        for(let i=0;i<rgba.length;i+=4096)parts.push(String.fromCharCode(...rgba.subarray(i,i+4096)));
+        return {width:128,height:72,videoWidth:v.videoWidth,videoHeight:v.videoHeight,
+          mediaTime:v.currentTime,rgbaBase64:btoa(parts.join('')),diagnosticAfterMeasurement:true};
+      }catch(e){return {error:String(e)}}''',args=[],newSandbox=False))
+
+
 def admissible(state,video_id):
     return (state.get('videoId')==video_id and state.get('ad') is False and
             state.get('width',0)>=1920 and state.get('height',0)>=1080 and
             state.get('readyState',0)>=2 and state.get('error') is None)
 
 
-def prepare(client,video_id,output,seconds=20):
+def prepare(client,video_id,output,seconds=20,start_media=None):
     result=dict(requested_quality='hd1080',input_injected=False,complete=False,states=[])
     def script(source):
         return client.command('WebDriver:ExecuteScript',dict(script=source,args=[video_id],newSandbox=False))
@@ -66,6 +95,9 @@ def prepare(client,video_id,output,seconds=20):
                 raise RuntimeError('Video identity or non-ad admission changed; no interaction attempted')
             if admissible(state,video_id):
                 result['capabilities']=capabilities(client,state)
+                if start_media is not None:
+                    result['seek']=seek(client,video_id,start_media)
+                    if result['seek'].get('error'):raise RuntimeError(result['seek']['error'])
                 result['complete']=True
                 return result
             time.sleep(.25)
