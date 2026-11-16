@@ -6,6 +6,12 @@ remains on qualified NON-AVE CIO29. Hardware import, cache visibility, zero-copy
 video and physical pinch delivery are unqualified. The failing dock Ethernet
 and uninstalled dock diagnostic are excluded from this candidate.
 
+The later23:20 desktop wedge makes devfs clone lifetime the first priority.
+The original three-module artifact below is superseded for the next window by
+[../m1-devfs-clone/README.md](../m1-devfs-clone/README.md): the SAME reviewed three
+SDKs plus the kernel/shared-DRM fix in one image. The old artifact remains a
+local build, and qualified29 remains the installed recovery baseline.
+
 ## Exact scope
 
 | Module | Prepared change | Preserved baseline |

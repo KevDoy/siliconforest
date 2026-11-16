@@ -3375,3 +3375,40 @@ window; the earlier12min sequence is retained as a dock plan, not the next
 Firefox window. USB/physical Keychron, DP provider graph/HPD/EDID/Samsung and10
 physical dock cable cycles remain unobserved. Original idle regression and
 compositor-specific SIGSTOP finding remain unresolved as recorded above.
+
+
+### GPU freeze recovery and next-kernel priority: devfs clone lifetime
+
+The authorized recovery exception captured the23:20 frozen desktop before any
+reset and returned standard SiliconForest at23:37:34Z. Both compositor28999
+and GPU helper28583 were in the SAME devfs_dntovn creation wait, before DRM
+callbacks, not an observed AGX firmware-recovery lock. AGX/DCP workers were idle
+and services attached. All37 tasks/201 threads,23:15+ dmesg/ioreg/UART and
+symbolication remain private at runs/sftb/gpu-wedge-2320/.
+
+Source plus actual-function host reproduction shows stat-only DRM lookups leak
+clone reservations: no open/close happens, and devfs reclaim never frees them.
+Lookup1024 exhausts the1023-slot pool; the allocation-error path leaves DN_CREATE
+set, stranding all later lookup/stat/open callers and preventing helper exit.
+That threshold is hosted evidence; the original failing caller/count were not
+recorded on hardware. No live creator/lock owner was identified in the snapshot.
+Older SF-AC dma-buf/syncobj/mapping issues remain separately unproved.
+
+The next SINGLE Firefox kernel now prioritizes the devfs/core + shared DRM
+fix alongside the original frozen AVD/K14/HID inputs. It requires exactly five
+changed modules and52 baseline UUIDs unchanged, including AGX/DCP/NVMe/CIO.
+Native APIs are linked in the final collection; the source/host/native build
+handover and55min window plan are in
+[m1-devfs-clone/README.md](../../../integrations/puredarwin/m1-devfs-clone/README.md).
+The fixed-image5000-stat/512-open probe and owned GPU-helper kill→IPC-closure/
+visible-fallback gate run FIRST after standard-state verification, before media/
+pinch tests. They are prepared, not observed. No new install is authorized now.
+
+Recovery used one M5 reset, a normal qualified29/a149e487… install, one-time
+bless/defaultLinux preserved, actual .next/socket/inject + non-input stats reply,
+UART reader stopped and all TB locks released. e2fsck -fn returned4 with bitmap/
+count differences; it skipped journal replay and did not repair anything.
+Correction: the initial clean request used /sbin/reboot rather than supported
+fenced /bin/reboot, so a supported shutdown hang is NOT proved. Raw failures
+and the command mistake are retained; no extra recovery boot followed.
+CODEX-TB resumed the machine pause after recovery; all later work is offline.

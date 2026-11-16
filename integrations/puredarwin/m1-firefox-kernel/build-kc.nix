@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Local-only combined candidate. frozenPhase is the recorded qualified29 buildCommand.
-{ frozenPhase }:
+{ frozenPhase
+, hid ? import ./build-hid-readiness.nix
+, spi ? import ./build-k14-touchbar.nix
+, avd ? import ./build-avd-import.nix
+}:
 let
   source = import ../rebase/pd.nix;
   inherit (source) pkgs pd;
@@ -9,9 +13,6 @@ let
   roots = pkgs.lib.unique (builtins.concatMap
     (x: if builtins.isList x then x else [])
     (builtins.split "(/nix/store/[a-z0-9]{32}-[a-zA-Z0-9+._=-]+)" original));
-  hid = import ./build-hid-readiness.nix;
-  spi = import ./build-k14-touchbar.nix;
-  avd = import ./build-avd-import.nix;
   exts = "System/Library/Extensions";
   strip = "${pd.packages.x86_64-linux.arm64-cross-toolchain}/bin/arm64-apple-darwin20.4-strip";
   baseline = builtins.storePath "/nix/store/xvhy0h859aq5zgkzgkl4y46gcqvwfwq9-puredarwin-kc-cio29-local-stripped";

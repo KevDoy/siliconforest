@@ -364,3 +364,50 @@ was not tested. Those two tests are what to write first.
 - The ray-query render path (`drm_asahi_cmd_render_with_ray_query`, 448 bytes) depends on the kernel
   feature `RENDER_RAY_QUERY`, which our kernel does not report, so it is not used; its tail layout
   against the kernel's 448-byte `cmd_render` was not compared.
+
+
+### 2026-11-15 23:20Z desktop freeze: devfs lookup, captured before recovery
+
+CODEX-TB captured the still-wedged machine before reset under core/gui/bench:
+37 tasks/201 threads, kernel stackshot decoded and symbolicated against exact
+installed CIO29 and its AGX/DCP maps, ps,23:15+ dmesg, service ioreg and live UART.
+Private evidence/analysis: runs/sftb/gpu-wedge-2320/.
+
+Both compositor28999 main73279 and Firefox GPU helper28583 Renderer72355 wait
+in devfs_dntovn+0x94/msleep/lck_mtx_sleep on the same channel. The calls are
+open/namei and fstatat/namei, before DRM callbacks. The captured AGX/DCP workers
+are idle in taskqueue semaphores; services remain attached/busy0. No corresponding
+GPU fault/timeout/recovery appears in the retained ring. The kernel is waiting
+for DN_CREATE completion, not a DRM mutex held by the exiting helper. Generic
+msleep gives no owner; no live creator was identified in the captured stacks.
+
+The installed shared PDDRMDri already returns clone slots on close, but stat-only
+lookups allocate cloned vnodes without ever calling open/close. devfs reclaim
+never returns those reservations. Actual frozen source under host ASan/UBSan
+reproduces1023 leaked slots, then ENOMEM on stat lookup1024; devfs_dntovn's early
+failure skips DN_CREATE clear/wakeup, leaving later callers blocked indefinitely.
+The historical lookup count and original failing caller were not captured on
+hardware. This mechanism matches the observed wait; it does not establish that
+the older dEQP dma-buf hang or syncobj wait had the same cause.
+
+Offline fix: creation-error cleanup and actual-minor retirement, interruptible
+PCATCH creation wait, opt-in vnode-reclaim clone API, and shared DRM reservation
+ownership through final reclaim instead of early close/error reuse. Existing
+GPU-file teardown still owns pages/mappings; no in-flight backing is freed to
+make exit pass. The earlier taskqueue0041 fix and GPU/DCP drivers are unchanged.
+Actual-source tests cover15000 lookup/open lifecycle cycles, pool failure/reuse,
+minor1, abort, delayed reclaim, legacy consumers and live-cookie refusal.
+
+The source, frozen native recipes, link verification and next-window gate are in
+[m1-devfs-clone/README.md](../../../integrations/puredarwin/m1-devfs-clone/README.md).
+This is the highest-priority addition to the SAME future Firefox AVD/K14/HID
+install, not another boot now. Native SIGKILL/IPC closure and metadata stress
+remain unqualified until an owner-opened window; fixed-image probe is built only.
+
+Recovery returned standard .next/socket/inject and a non-input stats reply on
+exact CIO29 at23:37:34Z, UART stopped/locks released. One M5 reset was used.
+Read-only e2fsck returned4 with bitmap/count differences, journal replay skipped;
+no repairs made. Correction: initial clean request used /sbin/reboot rather
+than supported fenced /bin/reboot, so a shutdown-kernel hang was not proved.
+No extra recovery boot was used to retest that mistake. CODEX-TB then resumed
+its machine pause and continued only workstation work. No AVE or push.

@@ -646,3 +646,27 @@ None is irreversible in the strict sense. The steps that deserve the word in pra
 
 ## Rules
 Inherits SF-B. In addition: no boot with `pdnvme=2` or `3` without the host tests passing; after every such boot the Linux check (`linux_m1.sh all`: root mounted without recovery, no NVMe error, SMART compared); any anomaly creates `runs/m1-storage/STOP` and stops all storage boots.
+
+
+### Read-only filesystem check during GPU-wedge recovery, 2026-11-15
+
+The authorized recovery from the23:20 devfs/DRM-open freeze used one M5 reset,
+one Linux visit, the normal installer for qualified CIO29/a149e487… and a
+one-time SiliconForest boot. Root identity/label/geometry and unmounted state
+were checked before e2fsck -fn. It returned4: journal replay skipped, block and
+inode bitmap differences, free-block totals off by3, plus many extent-narrowing
+suggestions. No repair or journal replay was requested; this is not a clean
+post-replay filesystem assessment. Full output remains private at
+runs/sftb/gpu-wedge-2320/linux-fsck-and-install.txt.
+
+At23:37:34Z the actual .next process, Wayland socket/inject directory and a
+non-input stats request/reply were verified on the qualified kernel. UART
+reader and reroute process stopped; CODEX-TB released all locks and returned to
+its machine pause. Default boot stayed Linux; only one-time bless was used.
+
+Recovery command correction: CODEX-TB initially requested /sbin/reboot with
+background stderr redirected. The supported fenced installed command is
+/bin/reboot (sf-command -> /sbin/sf-halt). Thus this attempt does not prove the
+supported clean shutdown hung on the wedged processes. Future recovery must
+use /bin/reboot and retain status/stderr; no extra reboot was performed to
+retest after this recovery. No SSH/firewall/authentication configuration changed.
