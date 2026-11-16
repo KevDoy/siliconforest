@@ -340,6 +340,26 @@ show whether XPI traffic disappears. Compare conditions inside one shared lock
 hold and require actual provider identities to match: the initial unpaired
 control crossed an AppKit install, so its timing delta remains unqualified.
 
+The subsequent matched pair holds the same actual media, UI, graphics, kernel
+boot, runtime manifest and profiler configuration under one lock hold. All four
+actual first/final GPU images were inspected. With rollouts enabled it records
+867 distinct export IDs, 33 missing and a181.821ms maximum changed-ID interval;
+the fresh owned profile with rollouts/studies disabled records889 IDs, 11 missing
+and a35.678ms maximum. XPI markers change from4 to0. Both decode900 frames with
+0 reported drops, retain40.06ms median rVFC callbacks and exit naturally with
+status0 and no remaining family. This is one intrusive profiled pair, not a
+production preference recommendation, perfect-FPS pass or panel measurement.
+The two preferences may affect other first-run rollout work as well.
+
+The same strict two-clip analyzer accepts `--staged-media` for a private media
+candidate. That mode requires staged selection and canonical GPU providers,
+keeps all pixel/hash, decoder-job, transport, audio-provider and natural-exit
+checks, and explicitly labels the result private. It cannot qualify an installed
+outer launcher. Completed staged playback now requests ordinary Quit before the
+shared runner's cleanup, as the installed gate already does. Both actual GPU
+images still require inspection. This supports qualifying a new CoreVideo clock
+while retaining the byte-identical reviewed VideoToolbox main and child.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore

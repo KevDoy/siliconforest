@@ -16,13 +16,16 @@ spec=importlib.util.spec_from_file_location('video_pair',HERE/'analyze-video-pai
 pair=importlib.util.module_from_spec(spec);spec.loader.exec_module(pair)
 
 
-def analyze(run):
+def analyze(run,staged=False):
     launch=json.loads((run/'cadence-launch.json').read_text())
     raw=json.loads((run/'browser/result.json').read_text())
     checks={}
     try:installed_family(launch['release']);checks['selected_manifest']=True
     except (ValueError,KeyError):checks['selected_manifest']=False
-    checks['installed_outer']=launch.get('installed_media') is True and launch.get('staged_media') is False
+    if staged:
+        checks['staged_outer']=launch.get('installed_media') is False and launch.get('staged_media') is True
+    else:
+        checks['installed_outer']=launch.get('installed_media') is True and launch.get('staged_media') is False
     checks['canonical_graphics']=not launch.get('graphics_override')
     checks['actual_graphics']=raw.get('providers',{}).get('complete') is True and raw.get('providers',{}).get('expected_system_gpu') is True
     checks['strict_mode']=launch.get('frame_mode')=='require'
@@ -65,6 +68,7 @@ def analyze(run):
             len(p.get('selected',{}).get(name,[]))==1 and p['selected'][name][0].startswith(audio)
             for p in processes for name in ['AudioToolbox','AudioToolbox.output-pd'])
     return dict(passed=all(checks.values()),checks=checks,clips=clips,
+        qualification='private media candidate' if staged else 'installed outer launcher',
         visual_review='REQUIRED: inspect both actual renderer images before overall acceptance',
         shared_runner_verdict={k:raw.get(k) for k in ['browser_survived_run','measurement_passed','exit_before_cleanup','exit_after_cleanup']},
         limits='The shared survival-oriented runner marks intentional Quit as not surviving; its original verdict is retained. This admission requires completed pictures followed by natural status0 and no live family before cleanup. Not acoustic sync, panel cadence or whole-browser zero-copy proof.')
@@ -72,6 +76,7 @@ def analyze(run):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('run',type=Path);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();result=analyze(a.run);a.output.write_text(json.dumps(result,indent=2)+'\n')
+    p.add_argument('--staged-media',action='store_true',help='Qualify a private media candidate; never an installed-outer pass')
+    a=p.parse_args();result=analyze(a.run,staged=a.staged_media);a.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(dict(passed=result['passed'],checks=result['checks'])))
     raise SystemExit(0 if result['passed'] else 1)

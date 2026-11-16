@@ -42,7 +42,7 @@ def fixtures():
 
 
 class InstalledVideoTests(unittest.TestCase):
-    def analyze(self,mutate=lambda *x:None):
+    def analyze(self,mutate=lambda *x:None,staged=False):
         launch,raw,quit=fixtures();mutate(launch,raw,quit)
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'browser').mkdir()
@@ -53,7 +53,7 @@ class InstalledVideoTests(unittest.TestCase):
             (root/'browser/native-output/firefox-1-123.log').write_bytes(data)
             (root/'browser/native-logs.json').write_text(json.dumps([dict(path='native-output/firefox-1-123.log',
                 bytes=len(data),sha256=hashlib.sha256(data).hexdigest())]))
-            return m.analyze(root)
+            return m.analyze(root,staged=staged)
 
     def test_intentional_quit_keeps_original_survival_failure(self):
         result=self.analyze();self.assertTrue(result['passed'])
@@ -62,6 +62,18 @@ class InstalledVideoTests(unittest.TestCase):
 
     def test_private_outer_cannot_qualify_as_installed(self):
         self.assertFalse(self.analyze(lambda launch,*_:launch.update(staged_media=True))['passed'])
+
+    def test_candidate_requires_explicit_scope_and_keeps_graphics_gate(self):
+        def candidate(launch,*_):launch.update(staged_media=True,installed_media=False)
+        self.assertFalse(self.analyze(candidate)['passed'])
+        result=self.analyze(candidate,staged=True)
+        self.assertTrue(result['passed'])
+        self.assertEqual(result['qualification'],'private media candidate')
+        self.assertNotIn('installed_outer',result['checks'])
+        def wrong_graphics(launch,raw,*_):
+            candidate(launch);raw['providers']['expected_system_gpu']=False
+        self.assertFalse(self.analyze(wrong_graphics,staged=True)['passed'])
+        self.assertFalse(self.analyze(staged=True)['passed'])
 
     def test_cleanup_exit_or_live_family_refused(self):
         for mutate in [lambda l,r,q:r.update(exit_before_cleanup=None,exit_after_cleanup=143),

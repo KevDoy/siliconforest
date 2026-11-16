@@ -266,7 +266,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.frame_id and getattr(self,'frame_id_preview_completed',False)) or (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.frame_id and getattr(self,'frame_id_preview_completed',False)) or (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or ((a.installed_media or a.staged_media) and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -471,7 +471,7 @@ def main():
             if a.lifetime_control:
                 try:video['lifetime_control']=self.lifetime_control(video)
                 except Exception as error:video['lifetime_control_error']=str(error)
-            if a.installed_media and video.get('ended') is True and not video.get('error') and not video.get('playError'):
+            if (a.installed_media or a.staged_media) and video.get('ended') is True and not video.get('error') and not video.get('playError'):
                 self.completed_installed_videos=getattr(self,'completed_installed_videos',0)+1
             if a.frame_id_dimensions_only:self.frame_id_preflight_completed=True
             return video
@@ -557,7 +557,7 @@ def main():
         argv+=['--pref','nimbus.rollouts.enabled=false','--pref','app.shield.optoutstudies.enabled=false']
     if a.youtube_1080 and not a.installed_codec_policy:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
     if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
-    if (a.installed_media or a.youtube_1080) and not a.frame_id_cgl:argv+=['--expect-system-gpu']
+    if (a.installed_media or a.youtube_1080 or a.staged_media) and not (a.frame_id_cgl or a.graphics_override):argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file() and not a.youtube and not a.frame_id_cgl:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
