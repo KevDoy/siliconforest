@@ -1651,8 +1651,8 @@ Nothing.
 **Truthfulness.** All input on the M1 was synthetic (the inject module's virtual seat; every request starts with `seat
 virtual`), into my own Firefox windows (fresh profiles under `/private/var/db/sfdesk10/`, crash reporter off); never
 the owner's windows or processes; his counters stayed unchanged by my runs. Host tests are wire tests with real
-Wayland clients and stand-in renderers. Everything desk10 does on the M1 waits for its first run: desk10-001..003 were
-installed as files only (my brief: no relaunch of my own); see "On the disk".
+Wayland clients and stand-in renderers. desk10-001..003 were installed as files only (my brief: no relaunch of my own); the
+coordinator relaunched into desk10-next-003 at 07:04Z at the owner's word.
 
 ### 1. "I have to scroll a lot just to make the page move" - the trackpad's scrolling
 **What his two-finger scroll was, in numbers** (from the sources, not from feel):
@@ -1713,11 +1713,32 @@ wheel-step momentum (0159w) is installed first and finger frames feel worse: `de
 **Asked of CODEX-TB** (requests-for-CODEX-TB.md "DESK10"): the boot argument `pdm1tpscroll=20` (0.21 mm a step: slow
 drags seen per 0.2 mm, the lift 40 ms after the last record; only together with desk10 - older compositors would scroll
 17x too far), and, properly, the two-finger scroll as a gesture in the driver's ring with an exact lift and both axes.
-**Not observed on the M1 yet:** desk10 has not run (installed as files at 06:09/06:24/06:55Z; no reboot or relaunch
-since). The M1 run is ready: `m1/scroll10.sh` (my own Firefox, 5 cm swipes at 20, 150 and 400 mm/s and a slowing
-drag as the driver's records on the virtual seat, the page's scrollY at the end of the contact and 0.3/1/2.5 s later,
-the desk's `WMSCROLL` lines, then five mouse-wheel notches against desk9's). Momentum in Firefox and Terminal needs
-TERM10's finger-path momentum; not observed.
+**Observed on the M1** (desk10-next-003 since 07:04Z, the coordinator's relaunch at the owner's word; run sc10a,
+07:15Z, `m1/scroll10.sh`; my own Firefox, fresh profile, installed frameworks; synthetic: the driver's records of a 5 cm
+two-finger swipe from the inject's thread on the virtual seat, the page's scrollY read from its title):
+
+| 5 cm swipe | desk sent (`WMSCROLL gesture`) | Firefox moved | lift seen after the last record |
+|---|---|---|---|
+| 20 mm/s, steady | 679 units (13.6 per mm, factor 1.00) | 679 CSS px | 301 ms |
+| 150 mm/s, steady | 1031 units (factor 1.52) | 1031 CSS px | 63 ms |
+| 400 mm/s, steady | 1898 units (factor 2.79) | 1898 CSS px | 40 ms |
+| 500 ms, slowing to a stop | 975 units (factor 1.44) | 975 CSS px | 513 ms |
+| 5 mouse-wheel notches | (wheel, unchanged) | 100 CSS px, 20 a notch (no regression) | - |
+
+Firefox moves exactly what the desk sends (1 unit = 1 CSS px = 1 point at zoom 1); before desk10 the same 5 cm moved 280
+CSS px at any speed (TERM10's measurement on the installed path). Its scrollY lags the visible position during the
+gesture (APZ scrolls asynchronously; the title caught up within a second of the lift). No momentum with the installed
+libWindowServer (the totals equal what was sent); TERM10's t10s7 (finger frames precise for every app + momentum,
+`answers-from-TERM.md` 06:35Z) was not measured: my run refused itself while the owner was active, and at 07:31Z the M1's
+disk was full (no new launches).
+**The owner's own scrolling** (his hands; `WMSCROLL gesture seat=owner` since 07:04Z, `m1/owner-scroll-1.txt`, no
+content, only steps and timing): 36 gestures; the trackpad is device 0, as assumed. He flicks: per gesture median 8
+driver steps = 28.5 mm (p10 14, p90 39, max 46 mm) in 128 ms (p90 183), mean finger speed median 202 mm/s (p90 298,
+peaks up to 437); the curve's factor median 1.6 (max 2.4); **594 points per swipe at the median (p90 1189, max 1505)**,
+where desk9 gave about 160 (8 notches of 20); lift seen 79 ms after his last record (median; p90 118). For flicks like his
+the momentum (TERM10's, on its way) matters as much as the curve.
+**Not done:** horizontal scrolling (the driver has none: asked of CODEX-TB); an exact lift (driver: asked); Terminal's
+scrolling not measured (its finger frames are lines until TERM10's build is installed).
 
 ### 2. FX-022 (≡ gives no menu, a second click kills Firefox's window): the compositor's half
 - **dma-bufs on popups and layer surfaces** (patch 32): the desk read every popup buffer as shared memory and refused
@@ -1735,8 +1756,11 @@ TERM10's finger-path momentum; not observed.
   the M1's error** (`basecheck-unmap-ack-old-source.txt`: "wrong configure serial: 9"), on desk10 it passes.
 - What the client must still do (to TERM10): show an unmapped toplevel again by a commit without a buffer, then ack the
   configure that answers it, then attach; ack on the xdg_surface the configure came on; never an older-than-acked or
-  never-sent serial. Not observed on the M1 yet (desk10 not running); FX-022's first-click blank panel (TERM10: Firefox
-  hides the panel before it paints) is the client's.
+  never-sent serial. On the M1 since desk10 started (07:04-07:31Z: CODEX-FX's 20-click installed ≡ run, TERM10's and
+  FXPERF2's runs, the owner's own use): **no "wrong configure serial" and no protocol-error disconnect** in the desk's
+  log (only ordinary connection closes), popups mapped; whether the ≡ panel is usable is CODEX-FX's/TERM10's to judge
+  (their run's result was being analysed); FX-022's blank first panel (TERM10: Firefox hides the panel before it paints)
+  is the client's.
 
 ### 3. Client damage and partial repaint over many frames (on desk9-001, partial_repaint on)
 **Correctness soak** (`m1/partial10.sh`, run pr10c, 06:30Z; my own Firefox on a long static page whose title changes
@@ -1789,8 +1813,7 @@ fresh copy of the `desk9-next-003` build source give the build sources of desk10
 (`diff -r`, `runs/m1-desktop-010/desk10-patchcheck`).
 
 ### On the disk and how to go back
-- Running: desk9-next-001 `df5a3290` (since 03:45Z). Installed as files, start with the next reboot or relaunch:
-  `/usr/bin/chonkstep-darwin-desktop.next` = desk10-next-003 `554e8da2...` (inject), `/usr/bin/chonkstep-darwin-desktop`
+- Running: desk10-next-003 `554e8da2...` (inject) since 07:04Z (the coordinator's relaunch); `/usr/bin/chonkstep-darwin-desktop`
   = desk10-daily-003 `2efe6e06...` (hashes on the M1 right after each copy). `.before-desk10` = DESK9's 003 pair
   (`dc2002ad`/`b36a9f0c`), `.before-desk10-002`/`-003` = desk10's 001/002 pairs (never ran), `.safe` untouched
   (`b1104b75`). Policy file: `partial_repaint=on` (DESK9's), `scroll_trace=on` (mine, 06:10Z; desk9 ignores the key).
