@@ -38,6 +38,8 @@ def analyze(run):
             video.get('renderer_capture',{}).get('owner_input_overlap') is False and
             video.get('renderer_capture',{}).get('input_injected') is False,
         natural_quit_zero=raw.get('exit_before_cleanup')==0 and raw.get('exit_after_cleanup')==0)
+    selected=video.get('selected_format_after',{}).get('selectedFormat') or {}
+    checks['source_60fps']=55<=selected.get('fps',0)<=65 and selected.get('width',0)>=1920 and selected.get('height',0)>=1080
     try:installed_family(launch['release']);checks['selected_manifest']=True
     except (KeyError,ValueError):checks['selected_manifest']=False
     quit=json.loads((run/'natural-quit.json').read_text()) if (run/'natural-quit.json').is_file() else {}
@@ -46,6 +48,7 @@ def analyze(run):
     return dict(passed=all(checks.values()),checks=checks,decoded_frames=frames,reported_dropped=drops,
         decoded_frames_per_media_second=fps,media_seconds=media,wall_seconds=video.get('wallSeconds'),
         dimensions=[video.get('width'),video.get('height')],quality=video.get('quality_admission'),
+        selected_format_after=video.get('selected_format_after'),
         owned_cpu=video.get('owned_process_cpu',{}).get('comparison'),
         rvfc=dict(count=len(gaps),median_ms=statistics.median(gaps) if gaps else None,max_ms=max(gaps) if gaps else None),
         avd_before=streaming.get('avd_before'),avd_after=streaming.get('avd_after'),

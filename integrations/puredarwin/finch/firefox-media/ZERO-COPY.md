@@ -5,8 +5,13 @@
 Kernel44 qualified shared capture after the earlier teardown failure;47
 retains it and46's reviewed per-context diagnostics. CODEX-TB owns kernel
 build/install/recovery. The following current browser pair uses47; the qualified
-CV/VT family is cold-staged at a new inactive runtime prefix. FX owns selection
-and its installed-outer playback/natural-Quit gate. Full32-buffer pools remain
+CV/VT family was cold-staged, then selected by FX at09:48:25UTC. Its
+installed-outer gate passed at09:49:13:600/300 pictures, zero reported drops,
+zero decoder copies, expected hardware jobs/no faults and actual provider paths.
+Both GPU captures were inspected. Natural Quit returned0 and the whole own
+family disappeared in1.748s without cleanup signals. The separate installed
+sample is RDD7.913/16.327% and family114.850/151.338% of one core, not another
+matched comparison. FX owns the checked selection rollback. Full32-buffer pools remain
 the default and pool retirement is off.
 
 | Ten-second generated clip | H2641080p60 copy → shared | HEVC4K30 copy → shared |

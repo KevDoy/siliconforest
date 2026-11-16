@@ -52,12 +52,14 @@ def main():
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
+    p.add_argument('--mse-scroll',action='store_true',help='Own fixture programmatic viewport scrolling; no pointer/key input')
     p.add_argument('--view-state',action='store_true',help='Main-queue read-only window/view getter diagnostic, no focus/input/drawing')
     a=p.parse_args()
     if a.view_state and (not a.mse or not a.without_trace):
         raise ValueError('View-state requires separate MSE without cadence trace (three observer limit)')
     if a.mse and (a.youtube or a.codec_matrix or a.rate_control or a.lifetime_control):
         raise ValueError('MSE representation control is a separate owned measurement')
+    if a.mse_scroll and not a.mse:raise ValueError('Programmatic MSE scrolling requires its own fixture')
     # Do not leave crashreporter helpers from owned tests of the open platform
     # shutdown defect (FX-003). No owner process environment is changed.
     os.environ['MOZ_CRASHREPORTER_DISABLE']='1'
@@ -144,6 +146,7 @@ def main():
             playback['profile_diagnostic_only']=a.youtube_profile
             if quality:
                 playback['quality_admission']=quality
+                playback['selected_format_after']=youtube_quality.describe(self)
                 frames=playback.get('after',{}).get('total',0)-playback.get('before',{}).get('total',0)
                 elapsed=playback.get('endMedia',0)-playback.get('startMedia',0)
                 playback['observed_decoded_frames_per_media_second']=frames/elapsed if elapsed>0 else None
@@ -209,7 +212,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.installed_media and getattr(self,'completed_installed_videos',0)==2) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -366,6 +369,7 @@ def main():
         cv_timer_control=a.timer_control,
         codec_matrix=a.codec_matrix,
         mse_representation_control=a.mse,
+        mse_programmatic_scroll=a.mse_scroll,
         view_state_diagnostic=a.view_state,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
         youtube_1080=a.youtube_1080,
@@ -434,7 +438,7 @@ def main():
         handler=functools.partial(SimpleHTTPRequestHandler,directory=str(folder))
         server=ThreadingHTTPServer(('127.0.0.1',0),handler)
         server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
-        argv+=['--url','http://127.0.0.1:'+str(server.server_port)+'/index.html']
+        argv+=['--url','http://127.0.0.1:'+str(server.server_port)+'/index.html'+('?activity=scroll' if a.mse_scroll else '')]
     sys.argv=argv
     try:
         try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')

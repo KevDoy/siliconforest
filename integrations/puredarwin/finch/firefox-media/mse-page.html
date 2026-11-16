@@ -7,6 +7,17 @@
 <video id="video" controls playsinline></video><pre id="result"></pre>
 <script>
 const video=document.querySelector('#video'),output=document.querySelector('#result');
+const scrollActivity=new URLSearchParams(location.search).get('activity')==='scroll';
+// Identical content/geometry in both arms; only the scrolling timer differs.
+{
+  video.style.position='sticky';video.style.top='0';video.style.zIndex='2';
+  const content=document.createElement('section');
+  for(let i=0;i<60;i++){
+    const row=document.createElement('p');row.textContent=`Owned programmatic-scroll row ${i}: media representation switching`;
+    row.style.cssText=`padding:12px;background:${i%2?'#254050':'#152530'}`;content.append(row);
+  }
+  document.body.append(content);
+}
 video.volume=.05;video.muted=false;
 window.fxVideoResult={source:'local-mse-representations',timeOrigin:performance.timeOrigin,
   events:[],presented:[],quality:[],representations:[],appendEvents:[],requestedPlaybackRate:1};
@@ -46,7 +57,8 @@ window.fxMeasureVideo=async()=>{
   const initial=video.getVideoPlaybackQuality();
   fxVideoResult.initialQuality={total:initial.totalVideoFrames,dropped:initial.droppedVideoFrames};
   fxVideoResult.measureStart=performance.now();
-  let url;
+  fxVideoResult.activity={kind:scrollActivity?'programmatic-scroll':'none',inputInjected:false,scrolls:[]};
+  let url,scrollTimer;
   try{
     const response=await fetch('manifest.json');if(!response.ok)throw new Error('Manifest fetch failed');
     const manifest=await response.json();fxVideoResult.expectedFrames=manifest.expected_video_frames;
@@ -63,7 +75,16 @@ window.fxMeasureVideo=async()=>{
         ranges:Array.from({length:buffer.buffered.length},(_,i)=>[buffer.buffered.start(i),buffer.buffered.end(i)])});
     }
     source.endOfStream();const completion=event(video,'ended',20000);
-    await Promise.all([video.play(),completion]);
+    const playing=video.play();
+    if(scrollActivity){
+      let direction=1;
+      scrollTimer=setInterval(()=>{
+        const now=performance.now();if(scrollY>=400)direction=-1;else if(scrollY<=0)direction=1;
+        scrollBy({top:direction*32,behavior:'instant'});
+        fxVideoResult.activity.scrolls.push({wall:now,y:scrollY,mediaTime:video.currentTime});
+      },50);
+    }
+    await Promise.all([playing,completion]);
     const canvas=document.createElement('canvas');canvas.width=64;canvas.height=36;
     const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(video,0,0,64,36);
     const pixels=ctx.getImageData(0,0,64,36).data;let hash=2166136261,nonBlack=0;
@@ -71,6 +92,7 @@ window.fxMeasureVideo=async()=>{
     fxVideoResult.finalPixels={hash:(hash>>>0).toString(16),width:64,height:36,nonBlack,videoWidth:video.videoWidth,videoHeight:video.videoHeight};
   }catch(error){fxVideoResult.playError=String(error)}
   finally{
+    if(scrollTimer)clearInterval(scrollTimer);
     fxVideoResult.measureEnd=performance.now();
     const rect=video.getBoundingClientRect();
     fxVideoResult.documentState={visibility:document.visibilityState,focused:document.hasFocus(),

@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','mse'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','mse','mse-installed','mse-scroll'])
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
@@ -66,6 +66,9 @@ try:
         if a.phase=='rates':argv+=['--rate-control']
         if a.phase=='codecs':argv+=['--codec-matrix','--without-trace']
         if a.phase=='mse':argv+=['--mse','--staged-media','--frame-mode','require','--without-trace']
+        if a.phase in ['mse-installed','mse-scroll']:
+            argv+=['--mse','--installed-media','--frame-mode','require','--without-trace']
+            if a.phase=='mse-scroll':argv+=['--mse-scroll']
         if a.view_state:argv+=['--view-state']
         if a.phase in ['youtube','youtube-profile','youtube1080']:
             argv+=['--youtube','--without-trace']

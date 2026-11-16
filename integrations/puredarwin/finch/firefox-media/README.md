@@ -87,6 +87,43 @@ The quality request changes only this fresh test page; it does not change the
 owner's quality preferences, import cookies or bypass consent. Availability or
 successful source tests do not establish site playback or panel60fps.
 
+The first real1080p60 execution passed900/0 frames in15.001s, with selected
+itag399/AV1/BT709/1920×1080/60fps matching before and after measurement.
+Actual GPU output was inspected. RDD CPU is62.793% and matched family186.395%
+of one core; MediaCapabilities reports supported/smooth true and powerEfficient
+false, with no decoder hardware jobs. Ordinary Quit returns0 with the family
+gone in2.743s. This demonstrates real-time software decoding for this interval,
+not low CPU, all AV1 content or panel60fps. No AV1 preference is installed.
+
+`mse-installed` and `mse-scroll` use the selected installed family and the same
+local H264/AAC files/content/layout. Only the50ms programmatic scrolling timer
+differs; it sends no pointer/wheel/key input. `analyze-mse.py` separately checks
+the360 pictures, all three resolutions, final pixels, strict shared output,
+hardware jobs/faults, CGL transport, own nonzero PCM and at least five seconds
+accepted/consumed by the48k HAL ring, then natural Quit. Audio meters add
+diagnostic cost. These are local preloaded representation changes, not Internet
+DASH adaptation or a trusted-input/performance qualification.
+
+Both installed MSE arms subsequently pass360/0,640→1920→1280 pixel widths,
+identical final hashes and360 hardware jobs without new faults. The scrolling
+arm records127 programmatic movements. Each own48k HAL ring accepts292864
+frames and consumes291328, with nonzero valid PCM and normalized clock;
+ordinary Quit returns0 and the families disappear within1.609s. Both actual
+GPU images were inspected. Each arm has a283ms initial preview-to-progress
+callback gap, with only71ms media-time advance, rather than a scroll-induced
+midstream callback stall. This is consistent with audio-clock preroll but does
+not prove its cause or panel presentation; the full original maxima remain.
+
+`reuse-media-profile.patch` is a handover against the shared runner, used only
+in a frozen diagnostic copy until FX adopts it. `media_profile_admission.py`
+accepts only our previous1080 case's exact private directory layout, matching
+recorded no-remote command and successful automation/playback, followed by
+natural status0 and observed family disappearance. Aliases, owner paths,
+incomplete/failed history or cleanup-only exit are refused. It never removes
+a profile lock or copies an owner's profile. The ordinary new-launch/owned
+Marionette ancestry admission remains required. This permits a subsequent
+same-own-profile codec comparison without changing the installed preference.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A
