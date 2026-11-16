@@ -682,7 +682,14 @@ QuartzCore.pd 2c6d0b74 (0157, 0160, 0300). Gates before: visual check looked at 
 request.part from my own stalled pass blocked all injects - removed). t10s6 (the same without FXPERF2's patches) passed
 all: AM 240 / Terminal 240 actions alive, compat 18/18. Found on the way: the M1's root filesystem was full (921 MB
 free, captures failing); my 47 test profiles (~3.5 GB) removed. At 07:4xZ the M1 went to Linux for CODEX-TB's window;
-the install of t10s7 waits for SiliconForest (`runs/sf-term10/install-b.sh`, keeps `.pre-t10b`).
+the install of t10s7 waited for SiliconForest (`runs/sf-term10/install-b.sh`).
+Installed 08:08Z (kernel back, desk10-next-003 running since 07:04Z): AppKit 7aa13533 (`.pre-t10b` = c19's 56099510),
+/usr/lib/libWindowServer.dylib 821dc8c4 (`.pre-t10b` = 7133efed), QuartzCore.pd 2c6d0b74 (`.pre-t10b` = 432fa011,
+`.pre-t10` = 95e0c621). The Terminal gate before ran at 07:5xZ: 228 actions alive. After: visual check: Terminal's
+menu and tab crops differ from the 05:59Z reference by |diff| 62.7 / 10.9, but the old files (prefix c19) on the same
+compositor give the same picture (vi10b vs vo10: 0.00 / 0.01): the desk's new geometry, not these files (DESK10
+told). FX-022 on desk10 with these files: 4 of 4 ≡ clicks, window kept (no protocol error), but the panel is shown as
+a separate dark toplevel at the right of the screen (the level-8 re-show), not as a menu: NOT fixed.
 
 
 ## TERM9 round (16 November, night): Firefox on the system frameworks
