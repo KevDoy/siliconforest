@@ -32,9 +32,32 @@ concurrency, power-loss, filesystem-cleanliness or native runtime proof.
 
 build-ext4.nix freezes the qualified SDK recipe and hashes before/after the one
 source file. Native SDK compilation succeeds with96 exported symbols identical to the
-qualified driver. Real QEMU filesystem write/truncate/readback/unmount plus
-e2fsck rehearsal remains a prerequisite before any M1 install.
-No replacement collection or install is scheduled. Linux fsck repairs remain
+qualified driver. Real QEMU filesystem rehearsal now passes: the frozen driver produces nine
+initialized-tail i_size errors (including52208 ->65536) and e2fsck -fn RC4;
+the fixed driver gives RC0. Both complete28 mmap/write sizes and7 resize steps,
+cleanly unmount, and all29 persisted files match an independent host byte oracle.
+The first classifier expected different fsck wording and remains a failed run;
+its raw counterexample was preserved before correcting the exact size predicate.
+Private receipts: runs/sftb/ext4-eof-qemu-{001,002}. This is actual isolated VM
+filesystem behavior, not M1, concurrency or power-loss qualification.
+
+build-qemu-image.nix replaces only ext4 in the ordinary virt image. run-qemu.py
+creates disposable scratch images and never contacts an M1. The QEMU IO helper
+is compiled from eof-io.c; a separate native mode refuses the wrong runtime
+kernel UUID, existing directories or any path outside its strict own prefix.
+Its read/write/mmap/truncate body is shared with the VM test; native guard-mode
+compilation succeeds, native execution is pending.
+
+build-kc.nix prepares one ext4 replacement over qualified44, requires exactly
+that module UUID/source to change, retains55 other kext source inputs and core,
+and keeps the existing Force-CMO/clone API/overlap proofs. Speaker extra cap
+remains0; boot arguments, no-AVE cohort and rollback rules are unchanged.
+The collection builds successfully:57 executable modules, only
+com.apple.filesystems.ext4 differs from44 (9 changed/48 unchanged versus29),
+all55 other kext source paths identical, zero segment overlap and the real
+Force-CMO and devfs link checks pass. The first verifier mistakenly matched
+the separate RavynOS compatibility ID as well; its failure is retained before
+requiring the exact ext4 filesystem ID. The candidate is not yet installed. Linux fsck repairs remain
 outside the current bitmap-only permission for these extent cases.
 
 FXPERF also measured4KiB fsync/unlink near14–15ms. That timing is a separate
