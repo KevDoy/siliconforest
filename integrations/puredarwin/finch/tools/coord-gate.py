@@ -31,7 +31,7 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 active.pop((owner, 'recovery-freeze'), None)
             # A kernel owner's dated reservation blocks new work immediately.
             # It is not an actual reboot epoch and has no timeout-based release.
-            scheduled = re.match(r'^notice\s+.+?\bearliest\s*(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
+            scheduled = re.match(r'^notice\s+.+?\bearliest\s*(?:\d{4}-\d{2}-\d{2}t)?(\d{2}):(\d{2})(?::(\d{2}))?z\b', lower_body)
             if scheduled:
                 active[(owner, 'scheduled-reboot')] = (line, [], owner)
                 offered_until.pop(owner, None)
@@ -45,6 +45,9 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                         announced = datetime.fromisoformat(line.split()[0].replace('Z', '+00:00'))
                         deadline = announced.replace(hour=int(offer[1]), minute=int(offer[2]), second=int(offer[3] or 0), microsecond=0)
                         earliest = announced.replace(hour=int(scheduled[1]), minute=int(scheduled[2]), second=int(scheduled[3] or 0), microsecond=0)
+                        dated = re.search(r'\d{4}-\d{2}-\d{2}t', scheduled[0])
+                        if dated:
+                            earliest = datetime.fromisoformat(dated[0][:-1]+'T'+earliest.strftime('%H:%M:%S')+'+00:00')
                         if announced <= now and announced < deadline <= earliest:
                             offered_until[owner] = deadline
                     except ValueError:

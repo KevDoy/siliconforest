@@ -8,6 +8,20 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_iso_dated_kernel_notice_blocks_until_its_real_recovery(self):
+        text='2026-11-16T03:26:50Z CODEX-TB NOTICE next Firefox kernel install earliest 2026-11-16T03:28:50Z: Firefox45 reserved\n'
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNotNone(gate.pending_hold(text+'T OTHER M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'T CODEX-TB quoted: M1 back in SiliconForest\n'))
+        boot='T CODEX-TB INSTALL START Firefox45; Correct fenced /bin/reboot requested\n'
+        self.assertIsNone(gate.pending_hold(text+boot+'U CODEX-TB M1 back in SiliconForest\n'))
+
+    def test_iso_date_does_not_implicitly_offer_or_expire_a_slot(self):
+        from datetime import datetime,timezone
+        text='2026-11-16T23:58:00Z CODEX-TB NOTICE next Firefox kernel install earliest 2026-11-17T00:02:00Z: reserved\n'
+        self.assertIsNotNone(gate.pending_hold(text,now=datetime(2026,11,16,23,59,tzinfo=timezone.utc)))
+        self.assertIsNotNone(gate.pending_hold(text,now=datetime(2026,11,17,0,5,tzinfo=timezone.utc)))
+
     def test_actual_fenced_kernel_install_reboot_has_its_own_epoch(self):
         text='T DESK8 gui.lock: install desk8 compositor relaunch\nU CODEX-TB NOTICE next Firefox kernel install earliest01:07:30Z\n'
         boot='INSTALL START Firefox42 capsulehash; Correct fenced /bin/reboot requested, stderr retained; no idle gate.\n'
