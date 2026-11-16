@@ -468,6 +468,25 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   HELD (TERM12, 16 November; patch files in ./patches, NOT in the lists below, NOT installed: the series still builds
+#   the installed t11c; add them to the lists only after the gates in docs/roadmap/issues/SF-Y-terminal-app.md "TERM12 round"):
+#   0178  QuartzCore: the layer tree rendered and presented on a render thread at each committed transaction
+#         (SFFX_GPU_RENDER_THREAD=1 with SFFX_GPU_PRESENT=1; inert without), a process-wide frame lock, a reader/writer
+#         gate between explicit transactions and renders (fails closed after 20 ms; PD_CA_GATE=soft / PD_CA_NO_GATE=1 for
+#         A/B), contexts of windows off the screen not asked for renders by other windows' commits, PD_CA_FRAME_TRACE=1,
+#         PD_CA_DUMP_STRIP=x,w,frames,path[,after_ms] (per-frame column record), PD_CA_DELAY_MS (diagnostic)
+#   0178a AppKit: the presenter the render thread calls (export, GPU layer registration, window server present), the
+#         main thread's frames under the frame lock, no readback of an unchanged commit frame, windows off the screen
+#         not rendered
+#   0178w WindowServer: _windowServerSFFXPresentLayers (a present from the render thread, refused when the window's
+#         geometry serial moved: buffer, role, state/level/style change, any xdg configure), presents counted by source
+#   0179  QuartzCore: painter's order (no depth test; zPosition orders siblings) and contents clamped to their edges
+#         (FXPERF2's missing position:fixed marker; GL_REPEAT edge bleeding); PD_CA_OLD_ORDER=1 restores the old
+#   0180a AppKit, 0180w WindowServer (FX-002): a full-size-content window with a transparent title bar and hidden title
+#         draws its own title bar (client-side decorations, set_mode at run time), its buttons where the app puts them
+#         (-_closeButtonOrigin), over its GPU layers via a window-server overlay; no menu strip there (menus on
+#         right/Control-click of the buttons' row); PD_NO_CLIENT_TITLEBAR=1 disables. First capture: frame right, the
+#         three buttons NOT visible yet.
 #   0177  AppKit (TERM11, clipboard): an application's write to the general board is not replaced by another client's
 #         selection that arrives before the write's offer is out (within a second; the desk's clipboard keeper re-offers
 #         the previous copy): the offer went out with the other client's types and none of the data

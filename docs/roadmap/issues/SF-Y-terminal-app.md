@@ -607,6 +607,80 @@ Figures from runs judged by DESK7's real-input counters before and after (unchan
 - Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
   the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
+## TERM12 round (16 November, afternoon): Firefox frames off the main thread, video tearing, position:fixed, CSD
+Nothing installed this round: the M1 still runs t11c (AppKit 2e5a5266, libWindowServer c2cdfcf8, QuartzCore.pd 3c6d9530);
+the committed series still builds exactly those. The new patches are in `integrations/puredarwin/cocoa/patches` but HELD
+(listed in patched.nix's header, not in its lists). Tools: `integrations/puredarwin/firefox/perf/tools/term12/` (copies
+of runs/sf-term12/tools). Own Firefox only (`-no-remote`, copy of a 93 MB warm profile, deleted after each run),
+synthetic input on the virtual seat into my own windows only.
+
+### Per-frame profile (sf-sample of the parent and GPU process, damage path + CGL 0303 + CoreVideo 0172, 8 s at ~3.4 ms)
+- Warm profile: parent main thread busy 25 / 53 / 65 % of wall (anim / wheel scroll / 1080p60 video); our frame block
+  (`-[CALayerContext _scheduleRender]` block on the main queue) 22 / 44 / 62 %: export glFinish (drmSyncobjWait) 18-20 %,
+  WS sfGPUCompose+glFinish 2-11 %, CARenderer 1.5 / 7 / 25 % (video: `uploadPlane` CPU copy of the NV12 planes 20 %).
+  Gecko's own main-thread work 3-10 %. GPU process light (Renderer 7-14 %).
+- Fresh profile (TERM11's method): main thread 90-98 % busy, 64-72 % of it Gecko's first-run JS; frames wait behind it.
+  Most of TERM11's 50-55 shown/s came from fresh profiles (CODEX-FX's warm-profile control: ~59.5 on the old path).
+
+### 0178 / 0178a / 0178w: frames on a render thread (opt-in `SFFX_GPU_RENDER_THREAD=1`, with SFFX_GPU_PRESENT=1)
+- After a main-thread GPU present AppKit gives QuartzCore a presenter (geometry snapshot + window-server geometry
+  serial); every committed transaction then renders, exports, registers and presents on the "CARenderServer" thread.
+  The main thread does a frame when a layer needs display, AppKit geometry changed (setFrame:/setLayer:/invalidate), or
+  the window server refuses (`_windowServerSFFXPresentLayers`: serial moved by a new backing store, role, state/level/
+  style change or any xdg configure). One process-wide frame lock; main-thread frames of other contexts that arrive
+  during a render-thread frame are re-queued after it instead of blocking. Windows off the screen are not rendered;
+  a popup context is asked for a render by other windows' commits only when its own surfaces changed.
+- Transaction gate (CATransaction.m): renders and explicit transactions exclude each other; a render waits at most
+  20 ms and then does NOT render (fail closed; CODEX-FX's literal-host contract and my host test pass, host only).
+  Implicit (AppKit main-thread) changes are not gated (memory safety as before 0178: locked swaps, retained reads).
+- Measured (own Firefox, synthetic): main thread out of the frame path (sf-sample: no CA/GL frames on main in anim and
+  video); render-thread work p50 1.9-3.5 ms; it presents 60/s (ws presents: render-thread=300 per 5 s, flush=0).
+  Presented (desk WMPACING, steady 10 s windows): r16 (full gate) anim 55.5-59.0, scroll 59.3-59.6 (2 steady windows
+  x 3 runs), video 55.8-59.5; 0 of 9 runs >= 59.5 in both windows. The desk shows fewer than we commit: commits
+  59.6-60.0/s, replaced_before_shown 0.4-10/s, commit->flip p50 22-31 ms. Delaying our present by 0/4/8 ms after
+  Firefox's commit (r19, 2 runs each) changed nothing; a phase lock (render half a refresh away from the commits) was
+  worse (removed). NOT 59.5 x 12: the remaining loss is in when the desk takes commits (replaced before shown), not in
+  the parent main thread. Lifecycle x5 (r13): 85 steps, no crash report, no log fault, quit 5/5; "restore after
+  maximise" fails 4/5, the INSTALLED t11c fails it too (2/4 runs): pre-existing.
+- Tearing (item 2): a per-frame column record (PD_CA_DUMP_STRIP) on a page of 18 looping muted videos with grey
+  borders, wheel scroll: the old main-thread path showed a video picture shifted ~8 rows against its own border in 10
+  of 733 moving frames (3 runs, page still loading); render thread + gate: 0 of ~1200 moving frames (7 runs, settled
+  and loading, conditions not identical). Also found: Firefox's title changes bumped the serial (fixed: title-only no).
+
+### 0179: painter's order, contents clamped to edge (FXPERF2's position:fixed defect)
+CARenderer drew each sublayer "a step nearer than its parent" with the depth test on, so a later sibling was hidden
+where an earlier sibling's deeper-nested layers had drawn. FXPERF2's pages: the fixed magenta marker is MISSING with the
+old order (still.html, nested.html; present on scrolled.html) and PRESENT with 0179 on all three (one capture each,
+looked at). Contents now use GL_CLAMP_TO_EDGE (GL_REPEAT pulled the opposite edge into linear samples at fractional
+positions). PD_CA_OLD_ORDER=1 restores the old behaviour for A/B.
+
+### 0180a / 0180w (FX-002, tabs in the title bar): started, not working yet
+A window with a full-size content view, transparent title bar and hidden title (Firefox with inTitlebar=1) asks the
+desk for client-side decorations at run time; no menu strip in it (menus on right/Control-click of the buttons' row;
+DESK asked to offer them from the dock tile). First capture (r18, own Firefox, inTitlebar=1): no desk title bar, no
+menu strip, Firefox's tab strip at the window top (two chrome rows as on macOS) - but the three buttons are NOT shown
+(the WS overlay or Gecko's `_closeButtonOrigin` placement still to debug). Installed t11c with inTitlebar=1 still has
+the desk title bar + menu strip over the tab strip.
+
+### Not done
+Tab switch (FX-030) not measured (tool tabs12.py ready); NV12 GPU planes: CODEX's private QC caller (5d24e79c3) not yet
+adopted, my inert version held as `term12/held-nv12-planes-on-gpu.patch`; item 5 (image clipboard, Terminal/AM
+momentum, touch-to-stop, FX-027, COLR) untouched.
+
+### Next steps (in order)
+1. Desk pacing: with presents at 60/s from the render thread, find why the desk replaces 1-10/s (commit->flip 22-31 ms;
+   needs the desk's latch timing per commit) - a compositor question.
+2. Gate 0178/0178a/0178w+0179 for install: lifecycle x5, visual (done once, r13: same), AM/Terminal random input, compat,
+   tearing record x12, position:fixed x3 pages x3; then add to patched.nix and install with `.pre-t12`; launcher env
+   SFFX_GPU_RENDER_THREAD=1 (+SFFX_GPU_DAMAGE=1 SFFX_GPU_IMAGE_CACHE=1, CGL 0303) is CODEX-FX's.
+3. 0180a: draw the buttons (check `_windowServerSFFXSetOverlay` is reached and the base pixels under the buttons).
+4. Tab switch: `tabs12.py` installed vs candidate, then a Gecko profile of the switch.
+Commands: edit trees runs/sf-term12/{ak,ws,qc}/b (a = series, m = after 0178a/0178w); `tools/mkp.sh`/`mkp2.sh` make the
+patches; `nix-build patched.nix -A appkit|windowserver|quartzcore` (with the held patches added to the lists);
+`tools/stage.sh <name> ak=.. ws=.. qc=.. cv=.. gl=..` stages a prefix on the M1; `tools/runm1.py <min> "<title>"
+"pace12.py <name> <prefix> anim|scroll|video <runs> KEY=VAL,.."` (also prof12/life12/vid12/cap12/tabs12);
+`paceset.py <tag> <prefix> 12 <env>`; `vscheck.py`/`stripcheck.py` for the strip records.
+
 ## TERM11 round (16 November, day): Firefox's menu panel, clipboard, Quit, display link
 Tools in `runs/sf-term11` (not committed): `tools/t11_m1.py` (TERM10's launcher helper, my area /private/var/db/sft11),
 `tools/pop11.py` (menu panel x N with Marionette panel state, hover, History, New Tab, doorhangers, permission prompt),
