@@ -17,7 +17,7 @@ import time
 def capture(destination):
     destination = Path(destination)
     inject = Path('/private/var/run/gpu-desktop/inject')
-    from presentation_seat import owner_idle
+    from presentation_seat import owner_idle, functional_qa_enabled
     owner_idle(inject)
     name = 'sffx-frame-%d-%s' % (os.getpid(), secrets.token_hex(5))
     if destination.exists():
@@ -35,7 +35,8 @@ def capture(destination):
     if not re.search(r'errors=0\b', status):
         raise RuntimeError('Renderer capture failed: ' + status)
     owner_idle(inject)
-    if re.search(r'owner_seen_active=1\b',status):
+    owner_overlap = bool(re.search(r'owner_seen_active=1\b',status))
+    if owner_overlap and not functional_qa_enabled():
         raise RuntimeError('Real owner input overlapped renderer capture; discard it')
     shutil.copy2(inject / (name + '.ppm'), destination)
     with Path('/var/log/desktop-session.log').open('rb') as stream:
@@ -44,7 +45,9 @@ def capture(destination):
         log = stream.read().decode('utf-8', errors='replace')
     lines = [line for line in log.splitlines()
              if 'WMINJECT capture=' in line and name + '.ppm' in line]
-    evidence = dict(path=str(destination), source='unverified', inject_status=status, log=lines)
+    evidence = dict(path=str(destination), source='unverified', inject_status=status, log=lines,
+                    owner_input_overlap=owner_overlap, functional_qa=functional_qa_enabled(),
+                    timing_qualified=False)
     if lines and 'source=renderer' in lines[-1]:
         evidence['source'] = 'renderer'
     destination.with_suffix('.source.json').write_text(json.dumps(evidence, indent=2) + '\n')

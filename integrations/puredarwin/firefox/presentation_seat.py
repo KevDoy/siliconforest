@@ -17,6 +17,10 @@ def functional_qa(enabled=True):
     _allow_owner_activity.set(bool(enabled))
 
 
+def functional_qa_enabled():
+    return _allow_owner_activity.get()
+
+
 def target_window(window_id):
     """Set only after this caller admits its own unique window in the dump."""
     if type(window_id) is not int or window_id<=0:
@@ -35,7 +39,9 @@ def owner_idle(inject, require_virtual=False):
         raise RuntimeError('Owner input active or unrecognized: stop synthetic input/capture')
 
 
-def _request(inject, lines, _virtual_handshake=False):
+def _request(inject, lines, _virtual_handshake=False, timeout=6):
+    if not 0 < timeout <= 30:
+        raise ValueError('Virtual-seat request timeout must be bounded by 30 seconds')
     commands=[line.split()[0] for line in lines.splitlines() if line.split()]
     mutating=any(command not in ['dump','list','stats','capture','wait'] for command in commands)
     if any(command=='capture' for command in commands):owner_idle(inject)
@@ -59,7 +65,7 @@ def _request(inject, lines, _virtual_handshake=False):
     with (inject / 'request.part').open('x') as stream:
         stream.write(lines + '\n')
     os.replace(inject / 'request.part', inject / 'request')
-    end = time.monotonic()+6
+    end = time.monotonic()+timeout
     while not (inject / 'done').exists() and time.monotonic() < end:
         time.sleep(.05)
     status = (inject / 'done').read_text()

@@ -97,6 +97,8 @@ def main():
     ap.add_argument('--profile-fixture', action='store_true', help='diagnostic parent stack sampling during fixture; excludes timing qualification')
     ap.add_argument('--pipeline-profile', action='store_true', help='diagnostic native/JS/IPC Gecko profile of this browser family')
     ap.add_argument('--site-legibility', action='store_true', help='capture text paint masks and actual renderer for owned ordinary pages')
+    ap.add_argument('--page-down-captures', action='store_true', help='four owned HTTPS tabs, five trusted virtual-seat Page Downs each; inspected pixels required')
+    ap.add_argument('--composition-workloads', action='store_true', help='four ten-second installed composition controls, retaining per-window WMPACING and family CPU')
     ap.add_argument('--font-logs', action='store_true', help='bounded font activation diagnostics for owned legibility controls')
     ap.add_argument('--profile-video', action='store_true', help='diagnostic all-process Gecko profile around owned video clips')
     ap.add_argument('--profile-benchmark', action='store_true', help='diagnostic Gecko profile around a stock benchmark; score is not timing-qualified')
@@ -128,6 +130,10 @@ def main():
         raise ValueError('Early scene exit requires a functional reference-scene control')
     if args.popup_stress and (not args.functional_qa or not args.presentation_seat or args.native_ui):
         raise ValueError('Popup stress requires a separate functional-QA presentation-seat run')
+    if args.composition_workloads and (not args.functional_qa or not args.presentation_seat or args.page_down_captures or args.popup_stress):
+        raise ValueError('Composition comparison requires its own owned virtual-seat run')
+    if args.page_down_captures and (not args.functional_qa or not args.presentation_seat or args.popup_stress or args.native_ui):
+        raise ValueError('Page Down captures require their own functional-QA virtual-seat run')
     if args.popup_observe_auto_close and not args.popup_stress:
         raise ValueError('Automatic-close observation is only a popup protocol diagnostic')
     if args.expect_private_windowserver and (not args.functional_qa or
@@ -421,6 +427,14 @@ def main():
                                     return ''
                                 return subprocess.run(['ps', '-p', ','.join(map(str, active)),
                                     '-o', 'pid,ppid,time,rss,stat,command'], capture_output=True, text=True).stdout
+                            if args.composition_workloads:
+                                from composition_workloads import measure as measure_composition
+                                result['composition_workloads'] = measure_composition(client, snapshot, args.run, deadline)
+                                deadline = min(deadline, time.monotonic()+2)
+                            if args.page_down_captures:
+                                from page_down_captures import measure as measure_page_down
+                                result['page_down_captures'] = measure_page_down(client, args.run, deadline)
+                                deadline = min(deadline, time.monotonic()+2)
                             if args.site_legibility:
                                 from font_legibility import measure as measure_legibility
                                 result['legibility']=measure_legibility(client,args.run)
@@ -729,7 +743,7 @@ def main():
             result['automation_complete'] = session_started and not automation_failed
             result['browser_survived_run'] = result.get('exit_before_cleanup') is None
             result['measurement_passed'] = result['automation_complete'] and result['browser_survived_run']
-            for field in ['benchmark', 'native_ui', 'popup_stress', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing', 'pinch_zoom', 'legibility']:
+            for field in ['benchmark', 'native_ui', 'popup_stress', 'jit_probe', 'stability', 'quality', 'streaming', 'streaming_dash', 'integration', 'panels', 'render_quality', 'video_fullscreen', 'providers', 'cgl_export_cache', 'scene_reference', 'compositor_pacing', 'pinch_zoom', 'legibility', 'page_down_captures', 'composition_workloads']:
                 if field in result:
                     result['measurement_passed'] &= bool(result[field].get('complete'))
             videos = [entry['video'] for entry in result.get('video_measurements', [])]
