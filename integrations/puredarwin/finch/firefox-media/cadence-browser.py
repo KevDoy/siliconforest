@@ -61,9 +61,21 @@ def main():
     p.add_argument('--mse-scroll',action='store_true',help='Own fixture programmatic viewport scrolling; no pointer/key input')
     p.add_argument('--view-state',action='store_true',help='Main-queue read-only window/view getter diagnostic, no focus/input/drawing')
     p.add_argument('--frame-id',action='store_true',help='Own900-frame Gray-code fixture, preview calibration then15s playback; not a panel-rate claim')
+    p.add_argument('--frame-id-geometry',help='Explicit private-CGL seven-field marker geometry; bounds are not pixel admission')
+    p.add_argument('--frame-id-cgl',action='store_true',help='Packaged private CGL only; keep installed media/GLAPI/IOSurface/broker/UI plan')
+    p.add_argument('--frame-id-dimensions-only',action='store_true',help='Paused preview/private CGL export dimensions only; no geometry/readback/15s run')
     a=p.parse_args()
     if a.frame_id and (not a.installed_media or not a.without_trace or a.youtube or a.codec_matrix or a.mse or a.rate_control or a.lifetime_control):
         raise ValueError('Frame identity requires its separate installed-media no-trace case')
+    if a.frame_id_geometry:
+        if not a.frame_id or not a.frame_id_cgl:raise ValueError('Marker geometry requires its packaged private-CGL case')
+        from frame_geometry import parse
+        parse(a.frame_id_geometry)
+    elif a.frame_id_cgl and not a.frame_id_dimensions_only:raise ValueError('Private marker hook requires explicit geometry or paused dimensions preflight')
+    if a.frame_id_dimensions_only and (not a.frame_id or not a.frame_id_cgl or a.frame_id_geometry):
+        raise ValueError('Paused dimensions preflight requires private CGL and no geometry')
+    if a.frame_id_cgl and (not a.frame_id or a.graphics_override or a.staged_media):
+        raise ValueError('Private marker CGL must retain installed media and graphics plan')
     if a.view_state and (not a.mse or not a.without_trace):
         raise ValueError('View-state requires separate MSE without cadence trace (three observer limit)')
     if a.mse and (a.youtube or a.codec_matrix or a.rate_control or a.lifetime_control):
@@ -244,7 +256,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -330,7 +342,10 @@ def main():
             cpu={}
             try:cpu['before']=self.cpu_snapshot()
             except Exception as error:cpu['before_error']=str(error)
-            video=super().measure_video(handle)
+            if a.frame_id_dimensions_only:
+                video=dict(calibration_only=True,ended=False,paused=True,error=None,
+                           source=marker_preparation['source'],sourceFrameCount=900,playback_measured=False)
+            else:video=super().measure_video(handle)
             if a.frame_id:
                 video['frame_identity_calibration']=marker_preparation
                 video['frame_identity_limits']='Known encoded IDs and calibrated own video rectangle. JS decode/rVFC and one GPU capture do not qualify per-export or completed shown-frame cadence. Initial preview outside interval; native readback is diagnostic.'
@@ -371,6 +386,7 @@ def main():
                 except Exception as error:video['lifetime_control_error']=str(error)
             if a.installed_media and video.get('ended') is True and not video.get('error') and not video.get('playError'):
                 self.completed_installed_videos=getattr(self,'completed_installed_videos',0)+1
+            if a.frame_id_dimensions_only:self.frame_id_preflight_completed=True
             return video
     marionette.Marionette=IsolatedClient
     if not a.without_trace:
@@ -408,6 +424,12 @@ def main():
     if a.retire_pool:os.environ['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
     else:os.environ.pop('SF_VT_RETIRE_POOL_AT_INVALIDATE',None)
     if a.graphics_override:os.environ['SF_MEDIA_GRAPHICS_OVERRIDE']=str(a.graphics_override)
+    if a.frame_id_cgl:os.environ['SF_MEDIA_FRAME_CGL']=str(root/'frame-id-cgl/Frameworks')
+    else:os.environ.pop('SF_MEDIA_FRAME_CGL',None)
+    if a.frame_id_geometry:os.environ['SFFX_FRAME_ID_GEOMETRY']=a.frame_id_geometry
+    else:os.environ.pop('SFFX_FRAME_ID_GEOMETRY',None)
+    if a.frame_id_dimensions_only:os.environ['SFFX_FRAME_ID_DIMENSIONS']='1'
+    else:os.environ.pop('SFFX_FRAME_ID_DIMENSIONS',None)
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
         release=manifest,diagnostic_only=True,timing_qualified=False,
@@ -423,6 +445,9 @@ def main():
         mse_programmatic_scroll=a.mse_scroll,
         view_state_diagnostic=a.view_state,
         known_frame_id_fixture=a.frame_id,
+        private_frame_identity_graphics=a.frame_id_cgl,
+        frame_identity_geometry=a.frame_id_geometry,
+        frame_identity_dimensions_only=a.frame_id_dimensions_only,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
         youtube_1080=a.youtube_1080,
         youtube_disable_av1=a.disable_av1,reused_media_profile=str(a.reuse_media_profile) if a.reuse_media_profile else None,
@@ -442,12 +467,12 @@ def main():
     argv+=['--vt-frame-mode',a.frame_mode]
     if a.youtube_1080 and not a.installed_codec_policy:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
     if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
-    if a.installed_media or a.youtube_1080:argv+=['--expect-system-gpu']
+    if (a.installed_media or a.youtube_1080) and not a.frame_id_cgl:argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
-    if (tools/'gpu-counters.json').is_file() and not a.youtube:
+    if (tools/'gpu-counters.json').is_file() and not a.youtube and not a.frame_id_cgl:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
                '--policy-probe-path',str(root/'bin/thread-policy-probe')]
-    if a.staged_media:
+    if a.staged_media or a.frame_id_cgl:
         bundle=a.run/'Diagnostic.app'
         wrapper=bundle/'Contents/MacOS/firefox-sf'
         wrapper.parent.mkdir(parents=True)

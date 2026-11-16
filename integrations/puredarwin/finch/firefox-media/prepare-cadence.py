@@ -13,6 +13,7 @@ p.add_argument('--probes',type=Path,required=True)
 p.add_argument('--admission',type=Path,required=True)
 p.add_argument('--fixture',type=Path,required=True)
 p.add_argument('--frame-id-fixture',type=Path,help='Own Linux-verified900-frame Gray-code movie and manifest')
+p.add_argument('--frame-id-cgl',type=Path,help='Linux-built CGL hook prefix; package ONLY OpenGL.framework')
 p.add_argument('--stage',type=Path,required=True)
 p.add_argument('--providers',type=Path,help='Reviewed media payload only; graphics and broker remain selected by FX')
 p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exact runtime provider path/UUID and Linux symbol offset')
@@ -28,6 +29,8 @@ if a.view_state and not a.mse_fixtures:raise ValueError('View-state diagnostic r
 if bool(a.mse_fixtures)!=bool(a.mse_pcm_trace) or bool(a.mse_fixtures)!=bool(a.mse_hal_trace):
     raise ValueError('MSE requires its generated fixtures and both qualified native observers')
 if bool(a.gpu_counter_spec)!=bool(a.policy_probe):raise ValueError('Counter specification and read-only helper required together')
+if a.frame_id_cgl and (not a.frame_id_fixture or a.providers):
+    raise ValueError('Private frame-ID CGL must retain installed media and use the own fixture')
 if a.stage.exists():raise ValueError('Fresh destination required')
 a.stage.mkdir();(a.stage/'bin').mkdir();(a.stage/'lib').mkdir();(a.stage/'media').mkdir()
 for name in ['cadence-baseline','cadence-observed']:
@@ -60,6 +63,23 @@ if a.frame_id_fixture:
     target=a.stage/'media/frame-id';target.mkdir()
     shutil.copy2(source,target/name);shutil.copy2(folder/'manifest.json',target/'manifest.json')
     shutil.copy2(here/'frame-id-page.html',target/'index.html')
+if a.frame_id_cgl:
+    if not str(a.frame_id_cgl.resolve()).startswith('/nix/store/'):raise ValueError('Original Linux Nix CGL output required')
+    target=a.stage/'frame-id-cgl/Frameworks';target.mkdir(parents=True)
+    shutil.copytree(a.frame_id_cgl/'Frameworks/OpenGL.framework',target/'OpenGL.framework',symlinks=True)
+    import struct
+    data=(a.frame_id_cgl/'Frameworks/OpenGL.framework/Versions/A/OpenGL').read_bytes();uuids=[];offset=32
+    if struct.unpack_from('<I',data)[0]!=0xfeedfacf:raise ValueError('Thin original arm64 CGL required')
+    for _ in range(struct.unpack_from('<I',data,16)[0]):
+        command,size=struct.unpack_from('<II',data,offset)
+        if size<8 or offset+size>len(data):raise ValueError('Invalid original CGL load command')
+        if command==27:uuids.append(data[offset+8:offset+24].hex())
+        offset+=size
+    if len(uuids)!=1:raise ValueError('One original CGL UUID required')
+    (a.stage/'frame-id-cgl/identity.json').write_text(json.dumps(dict(original_linux_nix=str(a.frame_id_cgl),
+        sha256=hashlib.sha256(data).hexdigest(),uuid=uuids[0],
+        relative_binary='frame-id-cgl/Frameworks/OpenGL.framework/Versions/A/OpenGL',
+        scope='Private CGL only; canonical GLAPI/IOSurface/broker/UI and selected media remain'),indent=2)+'\n')
 if a.codec_fixtures:
     manifest=json.loads((a.codec_fixtures/'manifest.json').read_text())
     rows={row['file']:row for row in manifest['fixtures']}
@@ -79,7 +99,7 @@ for directory in ['bin','lib']:
     subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
         str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/directory),
         str(a.stage/('portable-'+directory+'.json'))],check=True)
-for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py']:
+for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py','frame_geometry.py']:
     shutil.copy2(here/name,a.stage/name)
 shutil.copy2(here.parent/'tools/owner_input.py',a.stage/'owner_input.py')
 tools=here.parents[1]/'firefox';(a.stage/'tools').mkdir()

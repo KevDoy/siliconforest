@@ -229,6 +229,42 @@ performance flag is installed by this source. Parent-export frame IDs still
 need completed compositor shown/source-buffer correlation before any panel-rate
 claim. Diagnostic readback time/bytes remain separate from production pacing.
 
+The first installed M1 source/calibration run subsequently passes900/0 over
+15.176s wall/15s media, with initial quality count0. Both actual GPU images were
+inspected and independently decode as marker0 and899 at the same physical
+1440×810 video rectangle (DPR1.5). Native output reports900 shared frames with
+zero copied bytes; the separate15-frame preview session is not added to900.
+CGL CPU transport counters stay0. Ordinary Quit returns0 and the family is
+gone within1.867s without cleanup signals. The377 rVFC notifications have
+median40.02/max40.20ms; first/final images do not prove per-frame presentation.
+
+`locate-frame-marker.py` requires an actual renderer receipt and the admitted
+scale, finds the expected encoded ID, and refuses spatially ambiguous matches.
+Its screen coordinates must not be used directly as GL framebuffer coordinates.
+`--frame-id-cgl NIX_PREFIX` packages only the original private OpenGL.framework
+and its cold hash/UUID. The own private wrapper retains the installed plan's
+media, network, GLAPI, IOSurface, UI and per-family broker and prepends only that
+packaged CGL. It records this private substitution instead of claiming the
+actual outer executable or all-system graphics. Current installed codec-policy
+helpers also apply to this already admitted private profile.
+
+Use `frame-id --frame-id-cgl --frame-id-dimensions-only` for a paused preflight.
+It sets only the hook's dimensions flag: no guessed ROI, marker-row readback or
+15s playback. It requests natural Quit after the preview, actual capture and
+provider observations. The original generic runner's false survival/ended
+verdict is retained; this is a separate geometry preflight, not completed video.
+Only after exact dimensions/origin/flip and marker0 are admitted use
+`--frame-id-geometry frameW,frameH,x,y,videoW,videoH,direction` instead.
+
+`analyze-frame-id-exports.py --run COLLECTED_RUN --output JSON` validates the
+owned parent and collected log hashes, independently decodes all36 raw levels,
+and summarizes that parent's `FXFRAMEID` records. Missing, repeated, skipped or
+reversed IDs and diagnostic readback cost remain explicit. It excludes preroll0
+and after-end899 repeats from the identity span. This parser does not admit the
+actual private providers, a JS/native clock bridge or completed display flips;
+those require their separate evidence. It never reports panel or production
+performance success from native export identities.
+
 `context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
 libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
 kernel's additive128-byte/version1/capability17 contract only at successful
