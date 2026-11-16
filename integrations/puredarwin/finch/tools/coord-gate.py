@@ -23,6 +23,8 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
             # A coordinator-declared frozen desktop blocks even CLI media
             # work until the designated recovery owner confirms restoration.
             # Do not infer recovery from time passing or a physical lock.
+            if owner == 'COORDINATOR' and lower_body.startswith('gpu device slots exhausted'):
+                active[(owner, 'devfs-recovery')] = (line, ['M1 back in SiliconForest (devfs clone-slot fix installed)'], 'CODEX-TB')
             if owner == 'COORDINATOR' and lower_body.startswith('desktop frozen'):
                 active[(owner, 'recovery-freeze')] = (line, ['M1 back in SiliconForest'], 'CODEX-TB')
             elif owner == 'COORDINATOR' and lower_body.startswith('m1 back in siliconforest'):

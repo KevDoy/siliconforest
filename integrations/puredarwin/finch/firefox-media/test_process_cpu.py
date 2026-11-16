@@ -40,6 +40,12 @@ class Cases(unittest.TestCase):
     def test_zero_counter_is_unavailable(self):
         result=compare(snap(0,process(2,'rdd',0)),snap(10,process(2,'rdd',0)))
         self.assertFalse(result['rdd_counter_present']);self.assertFalse(result['family_complete'])
+    def test_zero_thread_counter_is_unavailable_not_idle(self):
+        before=process(2,'rdd',1e9);after=process(2,'rdd',4e9)
+        before['threads'][0]['cpuTime']=after['threads'][0]['cpuTime']=0
+        row=compare(snap(0,before),snap(10,after))['processes'][0]
+        self.assertEqual(row['threads'],[])
+        self.assertEqual(len(row['thread_counters_unavailable']),1)
     def test_reset_cannot_prove_negative_cpu(self):
         result=compare(snap(0,process(2,'rdd',4e9)),snap(10,process(2,'rdd',1e9)))
         self.assertEqual(result['cpu_ns_by_type'],{});self.assertFalse(result['family_complete'])

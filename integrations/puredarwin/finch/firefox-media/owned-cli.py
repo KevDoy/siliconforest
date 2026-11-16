@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Run only our fresh staged audio probe, with no GUI or input operations."""
+"""Run only our fresh staged media probe, with no GUI or input operations."""
 import argparse,json,os,signal,subprocess,time
 from pathlib import Path
-from owner_input import OwnerInputGuard
+from owner_input import OwnerActivityRecorder
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=['query','silence','latency'])
+    parser.add_argument('mode',choices=['query','silence','latency','latency-normalized','codec-nv12-hw','codec-p010-hw','codec-p010-sw'])
     args=parser.parse_args();root=Path.cwd().resolve()
     if os.uname().sysname!='Darwin' or not str(root).startswith('/private/var/db/sffinch/'):
         raise ValueError('Fresh reviewed M1 prefix required')
@@ -16,8 +16,12 @@ def main():
     output=root/args.mode;output.mkdir()
     child=None
     try:
-        guard=OwnerInputGuard();report['owner_before']=guard.before
-        argv=[str(root/('bin/audio-latency-probe' if args.mode=='latency' else 'bin/audio-media-probe'))]+(['--silence'] if args.mode=='silence' else [])
+        guard=OwnerActivityRecorder();report['owner_before']=guard.before
+        if args.mode.startswith('codec-'):
+            options={'codec-nv12-hw':[],'codec-p010-hw':['--p010'],'codec-p010-sw':['--p010','--software']}[args.mode]
+            argv=[str(root/'bin/vt-codec-admission'),'--admission-only',*options,str(root/'media/hevc-main10-pq.mp4')]
+        else:
+            argv=[str(root/('bin/audio-latency-probe' if args.mode in ['latency','latency-normalized'] else 'bin/audio-media-probe'))]+(['--silence'] if args.mode=='silence' else [])
         with (output/'stdout').open('wb') as out,(output/'stderr').open('wb') as err:
             guard.check()
             child=subprocess.Popen(argv,stdout=out,stderr=err,start_new_session=True)
@@ -28,6 +32,8 @@ def main():
                 if time.monotonic()>deadline:raise TimeoutError('Our audio probe exceeded12s')
                 time.sleep(.05)
             report['owner_after']=guard.check()
+            report['owner_activity_changed']=report['owner_before']!=report['owner_after']
+            report['owner_idle_required']=False
     except (OSError,RuntimeError,TimeoutError) as error:
         report.update(abort=type(error).__name__,reason=str(error))
     finally:

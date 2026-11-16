@@ -16,6 +16,15 @@ class OwnerPolicy(unittest.TestCase):
                          real_pointer_records=0,real_key_records=0,updated_unix_ms=100000)
         self.write()
     def write(self):self.path.write_text(''.join(f'{k}={v}\n' for k,v in self.fields.items()))
+    def test_current_recorder_allows_active_owner(self):
+        self.fields['active']=1;self.fields['real_pointer_records']=5;self.write()
+        recorder=owner.OwnerActivityRecorder(self.path)
+        self.assertEqual(recorder.before['active'],1)
+        self.fields['real_key_records']=1;self.write()
+        self.assertEqual(recorder.check()['real_key_records'],1)
+    def test_current_recorder_records_missing_marker_without_wait(self):
+        self.path.unlink();recorder=owner.OwnerActivityRecorder(self.path)
+        self.assertEqual(recorder.before['marker_unavailable'],'FileNotFoundError')
     def test_idle_marker_and_unchanged_old_update(self):
         guard=owner.OwnerInputGuard(self.path,400000);guard.check(500000)
     def test_missing_or_malformed_refuses(self):

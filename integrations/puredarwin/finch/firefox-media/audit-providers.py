@@ -6,8 +6,9 @@ from pathlib import Path
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--package',type=Path,required=True)
-p.add_argument('--corevideo-baseline',type=Path,required=True)
-p.add_argument('--videotoolbox-baseline',type=Path,required=True)
+p.add_argument('--corevideo-baseline',type=Path)
+p.add_argument('--videotoolbox-baseline',type=Path)
+p.add_argument('--audiotoolbox-baseline',type=Path)
 p.add_argument('--output',type=Path,required=True)
 a=p.parse_args();here=Path(__file__).resolve().parent
 api=runpy.run_path(str(here.parents[1]/'homebrew/hb_macho.py'))
@@ -25,7 +26,10 @@ def effective(path,ancestors=()):
         result|=effective(child,(*ancestors,path))
     return result
 rows=[]
-for name,baseline in [('CoreVideo',a.corevideo_baseline),('VideoToolbox',a.videotoolbox_baseline)]:
+baselines=[('CoreVideo',a.corevideo_baseline),('VideoToolbox',a.videotoolbox_baseline),('AudioToolbox',a.audiotoolbox_baseline)]
+if not any(path is not None for _,path in baselines):p.error('At least one baseline required')
+for name,baseline in baselines:
+    if baseline is None:continue
     candidate=a.package/'Frameworks'/(name+'.framework/Versions/A/'+name)
     before=effective(baseline);after=effective(candidate)
     rows.append(dict(framework=name,baseline=str(baseline),candidate=str(candidate),

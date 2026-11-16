@@ -8,6 +8,13 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_devfs_exhaustion_needs_the_exact_installed_fix_marker(self):
+        text="T COORDINATOR: GPU device slots exhausted AGAIN; until 'M1 back in SiliconForest' is logged.\n"
+        self.assertIsNotNone(gate.pending_hold(text))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB M1 back in SiliconForest (old kernel)\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U CODEX-TB waiting for M1 back in SiliconForest (devfs clone-slot fix installed)\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'U OTHER M1 back in SiliconForest (devfs clone-slot fix installed)\n'))
+        self.assertIsNone(gate.pending_hold(text+'U CODEX-TB M1 back in SiliconForest (devfs clone-slot fix installed)\n'))
     def test_coordinator_freeze_requires_actual_recovery_owner_marker(self):
         text="T COORDINATOR: desktop FROZEN since ~23:20Z; no work until 'M1 back in SiliconForest' is logged.\n"
         self.assertIsNotNone(gate.pending_hold(text))

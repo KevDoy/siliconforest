@@ -28,3 +28,25 @@ class OwnerInputGuard:
                ['last_real_input_unix_ms','real_pointer_records','real_key_records']):
             raise RuntimeError('Real owner input observed during our run')
         return after
+
+
+class OwnerActivityRecorder:
+    """Owner lifted idle waits 2026-11-16 00:25Z; record activity, never wait.
+
+    Used by current media CLI diagnostics. The strict historical guard above
+    remains available for reproducing old policies, not current authorization.
+    Concurrent owner input can affect timing qualification, not permission.
+    """
+    def __init__(self,path=Path('/private/var/run/gpu-desktop/owner-input')):
+        self.path=path;self.before=self.check()
+
+    def check(self,now_ms=None):
+        del now_ms
+        try:
+            text=self.path.read_text()
+            values={key:int(value) for key,value in re.findall(r'^([a-z_]+)=(\d+)$',text,re.M)}
+            required={'active','last_real_input_unix_ms','real_pointer_records','real_key_records'}
+            if not required<=values.keys():raise RuntimeError('Malformed owner-input marker')
+            return values
+        except (OSError,RuntimeError) as error:
+            return dict(marker_unavailable=type(error).__name__,reason=str(error))

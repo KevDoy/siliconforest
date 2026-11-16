@@ -62,11 +62,13 @@ def compare(before, after):
             unavailable.append(dict(pid=b['pid'], reason='zero-counters-availability-unproved'));continue
         delta=last-first
         row=dict(pid=b['pid'],type=b['type'],cpu_ns=delta,percent_one_core=delta/1e9/elapsed*100,
-                 percent_bounds=[delta/1e9/longest*100,delta/1e9/shortest*100],threads=[])
+                 percent_bounds=[delta/1e9/longest*100,delta/1e9/shortest*100],threads=[],thread_counters_unavailable=[])
         old_threads={(t['tid'],t['name']):t for t in a['threads']}
         for thread in b['threads']:
             old=old_threads.get((thread['tid'],thread['name']))
-            if old is not None and 0<=int(old['cpuTime'])<=int(thread['cpuTime']):
+            if old is not None and int(old['cpuTime'])==int(thread['cpuTime'])==0:
+                row['thread_counters_unavailable'].append(dict(tid=thread['tid'],name=thread['name'],reason='zero-counter-availability-unproved'))
+            elif old is not None and 0<=int(old['cpuTime'])<=int(thread['cpuTime']):
                 used=int(thread['cpuTime'])-int(old['cpuTime'])
                 row['threads'].append(dict(tid=thread['tid'],name=thread['name'],cpu_ns=used,
                                            percent_one_core=used/1e9/elapsed*100))

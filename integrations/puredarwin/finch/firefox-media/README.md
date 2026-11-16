@@ -90,8 +90,11 @@ document/acoustic stop explicitly unproved. `audio-probe` queries properties
 by default; `--silence` is M1-only and exercises our silent start/stop/restart,
 two units, stopping one while the other remains active, uninitialize/dispose
 and callback getter transparency. It is not browser tab/window shutdown proof.
-The CLI wrapper requires three minutes of owner idle, checks real counters
-every50ms and aborts only its newly created child session. No GUI/input/capture.
+Those original runs required three minutes of owner idle. The owner lifted
+idle waits at00:25Z on16November: current CLI runs record activity without
+waiting or aborting on owner input. Conflicting input affects timing provenance,
+not authorization. Only our own child is stopped on its finite timeout. No
+GUI/input/capture.
 
 Build `audio-probe.nix`, then:
 
@@ -130,14 +133,20 @@ offset. No latency or shutdown fix is claimed yet.
 
 ## Staged timing and RDD diagnostics
 
-`latency-probe.nix` builds our own silent CLI. Its executable interposes only
+`latency-probe.nix` builds our own silent CLI. Its separately linked diagnostic dylib interposes only
 AudioDeviceCreateIOProcID, forwards the original IOProc unmodified and exposes
 its exact output timestamp to the nested AU render callback in thread-local
 storage. It records timestamps in a bounded array, prints after Stop, and
 changes no clock/latency property or output device. It tests48k/44.1k client
 formats against the existing device rate. A missing HAL callback or exceeded
-record bound fails. This is Linux-built/staged only; the M1 GPU freeze at23:26Z
-prevents target qualification. No new M1 work is queued during recovery.
+record bound fails. The first executable-local variant failed actual M1 instrumentation at23:47Z:
+AU callbacks ran, but the HAL interpose was not reached (entry/host/flags0).
+That failure remains recorded, with no latency comparison. The hook is now in
+a separately linked diagnostic dylib, using the qualified observer's loader
+pattern; the corrected version is Linux-built and awaiting target execution.
+No target work ran during the23:27–37 recovery hold. The earlier immediate
+post-restart attempt refused before execution because three minutes of startup
+idle had not elapsed; that refusal is retained separately.
 
 Prepare with `prepare-audio.py --latency --package NIX_OUTPUT --stage NEW_STAGE`
 using the same cold hashing/owner guard as the lifecycle probe. Analyze a normal
@@ -152,7 +161,7 @@ Pass the verified parent and a fresh map of owned descendant PID to OS start
 identity. Capture before/after local MSE or real playback; it restores content
 context and never changes native focus or sends input. Gecko reports process
 and thread CPU nanoseconds with explicit rdd/gpu/utility types. Compare keeps
-RDD separate from family and ranks matched threads. Eight synthetic controls
+RDD separate from family and ranks matched threads. Nine synthetic controls
 cover counter resets, zero/unavailable counters, PID reuse and context cleanup.
 New/exited/missing-identity processes make family accounting incomplete rather
 than disappearing as zero CPU. RPC duration brackets wall-time uncertainty.
@@ -183,3 +192,59 @@ as a persistent hold, released only by an actual restoration event from the
 named recovery owner CODEX-TB or the coordinator. A quoted marker, another
 agent's release or elapsed time cannot clear it. The45 gate controls pass;
 this is host policy coverage, not a hardware recovery result.
+
+`codec-admission.nix` extends our existing MIT public-VT demux client only in
+admission mode. It uses the real fixture hvcC, requests NV12 or10-bit x420
+(P010), and records status/session invariants without feeding samples. The old
+8-bit hashing code is unreachable, so it cannot falsely hash P010 as8-bit.
+The same Linux-built portable client786db079… ran on M5: NV12/HW and P010/HW/SW
+all status0/session present,0.457/0.041/0.049s. This validates the Main10
+description and admission test; no frames were decoded. M1 same-byte comparison23:49:46–49Z admits NV12/HW(status0), but rejects
+P010/HW and P010/SW with-12906 and null session, both cleanly. No samples were
+fed, so Main10 pixel correctness and browser fallback remain unproved. A clean
+refusal is never called working10-bit/HDR decode. Prepare
+with `--admission --fixture OUR_HEVC_FILE`, using the same fresh cold/coordination gate.
+
+The corrected needed-dylib timestamp probe passed on M1 at23:51:44–46Z:
+156 actual callbacks, both48k/44.1k clients, unchanged real-input counters and
+no signals/install. HAL lead median191.990ms at48k and197.292ms for44.1k,
+while AU callbacks report now and the cubeb source model reports181.333ms.
+Median model under-reporting is10.657/15.959ms, maximum21.322ms. Four startup
+HAL timestamps are nonfuture and retained as such. One early future timestamp
+is149.305ms, where the fixed model instead over-reports32.028ms. These are
+software-clock measurements, not a measured DAC/lip-sync offset. The browser's
+actual selected cubeb backend/GetPosition still requires integrated evidence.
+
+`clock-provider.nix` builds an opt-in private PD AU variant, applied after the
+existing selected-device patch. `SF_AU_NORMALIZE_HAL_CLOCK=1` enables only the
+audited speakers/headphones UIDs. Initialization caches device/stream latency
+and timebase; the callback subtracts the unchanged fixed device/stream/unit
+properties from HAL's already-audible timestamp, and accounts for further
+converter callbacks at the client rate. Mutable buffer-size updates publish
+new fixed ticks atomically. There are no device queries, allocation or prints
+in the render path. Other devices/default behavior remain unchanged. No
+CoreAudio/server changes or canonical installation are included.
+
+The fixed-latency floor still over-reports when the HAL predicts a shorter
+startup delay. Converter prefetch of a few client samples is not modelled
+exactly; do not claim sample-exact or acoustic correction. Nine arithmetic
+ASan/UBSan controls and native PD compile pass. The first patch build refused
+an ambiguous outputTime anchor; the corrected patch is scoped to outputProc.
+Own silent A/B with `--latency --clock-provider NIX_PROVIDER` stages only
+AudioUnit/AudioToolbox and retains canonical CoreAudio. This thin private PD
+root is for the timing probe; never select it as Firefox's full AudioToolbox.
+Firefox integration must merge its child into the full retained Finch family
+and prove callback/rate/queue/codec behavior before activation.
+
+Private clock A/B00:01:56–02:01Z passed153 default and160 normalized callbacks:
+median cubeb-model under-report10.6566/15.9704ms ->0 at48/44.1k; p95 residual0,
+unchanged properties. Startup floor outlier32.026ms remains. Full-family
+`clock-family.nix` retains the installed main image byte-for-byte (SHA4bb3b697…)
+and135/135 effective exports, with a new normalized PD child. It is built only;
+Firefox/queue/codec integration still needs its gate. No canonical replacement
+or acoustic proof follows from the silent test.
+
+Current first task is FX-035: all video rVFC intervals are about40ms/25Hz.
+No GPU/Firefox workload is permitted before the exact CODEX-TB devfs-fix
+restoration marker. Kernel optimization authorization is durable; TB owns its
+installs. Source/host work continues during recovery.

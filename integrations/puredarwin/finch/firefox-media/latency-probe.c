@@ -11,10 +11,7 @@
 #include <unistd.h>
 
 #define CAPACITY 1024
-struct io_context { AudioDeviceIOProc proc; void *data; };
-static struct io_context contexts[16];
-static unsigned context_count;
-static _Thread_local const AudioTimeStamp *current_output;
+extern int SFAudioCopyHALBoundary(AudioTimeStamp *,uint64_t *);
 static _Thread_local uint64_t current_entry;
 static _Thread_local double current_client_base;
 static _Thread_local unsigned current_callback;
@@ -25,42 +22,23 @@ struct row {
 };
 static struct row rows[CAPACITY];
 static unsigned row_count, current_case;
-static OSStatus io_proxy(AudioObjectID device,const AudioTimeStamp *now,
-        const AudioBufferList *input,const AudioTimeStamp *input_time,
-        AudioBufferList *output,const AudioTimeStamp *output_time,void *opaque)
-{
-    struct io_context *context=opaque;
-    const AudioTimeStamp *previous=current_output;
-    current_output=output_time; current_entry=mach_absolute_time(); current_callback=0;
-    OSStatus result=context->proc(device,now,input,input_time,output,output_time,context->data);
-    current_output=previous;
-    return result;
-}
-static OSStatus trace_create(AudioObjectID device,AudioDeviceIOProc proc,void *data,AudioDeviceIOProcID *out)
-{
-    if (!proc || context_count==16) return AudioDeviceCreateIOProcID(device,proc,data,out);
-    struct io_context *context=&contexts[context_count++];
-    *context=(struct io_context){proc,data};
-    return AudioDeviceCreateIOProcID(device,io_proxy,context,out);
-}
-/* dyld excludes this image's original references from its own interposition. */
-__attribute__((used,section("__DATA,__interpose")))
-static const struct { const void *replacement,*original; } interpose={trace_create,AudioDeviceCreateIOProcID};
-
 static void need(int good,const char *what)
 { if (!good) { fprintf(stderr,"LATENCY_PROBE_FAIL %s\n",what); exit(1); } }
 static OSStatus render(void *opaque,AudioUnitRenderActionFlags *flags,const AudioTimeStamp *stamp,
         UInt32 bus,UInt32 frames,AudioBufferList *data)
 {
     (void)opaque; (void)flags; (void)bus;
-    uint64_t now=mach_absolute_time();
+    uint64_t now=mach_absolute_time(),entry=0;
+    AudioTimeStamp boundary={0};
+    int has_boundary=SFAudioCopyHALBoundary(&boundary,&entry);
+    if(entry!=current_entry){current_entry=entry;current_callback=0;}
     unsigned index=__atomic_fetch_add(&row_count,1,__ATOMIC_RELAXED);
     if (current_callback==0) current_client_base=stamp->mSampleTime;
     if (index<CAPACITY) rows[index]=(struct row){
-        .now=now,.entry=current_entry,.hal_host=current_output?current_output->mHostTime:0,
-        .au_host=stamp->mHostTime,.hal_sample=current_output?current_output->mSampleTime:0,
+        .now=now,.entry=current_entry,.hal_host=has_boundary?boundary.mHostTime:0,
+        .au_host=stamp->mHostTime,.hal_sample=has_boundary?boundary.mSampleTime:0,
         .au_sample=stamp->mSampleTime,.client_base=current_client_base,
-        .hal_flags=current_output?current_output->mFlags:0,.au_flags=stamp->mFlags,
+        .hal_flags=has_boundary?boundary.mFlags:0,.au_flags=stamp->mFlags,
         .frames=frames,.cycle_callback=current_callback,.case_id=current_case};
     current_callback++;
     for (UInt32 b=0;b<data->mNumberBuffers;b++)
@@ -118,6 +96,6 @@ int main(void)
             r->hal_sample,r->au_sample,r->client_base,r->hal_flags,r->au_flags,r->frames,r->cycle_callback);
         need((r->hal_flags&kAudioTimeStampHostTimeValid)!=0,"real HAL callback interposition reached");
     }
-    printf("LATENCY_DONE rows=%u io-contexts=%u no-timestamp-change=1 no-acoustic-claim=1\n",row_count,context_count);
+    printf("LATENCY_DONE rows=%u no-timestamp-change=1 no-acoustic-claim=1\n",row_count);
     return 0;
 }
