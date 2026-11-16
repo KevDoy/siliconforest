@@ -234,6 +234,16 @@ struct bwfm_softc {
 	int			 sc_media_done;
 	/* PDBwfm: the port is down, the glue keeps off the DART too */
 	int			 sc_bus_gone;
+	/*
+	 * PDBwfm (FXNET): the power save mode init gives the firmware
+	 * (BWFM_PM_*, read from the boot-args once sc_pm_known is 0) and, for
+	 * fast power save, how long it stays awake after the last frame
+	 * (pm2_sleep_ret, ms, 0: the firmware's own). pd_bwfm_set_pm() changes
+	 * both at run time.
+	 */
+	int			 sc_pm_known;
+	int			 sc_pm_mode;
+	int			 sc_pm2_ret_ms;
 };
 
 void bwfm_attach(struct bwfm_softc *);
@@ -244,6 +254,9 @@ void bwfm_cleanup(struct bwfm_softc *);
 void bwfm_lifecycle_enter(struct bwfm_softc *);
 void bwfm_lifecycle_exit(struct bwfm_softc *);
 int bwfm_task_barrier(struct bwfm_softc *);
+/* PDBwfm (FXNET): power save at run time, see bwfm.c */
+int bwfm_pm_set(struct bwfm_softc *, int, int);
+void bwfm_pm_get(struct bwfm_softc *, int *, int *, int *, int *);
 int bwfm_radio_down(struct bwfm_softc *, int);
 void bwfm_init(struct ifnet *);
 void bwfm_stop(struct ifnet *);

@@ -25,6 +25,9 @@ int	pd_bwfm_dma_resume(void);
 void	pd_bwfm_unhook(struct device *);
 int	pd_bwfm_detach(struct device *);
 struct ieee80211com *pd_bwfm_ic(struct device *);
+/* FXNET: power save at run time, see pd_bwfm_glue.c */
+int	pd_bwfm_set_pm(struct device *, int mode, int ret_ms);
+int	pd_bwfm_get_pm(struct device *, int *fw_mode, int *fw_ret_ms, int *want_mode, int *want_ret_ms);
 
 #ifdef __cplusplus
 }

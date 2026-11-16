@@ -257,6 +257,11 @@ int	pd_bwfm_bootarg(const char *name, char *buf, int len);
 int	pd_bwfm_want_fwsup(void);
 // 1 when the firmware's deep sleep request is acknowledged as brcmfmac does (boot-arg bwfm_dsack=1; default 0)
 int	pd_bwfm_want_dsack(void);
+// the station's power save mode, BWFM_PM_* (boot-arg bwfm_pm, default 2: fast power save)
+int	pd_bwfm_want_pm(void);
+// ms the firmware stays awake after the last frame in fast power save (boot-arg bwfm_pm2_ret,
+// default 2000; 0 leaves the firmware's own 200 ms)
+int	pd_bwfm_want_pm2_ret(void);
 
 // the rest of the kernel bwfm touches
 

@@ -255,6 +255,30 @@ pd_bwfm_detach(struct device *dev)
 	return busy;
 }
 
+// FXNET: the station's power save at run time, see bwfm_pm_set() and bwfm_pm_get() in bwfm.c
+int
+pd_bwfm_set_pm(struct device *dev, int mode, int ret_ms)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+	int error;
+
+	pd80211_lock();
+	error = bwfm_pm_set(sc, mode, ret_ms);
+	pd80211_unlock();
+	return error;
+}
+
+int
+pd_bwfm_get_pm(struct device *dev, int *fw_mode, int *fw_ret_ms, int *want_mode, int *want_ret_ms)
+{
+	struct bwfm_softc *sc = (struct bwfm_softc *)dev;
+
+	pd80211_lock();
+	bwfm_pm_get(sc, fw_mode, fw_ret_ms, want_mode, want_ret_ms);
+	pd80211_unlock();
+	return 0;
+}
+
 struct ieee80211com *
 pd_bwfm_ic(struct device *dev)
 {

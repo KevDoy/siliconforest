@@ -263,6 +263,64 @@ bwfm_lifecycle_exit(struct bwfm_softc *sc)
 	}
 }
 
+/*
+ * PDBwfm (FXNET): the station's power save at run time, under the stack lock.
+ * mode is BWFM_PM_* (0 constantly awake, 1 PS-Poll, 2 fast power save); for
+ * mode 2, ret_ms > 0 is how long the firmware stays awake after the last frame
+ * (pm2_sleep_ret), 0 keeps what it has. Both are kept for the next init. The
+ * firmware is asked only while it runs; otherwise the next init applies them.
+ * Returns 0, EINVAL for a mode out of range, EIO when the firmware refused it.
+ */
+int
+bwfm_pm_set(struct bwfm_softc *sc, int mode, int ret_ms)
+{
+	int error = 0;
+
+	if (mode < BWFM_PM_CAM || mode > BWFM_PM_FAST_PS || ret_ms < 0 || ret_ms > 60000)
+		return EINVAL;
+	bwfm_lifecycle_enter(sc);
+	sc->sc_pm_known = 1;
+	sc->sc_pm_mode = mode;
+	if (ret_ms > 0)
+		sc->sc_pm2_ret_ms = ret_ms;
+	if (sc->sc_initialized && !sc->sc_bus_gone &&
+	    (sc->sc_ic.ic_if.if_flags & IFF_RUNNING)) {
+		if (mode == BWFM_PM_FAST_PS && sc->sc_pm2_ret_ms > 0 &&
+		    bwfm_fwvar_var_set_int(sc, "pm2_sleep_ret", sc->sc_pm2_ret_ms))
+			printf("%s: pm2_sleep_ret %d ms not taken: %s\n", DEVNAME(sc),
+			    sc->sc_pm2_ret_ms, BWFM_CTLWHY(sc));
+		if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_PM, mode))
+			error = EIO;
+		printf("%s: power save mode %d, pm2_sleep_ret %d ms: %s\n", DEVNAME(sc),
+		    mode, sc->sc_pm2_ret_ms, error ? BWFM_CTLWHY(sc) : "set");
+	}
+	bwfm_lifecycle_exit(sc);
+	return error;
+}
+
+/*
+ * PDBwfm (FXNET): what the firmware says now, its PM mode and pm2_sleep_ret
+ * (-1 each when it was not asked or did not answer), and what init will give it.
+ */
+void
+bwfm_pm_get(struct bwfm_softc *sc, int *fw_mode, int *fw_ret_ms, int *want_mode, int *want_ret_ms)
+{
+	uint32_t v;
+
+	*fw_mode = *fw_ret_ms = -1;
+	bwfm_lifecycle_enter(sc);
+	if (sc->sc_initialized && !sc->sc_bus_gone &&
+	    (sc->sc_ic.ic_if.if_flags & IFF_RUNNING)) {
+		if (bwfm_fwvar_cmd_get_int(sc, BWFM_C_GET_PM, &v) == 0)
+			*fw_mode = (int)v;
+		if (bwfm_fwvar_var_get_int(sc, "pm2_sleep_ret", &v) == 0)
+			*fw_ret_ms = (int)v;
+	}
+	*want_mode = sc->sc_pm_known ? sc->sc_pm_mode : pd_bwfm_want_pm();
+	*want_ret_ms = sc->sc_pm_known ? sc->sc_pm2_ret_ms : pd_bwfm_want_pm2_ret();
+	bwfm_lifecycle_exit(sc);
+}
+
 static void
 bwfm_task_barrier_done(void *arg)
 {
@@ -738,16 +796,34 @@ bwfm_init1(struct ifnet *ifp)
 	/*
 	 * Use CAM (constantly awake) when we are running as AP,
 	 * otherwise use fast power saving.
+	 *
+	 * PDBwfm (FXNET): the station's mode comes from bwfm_pm (default fast
+	 * power save) and, in fast power save, the firmware stays awake for
+	 * bwfm_pm2_ret ms after the last frame (default 2000; the firmware's
+	 * own 200 ms let replies that come later than that wait for the next
+	 * DTIM beacon, up to ~300 ms on the bench). Both can be changed at run
+	 * time, see pd_bwfm_set_pm().
 	 */
-	pm = BWFM_PM_FAST_PS;
+	if (!sc->sc_pm_known) {
+		sc->sc_pm_mode = pd_bwfm_want_pm();
+		sc->sc_pm2_ret_ms = pd_bwfm_want_pm2_ret();
+		sc->sc_pm_known = 1;
+	}
+	pm = sc->sc_pm_mode;
 #ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 		pm = BWFM_PM_CAM;
 #endif
+	if (pm == BWFM_PM_FAST_PS && sc->sc_pm2_ret_ms > 0 &&
+	    bwfm_fwvar_var_set_int(sc, "pm2_sleep_ret", sc->sc_pm2_ret_ms))
+		printf("%s: pm2_sleep_ret %d ms not taken: %s\n", DEVNAME(sc),
+		    sc->sc_pm2_ret_ms, BWFM_CTLWHY(sc));
 	if (bwfm_fwvar_cmd_set_int(sc, BWFM_C_SET_PM, pm)) {
 		printf("%s: could not set power: %s\n", DEVNAME(sc), BWFM_CTLWHY(sc));
 		return;
 	}
+	printf("%s: power save mode %d, pm2_sleep_ret %d ms (0: firmware's)\n",
+	    DEVNAME(sc), pm, pm == BWFM_PM_FAST_PS ? sc->sc_pm2_ret_ms : 0);
 
 	bwfm_fwvar_var_set_int(sc, "txbf", 1);
 	bwfm_fwvar_cmd_set_int(sc, BWFM_C_UP, 0);

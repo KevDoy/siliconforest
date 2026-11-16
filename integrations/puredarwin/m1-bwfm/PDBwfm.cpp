@@ -670,8 +670,43 @@ IOReturn PDBwfm::enable(IONetworkInterface *interface)
 
 // The requests that change the radio pass through here: power is where bwfm_off takes
 // effect, and once the chip was taken down every other one first needs it back.
+// FXNET: APPLE80211_IOC_POWERSAVE carries PureDarwin's own layout, not Apple's: a set takes
+// version, mode (0 constantly awake, 1 PS-Poll, 2 fast power save) and pm2_ret_ms (0 keeps
+// it); a get fills in what init will give the firmware and what the firmware says now (-1 when
+// it was not running). pd-wifipm (m1-bwfm/tools) is the userspace side.
+struct pd80211_powersave_data {
+	uint32_t	version;
+	uint32_t	mode;
+	uint32_t	pm2_ret_ms;
+	int32_t		fw_mode;
+	int32_t		fw_pm2_ret_ms;
+};
+
 SInt32 PDBwfm::apple80211Request(bool set, int type, int value, void *data, uint32_t *len)
 {
+	if (type == APPLE80211_IOC_POWERSAVE && fIC != NULL && fDev != NULL && len != NULL && data != NULL) {
+		struct pd80211_powersave_data *ps = (struct pd80211_powersave_data *)data;
+
+		if (set) {
+			if (*len < 3 * sizeof(uint32_t))
+				return EINVAL;
+			if ((fChipDown || fPortDown) && chipUp(false, "power save") != kIOReturnSuccess)
+				return EIO;
+			LOG("power save: mode %u, pm2_sleep_ret %u ms requested", ps->mode, ps->pm2_ret_ms);
+			return pd_bwfm_set_pm(fDev, (int)ps->mode, (int)ps->pm2_ret_ms);
+		}
+		if (*len < sizeof(*ps))
+			return EINVAL;
+		int fwMode, fwRet, wantMode, wantRet;
+		pd_bwfm_get_pm(fDev, &fwMode, &fwRet, &wantMode, &wantRet);
+		ps->version = APPLE80211_VERSION;
+		ps->mode = (uint32_t)wantMode;
+		ps->pm2_ret_ms = (uint32_t)wantRet;
+		ps->fw_mode = fwMode;
+		ps->fw_pm2_ret_ms = fwRet;
+		*len = sizeof(*ps);
+		return 0;
+	}
 	if (!set || fIC == NULL)
 		return super::apple80211Request(set, type, value, data, len);
 	if (type == APPLE80211_IOC_POWER && len != NULL && *len >= sizeof(struct apple80211_power_data)) {
@@ -926,6 +961,24 @@ int pd_bwfm_want_dsack(void)
 
 	PE_parse_boot_argn("bwfm_dsack", &value, sizeof(value));
 	return value != 0;
+}
+
+// FXNET: replies that come more than the firmware's 200 ms after our last frame waited for
+// the next DTIM beacon in fast power save (LAN ping at 1 s: p50 159 ms, max 318 ms)
+int pd_bwfm_want_pm(void)
+{
+	int value = 2;
+
+	PE_parse_boot_argn("bwfm_pm", &value, sizeof(value));
+	return value >= 0 && value <= 2 ? value : 2;
+}
+
+int pd_bwfm_want_pm2_ret(void)
+{
+	int value = 2000;
+
+	PE_parse_boot_argn("bwfm_pm2_ret", &value, sizeof(value));
+	return value >= 0 && value <= 60000 ? value : 2000;
 }
 
 // config space, the tag is the IOPCIDevice
