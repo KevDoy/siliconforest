@@ -31,6 +31,9 @@ LAUNCHER = '/Applications/Firefox.app/Contents/MacOS/firefox-sf'
 if MODE == 'private-gpu':
     LAUNCHER = B + '/bin/firefox-perf'
     ENV += ',_LAUNCHER=%s,FXPERF_MANIFEST=%s/bin/release-private-gpu.json,SFFXPERF_INSERT=%s/lib/libsffxperf-fontprobe.dylib' % (LAUNCHER, B, B)
+elif MODE == 'installed-perf':   # the installed manifest (system UI), through my launcher copy so candidates can go first
+    LAUNCHER = B + '/bin/firefox-perf'
+    ENV += ',_LAUNCHER=%s' % LAUNCHER
 if len(sys.argv) > 4 and sys.argv[4]:
     ENV += ',' + sys.argv[4]
 PLANENV = ' '.join(kv for kv in ENV.split(',') if kv.startswith(('FXPERF_', 'SFFXPERF_')))
@@ -44,7 +47,7 @@ with hold(6, 'FXPERF capture %s (%s): idle example.com + idle cnn.com: Gecko pro
     sh('rm -rf %s && mkdir -p %s %s && cat > %s/user.js' % (PROFILE, RO, PROFILE, PROFILE), inp=USERJS, check=True)
     sh('env {pe} {la} --sf-plan -no-remote --profile {pr} > {ro}/plan.json; shasum -a 256 /usr/local/lib/siliconforest/firefox/160-system1/release.json /Applications/Firefox.app/Contents/MacOS/firefox-sf {b}/bin/* {b}/lib/* > {ro}/runtime.sha; uname -v >> {ro}/runtime.sha'.format(pe=PLANENV, la=LAUNCHER, pr=PROFILE, ro=RO, b=B))
     step('launch')
-    r = sh(T + ' launch %s %s --marionette https://example.com/' % (PROFILE, ENV), check=True)
+    r = sh(T + " launch %s '%s' --marionette https://example.com/" % (PROFILE, ENV), check=True)
     R['mode'] = MODE; R['env'] = ENV
     R['launch'] = r.stdout.strip(); print(R['launch'])
     if 'marionette up' not in mn('wait', 'startup:%s/startup.json' % RO):

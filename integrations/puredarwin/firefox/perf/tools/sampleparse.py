@@ -4,7 +4,7 @@
 functions over the busy samples.  sampleparse.py <sample.txt> [nthreads] [nframes]"""
 import collections, re, sys
 
-WAIT = re.compile(r'mach_msg2_trap|__psynch_cvwait|__psynch_mutexwait|kevent|__select|__semwait|__workq_kernreturn|'
+WAIT = re.compile(r'mach_msg2_trap|__psynch_cvwait|__psynch_mutexwait|kevent|__select|__semwait|\bread\b|__workq_kernreturn|'
                   r'__ulock_wait|poll\b|__wait4|__sigsuspend|nanosleep|mach_wait_until|__recvfrom|__pthread_kill|'
                   r'thread_suspend|__read_nocancel|__accept|semaphore_wait_trap|semaphore_timedwait_trap|__psynch_rw')
 line_re = re.compile(r'^(\s*[+!:| ]*)(\d+) (.*)$')

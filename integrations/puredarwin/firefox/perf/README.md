@@ -42,7 +42,16 @@ The 30 FreeType maps of the same file (one per FT_New_Face) are clean shared pag
   HasPendingRenderingSteps (Update animations and send events)": CSS animations (46 iterations/s), animated images
   and a muted autoplay video. 60 display lists/s, WebRender builds and composites 60 frames/s. A Mac does the same
   Gecko work; there each frame recomposites only the changed layer.
-- Ours, per frame: CGL writes every IOSurface WebRender drew back with a glFinish per surface
-  (`pd_cgl_write_back` -> `drmSyncobjWait`); the parent's `IOSurfaceLookupFromMachPort` maps and unmaps each tile's
-  dma-buf at every native-layer commit (94 % of the parent compositor thread's busy samples); the parent main thread
-  renders the whole layer tree and the WindowServer composes and damages the whole window.
+- Ours, per frame (installed c19 GPU path, clean run D-base-1: no tracing, no profiler, no Marionette, 30 s): family
+  101 % of a core; the compositor receives 75 commits/s (55 shown/s), each the full 1920x1440 window with full damage.
+  The parent main thread is 38 % CPU and busy 85 % of wall time: 80 % of it in `-[CALayerContext _layerTreeChanged]`
+  -> `layerContextNeedsDisplay:`: `-[CARenderer render]` of the whole tree 29 %, the export
+  (`copySFFXRenderedSurface` -> `CGLSFFXCopyFramebuffer` -> glFinish) 37 %, WindowServer `sfGPUCompose` 9.5 %;
+  43.5 % of its wall time is blocked in glFinish (`drmSyncobjWait`).
+- Requests (no patch proven yet): EGLImage per IOSurface in CGL; a GPU-side fence instead of the export glFinish;
+  damage-limited render/compose/commit (QuartzCore, WindowServer, compositor); no flush for an unchanged frame.
+- Tried and NOT effective on the c19 path (one run each, runtime changed between runs, inside run-to-run noise):
+  IOSurface lookup of a known port without mapping (`build/0234`, the parent compositor thread is only 3 % on c19;
+  its remaining per-frame maps are probably new video surfaces - inference), one glFinish per CGL write-back (GPU Renderer 8.3 -> 8.4 %).
+- File system (kernel): unlink and fsync of a 4 KB file take 15 / 14 ms (p50) on the M1's ext4; Firefox's IndexedDB,
+  cache and quota threads spend their idle time there.

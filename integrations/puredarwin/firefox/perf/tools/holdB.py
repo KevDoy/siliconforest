@@ -97,7 +97,7 @@ with hold(9, 'FXPERF capture %s (%s): tab switches (Command-number, own window),
        'shasum -a 256 /usr/local/lib/siliconforest/firefox/160-system1/release.json /Applications/Firefox.app/Contents/MacOS/firefox-sf > %s/runtime.sha; '
        'uname -v >> %s/runtime.sha' % (PROFILE, RO, RO, RO))
     step('launch tabs')
-    R['launch1'] = sh(T + ' launch %s %s --marionette http://127.0.0.1:8766/tab.html?i=0' % (PROFILE, ENV), check=True).stdout.strip()
+    R['launch1'] = sh(T + " launch %s '%s' --marionette 'http://127.0.0.1:8766/tab.html?i=0'" % (PROFILE, ENV), check=True).stdout.strip()
     if 'marionette up' not in mn('wait', 'tabs:9:http://127.0.0.1:8766/tab.html?i={i}', 'sleep:1'):
         sh(T + ' quitall'); sh("pkill -f 'sffxperf/www/serve.py'")
         raise SystemExit('no marionette')
@@ -137,7 +137,7 @@ with hold(9, 'FXPERF capture %s (%s): tab switches (Command-number, own window),
                    'MOZ_PROFILER_SHUTDOWN=%s/startup.prof.json' % RO
         before = {w['id'] for w in wins()[0] if w['app'] == 'org.mozilla.firefox'}
         step('start %d' % n)
-        lr = sh(T + ' launch %s %s https://example.com/' % (PROFILE, env), check=True).stdout.strip()
+        lr = sh(T + " launch %s '%s' https://example.com/" % (PROFILE, env), check=True).stdout.strip()
         t0 = int(lr.split()[1])
         w = mywin(before)
         tmap = time.time()
