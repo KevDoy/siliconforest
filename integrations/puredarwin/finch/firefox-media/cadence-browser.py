@@ -29,6 +29,7 @@ def main():
     p.add_argument('--graphics-override',type=Path,help='FX-qualified complete cohort under the runtime overrides directory')
     p.add_argument('--no-native-compositor',action='store_true',help='Own-profile diagnostic: one full-window layer instead of native tile layers')
     p.add_argument('--timer-control',action='store_true',help='Own-process comparison using the existing PD_CV_TIMER escape hatch')
+    p.add_argument('--codec-matrix',action='store_true',help='Owned AV1/VP9/PQ fixtures; declarations remain separate from decode')
     a=p.parse_args()
     if a.frame_mode=='require' and not a.staged_media:
         raise ValueError('Strict sharing requires the reviewed staged VT producer')
@@ -115,6 +116,15 @@ def main():
                 if 'before' in cpu:cpu['comparison']=process_cpu.compare(cpu['before'],cpu['after'])
             except Exception as error:cpu['after_error']=str(error)
             video['owned_process_cpu']=cpu
+            if a.codec_matrix and not getattr(self,'codec_queries_recorded',False):
+                self.codec_queries_recorded=True
+                try:
+                    self.command('Marionette:SetContext',{'value':'content'})
+                    script=(root/'codec-capabilities.js').read_text()
+                    video['codec_declarations']=self.command('WebDriver:ExecuteAsyncScript',{
+                        'script':script+'\nconst done=arguments[arguments.length-1]; window.fxCodecCapabilities().then(done,e=>done({error:String(e)}));',
+                        'args':[],'scriptTimeout':70000,'newSandbox':False})
+                except Exception as error:video['codec_declarations_error']=str(error)
             if 'after' in cpu:
                 import media_images
                 directory=a.run/('media-provider-'+str(len(list(a.run.glob('media-provider-*')))))
@@ -157,6 +167,7 @@ def main():
         graphics_override=str(a.graphics_override) if a.graphics_override else None,
         native_compositor_disabled=a.no_native_compositor,
         cv_timer_control=a.timer_control,
+        codec_matrix=a.codec_matrix,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
@@ -183,9 +194,14 @@ def main():
     if a.profile_video:argv+=['--profile-video']
     clips=([( 'pattern-1080p60-h264.mp4',rate) for rate in [0.5,1,2]] if a.rate_control else
            [('pattern-1080p60-h264.mp4',1),('pattern-4k30-hevc.mp4',1)])
+    if a.codec_matrix:
+        if a.rate_control:raise ValueError('Codec and rate comparisons are separate measurements')
+        clips=[(name,1) for name in ['av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm']]
     for clip,rate in clips:
+        source=root/'media/codecs'/clip if a.codec_matrix else Path('/private/var/db/sffx/media-highrate-v1')/clip
+        if a.codec_matrix and not source.is_file():raise ValueError('Missing generated codec fixture: '+clip)
         argv+=['--url','file://'+str(tools/'video-page.html')+
-               '?src=file:///private/var/db/sffx/media-highrate-v1/'+clip+
+               '?src='+source.as_uri()+
                '&deferred=1&deadline=25000&rate='+str(rate)]
     sys.argv=argv
     runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')

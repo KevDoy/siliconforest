@@ -458,3 +458,12 @@ actual main and PD output-child image paths and can use our generated AAC
 fixture. The prepared normalized-AAC test has not run: the fresh coordination
 gate refused77 during TB's kernel45 reservation. No browser-clock selection,
 latency or abnormal-death result is inferred from preparation.
+
+The optional `prepare-cadence.py --codec-fixtures OUR_DIRECTORY` checks our
+Linux-generated AV1/VP9/10-bit-PQ fixture hashes and freezes them with their
+manifest. `run-cadence.py ... codecs` measures each using the installed runtime
+without boundary tracing or altered codec preferences. It captures actual
+process CPU and kernel job deltas, and queries MediaCapabilities after the first
+timed measurement. Declaration results do not prove hardware, speed or HDR
+rendering. Rejected media stays a recorded failure; correct offscreen pixels
+still do not qualify a visible window. The first native matrix is queued.

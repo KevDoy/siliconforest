@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs'])
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--no-native-compositor',action='store_true',help='Explicit own-profile tile-path diagnostic')
 p.add_argument('--timer-control',action='store_true',help='Explicit own-process PD CV timer comparison')
@@ -54,6 +54,7 @@ try:
         argv=['python3',dest+'/cadence-browser.py','--run',dest+'/'+a.phase+'-run']
         if a.phase=='profile':argv+=['--profile-video']
         if a.phase=='rates':argv+=['--rate-control']
+        if a.phase=='codecs':argv+=['--codec-matrix','--without-trace']
         if a.phase in ['copy','shared']:
             argv+=['--staged-media','--frame-mode','require' if a.phase=='shared' else 'copy','--without-trace']
         if a.graphics_override:
