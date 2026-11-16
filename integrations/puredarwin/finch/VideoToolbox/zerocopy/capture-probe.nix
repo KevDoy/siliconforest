@@ -8,6 +8,7 @@ in e.pkgs.runCommand "siliconforest-vt-external-capture-probe-arm64" {} ''
  export DARWIN_SDK_ROOT=${e.sdk}
  mkdir -p $out/bin
  cp ${../../../m1-avd/videotoolbox/vt-decode-test.c} capture-probe.c
+ cp ${./final-gpu-picture.h} final-gpu-picture.h
  chmod u+w capture-probe.c
  ${e.pkgs.python3}/bin/python3 ${./capture-probe.py} capture-probe.c
  ${e.cc} -O2 -isysroot ${e.sdk} -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_DARWIN_C_SOURCE \

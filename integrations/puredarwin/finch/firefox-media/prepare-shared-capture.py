@@ -16,7 +16,16 @@ p=argparse.ArgumentParser(description=__doc__)
 for name in ['surface','providers','probe','fixtures','stage']:
     p.add_argument('--'+name,type=Path,required=True)
 p.add_argument('--capture-buffers',type=int,choices=range(1,33),help='Private bounded-pool measurement; codec minimum still applies')
+p.add_argument('--hold-final',action='store_true',help='Keep the final picture through session invalidation; no GPU-fence claim')
+p.add_argument('--retire-pool',action='store_true',help='Private opt-in pool retirement; requires the held-picture control')
+p.add_argument('--gpu-final',action='store_true',help='Verify a real GPU copy of the last picture after invalidation and picture release')
+p.add_argument('--graphics-override',type=Path,help='FX-qualified versioned graphics family; required for GPU final-picture verification')
 a=p.parse_args();here=Path(__file__).resolve().parent
+if a.retire_pool and not a.hold_final:raise ValueError('Retirement requires the held-picture control')
+if a.gpu_final and (not a.hold_final or not a.graphics_override):raise ValueError('GPU verification requires held picture and explicit graphics family')
+if a.graphics_override and (not a.gpu_final or '..' in a.graphics_override.parts or
+    not str(a.graphics_override).startswith('/usr/local/lib/siliconforest/firefox/160-system1/overrides/')):
+    raise ValueError('A qualified versioned Firefox graphics family is required')
 if a.stage.exists():raise ValueError('Fresh stage required')
 a.stage.mkdir();(a.stage/'Frameworks').mkdir();(a.stage/'bin').mkdir();(a.stage/'fixtures').mkdir()
 for family in ['CoreVideo','VideoToolbox']:
@@ -45,11 +54,21 @@ for clip in ['pattern-1080p60-h264','pattern-4k30-hevc']:
 shutil.copy2(a.fixtures/'manifest.json',a.stage/'fixture-manifest.json')
 if a.capture_buffers:
     for test in manifest:test['env']['SF_VT_CAPTURE_BUFFERS']=str(a.capture_buffers)
+for test in manifest:
+    if a.hold_final:test['env']['SF_CAPTURE_HOLD_FINAL']='1'
+    if a.retire_pool:test['env']['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
+    if a.gpu_final:
+        test['env'].update(SF_CAPTURE_GPU_FINAL='1',
+            SF_CAPTURE_EXPECT_GL=str(a.graphics_override/'gl/Frameworks/OpenGL.framework/Versions/A/OpenGL'),
+            DYLD_FRAMEWORK_PATH='@ROOT@/Frameworks:'+str(a.graphics_override/'gl/Frameworks'),
+            DYLD_LIBRARY_PATH=str(a.graphics_override/'gl/lib'))
 (a.stage/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (a.stage/'scope.json').write_text(json.dumps(dict(
     scope='STRICT real GPU storage/import, independent visible-pixel hashes/PTS, retained-picture64. Not GPU sampling/completion/browser performance.',
     surface=str(a.surface.resolve()),providers=str(a.providers.resolve()),probe=str(a.probe.resolve()),
-    required_mode='require',fallback_is_failure=True),indent=2)+'\n')
+    required_mode='require',fallback_is_failure=True,
+    hold_final=a.hold_final,retire_pool=a.retire_pool,gpu_final=a.gpu_final,
+    graphics_override=str(a.graphics_override) if a.graphics_override else None),indent=2)+'\n')
 rows=[dict(path=str(f.relative_to(a.stage)),sha256=hashlib.sha256(f.read_bytes()).hexdigest())
       for f in sorted(a.stage.rglob('*')) if f.is_file() and not f.is_symlink()]
 (a.stage/'cold-files.json').write_text(json.dumps(rows,indent=2)+'\n')

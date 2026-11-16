@@ -17,10 +17,12 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from capture_lifetime import qualify as qualify_lifetime
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('stage',type=Path)
 p.add_argument('--capture-buffers',type=int,choices=range(1,33))
+p.add_argument('--codec',choices=['h264','hevc'],help='One bounded correctness case; default runs both')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
 if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold bench')
 if not a.stage.name.startswith('firefox-shared-capture-'):raise ValueError('Own capture packet required')
@@ -36,7 +38,7 @@ def log(message):
 with tempfile.TemporaryDirectory() as temporary:
     frozen=Path(temporary)/'packet'
     shutil.copytree(a.stage,frozen,symlinks=True,ignore=shutil.ignore_patterns('target-*'))
-    for codec in ['h264','hevc']:
+    for codec in ([a.codec] if a.codec else ['h264','hevc']):
         subprocess.run(['python3',str(repo/'integrations/puredarwin/finch/tools/coord-gate.py'),
                         '--max-seconds','100'],cwd=repo,check=True)
         name='pattern-1080p60-h264' if codec=='h264' else 'pattern-4k30-hevc'
@@ -63,6 +65,12 @@ with tempfile.TemporaryDirectory() as temporary:
                 for name_,body in json.loads(collected.stdout).items():(out/name_).write_text(body)
             log('strict capture '+codec+' END; raw evidence retained, classification follows.')
         if result is None or result.returncode or collected.returncode:raise RuntimeError('Native capture failed; no automatic retry/next codec')
+        test=next(t for t in manifest if t['name']==name)
+        if test['env'].get('SF_CAPTURE_HOLD_FINAL')=='1':
+            rows=json.loads((out/'candidate.json').read_text())
+            lifetime=qualify_lifetime(next(r for r in rows if r['name']==name),test['env'])
+            (out/'lifetime-controls.json').write_text(json.dumps(lifetime,indent=2)+'\n')
+            if lifetime['status']!='PASS':raise RuntimeError('Requested lifetime control failed or was not executed')
         subprocess.run(['python3',str(repo/'integrations/puredarwin/finch/VideoToolbox/zerocopy/qualify-capture.py'),
                         '--candidate',str(out/'candidate.json'),'--name',name,
                         '--framemd5',str(frozen/'fixtures'/(name+'.framemd5')),

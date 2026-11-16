@@ -508,8 +508,8 @@ these silent queries. No server/kernel/device setting is changed.
 
 AV1 1080p60's generated pattern completes600/0 in10.208s with no decoder jobs;
 RDD58.67%/family179.22% of one core. VP9 4K30 completes300/0 in10.280s,
-RDD27.25%/family151.05%,313 hardware jobs (including codec subframes; audit
-required before exact attribution). Both retain40.04ms median video callbacks;
+RDD27.25%/family151.05%,313 hardware jobs, independently matching300 packets plus13 extra VP9
+codec subframes. Both retain40.04ms median video callbacks;
 VP9's first gap is144.82ms. These short patterns do not establish all-site speed.
 AV1 declarations correctly say not power efficient; no disable/preference follows.
 
@@ -524,3 +524,38 @@ codec identity was not captured. rVFC median40.04/p9550/max66.70ms. The composit
 capture was inspected and remains transparent inside the Firefox client. This
 is a failed visible-playback gate, even with installed media providers. No panel
 FPS, perceived A/V sync, or full-owner experience claim follows.
+
+## Private decoder-pool retirement control
+
+`SF_VT_RETIRE_POOL_AT_INVALIDATE=1` is a default-off producer experiment.
+Grouped leases allow serialized session invalidation to drop AVFrame references
+and release the codec's pool, while retaining the separate IOSurface storage
+and the existing consumer usecount/completion contract. Frame destruction runs
+outside the list lock; the session's owner reference protects concurrent lease
+removal. This must never run during decode/flush or be generalized to decoder
+memory that lacks independent external GPU storage.
+
+`prepare-shared-capture.py --hold-final` keeps the final picture alive through
+invalidation. `--retire-pool` opts into the producer change; `--gpu-final` also
+requires the explicit FX graphics family. It imports both NV12 planes through
+that existing CGL provider and checks the independent texture after releasing
+the CV picture. The explicit verification readback is a correctness operation,
+not a zero-total-copy/performance result. `run-shared-capture.py --codec hevc`
+permits one short case. Requested control markers, the actual provider path and
+GPU hash are admitted independently; missing controls cannot pass silently.
+
+Real M1/M5 ownership-component outputs agree. Native M1 H264's unchanged control
+keeps243792KiB of decoder DART mappings after invalidation until picture release;
+the experiment reaches0 while the final picture remains byte-exact/GPU-backed.
+Native HEVC's real-GPU case passes all300 reference pictures/PTS/held64 and
+held-final checks:843376KiB/one decoder context become0 at invalidation, while
+the picture remains valid. After CV release, CGL texture hash remains
+`92da379456b1570d817462efdc82c3d4`; provider CPU upload/readback0, GPU blit12441600
+bytes. H264's real-GPU texture also matches (`a6db733a4de0e9a25188bac82bc7d4b9`,
+3110400 blit bytes), but its combined global kernel gate FAILs because concurrent
+jobs and a live context overlap. Both earlier HEVC combined gates similarly
+FAIL global-job attribution despite correct pixels. Those failures stay recorded.
+Zero decoder DART mappings does not mean every client-owned GPU allocation is
+freed. No browser memory saving, visible playback or canonical activation is
+qualified. The next gate measures actual browser pause/end/close with retained
+GPU contents; owner selection remains unchanged.

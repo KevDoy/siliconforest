@@ -12,11 +12,22 @@ def change(old,new):
  global s
  if s.count(old)!=1:raise ValueError('decoder fixture anchor changed: '+old[:80])
  s=s.replace(old,new)
-change('#include <time.h>','#include <time.h>\n#include <dlfcn.h>\n#include <unistd.h>\n#include <IOSurface/IOSurface.h>')
-change('static int64_t g_last_pts = INT64_MIN;', '''static int64_t g_last_pts = INT64_MIN;
+change('#include <time.h>','#include <time.h>\n#include <dlfcn.h>\n#include <unistd.h>\n#include <sys/sysctl.h>\n#include <IOSurface/IOSurface.h>')
+change('static int64_t g_last_pts = INT64_MIN;', '''#include "final-gpu-picture.h"
+static int64_t g_last_pts = INT64_MIN;
 static CVPixelBufferRef held;
 static char heldHash[33];
 static unsigned gpuFrames,heldChecks;
+static int holdFinal,gpuFinal;
+static CVPixelBufferRef finalHeld;
+static char finalHash[33];
+static void poolSnapshot(const char *phase) {
+ char text[4096]={0};size_t bytes=sizeof(text)-1;
+ if(sysctlbyname("kern.pd_avd.stats",text,&bytes,NULL,0)){
+  printf("CAPTURE_FAIL pool stats unavailable\\n");g_errors++;return;
+ }
+ text[sizeof(text)-1]=0;printf("CAPTURE_POOL phase=%s %s\\n",phase,text);
+}
 static void visibleHash(CVPixelBufferRef image,char hex[33]) {
  struct pd_md5 md5;pd_md5_init(&md5);
  size_t width=CVPixelBufferGetWidth(image),height=CVPixelBufferGetHeight(image);
@@ -45,7 +56,37 @@ change('    g_frames++;', '''    if(!held&&!g_frames){held=CVPixelBufferRetain(i
         else puts("CAPTURE_HELD stable-after-64-frames=1");
         CVPixelBufferRelease(held);held=NULL;
     }
+    if(holdFinal){
+        if(finalHeld)CVPixelBufferRelease(finalHeld);
+        finalHeld=CVPixelBufferRetain(image);memcpy(finalHash,hex,sizeof(finalHash));
+    }
     g_frames++;''')
+change('int main(int argc, char **argv)\n{','''int main(int argc, char **argv)
+{
+    const char *hold=getenv("SF_CAPTURE_HOLD_FINAL");holdFinal=hold&&!strcmp(hold,"1");
+    const char *gpu=getenv("SF_CAPTURE_GPU_FINAL");gpuFinal=gpu&&!strcmp(gpu,"1");
+    if(gpuFinal&&!holdFinal){puts("CAPTURE_FAIL GPU control requires held picture");return 1;}''')
+change('    VTDecompressionSessionInvalidate(session);','''    if(gpuFinal&&(!finalHeld||sfFinalGPUPrepare(finalHeld))){
+        puts("CAPTURE_FAIL real GPU final-picture preparation");g_errors++;gpuFinal=0;
+    }
+    if(holdFinal)poolSnapshot("before-invalidate");
+    VTDecompressionSessionInvalidate(session);
+    if(holdFinal){
+        poolSnapshot("after-invalidate-held");
+        char hash[33]={0};
+        if(finalHeld)visibleHash(finalHeld,hash);
+        IOSurfaceRef storage=finalHeld?CVPixelBufferGetIOSurface(finalHeld):NULL;
+        int (*copyFD)(IOSurfaceRef)=dlsym(RTLD_DEFAULT,"IOSurfaceSFGPUCopyFD");
+        int fd=storage&&copyFD?copyFD(storage):-1;
+        if(!finalHeld||strcmp(hash,finalHash)||fd<0){puts("CAPTURE_FAIL final GPU picture lost after invalidation");g_errors++;}
+        else puts("CAPTURE_INVALIDATED held-visible-pixels-stable=1 GPU-handle-alive=1 real-GPU-consumer-fence=0");
+        if(fd>=0)close(fd);
+        if(finalHeld){CVPixelBufferRelease(finalHeld);finalHeld=NULL;}
+        usleep(30000);poolSnapshot("after-picture-release");
+        if(gpuFinal&&sfFinalGPUVerify(finalHash)){
+            puts("CAPTURE_FAIL real GPU pixels after invalidation/release");g_errors++;
+        }
+    }''')
 change('    err = VTDecompressionSessionCreate(NULL, format, spec, attributes, &record, &session);', '''    const CFStringRef *global=dlsym(RTLD_DEFAULT,"kIOSurfaceIsGlobal");
     if(!global||!*global){puts("CAPTURE_FAIL missing global surface key");return 1;}
     CFMutableDictionaryRef surfaceProperties=CFDictionaryCreateMutable(NULL,0,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);

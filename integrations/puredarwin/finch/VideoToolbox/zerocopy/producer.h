@@ -88,6 +88,10 @@ static int sf_gpu_configure(VTDecompressionSessionRef s,AVPDAVDDeviceContext *de
  fprintf(stderr,"SF_VT_GPU requested=1 required=%d available=%d kernel-cap=%d cv-lifetime=%d\n",
   (int)s->zeroRequired,available,!!(device->capabilities&PDAVD_CAP_EXTERNAL_BUFFERS),!!sfSetLifetime);
  if(!available)return s->zeroRequired?-1:0;
+ const char *retire=getenv("SF_VT_RETIRE_POOL_AT_INVALIDATE");
+ if(retire&&!strcmp(retire,"1")&&!s->captureGroup){
+  s->captureGroup=SFVTFrameLeaseGroupCreate();if(!s->captureGroup)return -1;
+ }
  device->allocate_external=sf_gpu_allocate;device->free_external=sf_gpu_free;device->external_opaque=s;
  return 0;
 }
@@ -107,7 +111,7 @@ static CVPixelBufferRef sf_gpu_image(VTDecompressionSessionRef s,AVFrame *frame)
   * without touching pixel bytes; a bare Unlock would unbalance lockCount. */
  if(IOSurfaceLock(surface,0,NULL))return NULL;
  if(IOSurfaceUnlock(surface,0,NULL))return NULL;
- CFTypeRef lease=SFVTCreateFrameLease(frame,surface);if(!lease)return NULL;
+ CFTypeRef lease=SFVTCreateGroupedFrameLease(frame,surface,s->captureGroup);if(!lease)return NULL;
  CVPixelBufferRef image=NULL;
  if(CVPixelBufferCreateWithIOSurface(NULL,surface,NULL,&image)||!image||sfSetLifetime(image,lease)){
   if(image)CVPixelBufferRelease(image);CFRelease(lease);return NULL;
