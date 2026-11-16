@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 typedef void *IOSurfaceRef,*CGLContextObj,*CGLPixelFormatObj;
 typedef unsigned GLenum,GLuint;
 typedef int GLint,GLsizei;
@@ -24,14 +25,17 @@ static IOSurfaceRef make_surface(IOSurfaceRef (*create)(CFDictionaryRef),int wid
 int main(int argc,char **argv){
  setvbuf(stdout,0,_IOLBF,0);REQUIRE(argc==2);
  REQUIRE(getenv("SFFX_GPU_IMAGE_CACHE")&&!strcmp(getenv("SFFX_GPU_IMAGE_CACHE"),"1"));
+ REQUIRE(getenv("SFFX_IOSURFACE_GPU")&&!strcmp(getenv("SFFX_IOSURFACE_GPU"),"1"));
  void *surface=dlopen("/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface",RTLD_NOW|RTLD_GLOBAL);
  void *lib=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);if(!lib||!surface){fprintf(stderr,"dlopen %s\n",dlerror());return 2;}
  LOAD(surface,IOSurfaceRef,IOSurfaceCreate,(CFDictionaryRef));LOAD(surface,IOSurfaceRef,IOSurfaceLookup,(uint32_t));LOAD(surface,uint32_t,IOSurfaceGetID,(IOSurfaceRef));
+ LOAD(surface,int,IOSurfaceSFGPUCopyFD,(IOSurfaceRef));
  LOAD(lib,int,CGLChoosePixelFormat,(const int *,CGLPixelFormatObj *,int *));LOAD(lib,int,CGLCreateContext,(CGLPixelFormatObj,CGLContextObj,CGLContextObj *));
  LOAD(lib,int,CGLSetCurrentContext,(CGLContextObj));LOAD(lib,int,CGLDestroyContext,(CGLContextObj));LOAD(lib,int,CGLDestroyPixelFormat,(CGLPixelFormatObj));
  LOAD(lib,int,CGLTexImageIOSurface2D,(CGLContextObj,GLenum,GLenum,GLsizei,GLsizei,GLenum,GLenum,IOSurfaceRef,GLuint));
  LOAD(lib,int,CGLSFFXCopyFramebufferRect,(IOSurfaceRef,int,int,int,int,int));
  LOAD(lib,void,CGLSFFXImageCacheStats,(uint64_t *));LOAD(lib,void,CGLSFFXImageCacheFootprint,(uint64_t *));
+ LOAD(lib,void,CGLSFFXTransferStats,(uint64_t *));
  LOAD(lib,void,glGenTextures,(GLsizei,GLuint *));LOAD(lib,void,glBindTexture,(GLenum,GLuint));LOAD(lib,void,glDeleteTextures,(GLsizei,const GLuint *));
  LOAD(lib,void,glTexParameteri,(GLenum,GLenum,GLint));LOAD(lib,void,glGenFramebuffers,(GLsizei,GLuint *));LOAD(lib,void,glBindFramebuffer,(GLenum,GLuint));
  LOAD(lib,void,glFramebufferTexture2D,(GLenum,GLenum,GLenum,GLuint,GLint));LOAD(lib,GLenum,glCheckFramebufferStatus,(GLenum));LOAD(lib,void,glDeleteFramebuffers,(GLsizei,const GLuint *));
@@ -42,6 +46,9 @@ int main(int argc,char **argv){
  REQUIRE(glGetString(0x1f01)&&strstr(glGetString(0x1f01),"Apple M1"));
  GLuint fbo=0;glGenFramebuffers(1,&fbo);glBindFramebuffer(0x8d40,fbo);
  IOSurfaceRef tiny=make_surface(IOSurfaceCreate,32,32);REQUIRE(tiny);
+ int fd=IOSurfaceSFGPUCopyFD(tiny);REQUIRE(fd>=0);close(fd);
+ REQUIRE(!(IOSurfaceGetID(tiny)&0x80000000u));
+ uint64_t transfer_before[4],transfer_after[4];CGLSFFXTransferStats(transfer_before);
  uint64_t before[3],after[3],foot[4];CGLSFFXImageCacheStats(before);
  for(int round=0;round<2;round++){
   IOSurfaceRef alias=round?IOSurfaceLookup(IOSurfaceGetID(tiny)):tiny;REQUIRE(alias);
@@ -52,7 +59,9 @@ int main(int argc,char **argv){
   unsigned char pixel[4]={0};glReadPixels(0,0,1,1,0x1908,0x1401,pixel);REQUIRE(!memcmp(pixel,(unsigned char[]){0,255,0,255},4));
   glFramebufferTexture2D(0x8d40,0x8ce0,0x0de1,0,0);glDeleteTextures(1,&texture);if(round)CFRelease(alias);
  }
- CGLSFFXImageCacheStats(after);REQUIRE(after[0]>before[0]);
+ CGLSFFXImageCacheStats(after);
+ printf("FXIMAGECACHE admission hits=%llu imports=%llu let_go=%llu\n",(unsigned long long)(after[0]-before[0]),(unsigned long long)(after[1]-before[1]),(unsigned long long)(after[2]-before[2]));
+ REQUIRE(after[0]>before[0]);
  REQUIRE(!CGLSFFXCopyFramebufferRect(tiny,0,INT_MAX,INT_MAX,INT_MAX,INT_MAX));
  REQUIRE(!CGLSFFXCopyFramebufferRect(tiny,0,0,0,INT_MAX,1));
  REQUIRE(!CGLSFFXCopyFramebufferRect(tiny,0,-1,0,1,1));
@@ -73,6 +82,8 @@ int main(int argc,char **argv){
   glReadPixels(0,0,1,1,0x1908,0x1401,pixel);REQUIRE(pixel[0]==((i&1)?255:0)&&pixel[1]==0&&pixel[2]==((i&1)?0:255)&&pixel[3]==255);
  }
  REQUIRE(!glGetError());glFramebufferTexture2D(0x8d40,0x8ce0,0x0de1,0,0);glDeleteTextures(40,textures);
+ CGLSFFXTransferStats(transfer_after);
+ REQUIRE(transfer_after[0]==transfer_before[0]&&transfer_after[1]==transfer_before[1]&&transfer_after[3]>transfer_before[3]);
  for(int i=0;i<40;i++)CFRelease(surfaces[i]);glDeleteFramebuffers(1,&fbo);
  CGLSFFXImageCacheFootprint(foot);uint64_t unused=foot[2];
  REQUIRE(!CGLSetCurrentContext(0)&&!CGLDestroyContext(ctx)&&!CGLDestroyPixelFormat(pf));
