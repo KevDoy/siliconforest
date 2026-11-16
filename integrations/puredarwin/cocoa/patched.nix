@@ -457,9 +457,8 @@
 #   0153  QuartzCore (FXLEAD, FX-036, the blank page): -[CALayer display] asks a delegate that wants to update its layer
 #         itself (-wantsUpdateLayer, NSView) for -updateLayer, as AppKit's -displayLayer: does on macOS; Firefox ends the
 #         suspension of its layer commits there (a stale first picture, then nothing); inert for views that answer NO
-#   0155  QuartzCore (FXLEAD, FX-011/012 stale and foreign tiles): an IOSurface that is a layer's contents is marked in use
-#         (IOSurfaceIncrement/DecrementUseCount, looked up at run time) while it is, as the window server does on macOS
-#         (Firefox's tile pool recycled surfaces the window still showed); -dealloc releases the last contents (leaked)
+#   (0155, FXLEAD's layer-contents use count + release at -dealloc: NOT in the series - FXLEAD withdrew it at 02:21Z, its
+#         repeat showed FX-011/012 unchanged and Firefox's parent counts the use itself; the file is kept for its history)
 #   0154  Onyx2D (FXPERF, adopted unchanged): an installed font file of 1 MB or more is mapped once per process and
 #         shared by every data provider (it was read whole into a private copy each time: Firefox's parent held ten
 #         30 MB copies of the CJK collection, footprint 921 -> 634 MB)
@@ -656,7 +655,6 @@ let
     ./patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch
     ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
     ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
-    ./patches/0155-quartzcore-layer-contents-surface-in-use-and-released.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
