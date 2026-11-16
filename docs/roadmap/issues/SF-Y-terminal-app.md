@@ -607,6 +607,54 @@ Figures from runs judged by DESK7's real-input counters before and after (unchan
 - Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
   the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
+## TERM11 round (16 November, day): Firefox's menu panel, clipboard, Quit, display link
+Tools in `runs/sf-term11` (not committed): `tools/t11_m1.py` (TERM10's launcher helper, my area /private/var/db/sft11),
+`tools/pop11.py` (menu panel x N with Marionette panel state, hover, History, New Tab, doorhangers, permission prompt),
+`tools/clip11.py` (two own Firefox, Command-C/V both ways, HTML), `tools/quit11.py` (Command-W, then the desk's app
+Quit to the Firefox parent), `tools/pace11.py` (WMPACING shown/s, PD_CV_TRACE ticks, PD_WS_TIMING), `stage.sh`
+(prefix with AppKit Versions/A and C, libWindowServer, QuartzCore.pd, CoreVideo). Synthetic input only, on the
+virtual seat, into windows that appeared after my own launch; own fresh profiles, deleted after each run.
+
+### FX-022: Firefox's menu panel (causes found by reading Gecko 160's widget/cocoa against our AppKit)
+- `-orderWindow:relativeTo:` posted NSWindowWillMoveNotification around every order; Gecko's `-windowWillMove:` rolls
+  popups up, and the panel is shown by `-addChildWindow:ordered:` (PopupLevel::Parent): it closed 26-30 ms after it
+  opened (CODEX-FX's measurement). 0163: no move notifications on order.
+- The popup grab moved the keyboard to the popup surface and libWindowServer told AppKit the browser window lost key
+  (Gecko rolls up in `-windowDidResignKey:`). 0163w: our own popup taking the keyboard is no loss of key (a leave is told
+  only if no enter on a window of ours follows within 40 ms); key events for a window that cannot be key go to the key
+  window (Escape and arrows reach Firefox's popup manager, as on macOS).
+- Gecko lowers a closing popup to level 8 and paints it after hiding it; a flush of the hidden window made
+  libWindowServer map it again (TERM10's dark toplevel). 0165: a window off the screen sends no flush; 0163w: frameless
+  child windows and frameless former popups are popups at any level.
+- The panel then stayed open but was invisible: the popup's content view had a layer whose tree did not contain
+  Firefox's ChildView layers (read back empty, 0/439936 pixels). 0170: a view with a layer that moves under another view
+  puts its layer into the superview's layer; a removed view's layer leaves it; orphans are put back before a render.
+- No hover: the pointer entering the panel brought no move. 0173w: pointer enter is a move there.
+- Result in my own Firefox (candidate, synthetic input): 20/20 rounds open at the button, stay, painted, the item under
+  the pointer highlights, Escape closes, window alive, 0 compositor protocol errors; History subview opens; New Tab acts;
+  downloads, extensions, site permissions, tracking protection and bookmark panels and the geolocation prompt open at
+  their anchors and close (captures looked at).
+- Installed t11a 11:47Z, REVERTED 12:05Z: with it Firefox crashed when a window or panel closed (SIGSEGV in
+  `-[CALayerContext _scheduleRender]`'s block): a view could get a second layer context replacing the first without
+  invalidating it. 0175: a view keeps its context.
+
+### Clipboard (DESK10's 0 bytes)
+Another client's paste request was answered on Firefox's main thread from the board as it was then; the installed
+files answered 0 bytes (reproduced: cl7a). 0168: answered from the data offered, on a thread of its own; lazily
+provided data through the main thread; 0175: a request between an offer and its data reads the board's own data.
+Candidate: plain text both ways in cl6a/cl7b; HTML (bold kept) once (cl9a); one run each still got only a BOM: open.
+
+### Windowless Quit (DESK9/CODEX-FX)
+Gecko replaces `-terminate:` by a notification only and quits itself from `-applicationShouldTerminate:`; the desk's
+Quit called `-terminate:`. 0164/0169: as macOS's quit Apple event, the delegate is asked first (once). Candidate: Command-W,
+then the desk's Quit to the Firefox parent: natural exit in 3.1-3.3 s, family gone, 3/3; installed: alive after 12 s.
+
+### Presented frame rate (FXPERF2's bistable ~30/s)
+Firefox's display link runs in its GPU process (ticks traced to files with PD_CV_TRACE=<dir>). The old 0149 link waits
+for a pending frame's flip and sometimes ticks every second refresh; 0172 ticks once per refresh on the display's phase
+(a first version re-phased on flip reports and skipped refreshes: 34 ticks/s, kept as a lesson). In slow runs Firefox
+itself committed ~30 frames/s; our present costs 1.5 ms. 0306 (FXPERF2) adopted. Damage path not default-on.
+
 ## TERM10 round (16 November, early morning): Firefox's stale tiles, its menu panel, trackpad scrolling
 Tools in `runs/sf-term10` (not committed): `tools/t10_m1.py` (FXLEAD's launcher helper, my own area
 /private/var/db/sft10), `tools/ab.py` (sites + five Page Down), `tools/popt.py`, `tools/popstress.py`, `tools/scrollt.py`,

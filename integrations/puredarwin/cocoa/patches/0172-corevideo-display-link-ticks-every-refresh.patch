@@ -1,6 +1,15 @@
 --- a/src/Frameworks/CoreVideo/CVDisplayLink.m
 +++ b/src/Frameworks/CoreVideo/CVDisplayLink.m
-@@ -77,6 +77,27 @@
+@@ -3,6 +3,8 @@
+ #include <mach/mach_time.h>
+ #include <pthread.h>
+ #include <dlfcn.h>
++#include <mach/mach.h>
++#include <mach/thread_policy.h>
+ 
+ extern CGDirectDisplayID CGMainDisplayID(void);
+ 
+@@ -77,6 +79,27 @@
  
  static void displayLinkCall(CVDisplayLink *link, CVTimeStamp *now, CVTimeStamp *out) {
      CVOptionFlags flagsOut = 0;
@@ -28,7 +37,7 @@
      NSAutoreleasePool *pool = [NSAutoreleasePool new];
      if (link->_callback != NULL)
          link->_callback(link, now, out, 0, &flagsOut, link->_userInfo);
-@@ -84,8 +105,13 @@
+@@ -84,8 +107,13 @@
  }
  
  // one tick on the display clock; 0 when the clock knows no flip yet (the caller ticks on its timer instead)
@@ -43,7 +52,7 @@
      int pending;
      static mach_timebase_info_data_t tb;
  
-@@ -93,33 +119,28 @@
+@@ -93,33 +121,28 @@
          mach_timebase_info(&tb);
      if (!pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since))
          return 0;
@@ -95,3 +104,17 @@
      displayLinkCall(link, &tsNow, &tsOut);
      return 1;
  }
+@@ -133,6 +156,13 @@
+     pdFindDisplayClock();
+     mach_timebase_info(&tb);
+     period = (uint64_t)(1e9 / 60.0 * tb.denom / tb.numer);
++    /* (TERM11) the link's thread runs as a display link's does on macOS, under a time constraint (a refresh period,
++     * ~2 ms of work within ~4 ms): at the default priority it woke more than half a refresh late now and then while
++     * Firefox's processes kept the cores busy, and a refresh went without a frame */
++    thread_time_constraint_policy_data_t policy = { (uint32_t)period, (uint32_t)(period / 8), (uint32_t)(period / 4), 1 };
++    if (thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&policy,
++                          THREAD_TIME_CONSTRAINT_POLICY_COUNT) != KERN_SUCCESS)
++        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+     while (link->_running && link->_generation == generation) {
+         if (pdDisplayClock != NULL && displayLinkClockTick(link, generation, &last, start))
+             continue;
