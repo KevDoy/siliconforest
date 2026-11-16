@@ -22,6 +22,48 @@ that restores its previous value. No pointer, key, seat, focus or renderer
 setting changes occur. Actual pixels still require inspection; a successful
 readback alone is not visible playback or panel cadence proof.
 
+The corrected current-kernel copy/shared comparison completes600 H.2641080p60
+and300 HEVC4K30 frames, with zero reported drops in all four cases and identical
+final image hashes. All four actual renderer captures were inspected: browser
+chrome, page text and the expected video pattern are visible. Decoder pixel
+copies fall from one per frame to zero. RDD CPU falls14.745→8.558% and
+26.889→16.533% of one core; matched family CPU119.024→115.251% and
+151.429→149.472%. This is one unprofiled pair. CGL transport counters exclude
+QuartzCore CPU uploads and verification readbacks; this is not a claim that the
+whole browser performs no CPU copies. Shared rVFC median remains40.02ms, with
+maxima51.64/112ms. Neither those notifications nor inspected end frames prove
+the panel presents every frame.
+
+`stage-video-providers.py` stages the complete qualified CV/VT family at a new
+inactive versioned runtime prefix, after the notice deadline and fresh bench
+gate. All files are hashed on the M1 before execution. It changes no canonical
+framework, launcher, manifest, daemon or process. `video-runtime-plan.patch`
+hands selection to FX: canonical graphics, network and normalized audio remain
+selected; shared allocation uses best effort with the producer's copy fallback.
+Strict qualification still uses `SF_VT_ZERO_COPY=require`. The full32-buffer
+pool remains the default and invalidation retirement remains off.
+
+After FX selects the family under its guarded install hold, run:
+
+```sh
+python3 integrations/puredarwin/finch/firefox-media/run-installed-video.py \
+  --stage runs/sffinch/firefox-video-installed-packet-v1
+```
+
+The prepared packet contains no private media provider. The actual installed
+outer launcher must select the exact family with system graphics and retained
+audio/network. The gate requires both frozen clips, zero drops, decoder jobs
+and final hashes, zero CGL CPU transport counters, actual browser/RDD CV/VT
+including its PD child, and actual renderer receipts. Both GPU images still
+require inspection. After measurement and captures it requests ordinary Quit,
+requires status0 and no live owned family before cleanup, and collects the
+original runtime logs from only its fresh HOME with bounded hash receipts.
+The shared runner's original survival-oriented verdict remains false after
+intentional Quit; the installed admission reports this explicitly and qualifies
+completed playback followed by natural exit separately. FX rolls selection back
+if either admission or actual image inspection fails. Source-policy tests and
+an inactive cold stage do not establish installed playback.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

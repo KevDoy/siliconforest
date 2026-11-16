@@ -39,6 +39,7 @@ def main():
     p.add_argument('--profile-video',action='store_true')
     p.add_argument('--rate-control',action='store_true')
     p.add_argument('--staged-media',action='store_true')
+    p.add_argument('--installed-media',action='store_true',help='Exact installed video-shared-v1 selection; no private media wrapper')
     p.add_argument('--frame-mode',choices=['copy','require'],default='copy')
     p.add_argument('--without-trace',action='store_true')
     p.add_argument('--graphics-override',type=Path,help='FX-qualified complete cohort under the runtime overrides directory')
@@ -64,7 +65,9 @@ def main():
     if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):
         raise ValueError('Lifetime control requires separate strict owned fixtures')
     if a.retire_pool and not a.lifetime_control:raise ValueError('Pool retirement requires its lifetime control')
-    if a.frame_mode=='require' and not a.staged_media:
+    if a.installed_media and (a.staged_media or a.graphics_override):
+        raise ValueError('Installed video gate cannot use private media or graphics')
+    if a.frame_mode=='require' and not (a.staged_media or a.installed_media):
         raise ValueError('Strict sharing requires the reviewed staged VT producer')
     if a.graphics_override and (not a.staged_media or '..' in a.graphics_override.parts or
             not a.graphics_override.is_relative_to(Path('/usr/local/lib/siliconforest/firefox/160-system1/overrides'))):
@@ -188,6 +191,46 @@ def main():
                 if current==parent:owned[pid]=start
             return process_cpu.capture(self,parent,owned)
 
+        def close(self):
+            if a.installed_media and getattr(self,'completed_installed_videos',0)==2:
+                import time
+                # After both measurements/pages/captures, request ordinary Quit
+                # from this admitted client, before the shared runner's cleanup.
+                # Keep its original survival verdict: the installed admission
+                # separately requires this intentional natural status0 exit.
+                result=dict(requested=True,cleanup_signals=[],family_before=[],family_remaining=[])
+                def identities():
+                    text=subprocess.check_output(['ps','-axo','pid=,ppid=,lstart='],text=True)
+                    return {int(p):(int(pp),start) for p,pp,start in (line.split(None,2) for line in text.splitlines())}
+                before=identities();owned={}
+                if before.get(self.owned_parent,(None,None))[1]!=self.owned_parent_start:
+                    raise RuntimeError('Quit parent identity changed')
+                for pid,(_,start) in before.items():
+                    current=pid;seen=set()
+                    while current in before and current not in seen and current!=os.getpid():
+                        seen.add(current);current=before[current][0]
+                    if pid!=os.getpid() and current==os.getpid():owned[pid]=start
+                result['family_before']=sorted(owned)
+                result['parent']=self.owned_parent
+                result['requested_monotonic']=time.monotonic()
+                try:result['reply']=self.command('Marionette:Quit',{'flags':[]})
+                except (OSError,EOFError) as error:result['transport_end']=type(error).__name__
+                deadline=time.monotonic()+8
+                while True:
+                    current=identities()
+                    remaining=[pid for pid,start in owned.items() if current.get(pid,(None,None))[1]==start]
+                    # The launcher may remain a waitable zombie until Popen.poll.
+                    if remaining:
+                        states=subprocess.check_output(['ps','-axo','pid=,stat='],text=True)
+                        live={int(p):state for p,state in (row.split(None,1) for row in states.splitlines())}
+                        remaining=[pid for pid in remaining if not live.get(pid,'Z').startswith('Z')]
+                    result['family_remaining']=remaining
+                    if not remaining or time.monotonic()>=deadline:break
+                    time.sleep(.05)
+                result['elapsed_seconds']=time.monotonic()-result['requested_monotonic']
+                (a.run/'natural-quit.json').write_text(json.dumps(result,indent=2)+'\n')
+            return super().close()
+
         def lifetime_control(self,video):
             import process_cpu
             import time
@@ -242,9 +285,9 @@ def main():
                 directory=a.run/('media-provider-'+str(len(list(a.run.glob('media-provider-*')))))
                 directory.mkdir()
                 try:video['media_providers']=media_images.inspect(cpu['after']['processes'],directory,
-                                    root/'Frameworks' if a.staged_media else None)
+                                    root/'Frameworks' if a.staged_media else installed_frameworks)
                 except Exception as error:video['media_provider_error']=str(error)
-                if a.staged_media:
+                if a.staged_media or a.installed_media:
                     try:
                         capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(directory/'cpu-scene.ppm')],
                                                capture_output=True,text=True,timeout=5,
@@ -258,6 +301,8 @@ def main():
             if a.lifetime_control:
                 try:video['lifetime_control']=self.lifetime_control(video)
                 except Exception as error:video['lifetime_control_error']=str(error)
+            if a.installed_media and video.get('ended') is True and not video.get('error') and not video.get('playError'):
+                self.completed_installed_videos=getattr(self,'completed_installed_videos',0)+1
             return video
     marionette.Marionette=IsolatedClient
     if not a.without_trace:
@@ -283,7 +328,12 @@ def main():
     if not launcher.is_file() or 'SFFX_DIAGNOSTIC_OBSERVER' not in launcher.read_text():
         raise ValueError('Installed launcher lacks isolated diagnostic hook')
     manifest=json.loads((runtime/'release.json').read_text())
-    if a.staged_media:os.environ['SF_VT_COPY_COUNTS']='1'
+    installed_frameworks=None
+    if a.installed_media:
+        from video_selection import installed_family
+        installed_frameworks=installed_family(manifest)
+        if not installed_frameworks.is_dir():raise ValueError('Selected video family is absent')
+    if a.staged_media or a.installed_media:os.environ['SF_VT_COPY_COUNTS']='1'
     if a.timer_control:os.environ['PD_CV_TIMER']='1'
     if a.retire_pool:os.environ['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
     else:os.environ.pop('SF_VT_RETIRE_POOL_AT_INVALIDATE',None)
@@ -293,6 +343,7 @@ def main():
         release=manifest,diagnostic_only=True,timing_qualified=False,
         synthetic_input=False,owner_idle_wait=False,rate_control=a.rate_control,
         staged_media=a.staged_media,frame_mode=a.frame_mode,boundary_trace=not a.without_trace,
+        installed_media=a.installed_media,
         graphics_override=str(a.graphics_override) if a.graphics_override else None,
         native_compositor_disabled=a.no_native_compositor,
         cv_timer_control=a.timer_control,
@@ -312,6 +363,7 @@ def main():
           '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
+    if a.installed_media:argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file() and not a.youtube:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
@@ -366,8 +418,20 @@ def main():
         server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
         argv+=['--url','http://127.0.0.1:'+str(server.server_port)+'/index.html']
     sys.argv=argv
-    try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+    try:
+        try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+        except SystemExit as error:
+            if not a.installed_media:raise
+            # Intentional Quit makes the shared survival-oriented runner return1.
+            # Preserve its raw status/verdict and admit only via the exact gate.
+            (a.run/'shared-runner-status.json').write_text(json.dumps(dict(returncode=error.code,
+                reason='Survival-oriented runner; intentional Quit qualified separately'))+'\n')
+            if error.code not in [0,1]:raise
     finally:
+        if a.installed_media and destination.is_dir():
+            import audio_logs
+            rows=audio_logs.collect(destination,destination/'home')
+            (destination/'native-logs.json').write_text(json.dumps(rows,indent=2)+'\n')
         if server:
             server.shutdown();server.server_close();server_thread.join(timeout=2)
 

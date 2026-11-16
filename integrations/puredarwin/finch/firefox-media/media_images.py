@@ -32,6 +32,9 @@ def inspect(processes,directory,frameworks=None):
                     if name=='AudioToolbox':
                         children=selected.get('AudioToolbox.output-pd',[])
                         checks['AudioToolbox.output-pd']=len(children)==1 and children[0].startswith(str(frameworks/'AudioToolbox.framework')+'/')
+                    if name=='VideoToolbox':
+                        children=selected.get('VideoToolbox.pd',[])
+                        checks['VideoToolbox.pd']=len(children)==1 and children[0].startswith(str(frameworks/'VideoToolbox.framework')+'/')
         rows.append(dict(pid=pid,type=process['type'],status=sample.returncode,images=images,
                          selected=selected,staged_media_checks=checks,
                          passed=sample.returncode==0 and bool(images) and all(checks.values())))
