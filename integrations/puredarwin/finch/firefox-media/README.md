@@ -463,9 +463,24 @@ the installed media and other providers, and verifies their actual paths and
 UUIDs in its own parent/GPU processes. Read-only Mach snapshots cover exactly
 the ten-counter array; no function call is injected. `--qc-copy off/on` changes
 only this owned process's `PD_CA_NV12_GPU_COPY` switch. Neither arm qualifies as
-canonical Cocoa or an installed launch. The private SDK/caller host gates pass;
-the matched1080p60/4K30 browser pair is pending. TERM owns canonical adoption
-and installation, and FX owns CGL selection.
+canonical Cocoa or an installed launch. The private SDK/caller host gates pass.
+The first matched browser pair FAILS:1080p decodes600 frames each but drops47/43.
+QC CPU payload falls from1,636,070,400 bytes in526 uploads to zero in525 GPU
+copies; both final1080p renderer images were inspected and show the correct
+final pattern. Family CPU91.340→92.669% of one core shows no improvement.
+Neither4K clip decodes: AVD CREATE fails with ENOMEM. Kernel output identifies
+no contiguous IOVA space for1597 pages at1,985,472KiB mapped in its2GiB window,
+while physical memory is available. The capacity/fragmentation request is with
+the kernel owner. No private caller or CGL selection is installed.
+
+The failed pair's original143 cleanup exits remain failures. Future owned QC
+diagnostics request normal Quit even when a media case fails; media errors
+still fail admission. Their stdout evidence is separate from the installed
+launcher's native-log receipt. A separate H264-only comparison can use
+`--qc-1080-only --qc-settle 60`: a fixed normal-services startup control outside
+all CPU/playback measurements, with no quiet preferences or owner-idle wait.
+Its analyzer requires `--partial-1080` and explicitly leaves4K qualification
+open. TERM owns canonical adoption/installation, and FX owns CGL selection.
 
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL

@@ -10,7 +10,7 @@ import qc_copy_control as qc
 spec=importlib.util.spec_from_file_location('installed_video',Path(__file__).with_name('analyze-installed-video.py'))
 base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
 
-def arm(stage,mode):
+def arm(stage,mode,partial1080=False):
     stage=Path(stage);run=stage/'target-browser/browser-run'
     launch=json.loads((run/'cadence-launch.json').read_text())
     raw=json.loads((run/'browser/result.json').read_text())
@@ -18,7 +18,16 @@ def arm(stage,mode):
     original=base.analyze(run)
     # The three installed/graphics gates MUST be replaced by explicit private
     # admission, never promoted to a canonical or installed success.
-    checks={k:v for k,v in original['checks'].items() if k not in ['installed_outer','canonical_graphics','actual_graphics']}
+    checks={k:v for k,v in original['checks'].items() if k not in ['installed_outer','canonical_graphics','actual_graphics','native_output_collected']}
+    checks['own_native_stdout']=bool((run/'browser/firefox.log').read_text(errors='replace').strip())
+    if partial1080:
+        checks.pop('two_frozen_clips',None)
+        checks['explicit_partial_1080']=launch.get('qc_1080_only') is True and len(original['clips'])==1 and original['clips'][0]['expected_frames']==600
+    else:checks['complete_clip_selection']=launch.get('qc_1080_only') is not True
+    if (run/'qc-settle.json').is_file():
+        settle=json.loads((run/'qc-settle.json').read_text())
+        checks['fixed_settle_control']=settle.get('requested_seconds')==launch.get('qc_startup_settle_seconds',0) and settle.get('elapsed_seconds',-1)>=settle['requested_seconds'] and settle.get('normal_services') is True and settle.get('quiet_preferences') is False and settle.get('owner_idle_wait') is False and settle.get('outside_measurements') is True
+    else:checks['fixed_settle_control']='qc_startup_settle_seconds' not in launch # Legacy default0, no invented timing receipt.
     checks['private_only']=launch.get('private_quartzcore_copy')==mode and not any(launch.get(k) for k in ['staged_media','graphics_override','private_frame_identity_graphics'])
     target=Path('/private/var/db/sffx')/stage.name
     try:qc.verify(raw['providers'],identity,target);checks['actual_private_cohort']=True
@@ -42,7 +51,8 @@ def arm(stage,mode):
     return dict(passed=all(checks.values()),checks=checks,clips=clips,launch=launch,
         identity=identity,providers=raw['providers'],installed_admission=original['passed'],
         installed_admission_must_remain_false=True,visual_review='REQUIRED actual two renderer images',
-        scope='Owned private QC/CGL caller, not an installed provider, panel FPS or all browser memory copies.')
+        partial_1080_only=partial1080,
+        scope='Owned private QC/CGL caller, not an installed provider, panel FPS or all browser memory copies.'+(' H264 ONLY: 4K admission remains open.' if partial1080 else ''))
 
 def compare(off,on):
     checks=dict(both_arms=off['passed'] and on['passed'],
@@ -50,6 +60,7 @@ def compare(off,on):
         same_kernel=off['launch']['kernel_uuid']==on['launch']['kernel_uuid'],
         same_originals=off['identity']==on['identity'],
         installed_claim_refused=off['installed_admission'] is False and on['installed_admission'] is False)
+    checks['same_settle_selection']=off['launch'].get('qc_startup_settle_seconds',0)==on['launch'].get('qc_startup_settle_seconds',0) and off['launch'].get('qc_1080_only',False)==on['launch'].get('qc_1080_only',False)
     def providers(value):
         return sorted((p['role'],x['name'],x['uuid'],x['path'].split('/qc-nv12/',1)[-1]
                        if '/qc-nv12/' in x['path'] else x['path'])
@@ -64,10 +75,11 @@ def compare(off,on):
             qc_off=a['qc_uploads']['total'],qc_on=b['qc_uploads']['total'],
             off_callback_gap_ms=a.get('rvfc_ms'),on_callback_gap_ms=b.get('rvfc_ms')))
     return dict(passed=all(checks.values()),checks=checks,clips=rows,
-        visual_review='REQUIRED: independently inspect all four actual renderer images',
+        partial_1080_only=off.get('partial_1080_only',False),
+        visual_review='REQUIRED: independently inspect all '+('two' if off.get('partial_1080_only') else 'four')+' actual renderer images',
         limits='One fresh-profile OFF then ON pair; startup/background work and ordering can confound CPU. Counter-zero applies to observed decoder/CGL/QC transport, not every driver/browser copy. Not panel FPS, completed flips or asynchronous-fence qualification.')
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--off',type=Path,required=True);p.add_argument('--on',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
-    off=arm(a.off,'off');on=arm(a.on,'on');result=dict(off=off,on=on,pair=compare(off,on))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--off',type=Path,required=True);p.add_argument('--on',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--partial-1080',action='store_true');a=p.parse_args()
+    off=arm(a.off,'off',a.partial_1080);on=arm(a.on,'on',a.partial_1080);result=dict(off=off,on=on,pair=compare(off,on))
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result['pair'],indent=2));raise SystemExit(0 if result['pair']['passed'] else 1)

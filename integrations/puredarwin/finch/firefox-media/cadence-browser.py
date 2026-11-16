@@ -64,11 +64,14 @@ def main():
     p.add_argument('--frame-id-geometry',help='Explicit private-CGL seven-field marker geometry; bounds are not pixel admission')
     p.add_argument('--frame-id-cgl',action='store_true',help='Packaged private CGL only; keep installed media/GLAPI/IOSurface/broker/UI plan')
     p.add_argument('--qc-copy',choices=['off','on'],help='Private QC/CGL paired-copy comparison; retains installed media and all other providers')
+    p.add_argument('--qc-1080-only',action='store_true',help='Separate partial caller diagnostic while 4K resource admission is unavailable')
+    p.add_argument('--qc-settle',type=int,choices=[0,60],default=0,help='Fixed normal-services startup control outside all measurements')
     p.add_argument('--frame-id-dimensions-only',action='store_true',help='Paused preview/private CGL export dimensions only; no geometry/readback/15s run')
     p.add_argument('--frame-id-quiet-rollouts',action='store_true',help='Disable Nimbus rollout/study work only in this fresh owned test profile')
     a=p.parse_args()
     if a.qc_copy and (not a.installed_media or not a.without_trace or a.frame_id or a.graphics_override or a.staged_media or a.mse or a.youtube or a.codec_matrix or a.profile_video):
         raise ValueError('Separate installed-media/no-trace private QC comparison required')
+    if (a.qc_1080_only or a.qc_settle) and not a.qc_copy:raise ValueError('QC startup/clip controls require the private caller case')
     if a.frame_id and (not a.installed_media or not a.without_trace or a.youtube or a.codec_matrix or a.mse or a.rate_control or a.lifetime_control):
         raise ValueError('Frame identity requires its separate installed-media no-trace case')
     if a.frame_id_geometry:
@@ -287,7 +290,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.frame_id and getattr(self,'frame_id_preview_completed',False)) or (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or ((a.installed_media or a.staged_media) and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.qc_copy and hasattr(self,'owned_parent')) or (a.frame_id and getattr(self,'frame_id_preview_completed',False)) or (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or ((a.installed_media or a.staged_media) and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -454,6 +457,14 @@ def main():
                     if not admission:raise RuntimeError('No independently decoded owned native frame0; timed playback REFUSED')
                     (a.run/'frame-id-export-geometry-admission.json').write_text(json.dumps(admission,indent=2)+'\n')
             cpu={}
+            if a.qc_copy and not getattr(self,'qc_settled',False):
+                import time
+                begin=time.monotonic()
+                for _ in range(a.qc_settle//5):time.sleep(5)
+                self.qc_settled=True
+                (a.run/'qc-settle.json').write_text(json.dumps(dict(requested_seconds=a.qc_settle,
+                    elapsed_seconds=time.monotonic()-begin,normal_services=True,quiet_preferences=False,
+                    owner_idle_wait=False,input_injected=False,outside_measurements=True),indent=2)+'\n')
             qc_before=qc_snapshot() if a.qc_copy else None
             try:cpu['before']=self.cpu_snapshot()
             except Exception as error:cpu['before_error']=str(error)
@@ -575,6 +586,7 @@ def main():
         owned_rollout_control=a.frame_id_quiet_rollouts,
         private_frame_identity_graphics=a.frame_id_cgl,
         private_quartzcore_copy=a.qc_copy,
+        qc_1080_only=a.qc_1080_only,qc_startup_settle_seconds=a.qc_settle,
         frame_identity_geometry=a.frame_id_geometry,
         frame_identity_dimensions_only=a.frame_id_dimensions_only,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
@@ -614,6 +626,7 @@ def main():
     if a.profile_video:argv+=['--profile-video']
     clips=([( 'pattern-1080p60-h264.mp4',rate) for rate in [0.5,1,2]] if a.rate_control else
            [('pattern-1080p60-h264.mp4',1),('pattern-4k30-hevc.mp4',1)])
+    if a.qc_1080_only:clips=clips[:1]
     if a.codec_matrix:
         if a.rate_control:raise ValueError('Codec and rate comparisons are separate measurements')
         names=['av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm']
