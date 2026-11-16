@@ -25,8 +25,8 @@ def analyze(run,staged=False):
     if staged:
         checks['staged_outer']=launch.get('installed_media') is False and launch.get('staged_media') is True
     else:
-        checks['installed_outer']=launch.get('installed_media') is True and launch.get('staged_media') is False
-    checks['canonical_graphics']=not launch.get('graphics_override')
+        checks['installed_outer']=launch.get('installed_media') is True and launch.get('staged_media') is False and not launch.get('private_quartzcore_copy')
+    checks['canonical_graphics']=not any(launch.get(k) for k in ['graphics_override','private_quartzcore_copy','private_frame_identity_graphics'])
     checks['actual_graphics']=raw.get('providers',{}).get('complete') is True and raw.get('providers',{}).get('expected_system_gpu') is True
     checks['strict_mode']=launch.get('frame_mode')=='require'
     checks['unprofiled']=launch.get('boundary_trace') is False

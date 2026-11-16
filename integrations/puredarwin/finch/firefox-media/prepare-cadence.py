@@ -15,6 +15,8 @@ p.add_argument('--fixture',type=Path,required=True)
 p.add_argument('--frame-id-fixture',type=Path,help='Own Linux-verified900-frame Gray-code movie and manifest')
 p.add_argument('--frame-id-cgl',type=Path,help='Linux-built CGL hook prefix; package ONLY OpenGL.framework')
 p.add_argument('--frame-id-buffered',action='store_true',help='Private RAM observer needs an explicit post-measurement flush')
+p.add_argument('--qc-nv12',type=Path,help='Original private frozen QuartzCore caller build; paired with --qc-cgl')
+p.add_argument('--qc-cgl',type=Path,help='Current qualified CGL GPU-copy build; private comparison only')
 p.add_argument('--stage',type=Path,required=True)
 p.add_argument('--providers',type=Path,help='Reviewed media payload only; graphics and broker remain selected by FX')
 p.add_argument('--gpu-counter-spec',type=Path,help='Read-only CGL counters: exact runtime provider path/UUID and Linux symbol offset')
@@ -26,6 +28,9 @@ p.add_argument('--mse-pcm-trace',type=Path,help='Linux-built output aggregate me
 p.add_argument('--mse-hal-trace',type=Path,help='Linux-built HAL ring observer; required for MSE')
 p.add_argument('--view-state',type=Path,help='Linux-built read-only AppKit getter observer/control prefix; MSE diagnostic only')
 a=p.parse_args();here=Path(__file__).resolve().parent
+if bool(a.qc_nv12)!=bool(a.qc_cgl):raise ValueError('Private QC and CGL builds required together')
+if a.qc_nv12 and (a.providers or a.frame_id_cgl or a.frame_id_fixture or a.mse_fixtures or a.codec_fixtures or not a.gpu_counter_spec):
+    raise ValueError('Separate private QC comparison requires its exact GPU counter specification')
 if a.view_state and not a.mse_fixtures:raise ValueError('View-state diagnostic requires its own MSE case')
 if bool(a.mse_fixtures)!=bool(a.mse_pcm_trace) or bool(a.mse_fixtures)!=bool(a.mse_hal_trace):
     raise ValueError('MSE requires its generated fixtures and both qualified native observers')
@@ -83,6 +88,17 @@ if a.frame_id_cgl:
         relative_binary='frame-id-cgl/Frameworks/OpenGL.framework/Versions/A/OpenGL',
         explicit_log_flush=a.frame_id_buffered,
         scope='Private CGL only; canonical GLAPI/IOSurface/broker/UI and selected media remain'),indent=2)+'\n')
+if a.qc_nv12:
+    from qc_copy_control import binary_identity
+    qc=a.qc_nv12/'System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore'
+    cgl=a.qc_cgl/'Frameworks/OpenGL.framework/Versions/A/OpenGL'
+    identity=dict(quartzcore=binary_identity(qc,'_sfca_video_upload_stats'),
+                  cgl=binary_identity(cgl,'_pd_gpu_stats'),installed=False)
+    target=a.stage/'qc-nv12';(target/'lib').mkdir(parents=True)
+    shutil.copy2(qc,target/'lib/QuartzCore.pd')
+    (target/'Frameworks').mkdir()
+    shutil.copytree(a.qc_cgl/'Frameworks/OpenGL.framework',target/'Frameworks/OpenGL.framework',symlinks=True)
+    (target/'identity.json').write_text(json.dumps(identity,indent=2)+'\n')
 if a.codec_fixtures:
     manifest=json.loads((a.codec_fixtures/'manifest.json').read_text())
     rows={row['file']:row for row in manifest['fixtures']}
@@ -102,7 +118,7 @@ for directory in ['bin','lib']:
     subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
         str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/directory),
         str(a.stage/('portable-'+directory+'.json'))],check=True)
-for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','media-capture.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py','frame_geometry.py','frame_marker.py','frame_probe_admission.py']:
+for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','media-capture.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py','frame_geometry.py','frame_marker.py','frame_probe_admission.py','qc_copy_control.py']:
     shutil.copy2(here/name,a.stage/name)
 shutil.copy2(here.parent/'tools/owner_input.py',a.stage/'owner_input.py')
 tools=here.parents[1]/'firefox';(a.stage/'tools').mkdir()

@@ -22,6 +22,7 @@ p.add_argument('--compare-pixels',action='store_true')
 p.add_argument('--graphics-override',help='FX-qualified complete graphics cohort under the runtime overrides directory')
 p.add_argument('--frame-id-geometry',help='Explicit private-CGL marker geometry; actual frame0 must qualify it')
 p.add_argument('--frame-id-cgl',action='store_true',help='Only the packaged private CGL; retains installed media/GLAPI/surface/broker/UI')
+p.add_argument('--qc-copy',choices=['off','on'],help='Private frozen QC paired-copy browser comparison')
 p.add_argument('--frame-id-dimensions-only',action='store_true',help='Private CGL paused dimensions preflight, no geometry/readback/playback')
 p.add_argument('--frame-id-profile',action='store_true',help='Gecko media/renderer stacks for the owned frame-ID diagnostic; never speed qualification')
 p.add_argument('--frame-id-quiet-rollouts',action='store_true',help='Owned test-profile Nimbus rollout/study control; no installed preference change')
@@ -32,6 +33,7 @@ p.add_argument('--retire-pool',action='store_true',help='Private retirement comp
 p.add_argument('--trace-media',action='store_true',help='Diagnostic CV/VT/CGL boundary tracing; never performance qualification')
 p.add_argument('--view-state',action='store_true',help='MSE-only read-only native view observation; excludes performance qualification')
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
+if a.qc_copy and a.phase!='browser':raise ValueError('QC caller requires its separate browser phase')
 if a.frame_id_geometry:
     if a.phase!='frame-id' or not a.frame_id_cgl:raise ValueError('Marker geometry requires its private CGL frame-ID case')
     from frame_geometry import parse
@@ -85,6 +87,7 @@ try:
             raise ValueError('Missing prior cold receipt')
         argv=['python3',dest+'/cadence-browser.py','--run',dest+'/'+a.phase+'-run']
         if a.phase=='profile':argv+=['--profile-video']
+        if a.qc_copy:argv+=['--qc-copy',a.qc_copy,'--installed-media','--frame-mode','require','--without-trace']
         if a.phase=='rates':argv+=['--rate-control']
         if a.phase=='codecs':argv+=['--codec-matrix','--without-trace']
         if a.phase=='mse':argv+=['--mse','--staged-media','--frame-mode','require','--without-trace']

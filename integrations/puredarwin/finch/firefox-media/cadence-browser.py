@@ -63,9 +63,12 @@ def main():
     p.add_argument('--frame-id',action='store_true',help='Own900-frame Gray-code fixture, preview calibration then15s playback; not a panel-rate claim')
     p.add_argument('--frame-id-geometry',help='Explicit private-CGL seven-field marker geometry; bounds are not pixel admission')
     p.add_argument('--frame-id-cgl',action='store_true',help='Packaged private CGL only; keep installed media/GLAPI/IOSurface/broker/UI plan')
+    p.add_argument('--qc-copy',choices=['off','on'],help='Private QC/CGL paired-copy comparison; retains installed media and all other providers')
     p.add_argument('--frame-id-dimensions-only',action='store_true',help='Paused preview/private CGL export dimensions only; no geometry/readback/15s run')
     p.add_argument('--frame-id-quiet-rollouts',action='store_true',help='Disable Nimbus rollout/study work only in this fresh owned test profile')
     a=p.parse_args()
+    if a.qc_copy and (not a.installed_media or not a.without_trace or a.frame_id or a.graphics_override or a.staged_media or a.mse or a.youtube or a.codec_matrix or a.profile_video):
+        raise ValueError('Separate installed-media/no-trace private QC comparison required')
     if a.frame_id and (not a.installed_media or not a.without_trace or a.youtube or a.codec_matrix or a.mse or a.rate_control or a.lifetime_control):
         raise ValueError('Frame identity requires its separate installed-media no-trace case')
     if a.frame_id_geometry:
@@ -132,6 +135,24 @@ def main():
     guard=types.ModuleType('owner_guard');guard.OwnerInputGuard=RecordOnlyGuard
     sys.modules['owner_guard']=guard
     tools=root/'tools';sys.path.insert(0,str(tools))
+    qc_admitted={}
+    if a.qc_copy:
+        import provider_images
+        import qc_copy_control
+        qc_identity=json.loads((root/'qc-nv12/identity.json').read_text())
+        inspect_original=provider_images.inspect
+        def inspect_private_qc(sample,output,identities,parent_pid,*args,**kwargs):
+            observed=inspect_original(sample,output,identities,parent_pid,*args,**kwargs)
+            try:
+                qc_admitted['images']=qc_copy_control.verify(observed,qc_identity,root)
+                qc_admitted['starts']=dict(identities)
+            finally:output.write_text(json.dumps(observed,indent=2)+'\n')
+            return observed
+        provider_images.inspect=inspect_private_qc
+        def qc_snapshot():
+            if not qc_admitted:raise RuntimeError('Private QC not admitted before media measurement')
+            return qc_copy_control.snapshot(qc_admitted['images'],qc_identity,
+                root/'bin/thread-policy-probe',qc_admitted['starts'])
     # The shared runner defaults to one fixed port. Other diagnostic Firefox
     # families can exist: select a fresh loopback port for this profile instead.
     with socket.socket() as reservation:
@@ -433,6 +454,7 @@ def main():
                     if not admission:raise RuntimeError('No independently decoded owned native frame0; timed playback REFUSED')
                     (a.run/'frame-id-export-geometry-admission.json').write_text(json.dumps(admission,indent=2)+'\n')
             cpu={}
+            qc_before=qc_snapshot() if a.qc_copy else None
             try:cpu['before']=self.cpu_snapshot()
             except Exception as error:cpu['before_error']=str(error)
             if a.frame_id_dimensions_only:
@@ -447,6 +469,10 @@ def main():
                 if 'before' in cpu:cpu['comparison']=process_cpu.compare(cpu['before'],cpu['after'])
             except Exception as error:cpu['after_error']=str(error)
             video['owned_process_cpu']=cpu
+            if a.qc_copy:
+                qc_after=qc_snapshot()
+                video['quartzcore_uploads']=dict(before=qc_before,after=qc_after,
+                    comparison=qc_copy_control.compare(qc_before,qc_after),gpu_copy=a.qc_copy)
             if a.codec_matrix and not getattr(self,'codec_queries_recorded',False):
                 self.codec_queries_recorded=True
                 try:
@@ -523,6 +549,10 @@ def main():
     if a.graphics_override:os.environ['SF_MEDIA_GRAPHICS_OVERRIDE']=str(a.graphics_override)
     if a.frame_id_cgl:os.environ['SF_MEDIA_FRAME_CGL']=str(root/'frame-id-cgl/Frameworks')
     else:os.environ.pop('SF_MEDIA_FRAME_CGL',None)
+    if a.qc_copy:
+        os.environ['SF_MEDIA_QC_NV12']=str(root/'qc-nv12')
+        os.environ['PD_CA_NV12_GPU_COPY']='1' if a.qc_copy=='on' else '0'
+    else:os.environ.pop('SF_MEDIA_QC_NV12',None)
     if a.frame_id_geometry:os.environ['SFFX_FRAME_ID_GEOMETRY']=a.frame_id_geometry
     else:os.environ.pop('SFFX_FRAME_ID_GEOMETRY',None)
     if a.frame_id_dimensions_only:os.environ['SFFX_FRAME_ID_DIMENSIONS']='1'
@@ -544,6 +574,7 @@ def main():
         known_frame_id_fixture=a.frame_id,gecko_media_profile=a.profile_video,
         owned_rollout_control=a.frame_id_quiet_rollouts,
         private_frame_identity_graphics=a.frame_id_cgl,
+        private_quartzcore_copy=a.qc_copy,
         frame_identity_geometry=a.frame_id_geometry,
         frame_identity_dimensions_only=a.frame_id_dimensions_only,
         youtube=a.youtube,youtube_profile=a.youtube_profile,
@@ -567,12 +598,12 @@ def main():
         argv+=['--pref','nimbus.rollouts.enabled=false','--pref','app.shield.optoutstudies.enabled=false']
     if a.youtube_1080 and not a.installed_codec_policy:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
     if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
-    if (a.installed_media or a.youtube_1080 or a.staged_media) and not (a.frame_id_cgl or a.graphics_override):argv+=['--expect-system-gpu']
+    if (a.installed_media or a.youtube_1080 or a.staged_media) and not (a.frame_id_cgl or a.graphics_override or a.qc_copy):argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
     if (tools/'gpu-counters.json').is_file() and not a.youtube and not a.frame_id_cgl:
         argv+=['--gpu-transfer-spec',str(tools/'gpu-counters.json'),
                '--policy-probe-path',str(root/'bin/thread-policy-probe')]
-    if a.staged_media or a.frame_id_cgl:
+    if a.staged_media or a.frame_id_cgl or a.qc_copy:
         bundle=a.run/'Diagnostic.app'
         wrapper=bundle/'Contents/MacOS/firefox-sf'
         wrapper.parent.mkdir(parents=True)

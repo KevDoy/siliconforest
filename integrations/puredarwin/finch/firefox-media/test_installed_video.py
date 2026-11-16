@@ -62,6 +62,7 @@ class InstalledVideoTests(unittest.TestCase):
 
     def test_private_outer_cannot_qualify_as_installed(self):
         self.assertFalse(self.analyze(lambda launch,*_:launch.update(staged_media=True))['passed'])
+        self.assertFalse(self.analyze(lambda launch,*_:launch.update(private_quartzcore_copy='on'))['passed'])
 
     def test_candidate_requires_explicit_scope_and_keeps_graphics_gate(self):
         def candidate(launch,*_):launch.update(staged_media=True,installed_media=False)

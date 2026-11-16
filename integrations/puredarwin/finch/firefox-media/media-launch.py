@@ -23,9 +23,15 @@ def main():
         raise ValueError('Explicit owned no-remote profile required')
     graphics=os.environ.get('SF_MEDIA_GRAPHICS_OVERRIDE')
     frame_cgl=os.environ.get('SF_MEDIA_FRAME_CGL')
-    graphics_only=frame_cgl is not None
+    qc_control=os.environ.get('SF_MEDIA_QC_NV12')
+    graphics_only=frame_cgl is not None or qc_control is not None
     frameworks=root/'Frameworks';names=set()
-    if graphics_only:
+    if qc_control is not None:
+        if graphics or frame_cgl or frameworks.exists() or Path(qc_control)!=root/'qc-nv12':
+            raise ValueError('Private QC comparison must retain installed media/graphics plan')
+        for file in ['lib/QuartzCore.pd','Frameworks/OpenGL.framework/Versions/A/OpenGL','identity.json']:
+            if not (Path(qc_control)/file).is_file():raise ValueError('Cold private QC cohort incomplete')
+    elif graphics_only:
         if graphics or frameworks.exists() or Path(frame_cgl)!=root/'frame-id-cgl/Frameworks':
             raise ValueError('Frame CGL comparison must use its packaged CGL and retain installed media')
         if not (Path(frame_cgl)/'OpenGL.framework/Versions/A/OpenGL').is_file():
@@ -50,7 +56,10 @@ def main():
     compositor_preferences=daily.update_compositor_preference(
         settings,daily.native_compositor_preference(manifest,os.environ))
     codec_preferences=daily.update_codec_preference(settings,daily.av1_preference(manifest,os.environ))
-    if not graphics_only:env['DYLD_FRAMEWORK_PATH']=str(frameworks)+':'+env['DYLD_FRAMEWORK_PATH']
+    if qc_control is not None:
+        env['DYLD_FRAMEWORK_PATH']=str(Path(qc_control)/'Frameworks')+':'+env['DYLD_FRAMEWORK_PATH']
+        env['DYLD_LIBRARY_PATH']=str(Path(qc_control)/'lib')+':'+env['DYLD_LIBRARY_PATH']
+    elif not graphics_only:env['DYLD_FRAMEWORK_PATH']=str(frameworks)+':'+env['DYLD_FRAMEWORK_PATH']
     else:env['DYLD_FRAMEWORK_PATH']=frame_cgl+':'+env['DYLD_FRAMEWORK_PATH']
     (profile.parent/'private-media-launch.json').write_text(json.dumps(dict(
         command=command,frameworks=sorted(names),installed_outer_launcher=False,
@@ -59,7 +68,8 @@ def main():
         codec_preferences=codec_preferences,retained_installed_media=graphics_only,
         graphics_override=graphics,
         frame_identity_cgl=frame_cgl,
-        environment={k:v for k,v in env.items() if k.startswith(('DYLD_','SF_VT_','SF_AU_')) or k in ['SFFX_FRAME_ID_GEOMETRY','SFFX_FRAME_ID_DIMENSIONS']}),indent=2)+'\n')
+        private_quartzcore_copy=qc_control,
+        environment={k:v for k,v in env.items() if k.startswith(('DYLD_','SF_VT_','SF_AU_')) or k in ['SFFX_FRAME_ID_GEOMETRY','SFFX_FRAME_ID_DIMENSIONS','PD_CA_NV12_GPU_COPY']}),indent=2)+'\n')
     # Match the installed launcher: relative bundle resources must be resolved
     # from the real Mozilla executable directory, not our diagnostic wrapper.
     os.chdir(Path(manifest.get('original_bundle',str(runtime/'original/Firefox.app')))/'Contents/MacOS')

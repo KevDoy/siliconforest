@@ -433,8 +433,39 @@ compiled layout metadata; admission checks the exact dimensions, padding and
 both revisions' byte totals, so a tiny successful control cannot admit a large
 surface. A CPU fallback, one-plane result or duplicate range also fails
 admission. The probe's shader cache stays inside its disposable test prefix.
-These are source/build controls until their separate native receipts pass;
-they do not measure Firefox cadence or CPU use.
+Both target sizes subsequently pass their separate M1 controls:12 cases each,
+74,649,600/298,598,400 exact verification bytes after source overwrite, nine
+GL-state checks, zero CPU transport bytes, actual providers and natural exit
+with an empty own process group. They do not measure Firefox cadence or CPU use.
+
+`private-quartzcore-extension.nix` and `quartzcore-nv12-copy.patch/.h` implement
+the optional caller as a private proof against the frozen installed renderer.
+With `rendererPatch=null`, the recipe reproduces the original derivation
+exactly; the candidate changes only postPatch/output and retains all original
+exports, adding one diagnostic getter. It tries the paired CGL copy before
+surface Lock/base access, allocates independent R8/RG8 storage only when its
+dimensions/format change, and holds an outer frame use across the complete GPU
+attempt and both-plane CPU fallback. Missing APIs retain the CPU path. Matrix,
+range, orientation and the existing drawing code remain unchanged. Kernel/GPU
+completion waits remain in place.
+
+The fallback clears and restores pixel-unpack PBO/row/alignment/skip/swap state.
+Ten counters distinguish GPU frames, CPU frames, actual non-NULL upload calls,
+visible payload bytes, padded source spans and NULL storage allocations. Failed
+RG calls retried as luminance count both client uploads. The literal patched
+upload functions pass `quartzcore-policy-host.nix` under ASan/UBSan with fake
+callbacks, including partial failure, missing APIs, storage reuse/resize,
+surface lifetime, P010 CPU fallback and unpack restoration. This is host policy
+coverage; browser pictures and performance require separate native evidence.
+
+The private cadence adapter packages only QC.pd and the qualified CGL, retains
+the installed media and other providers, and verifies their actual paths and
+UUIDs in its own parent/GPU processes. Read-only Mach snapshots cover exactly
+the ten-counter array; no function call is injected. `--qc-copy off/on` changes
+only this owned process's `PD_CA_NV12_GPU_COPY` switch. Neither arm qualifies as
+canonical Cocoa or an installed launch. The private SDK/caller host gates pass;
+the matched1080p60/4K30 browser pair is pending. TERM owns canonical adoption
+and installation, and FX owns CGL selection.
 
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
