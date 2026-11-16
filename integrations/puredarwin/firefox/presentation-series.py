@@ -44,6 +44,12 @@ def main():
     if (os.uname().sysname!='Darwin' or root.parent!=Path('/private/var/db/sffx') or
             '..' in root.parts or not 1<=args.round<=12):raise ValueError('Owned target round required')
     functional_qa();guard=OwnerInputGuard(require_idle=False)
+    def check_owner():
+        after=guard.check()
+        if any(after[key]!=guard.before[key] for key in
+               ['last_real_input_unix_ms','real_pointer_records','real_key_records']):
+            raise RuntimeError('Real input overlapped presentation; discard and stop')
+        return after
     run=root/('round-%02d'%args.round);run.mkdir(exist_ok=False)
     spec=importlib.util.spec_from_file_location('series_remote',root/'remote-run.py')
     helpers=importlib.util.module_from_spec(spec);spec.loader.exec_module(helpers)
@@ -63,7 +69,8 @@ def main():
             or manifest.get('gpu_damage') or manifest.get('gpu_image_cache')):raise ValueError('Expected 0172 selected; damage/cache OFF')
     result=dict(round=args.round,complete=False,installed_outer=True,input_injected=False,
                 timed_input_injected=False,pointer_input_injected=False,
-                programmatic_scroll=True,manifest=manifest,phases=[],owned_profile=str(profile),test_preferences=prefs)
+                programmatic_scroll=True,manifest=manifest,phases=[],owned_profile=str(profile),test_preferences=prefs,
+                owner_input_before=guard.before)
     owned={};process=None;client=None
     def save():(run/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     def identities():
@@ -72,9 +79,9 @@ def main():
         return current
     def wait(seconds):
         end=time.monotonic()+seconds
-        while time.monotonic()<end:guard.check();time.sleep(min(.05,max(0,end-time.monotonic())))
+        while time.monotonic()<end:check_owner();time.sleep(min(.05,max(0,end-time.monotonic())))
     def script(value,args=None):
-        guard.check();return client.command('WebDriver:ExecuteScript',dict(script=value,args=args or [],newSandbox=False))
+        check_owner();return client.command('WebDriver:ExecuteScript',dict(script=value,args=args or [],newSandbox=False))
     def cpu():
         identities();return subprocess.check_output(['ps','-p',','.join(map(str,sorted(owned))),'-o','pid,ppid,time,rss,stat,command'],text=True)
     try:
@@ -89,7 +96,7 @@ def main():
         result['wrapper_pid']=process.pid;identities();result['owned_start_identities']=owned;save()
         end=time.monotonic()+30
         while time.monotonic()<end:
-            identities();guard.check()
+            identities();check_owner()
             if process.poll() is not None:raise RuntimeError('Wrapper exited during startup')
             try:client=Marionette(28482,timeout=1);break
             except (OSError,EOFError):wait(.2)
@@ -189,7 +196,7 @@ def main():
                         except ProcessLookupError:pass
                 time.sleep(.3);current=helpers.process_identities()
             process.wait(timeout=5)
-        try:result['owner_input_after']=guard.check()
+        try:result['owner_input_after']=check_owner()
         except (OSError,RuntimeError)as error:result['qualification_invalidated']=repr(error);result['complete']=False
         save()
     return 0 if result['complete'] else 1
