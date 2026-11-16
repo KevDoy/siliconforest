@@ -76,7 +76,7 @@ def _request(inject, lines, _virtual_handshake=False, timeout=6):
     return status
 
 
-def admit(client, output, fixture=True, verify_renderer=True, handle=None):
+def admit(client, output, fixture=True, verify_renderer=True, handle=None, seat_input=True):
     def script(source, args=None):
         return client.command('WebDriver:ExecuteScript', dict(script=source, args=args or [], newSandbox=False))
 
@@ -113,7 +113,8 @@ def admit(client, output, fixture=True, verify_renderer=True, handle=None):
     matches = [line for line in dump.splitlines() if marker in line and 'mapped=true' in line and 'org.mozilla.firefox' in line]
     if len(matches) != 1:
         raise RuntimeError('Expected exactly one uniquely titled owned fixture frame')
-    target_window(int(re.match(r'window (\d+)',matches[0])[1]))
+    if seat_input:
+        target_window(int(re.match(r'window (\d+)',matches[0])[1]))
     frame = re.search(r'frame=Some\((.*?)\)', matches[0])
     values = tuple(map(int, re.findall(r'-?\d+', frame[1]))) if frame else ()
     if len(values) != 4:
@@ -125,11 +126,12 @@ def admit(client, output, fixture=True, verify_renderer=True, handle=None):
     # Wake with a modifier tap on this explicit virtual target. Recent desktop
     # builds do not wake the panel on virtual pointer motion alone. No desktop
     # power/idle configuration is changed.
-    request('key e1 down\nkey e1 up\nabs %d %d\nwait 500\nbuttons 1\nwait 60\nbuttons 0\nwait 300' %
-            (round(tx*65535/2559), round(ty*65535/1599)))
+    if seat_input:
+        request('key e1 down\nkey e1 up\nabs %d %d\nwait 500\nbuttons 1\nwait 60\nbuttons 0\nwait 300' %
+                (round(tx*65535/2559), round(ty*65535/1599)))
     client.command('Marionette:SetContext', {'value': 'chrome'})
     focused = script('const w=Services.wm.getMostRecentWindow("navigator:browser");return !!w&&w.document.hasFocus();')
-    if not focused and not _allow_owner_activity.get():
+    if seat_input and not focused and not _allow_owner_activity.get():
         raise RuntimeError('Admitted Firefox did not acquire focus')
     from renderer_capture import capture
     renderer = capture(output.with_suffix('.ppm')) if verify_renderer else None
@@ -137,7 +139,7 @@ def admit(client, output, fixture=True, verify_renderer=True, handle=None):
     script('''document.title=arguments[0];if(arguments[1]){
       if(arguments[2]===null)delete window.fxTitleOverride;else window.fxTitleOverride=arguments[2];}return true;''',
            [previous['title'], previous['video'], previous['override']])
-    result = dict(complete=True, synthetic_seat_input=True, admitted_unique_title=marker,
+    result = dict(complete=True, synthetic_seat_input=seat_input, focus_qualified=bool(seat_input and focused), admitted_unique_title=marker,
                   requested_handle=handle, admitted_handle=candidate,
                   frame=values, window_id=int(re.match(r"window (\d+) ", matches[0])[1]),
                   focused=focused, renderer=renderer)

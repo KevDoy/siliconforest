@@ -51,10 +51,14 @@ def main():
     ap.add_argument('--observer', type=Path)
     ap.add_argument('--loss-observer', type=Path)
     ap.add_argument('--runtime-plan', action='store_true', help='diagnostic comparison; bypass installed outer launcher')
+    ap.add_argument('--ipc-quit-only', action='store_true',
+                    help='desktop-quit control: admit the owned window without pointer/key input')
     ap.add_argument('--quit-menu-control', action='store_true',
                     help='windowless-quit diagnostic: invoke the app-owned Quit menu; cannot qualify desktop routing')
     ap.add_argument('--sample-path', default='/private/var/db/sffx/probes-v3/sf-sample')
     args = ap.parse_args()
+    if args.ipc_quit_only and args.action != 'desktop-quit':
+        raise ValueError('Input-free IPC control is limited to desktop-quit')
     if args.quit_menu_control and args.action != 'windowless-quit':
         raise ValueError('Quit menu control is limited to the windowless diagnostic')
     if os.uname().sysname != 'Darwin':
@@ -210,7 +214,8 @@ def main():
             # DOM focus alone does not establish AppKit's key window. Native
             # menu validation and keyboard actions need an admitted seat click.
             from presentation_seat import admit, _request
-            result['admission'] = admit(client, args.run / 'native-admission.json', fixture=False, verify_renderer=False)
+            result['admission'] = admit(client, args.run / 'native-admission.json', fixture=False,
+                                        verify_renderer=False, seat_input=not args.ipc_quit_only)
             result['before_windows'] = gecko_windows(client)
             result['before_content_identities'] = {
                 str(tab['contentPid']): owned.get(tab['contentPid'])
