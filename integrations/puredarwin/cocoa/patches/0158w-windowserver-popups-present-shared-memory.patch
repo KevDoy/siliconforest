@@ -30,7 +30,36 @@
      struct wsFrame *frame = windowFreeFrame(window, window->pixelsW, window->pixelsH, gpu);
      if (frame == NULL) {
          pthread_mutex_unlock(&ws.pixelsLock);
-@@ -4798,6 +4812,9 @@
+@@ -3000,6 +3014,16 @@
+     best = windowForID(ws.pointerWindowID);
+     if (best == NULL || best == window || best->xdgSurface == NULL || !best->attached)
+         best = windowForID(ws.focusWindowID);
++    /* (TERM10, FX-022) the pointer can be on the popup itself and the keyboard nowhere of ours (Firefox's menu
++     * panel, shown again): a menu is still a popup, of the application's active window or any mapped window of it.
++     * Made a toplevel instead it was placed and focused as a window (its parent lost the keyboard and Firefox closed
++     * the menu at once) and later changed role again on a fresh surface. */
++    if (best == NULL || best == window || best->xdgSurface == NULL || !best->attached)
++        best = windowForID(ws.activeAppWindowID);
++    if (best == NULL || best == window || best->xdgSurface == NULL || !best->attached || best->toplevel == NULL)
++        for (best = ws.windows; best != NULL; best = best->next)
++            if (best != window && best->toplevel != NULL && best->attached && best->state != HIDDEN && best->state != MINIMIZED)
++                break;
+     if (best == NULL || best == window || best->xdgSurface == NULL || !best->attached)
+         return NULL;
+     return best;
+@@ -3651,7 +3675,10 @@
+                  * altogether, and the next flush makes a new one where the
+                  * window then is. */
+                 windowUnmap(window);
+-                if (window->popup != NULL) {
++                /* (TERM10) a menu-level window that had to be a toplevel (no window of ours was up) does not keep
++                 * that role: its next showing is a popup again if it can be */
++                if (window->popup != NULL || (window->toplevel != NULL && window->level == kWSPopUpMenuLevel &&
++                                              !wsStyleWantsServerFrame(window->style))) {
+                     windowDestroyRole(window);
+                     window->configured = 0;
+                     // what it shows next has to be drawn and flushed after this
+@@ -4798,6 +4825,9 @@
      if(!enabled||strcmp(enabled,"1")||!ensureConnected()||!ws.dmabuf)return 0;
      pthread_mutex_lock(&ws.pixelsLock);
      struct wsWindow *window=windowForID(windowID);int good=0;

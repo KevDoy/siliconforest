@@ -465,9 +465,22 @@
 #   0154  Onyx2D (FXPERF, adopted unchanged): an installed font file of 1 MB or more is mapped once per process and
 #         shared by every data provider (it was read whole into a private copy each time: Firefox's parent held ten
 #         30 MB copies of the CJK collection, footprint 921 -> 634 MB)
+#   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
+#         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
+#         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0160a AppKit (TERM10, FX-029): a layer render that made no new frame (-_sfcaTakeNewFrame) flushes nothing
+#   0159w WindowServer (TERM10, the owner's "I have to scroll a lot"): the trackpad reaches the desk as wheel steps (one
+#         per 3.6 mm of two-finger travel), and a step was one line (19 points in Firefox); now a step is sent as precise
+#         points like a Mac trackpad's: 50 at slow finger speed, up to 3.5x when fast, times the system scroll speed
+#         (/private/var/db/desktop-state/chonkstep/scroll-speed, percent, default 100), as a gesture (began, changed,
+#         ended after a pause of 90-200 ms) with a momentum phase after three or more steps (0.95 a refresh);
+#         PD_WS_WHEEL_LINES=1: lines as before
+#   0159  AppKit (TERM10): NSEvent -momentumPhase for those momentum events (bit 8 of the window server's scroll mods)
 #   0158w WindowServer (TERM10, FX-022): a window the desk shows as a popup or a layer surface presents through
 #         shared memory (the desk reads those buffers as shm and refused Firefox's dma-buf menu panel: "NotManaged");
-#         its GPU layers are refused, so AppKit reads them back into the backing store
+#         its GPU layers are refused, so AppKit reads them back into the backing store. A menu-level window finds a
+#         parent in the application's active or any mapped window before it is made a toplevel, and one that had to
+#         be a toplevel drops that role when hidden (Firefox's panel came back as a toplevel on a fresh surface)
 #   0157  QuartzCore (TERM10, FX-011/012): a layer the renderer meets without a texture name (a client thread added it
 #         to the tree while the frame was drawn) gets its own; it bound none, so its contents went into the texture of
 #         the layer drawn before it, which showed them until its own contents changed (foreign/stale tiles). The
@@ -596,6 +609,8 @@ let
     ./patches/0209-view-registers-gpu-layer-with-private-windowserver.patch
     ./patches/0206-window-class-content-geometry-counts-menu-strip.patch
     ./patches/0150-appkit-event-timestamps-since-startup.patch
+    ./patches/0159-appkit-scroll-momentum-phase.patch
+    ./patches/0160a-appkit-layer-render-without-a-new-frame-presents-nothing.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -619,6 +634,7 @@ let
     ./patches/0148w-windowserver-display-clock-from-presentation-feedback.patch
     ./patches/0156w-windowserver-presents-paced-by-frame-callbacks.patch
     ./patches/0158w-windowserver-popups-present-shared-memory.patch
+    ./patches/0159w-windowserver-wheel-steps-scroll-as-a-trackpad.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -671,6 +687,7 @@ let
     ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
     ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
     ./patches/0157-quartzcore-layer-tree-changed-from-other-threads.patch
+    ./patches/0160-quartzcore-unchanged-properties-and-commits-render-nothing.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
