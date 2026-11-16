@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 # GPU IOSurface bridge; private prefix by default, explicit canonical packaging.
 {prefix ? "/private/var/db/sffx/gl-gpu-v3", canonical ? false, nv12Backing ? false,
- contextLocalFBO ? false, imageCache ? false, frameIdentity ? false}:
+ contextLocalFBO ? false, imageCache ? false, frameIdentity ? false,
+ nv12GPUCopy ? false}:
+assert !nv12GPUCopy || nv12Backing;
 let base=import ./cgl.nix {inherit prefix canonical;};
 in base.overrideAttrs(old:{patches=old.patches++[./cgl-patches/0002-gpu-iosurface-alias-and-rectangle-blit.patch ./cgl-patches/0003-export-framebuffer-and-import-layer-gpu-storage.patch ./cgl-patches/0004-opt-in-export-framebuffer-resource-cache.patch]++
  (if nv12Backing then [./cgl-patches/0005-nv12-rectangle-gpu-planes-and-completion-lease.patch] else [])++
@@ -9,7 +11,14 @@ in base.overrideAttrs(old:{patches=old.patches++[./cgl-patches/0002-gpu-iosurfac
  (if imageCache then [./perf/patches/0303-cgl-rectangle-export-and-image-per-surface.patch
                      ./cgl-patches/0007-bound-iosurface-image-cache-and-snapshot-lock.patch] else [])++
  (if frameIdentity then [./cgl-patches/0008-private-exported-video-frame-identity.patch] else []);
-}//(if frameIdentity then {postPatch=(old.postPatch or "")+''
+}//(if frameIdentity || nv12GPUCopy then {postPatch=(old.postPatch or "")+
+ (if frameIdentity then ''
    cp ${./frame-id-export.h} src/Frameworks/OpenGL/sffx-frame-id-export.h
    cp ${../finch/firefox-media/frame-id-decode.h} src/Frameworks/OpenGL/sffx-frame-id-decode.h
- ''; } else {}))
+ '' else "")+
+ (if nv12GPUCopy then ''
+   cp ${../finch/firefox-media/strict-nv12-plane.h} src/Frameworks/OpenGL/sffx-strict-nv12-plane.h
+   cat >> src/Frameworks/OpenGL/CGL.c <<'SF_NV12_COPY'
+   #include "sffx-strict-nv12-plane.h"
+   SF_NV12_COPY
+ '' else ""); } else {}))

@@ -89,6 +89,19 @@ provider paths, natural status0 and no surviving browser family before cleanup.
 Decoder pool retirement remains disabled. These gates do not establish panel
 pacing, acoustic synchronisation or smooth playback while interacting.
 
+The optional CGL build flag `nv12GPUCopy=true` requires `nv12Backing=true`
+and adds the media owner's strict GPU plane-copy API to this recipe. Its
+default is off; it does not enable the image cache, damage path or frame
+observer. `CGLPDCopyNV12ToTextures2D(surface, textures)` fills two independently
+allocated R8/RG8 textures while holding one global IOSurface use across both
+completed GPU blits. The caller must also keep the input frame and global use
+alive across its complete attempt and fallback. A false return requires CPU
+fallback to overwrite both planes. Preserve the existing color matrix, range,
+orientation and texture sampling. Count actual CPU fallback bytes; helper
+statistics count planes, not video frames. Its conservative completion waits
+remain. This is GPU copying rather than a direct decoder-surface alias, and
+offscreen native controls do not qualify browser integration or performance.
+
 `install-video-clock.py` advances that family to the display-phase clock from
 TERM's 0172 recipe while requiring the same qualified VideoToolbox UUIDs.
 The cold payload comes from Finch's `firefox-media/clocked-providers.nix`, which
