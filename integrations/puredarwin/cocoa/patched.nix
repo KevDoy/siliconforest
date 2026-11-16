@@ -472,17 +472,16 @@
 #         it key (Firefox attaches its menu panel as a child right after showing it: the browser window resigned key and
 #         Firefox closed the panel at once); -removeChildWindow: only detaches, as on macOS
 #   0161  AppKit (TERM10): precise scroll deltas move a Cocoa scroll view by whole points (fractional offsets from
-#         0159w's momentum drew Activity Monitor's table rows over each other)
+#         momentum drew Activity Monitor's table rows over each other)
 #   0160a AppKit (TERM10, FX-029): a layer render that made no new frame (-_sfcaTakeNewFrame) flushes nothing
 #   0158  AppKit (TERM10, FX-022): a layer-backed view in a window the window server cannot give GPU layers (a popup
 #         or layer surface: _windowServerSFFXTakesGPULayers, 0158w) reads its layers back without copying a GPU frame
 #         first (a copied-then-refused frame left the read-back empty: Firefox's menu panel was transparent)
-#   0159w WindowServer (TERM10, the owner's "I have to scroll a lot"): the trackpad reaches the desk as wheel steps (one
-#         per 3.6 mm of two-finger travel), and a step was one line (19 points in Firefox); now a step is sent as precise
-#         points like a Mac trackpad's: 50 at slow finger speed, up to 3.5x when fast, times the system scroll speed
-#         (/private/var/db/desktop-state/chonkstep/scroll-speed, percent, default 100), as a gesture (began, changed,
-#         ended after a pause of 90-200 ms) with a momentum phase after three or more steps (0.95 a refresh);
-#         PD_WS_WHEEL_LINES=1: lines as before
+#   0159w WindowServer (TERM10, the owner's "I have to scroll a lot"; the desk's contract, DESK10 desk10-001): the
+#         trackpad's finger axis frames (points, the desk's acceleration and scroll speed applied, axis_stop at lift)
+#         are precise scroll events for every application (was: Firefox only), began/changed/ended, then a momentum
+#         phase from the release speed (last 100 ms of moving frames, 3+ frames, >300 pt/s; 0.95 a refresh; a finger
+#         frame or a button ends it). A mouse wheel stays lines without momentum. PD_WS_FINGER_LINES=1: as before
 #   0159  AppKit (TERM10): NSEvent -momentumPhase for those momentum events (bit 8 of the window server's scroll mods)
 #   0158w WindowServer (TERM10, FX-022): a window the desk shows as a popup or a layer surface presents through
 #         shared memory (the desk reads those buffers as shm and refused Firefox's dma-buf menu panel: "NotManaged");
@@ -645,7 +644,7 @@ let
     ./patches/0148w-windowserver-display-clock-from-presentation-feedback.patch
     ./patches/0156w-windowserver-presents-paced-by-frame-callbacks.patch
     ./patches/0158w-windowserver-popups-present-shared-memory.patch
-    ./patches/0159w-windowserver-wheel-steps-scroll-as-a-trackpad.patch
+    ./patches/0159w-windowserver-trackpad-finger-frames-precise-with-momentum.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
