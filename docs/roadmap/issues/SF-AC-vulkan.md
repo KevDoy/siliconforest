@@ -499,3 +499,35 @@ privately. The replacement image43 uses sound SDK c5zjb6pd…, collection gif6is
 capsule11f6f53b2089f2a6…, prelink0C63FD93-8845-4DE8-85E5-C317D51928A0.
 It still has7 changed modules/50 unchanged against CIO29 and ORIGINAL AVD.
 Native default-cap0 / K14 / killable-wait qualification is pending.
+
+
+### Private-UPL accounting fix prepared offline, 2026-11-16
+
+The frozen source provides a concrete counterexample for the42 panic: device-pager
+objects hold private, noncanonical pages, which vm_page_wire/unwire deliberately
+exclude from object/global canonical wired counts. The bulk UPL completion path
+subtracts all finally unwired pages and queues them, underflowing the zero object
+count for426 private pages. A one-line eligibility guard routes private objects
+through the existing per-page completion, including its canonical-only accounting
+and noncanonical queue guards. Assertions and real complete/unwire remain intact.
+The historical descriptor kind and UPL flags remain unrecorded; source agreement
+and a matching counterexample do not replace native verification.
+
+Actual-patch-applied ASan/UBSan tests retain the frozen426-page assertion as an
+expected failure and pass patched private/canonical cases, repeated wires,
+INACTIVATE/FREE_ABSENT, vector/purgable and empty guards. Media's independent
+source review agrees with the per-page accounting/queue behavior. Exact frozen
+before/after hashes pass in the full native core build, now in progress. All six
+repository checks pass. Source, limits and collection recipe are in
+[m1-upl-private/README.md](../../../integrations/puredarwin/m1-upl-private/README.md).
+
+The native SDK helper is built but unrun: it first double-maps a real writeback
+GPU BO, unmaps its alias, then imports only DATA after a16KiB header and destroys
+the context while checking the original mapping/header. It submits no GPU or
+decoder jobs, refuses the wrong kernel/import capability and retains synchronous
+phase markers. This is the first proposed hardware gate for a fixed-core/import
+image; strict complete-frame/PTS/held64 H264 and HEVC gates follow only if it
+passes. No zero-copy, physical-pinch or GPU-fence success is claimed.
+
+Image43 remains the independently ready original-AVD/default-cap0 cohort.
+Thunderbolt and AVE trials remain paused; no UPL candidate has been installed.
