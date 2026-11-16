@@ -58,7 +58,7 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             const range=document.createRange();range.selectNodeContents(node);
             const boxes=[...range.getClientRects()].map(r=>visibleBox(r,node.parentElement)).filter(Boolean);
             if(!boxes.length){excluded.push({text:node.textContent.trim().slice(0,120),reason:'No complete viewport rectangle, hidden content, or empty accessibility clip'});continue;}
-            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor,transitionProperty:s.transitionProperty,transitionDuration:s.transitionDuration});
+            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor,fontVariantCaps:s.fontVariantCaps,fontFeatureSettings:s.fontFeatureSettings,fontVariationSettings:s.fontVariationSettings,transitionProperty:s.transitionProperty,transitionDuration:s.transitionDuration});
           }
           return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
@@ -86,8 +86,29 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             anchors=script('''const anchors=[{x:5,y:5,width:8,color:[17,241,113]},{x:101,y:101,width:8,color:[233,19,157]}];
               window.__sffxLegibilityAnchors=anchors.map(a=>{const n=document.createElement('div');n.style.cssText=`all:initial!important;position:fixed!important;left:${a.x}px!important;top:${a.y}px!important;width:${a.width}px!important;height:${a.width}px!important;background:rgb(${a.color.join(',')})!important;z-index:2147483647!important;pointer-events:none!important`;document.documentElement.append(n);return n});return anchors;''')
             try:
-                paint();capture(directory/(image_prefix+'-calibration.ppm'))
-                row['calibration']=calibrate(directory/(image_prefix+'-calibration.ppm'),anchors,row['devicePixelRatio'])
+                paint()
+                row['marker_document']=script('''return {url:location.href,title:document.title,hidden:document.hidden,
+                  visibility:document.visibilityState,markers:window.__sffxLegibilityAnchors.map(n=>{
+                    const s=getComputedStyle(n),r=n.getBoundingClientRect();return {connected:n.isConnected,
+                      rect:{x:r.x,y:r.y,width:r.width,height:r.height},background:s.backgroundColor,
+                      display:s.display,visibility:s.visibility,opacity:s.opacity,zIndex:s.zIndex};})};''')
+                row['calibration_attempts']=[]
+                before=time.monotonic()
+                for attempt,delay in enumerate([0,.125,.375]):
+                    if delay:time.sleep(delay)
+                    path=directory/(image_prefix+'-calibration'+('-'+str(attempt) if attempt else '')+'.ppm')
+                    capture(path)
+                    record=dict(path=path.name,elapsed_ms=(time.monotonic()-before)*1000)
+                    row['calibration_attempts'].append(record)
+                    try:
+                        row['calibration']=calibrate(path,anchors,row['devicePixelRatio'])
+                        record['complete']=True
+                    except ValueError as error:
+                        record.update(complete=False,error=str(error))
+                    (directory/(image_prefix+'-calibration-attempts.json')).write_text(json.dumps(dict(
+                        marker_document=row['marker_document'],attempts=row['calibration_attempts']),indent=2)+'\n')
+                    if record['complete']:break
+                else:raise RuntimeError('DOM calibration markers did not reach the renderer in the bounded observation')
             finally:
                 script('window.__sffxLegibilityAnchors?.forEach(n=>n.remove());delete window.__sffxLegibilityAnchors;return true;')
             paint();shot(directory/(image_prefix+'-visible.png'))
