@@ -1471,3 +1471,177 @@ fails on desk7's source (`basecheck-synthetic-keys-old-source.txt`).
 
 ### Taken from Finch (DESK8)
 Nothing.
+
+## Firefox's frames measured, the desk's cost, corner resizing (DESK9, 16 November)
+
+**Truthfulness.** All input here is synthetic (the inject module's virtual seat; never `seat owner`), into my own
+Firefox (`/Applications/Firefox.app` launcher, `-no-remote -profile /private/var/db/sfdesk9/p1`, a fresh profile);
+the owner's processes were never signalled or typed into, and his counters stayed 0 in every run (`done` lines).
+Numbers are from the compositor's own trace (`WMPACING`, `WMCOST`) and the page's own clock (rAF/rVFC written into
+the window title, read by the inject `list`), 10 s phases, two rounds unless said; spread = the two rounds.
+
+### 1. Firefox's frame pacing, measured at last (desk9-001, kernel 44/45, c19)
+**Method.** `runs/m1-desktop-010/desk9-tests/m1/pace9.sh` (with `lib9.sh`, `m1run9.sh`, `batch9.sh`, `parse9.py`):
+my Firefox opens a page; per 10 s phase the inject pins `policy fifo=on|off` (+ `framehash=on` where said; released at
+the phase's end; no relaunch), a `stats` step before and after takes the phase's own `WMPACING`/`WMCOST` line,
+`ps` gives the CPU seconds of the compositor and of my Firefox's process tree, and the page's `stats9.js` writes its
+requestAnimationFrame intervals (and, on the video page, requestVideoFrameCallback and playback quality) of the last
+10 s into the title. Pages: a 400-paragraph page scrolled by one synthetic wheel notch every 33 ms; a CSS page (four
+boxes translating/rotating, a colour band); CODEX's 1080p60 H.264 file, muted, looping, 1200 px wide.
+New in the trace (patch 29): frame callback -> next commit, the commit handler's time, the content of every
+committed buffer (policy `framehash`: FNV over every 3rd pixel of every 3rd row; distinct / the same as the one
+before), and `WMCOST` (frames, render + GPU finish p50/p95/p99, texture uploads, share of the screen repainted).
+
+**FIFO on (the default), two rounds** (`p9b-*.txt`, `p9e.txt`, `p9f.txt`):
+
+| page | presented/s | commits/s | distinct pictures/s (hash run) | replaced unshown / repeats of the picture before (10 s, hash run) | commit->flip p50 / p95 / p99 ms | callback->commit p50 ms | page rAF | desk render+finish p50 / p95 ms | desk CPU |
+|---|---|---|---|---|---|---|---|---|---|
+| scroll | 59.2-59.5 | 77-78 | 59.4 | 188 / 188 | 22.5-24.0 / 25.2-29.2 / 25.4-30.3 | 8.1-9.8 | 600 per 10 s, p50/p95/p99 16.7 | 1.9-2.1 / 3.0-3.2 | 8 % of a core |
+| CSS animation | 59.4-59.9 | 65-68 | 59.1 | 53 / 55 | 22.5-22.6 / 24.5-30.3 / 25.1-30.5 | 9.6-9.8 | 600, 16.7 | 2.0 / 2.7-3.0 | 9-13 % |
+| 1080p60 video | 59.4-59.9 | 60.4-61.1 | 59.9 | 10 / 5 | 21.2-21.3 / 27.6-30.3 / 30.3-33.5 | 11.0-11.1 | 600, 16.7; rVFC 250 per 10 s (25 Hz); decoded 600, dropped 0 | 2.0 / 2.1 | 6 % |
+
+**FIFO off:** scroll 56.6-59.0 presented/s at 86-104 commits/s (283-449 replaced, 422-449 repeats); CSS 59.6-59.7
+(70-71/s, 106-113 replaced); video 57.9-58.4 (59.5-61/s, 12-32 replaced; its commits come 16-17 ms after the flip, at
+the next blank). The FIFO keeps every new picture: presented/s is higher with it in every page.
+**Rendering at once instead of late** (inject `latch off`, `p9e.txt`): scroll commit->flip p50 29.6 ms (worse),
+video 36 (FIFO off) and 52 (FIFO on) presented/s - much worse; late latching stays (policy `late_latch`, patch 30).
+**Acceptance.** >= 59.5 presented/s: met for CSS and video (59.4-59.9), scroll on the line (59.2-59.5). 0 replaced-
+unshown: **not met** - but in scroll and CSS the replaced commits were as many as the repeats of the picture before
+(188/188, 53/55): what the FIFO drops are Firefox's repeats, and the distinct pictures (59.1-59.4/s) all reached the
+screen (the per-commit proof, `replaced_distinct`, is in desk9-002/003, not running yet); in video 10 replaced vs 5
+repeats: up to 5 new pictures in 10 s were lost. Firefox commits an unchanged window picture 19-45 times a second while scrolling, 5-11 in the CSS page, ~1 in the
+video. Not two clocks of new frames any more (the rAF is a solid 60, distinct pictures 59.1-59.9/s): one picture per
+refresh plus repeats at a second offset after the flip (scroll, FIFO off: clusters 6-9 and 13-14 ms after the flip).
+Contract to TERM9/CODEX-FX (requests-for-TERM5.md and requests-for-CODEX-FX.md, "From DESK9"): commit a buffer only
+when the picture changed; one buffer commit per presentation feedback. TERM9's 0156w (present pacing, opt-in) and
+FXPERF's 75-vs-55 CNN finding point the same way.
+**Latency.** Firefox commits 10-12 ms after its tick; the desk needs ~5 ms before the blank (render + finish 2 ms,
+commit lead 2.2-2.9 ms), so a commit is shown a refresh later: commit->flip 21-24 ms p50. A cheaper Firefox frame
+(FXPERF) gains that refresh; the desk cannot without rendering late commits at once (measured worse). A deeper FIFO
+would show Firefox's repeats as frames of their own (a refresh each, more latency): not done.
+**FX-035, the compositor's view.** During the 1080p60 file Firefox commits 59.5-59.9 DISTINCT window pictures a second
+(600 distinct of 604 commits in 10 s with the FIFO, 595 of 611 without), while the page's rVFC fires 25 times a
+second: the desk receives ~60 different frames a second, not 25 or 30.
+
+### 2. The desk's cost per Firefox frame (with FXPERF's finding: the page side legitimately makes 60 frames/s)
+What one Firefox commit costs the desk, measured (desk9-001, `WMPACING ... commit handler`, `WMCOST`, `ps`):
+- **No copy, no upload**: Firefox (c19) commits 1920x1473 AR24 linear dma-bufs (three, rotating); the desk samples
+  them as EGL images (zero-copy, as since DESK4); texture uploads are 0.3-0.6 MB/s in all phases (title bars, the
+  dock's meters), not Firefox. The commit handler takes < 0.1 ms (p95) per commit.
+- **But the whole screen was re-composited every frame** (2560x1600, wallpaper + windows + frames, then glFinish):
+  render + finish p50 1.9-2.1 ms, p95 2.1-3.2 ms; the compositor process 5-13 % of a core at ~60 frames/s. Surface
+  damage was honoured only for CPU (shm) windows' copies and texture uploads.
+- **Damage**: Firefox damages its whole window on every commit (repainted area with a partial repaint = its window,
+  69-71 % of the screen), and its repeats (section 1) come as new buffers with full damage, so the desk cannot tell
+  them from a new picture without reading GPU memory (the test hash costs ~1 ms a commit: not for production).
+  Firefox sends no buffer-less or empty-damage commits (`unchanged_commits=0` in every phase).
+- **Changes** (patch 29, policy switches, no relaunch): `partial_repaint` - the GPU renderer repaints only what
+  changed since the buffer it draws into was drawn last (buffer age over the KMS target's three rotating buffers,
+  per-rectangle scissor, up to 4 passes, else the bounding box); `skip_unchanged` - a commit with no buffer, or the
+  same buffer again without damage, repaints nothing and its callbacks/feedback come at the next blank.
+  Measured (`p9h.txt`, `pr9a.txt`): a Firefox CSS page render+finish p50 2.1 -> 1.9 ms (69 % repainted); small
+  updates (an idle desk) 2.2 -> 0.8 ms (15 % repainted). Correctness: host test 400/400 random frames into rotating
+  buffers equal the CPU render; on the M1 a partial frame and a whole frame drawn right after it differ, outside my
+  test window, only in the dock's live meter (50 px, it changed in between). **`partial_repaint` is on since 05:12Z**
+  (policy file; revert `desk_m1.sh policy partial_repaint=off`); `skip_unchanged` stays off (no client measured that
+  would gain).
+- **Not done**: direct scan-out (Firefox's window is not full screen in these tests; full-screen video would need a
+  client dma-buf as the primary plane's framebuffer - AddFB2 of a client buffer on this DRM port is untested and a
+  wrong one blanks the panel, so it needs its own guarded test), and dropping repeats in the desk (needs reading the
+  buffers; the client should not send them).
+
+### 3. FX-033: resizing Firefox by its frame
+**Cause (desk side).** Two things together: (1) the hit test gives a point inside a window's content to the client
+before the frame is asked (`scene.rs hit_at`), and the inject `list`'s `resize_se` point (the centre of the theme's
+corner hitbox) lies about half a pixel inside the content's corner - so DESK8's and FXLEAD's presses went to the page
+(FXLEAD: a text selection); (2) placement fitted a new window by its *visible* frame only, so a window as tall as the
+work area had its invisible grab margin - the bottom resize band, 9-11 px - below the panel (DESK8: frame y 68..1609).
+A real hand could only grab the 2 on-screen rows left of the band.
+**Change (patch 29).** wm-core: on a backend that fits new windows to the work area (the Darwin desk) the frame's
+grab margin at the right and bottom is kept on the panel too (the work area for the fit and the placement is the
+visible one less the margin). wm-darwin: a resizable frame's corner grips win over the client within 8 px of the
+content's corners (`CORNER_GRIP`); the edge bands outside the content are unchanged (the theme's input margin).
+**Observed on the M1** (desk9-001, my own Firefox, fresh profile, virtual pointer, synthetic; `fx9c`, `fx9m`): the
+window opens with its whole frame on the panel (frame 279,39 1942x1541, bottom 1580); a press 3 px inside the
+content's south-east corner and 30 moves of (-15,-10) resized it 1920x1473 -> 1695x1323 mid-drag -> 1470x1173 at the
+release and 1.5 s later; the right edge band (4 px outside the content) -300 px -> 1170 wide; Maximize -> 2444x1550
+and back -> 1920x1473; Control-Command-F into my window -> full screen (Firefox draws 2561x1601, shown 2560x1600:
+FX-001's rounding) and back -> 1920x1473. Firefox's own buffer (`dmabuf` dumps) mid-drag, at the end, 1.5 s later,
+maximised, full screen and back: the whole chrome and the page reflowed, no blank column or offset (`shots/fx9c-*`,
+`fx9m-*`). So the owner's "content offset and blank areas after resize/maximise/full screen" did not reproduce on
+c19 + desk9 in these runs. **Client side, for TERM9:** Firefox answers a resize configure in 116-418 ms
+(`WMLATENCY resize asked->client-buffer` p50 170, max 418), so a fast drag shows the old size for up to 25 frames.
+
+### 4. Lifecycle on the M1
+- **After a reboot** (rode CODEX-TB's 44 and 45 reboots, 02:30Z and 03:40Z): nothing of the boot before came back - no
+  `WMRESTORE` line: DESK8's restore is for a compositor relaunch (the runtime file `$XDG_RUNTIME_DIR/session-apps`
+  does not survive a reboot, and a session that ended with a reboot was excluded by design). New, opt-in (patch 31,
+  policy `restore_after_reboot`, off): the file is also kept in `$XDG_STATE_HOME/chonkstep/session-apps.last` with
+  the boot it was written in; the first compositor of a new boot opens again, 10 s after its start, through the dock's
+  path, the applications the desk had opened that had windows when the machine went down (not after a power-off or
+  log-out, not when older than 30 min, never an agent's shell-started instance) - as a Mac reopens them after a
+  restart. Host-tested; in desk9-003 (installed as files, starts with the next reboot); turned on with
+  `desk_m1.sh policy restore_after_reboot=on` - the owner's call (every kernel install reboots: his dock-opened
+  Firefox and Activity Monitor would come back each time).
+- **FX-032 / a windowless application** (05:17Z, my own Firefox, fresh profile; the inject routes are what the dock
+  tile and the switcher send): the frame's close for my window only left it windowless (`WMFOREIGN windowless
+  applications: org.mozilla.firefox(33345)`); `app 33345 reopen` -> AppKit answered "ok" and a NEW window appeared in
+  the SAME process with my profile (no quit, no default-profile start: FX-032's fix holds end to end); `app 33345
+  quit` with no window -> AppKit answered "ok", but the process was still alive 14 s later (my script ended it):
+  **Quit of a windowless Firefox does not end it** - for TERM9/CODEX-FX (AppKit's terminate path), in the ledger.
+- **Restart/Quit of a leftover** (an application that outlived a compositor relaunch): not exercised - it needs a
+  relaunch, and none happened (the kernel installs reboot, which ends every application). The `relaunch` preflight's
+  5-minute owner-idle rule is still in `desk_m1.sh` (DESK8's edit was refused; I did not touch it).
+
+### 5. The rest of the list
+- **Clipboard after its application quits, on the M1** (05:22Z, my Firefox A and B, fresh profiles, keys only into my
+  own windows): when A quit, `WMCLIP the application that copied went: the desk keeps the clipboard (5 types, 900
+  bytes)`, and Command-V in B's address bar pasted the kept text - but the text was an Activity Monitor row that another
+  agent's robustness pass had copied, not my page's text, so whether my own Command-A/Command-C took is not shown.
+  Mechanism observed; my copy -> quit -> paste is not.
+- **Pinch into a client** (same run, synthetic `pinch` over my Firefox B, scale 1.0 -> 2.0): `WMGESTURE pinch begin
+  fingers=2 to the client under the pointer pid=<B>`; B's picture changed after it (the top-left text left the
+  view, consistent with a 2x zoom about the window's centre; not verified further). Real pinch records from the
+  trackpad (K14) need the owner's fingers: checklist.
+- Seen on the way, for FXLEAD/TERM10 (FX-011): in B's buffer before the pinch the page's left 1024 px were blank while
+  the right part showed the text (`shots/cl9a-b-before-pinch-client.png`), after a paste into the address bar and
+  Escape, on a static page.
+- **Not done**: `wl_subcompositor` (it pays off when libWindowServer hands Firefox's layers - the video layer, the
+  WebRender surface - to the desk as subsurfaces instead of composing the whole window per frame, which is FXPERF's
+  per-frame cost and the 10-12 ms that cost a refresh of latency: worth doing together with TERM9; the desk's half is
+  per-surface textures, z-order, sync/desync and hit-testing, ~1-2 days); direct scan-out of a full-screen client
+  buffer (untested AddFB2 of a client dma-buf on this DRM port; needs a guarded test of its own).
+
+### Host tests (`runs/m1-desktop-010/desk9-tests/`)
+desk9-001: wm-darwin lib 172/172 (new: the GL partial repaint into rotating buffers equals the CPU render, 400/400
+frames, 60 % of the pixels repainted), wayland_dmabuf 8/8 (new: a commit that brings nothing new repaints nothing
+and is answered at the next refresh; off: a frame each, as before), wayland_shm 24/25 and wayland_scale 3/4 (the base's
+failures), wayland_outputs 2/2, wayland_theme 3/3 (`cargo-test-wm-darwin-001b.txt`, `-001-shm.txt`; a first shm run
+aborted in the pinch test's 3 s start-up under two parallel cross builds, alone it passed). desk9-002: lib 173/173
+(+ repeats/lost/revisits), the rest the same; desk9-003: lib 174/174 (+ restore after a reboot), the rest the same.
+Patch check: 29, 29+30, 29-31 applied to a fresh copy of the `desk8-next-004` build source give the build sources of
+desk9-next/daily-001, -002, -003 exactly (`diff -r`, `runs/m1-desktop-010/desk9-patchcheck`).
+
+### On the disk and how to go back
+- Running: desk9-next-001 `df5a3290...` since CODEX-TB's 44 reboot (02:37Z), again after the 45 reboot (03:45Z).
+  Installed as files (start with the next reboot): `/usr/bin/chonkstep-darwin-desktop.next` = desk9-next-003
+  `dc2002ad...` (inject), `/usr/bin/chonkstep-darwin-desktop` = desk9-daily-003 `b36a9f0c...` (hashes on the M1
+  right after each copy; 001 and 002 were installed the same way on the way). `.before-desk9` = DESK8's 004 pair
+  (`c4a8c437`/`6149947e`), `.safe` untouched. Policy file `/private/var/db/desktop-state/chonkstep/policy`:
+  `partial_repaint=on` (05:12Z, mine); everything else at its default. My scripts and test profiles in
+  `/private/var/db/sfdesk9/` (removed at the end).
+- Revert: `desk_m1.sh policy partial_repaint=off` (no relaunch); the binaries: `ln -f <path>.before-desk9 <path>.back &&
+  mv -f <path>.back <path>` for both names, then the next reboot (or a relaunch).
+- Source: patches 29-31 in `integrations/puredarwin/terminal-app/compositor/` (README).
+
+### For the owner, at the M1 (real keys and fingers)
+1. Drag a Firefox window's bottom-right corner (a little inside the corner works now) and its edges: it should resize
+   and the page should follow without blank areas.
+2. Scroll a long page and play a video in Firefox: smooth at 60; say if anything stutters.
+3. Pinch on a Firefox page with two fingers: the page should zoom.
+4. After a reboot (every kernel install is one) your dock-opened apps do not come back by themselves. If you want them
+   to, as on a Mac: `desk_m1.sh policy restore_after_reboot=on` (from the next reboot on, desk9-003).
+5. If the screen ever shows a stale rectangle that is not Firefox's own: `desk_m1.sh policy partial_repaint=off`.
+
+### Taken from Finch (DESK9)
+Nothing.
