@@ -820,3 +820,19 @@ collects only owned logs/evidence, and writes `installed-clock-admission.json`.
 An unselected family or missing observations fail rather than silently choosing
 the private provider. It is a prepared acceptance gate, not new native evidence
 until FX actually selects and executes it. Acoustic sync remains unmeasured.
+
+The corrected M1 capture now verifies `source=renderer` and has been inspected:
+full Firefox chrome, page text and the colored final MSE test pattern are
+visible. The paired CPU scene omits that body. The run decoded360 frames with2
+reported drops; it establishes a visible final GPU frame, not smooth playback
+or panel cadence. The native view-getter diagnostic is deferred.
+
+`analyze-video-pair.py PACKET --output SUMMARY.json` summarizes the frozen
+600-frame1080p60 H264 and300-frame4K30 HEVC copy/shared cases. It retains raw VT
+finalizer rows and deduplicates counters. That log's `frames` field counts only
+shared frames: forced-copy mode reports0 there, so the analyzer matches its
+observed byte total to the known visible NV12 clip size instead of mistaking it
+for zero copies. Missing/ambiguous counters stay unknown. Historical CPU-scene
+images never become renderer evidence from their filename or return code.
+The summary keeps drops, CPU coverage, transport counters and rVFC notification
+intervals separate, and always requires visual review/presentation evidence.
