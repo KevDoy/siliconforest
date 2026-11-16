@@ -77,6 +77,8 @@ def browser_intervals(text,result):
         serials=[r['presentedFrames'] for r in callbacks]
         serial_steps=[b-a for a,b in zip(serials,serials[1:])]
         clips.append(dict(source=video['source'],epoch_start=begin,epoch_end=end,
+            requested_playback_rate=video.get('requestedPlaybackRate'),
+            actual_playback_rate=video.get('actualPlaybackRate'),
             callback_records=len(callbacks),callback_interval_ms=distribution(gaps),
             reported_picture_serial_steps=distribution(serial_steps),
             reported_picture_steps_larger_than_one=sum(n>1 for n in serial_steps),

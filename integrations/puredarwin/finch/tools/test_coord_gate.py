@@ -8,6 +8,17 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_actual_fenced_kernel_install_reboot_has_its_own_epoch(self):
+        text='T DESK8 gui.lock: install desk8 compositor relaunch\nU CODEX-TB NOTICE next Firefox kernel install earliest01:07:30Z\n'
+        boot='INSTALL START Firefox42 capsulehash; Correct fenced /bin/reboot requested, stderr retained; no idle gate.\n'
+        self.assertIsNotNone(gate.pending_hold(text+'V CODEX-TB M1 back in SiliconForest\n'))
+        for prefix in ['waiting for ','quoted: ']:
+            self.assertIsNotNone(gate.pending_hold(text+'V CODEX-TB '+prefix+boot+'W CODEX-TB M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(text+'V OTHER '+boot+'W CODEX-TB M1 back in SiliconForest\n'))
+        self.assertIsNone(gate.pending_hold(text+'V CODEX-TB '+boot+'W CODEX-TB M1 back in SiliconForest\n'))
+        # A hold that starts after shutdown is still independent.
+        self.assertIsNotNone(gate.pending_hold(text+'V CODEX-TB '+boot+'W TERM9 core.lock: GUARDED INSTALL now\nX CODEX-TB M1 back in SiliconForest\n'))
+
     def test_multiword_kernel_notice_is_a_real_reservation(self):
         from datetime import datetime,timezone
         text=('2026-11-16T01:05:09Z CODEX-TB NOTICE next Firefox kernel install '

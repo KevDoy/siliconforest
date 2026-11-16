@@ -20,6 +20,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run',type=Path,required=True)
     p.add_argument('--profile-video',action='store_true')
+    p.add_argument('--rate-control',action='store_true')
     a=p.parse_args()
     root=Path(__file__).resolve().parent
     private=Path('/private/var/db/sffx')
@@ -53,7 +54,8 @@ def main():
     a.run.mkdir(parents=True)
     (a.run/'cadence-launch.json').write_text(json.dumps(dict(
         release=manifest,diagnostic_only=True,timing_qualified=False,
-        synthetic_input=False,owner_idle_wait=False,trace_library=str(library)),indent=2)+'\n')
+        synthetic_input=False,owner_idle_wait=False,rate_control=a.rate_control,
+        trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
     destination=a.run/'browser'
     argv=[str(tools/'remote-run.py'),'--bundle','/Applications/Firefox.app',
@@ -61,10 +63,12 @@ def main():
           '--quiet-trace','--measure-all-videos','--page-load-strategy','none',
           '--pref','media.autoplay.default=0']
     if a.profile_video:argv+=['--profile-video']
-    for clip in ['pattern-1080p60-h264.mp4','pattern-4k30-hevc.mp4']:
+    clips=([( 'pattern-1080p60-h264.mp4',rate) for rate in [0.5,1,2]] if a.rate_control else
+           [('pattern-1080p60-h264.mp4',1),('pattern-4k30-hevc.mp4',1)])
+    for clip,rate in clips:
         argv+=['--url','file://'+str(tools/'video-page.html')+
                '?src=file:///private/var/db/sffx/media-highrate-v1/'+clip+
-               '&deferred=1&deadline=25000']
+               '&deferred=1&deadline=25000&rate='+str(rate)]
     sys.argv=argv
     runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
 

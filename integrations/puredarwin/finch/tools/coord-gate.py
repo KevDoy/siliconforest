@@ -125,6 +125,8 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 active[(owner, 'core')] = (line, [], owner)
             elif re.match(r'^in\b.*guarded(?: core)? install\b', lower_body):
                 active[(owner, 'core-announced')] = (line, [], owner)
+            requested_boot = (owner == 'CODEX-TB' and lower_body.startswith('install start ')
+                              and '/bin/reboot requested' in lower_body)
             if (lower_body.startswith('m1 back in siliconforest') or
                 (lower_body.startswith('install end ') and 'm1 back in siliconforest' in lower_body) or
                 re.fullmatch(r'[a-z0-9-]+ recovered [a-z0-9-]+; m1 back in siliconforest', lower_body) or
@@ -144,10 +146,10 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 active.pop((owner, 'reboot'), None)
                 active.pop((owner, 'gpu'), None)
                 active.pop((owner, 'gpu-session'), None)
-            elif any(phrase in lower_body for phrase in
+            elif requested_boot or any(phrase in lower_body for phrase in
                      ['m1 reboot', 'siliconforest rebooting', 'clean reboot to linux', 'reboot now',
                       'will reboot the m1']):
-                if re.match(r'^(?:[a-z0-9-]+ )?(?:clean reboot to linux|m1 reboot now|reboot now|siliconforest rebooting)\b', lower_body):
+                if requested_boot or re.match(r'^(?:[a-z0-9-]+ )?(?:clean reboot to linux|m1 reboot now|reboot now|siliconforest rebooting)\b', lower_body):
                     desktop_before_reboot.setdefault(owner, {
                         key: value[0] for key, value in active.items()
                         if key[1] == 'desktop-install'

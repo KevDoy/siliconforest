@@ -57,6 +57,33 @@ that Mac, not decoded-output/CGL forwarding, M1 cadence or Firefox performance.
 All files were SHA-256 checked before execution in a fresh temporary directory;
 each program had a30s timeout, no DYLD overrides and subsequent cleanup.
 
+The revised tracer's M5 CV control also passed216/216 callbacks at120.006Hz.
+A separate public VT decoder control then decoded120 own H264 pictures in
+both baseline and observed programs: all frame rows including PTS were
+identical, every PTS-sorted visible NV12 hash matched independent Linux output,
+and the trace contained120 output callbacks with zero errors. Decode-order
+callback hashes initially differ from the presentation-order reference;
+sorting by the recorded PTS gives exact matches in both controls. This adds
+native VT-output forwarding evidence, still no M1/CGL/browser performance proof.
+
+On the restored M1 devfs kernel, the same tracer passed01:24:51–57 UTC:
+baseline/observed output identical,108 callbacks each, zero forwarding errors,
+all108 traced at59.984Hz. Nominal/actual refresh properties remain100/6000
+and1/60. The Main10 P010 admission control cleanly returned-12906/null with
+the same status recorded by the tracer; no samples were submitted.
+
+A source candidate for25Hz is Gecko's periodic progress invalidation. At the
+revision identified by FX's Breakpad FILE audit, MDSM uses40ms divided by
+playbackRate for position updates. MediaDecoder's position watcher invalidates
+HTMLVideoElement, which schedules video-frame callbacks. Its callback request
+method queues a callback without directly scheduling a document tick; ordinary
+VideoFrameContainer image updates do not invalidate every frame. These are
+source observations, not a complete binary/source identity or measured cause.
+The rate0.5/1/2 prediction is80/40/20ms callbacks; compare actual decoder, CGL,
+display-link and compositor events before attributing it to the Darwin port.
+The source also explicitly advances reported picture serials independently
+of actual visible composition. rVFC rate alone cannot qualify panel FPS.
+
 `prepare-cadence.py` packages those Linux outputs and a snapshot of the shared
 Firefox diagnostic sources. `run-cadence.py` requires caller-held gui.lock and
 bench, then checks the current coordination gate. Its `control` phase copies
@@ -65,6 +92,9 @@ and cold-verifies the packet; `browser` and `profile` use the recorded receipt.
 observer hook and refuses if that hook is absent. It records owner activity
 without waiting, injects no keys/pointer events and runs only its own Firefox
 family. The optional Gecko profile is diagnostic, not a performance result.
+The `rates` phase uses `cadence-rate.js` only in our fixture snapshot, setting
+and reporting its requested/actual playback rate. It changes no global browser
+preference, decoder clock, display pacing or installed source.
 
 `analyze-cadence.py` uses each process's actual Mach timebase and accepts an
 epoch interval matching the browser fixture. Decoder prefetch/bursts are not

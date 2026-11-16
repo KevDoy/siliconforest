@@ -30,7 +30,7 @@ for path in a.stage.rglob('*'):
 subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
     str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/'bin'),str(a.stage/'portable-bin.json')],check=True)
 shutil.copy2(here.parent/'tools/compare-tests.py',a.stage/'compare-tests-engine.py')
-shutil.copy2(here.parent/'QuickTime/capture.py',a.stage/'compare-tests.py')
+shutil.copy2(here/'cold-capture.py',a.stage/'compare-tests.py')
 shutil.copy2(here/'shared-capture-case.py',a.stage/'shared-capture-case.py')
 manifest=[]
 for clip in ['pattern-1080p60-h264','pattern-4k30-hevc']:

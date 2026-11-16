@@ -25,13 +25,15 @@ for directory in ['bin','lib']:
     subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
         str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/directory),
         str(a.stage/('portable-'+directory+'.json'))],check=True)
-for name in ['cadence-browser.py','cadence-control.py']:
+for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js']:
     shutil.copy2(here/name,a.stage/name)
 shutil.copy2(here.parent/'tools/owner_input.py',a.stage/'owner_input.py')
 tools=here.parents[1]/'firefox';(a.stage/'tools').mkdir()
 for file in sorted(tools.iterdir()):
     if file.is_file() and file.suffix in ['.py','.html','.js','.json']:
         shutil.copy2(file,a.stage/'tools'/file.name)
+page=a.stage/'tools/video-page.html'
+page.write_text(page.read_text()+'\n<script src="../cadence-rate.js"></script>\n')
 rows={str(f.relative_to(a.stage)):hashlib.sha256(f.read_bytes()).hexdigest()
       for f in sorted(a.stage.rglob('*')) if f.is_file()}
 (a.stage/'packet-files.json').write_text(json.dumps(rows,indent=2)+'\n')

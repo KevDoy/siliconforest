@@ -1,5 +1,26 @@
 # Decoder-to-GPU contract for one future kernel installation
 
+## First native import attempt: failed and rolled back
+
+2026-11-16: CODEX-TB's combined Firefox42 kernel exposed ABI1/import capability,
+then the first strict H264 capture attempt panicked at `vm_upl.c:1360`,
+`VM_OBJECT_WIRED_PAGE_UPDATE_END` (`!__overflow`). HEVC was not attempted.
+TB restored the qualified devfs-only kernel and released it at01:20 UTC.
+No shared-buffer decode, zero-copy, K14 or cache-coherency success is claimed.
+Do not retry that kernel/provider combination before the kernel owner fixes
+and qualifies the cause. The failed capsule, full UART and packet stay private.
+
+Exact failed-kext symbolication places the caller at
+`pd_avd_os_dma_free -> avd_buf_free -> pd_avd_session_destroy -> context_destroy`.
+The DMA-free return address follows the virtual memory descriptor `complete`
+call. The assertion adds a signed wire-count delta to the object's wired-page
+count; its actual operands and descriptor type are not known from that stack.
+This is teardown evidence, not proof that import preparation itself caused it.
+Keep the original failure; do not remove accounting assertions, skip unpinning
+or release backing without the required ownership/completion contract.
+
+## Required contract
+
 The current installed AVD API allocates private capture pages and maps them
 read-only to the decoder process. It does not export a GPU-importable dma-buf.
 The current GPU ABI allocates/imports GEM BOs: VM_BIND.userptr names an array
@@ -48,7 +69,7 @@ Exact source/artifact, cache-order and frozen-base review is in
 `runs/m1-coord/requests-for-CODEX-TB.md`. TB owns the one combined future kernel
 with K14 on known-good NON-AVE29, excluding failed dock diagnostics/DP changes.
 Root does not build/install/boot a kernel. The durable owner grant now authorizes Firefox kernel optimizations without
-another decision. TB announces and owns the next idle installation slot;
+another decision. Owner-idle waits are lifted; TB announces and owns installations;
 source/host/SDK results remain separate from native qualification.
 
 Qualification requires independent full-frame hashes/PTS, actual GPU FD/backing,

@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates'])
 a=p.parse_args();repo=Path(__file__).resolve().parents[4]
 if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold gui.lock then bench')
 if not a.stage.name.startswith('firefox-media-cadence-packet-'):raise ValueError('Own cadence packet required')
@@ -50,6 +50,7 @@ try:
             raise ValueError('Missing prior cold receipt')
         argv=['python3',dest+'/cadence-browser.py','--run',dest+'/'+a.phase+'-run']
         if a.phase=='profile':argv+=['--profile-video']
+        if a.phase=='rates':argv+=['--rate-control']
         limit=165
     with (out/'launcher.log').open('w') as stream:
         result=subprocess.run(ssh+[shlex.join(argv)],stdout=stream,stderr=subprocess.STDOUT,timeout=limit)
