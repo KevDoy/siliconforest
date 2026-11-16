@@ -468,6 +468,11 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0300, 0301, 0302w (FXPERF2's FX-029 damage-only frames, adopted by TERM10; opt-in SFFX_GPU_DAMAGE=1, Firefox's
+#         launcher): QuartzCore renders and exports only the changed rectangle, AppKit registers the GPU layer with it,
+#         WindowServer composes and commits only it (wl_surface.damage_buffer). 0301 adapted to sit after 0158; the
+#         CGL part (0303, EGLImage per IOSurface) is CODEX-FX's. FXPERF2's A/B (cnn.com idle, own Firefox): family
+#         99.4 -> 86.9 % of a core, commits 85.6 -> 60/s, replaced unshown 26.5 -> 0.8/s
 #   0162  AppKit (TERM10, FX-022): -addChildWindow:ordered: orders the child above its visible parent and no longer makes
 #         it key (Firefox attaches its menu panel as a child right after showing it: the browser window resigned key and
 #         Firefox closed the panel at once); -removeChildWindow: only detaches, as on macOS
@@ -621,6 +626,7 @@ let
     ./patches/0160a-appkit-layer-render-without-a-new-frame-presents-nothing.patch
     ./patches/0161-appkit-precise-scrolling-by-whole-points.patch
     ./patches/0162-appkit-child-windows-ordered-not-made-key.patch
+    ./patches/0301-appkit-gpu-layer-registered-with-its-damage.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -645,6 +651,7 @@ let
     ./patches/0156w-windowserver-presents-paced-by-frame-callbacks.patch
     ./patches/0158w-windowserver-popups-present-shared-memory.patch
     ./patches/0159w-windowserver-trackpad-finger-frames-precise-with-momentum.patch
+    ./patches/0302w-windowserver-damage-only-compose-and-commit.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -698,6 +705,7 @@ let
     ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
     ./patches/0157-quartzcore-layer-tree-changed-from-other-threads.patch
     ./patches/0160-quartzcore-unchanged-properties-and-commits-render-nothing.patch
+    ./patches/0300-quartzcore-damage-only-frames.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";

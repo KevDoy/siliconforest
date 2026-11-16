@@ -646,17 +646,18 @@ Found on the way, each in my own Firefox with PD_WS_TRACE (synthetic clicks at t
   same show-then-hide); the ≡ button is 128 px below the window content's top at 150 %.
 
 ### Trackpad scrolling ("I have to scroll a lot")
-The trackpad reaches the desk as wheel steps (the trackpad child's libinput emulation: one step per 3.6 mm of
-two-finger travel, Hyprland's scroll_factor 0.4) and libWindowServer made a step one line: 19 points in Firefox,
-5.3 points per mm of finger travel at any speed. 0159w turns wheel steps into precise points as a Mac trackpad gives
-them (50 points a step at up to 100 mm/s, rising to 3.5x at 400 mm/s; times the system scroll speed
-`/private/var/db/desktop-state/chonkstep/scroll-speed`, percent, default 100), as a gesture that ends after a pause of
-2.5 steps (90-200 ms), then a momentum phase (0.95 a refresh) after three or more steps; 0159 gives NSEvent
--momentumPhase; 0161 moves Cocoa scroll views by whole points (fractional offsets drew Activity Monitor's rows over each
-other in the visual check). Measured (my own Firefox, a long page whose title is scrollY, 14 synthetic wheel steps = a
-50 mm swipe): installed 280 CSS px at every speed; with 0159w 1053 / 2359 / 4184 px at about 70 / 200 / 400 mm/s,
-momentum included. Not felt by a hand yet (synthetic steps). DESK9 asked for the trackpad as `AxisSource::Finger`
-with real per-frame travel and `axis_stop` (requests-for-DESK6.md); then the finger path becomes the default.
+The trackpad reached the desk as wheel steps (the trackpad child's libinput emulation: one step per 3.6 mm of
+two-finger travel) and libWindowServer made a step one line: 19 points in Firefox, 5.3 points per mm at any speed.
+DESK10's desk10-001 (from the next compositor start) sends it as axis source "finger" in points with the desk's
+acceleration and scroll speed, and axis_stop at lift (its contract: requests-for-TERM5.md 06:05Z). 0159w (rewritten
+to that contract; a first version that turned wheel steps into points is withdrawn): finger frames are precise
+events for every application (before: Firefox only), began/changed/ended, then a momentum phase from the release
+speed (last 100 ms of moving frames, 3+ frames, >300 pt/s; 0.95 a refresh; a finger frame or a button ends it); mouse
+wheels stay lines. 0159: NSEvent -momentumPhase. 0161: Cocoa scroll views move by whole points (fractional offsets drew
+Activity Monitor's rows over each other in a visual check). Measured in my own Firefox with the inject's finger frames
+(30 frames 8 ms apart of 6 / 15 / 30 points, then `scroll stop`): installed 180 / 450 / 900 CSS px (the frames' sum, no
+momentum); candidate 283 / 791 / 1545 px. Not felt by a hand yet; the wheel-step path the trackpad uses until desk10
+runs is unchanged (lines).
 
 ### Other items
 - FX-024 (emoji boxes): not reproduced at 05:4xZ: emoji render as Noto Emoji/DejaVu outlines on my page and on FXQA's
