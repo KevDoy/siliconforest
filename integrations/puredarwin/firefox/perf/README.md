@@ -53,6 +53,9 @@ The 30 FreeType maps of the same file (one per FT_New_Face) are clean shared pag
 - Tried and NOT effective on the c19 path (one run each, runtime changed between runs, inside run-to-run noise):
   IOSurface lookup of a known port without mapping (`build/0234`, the parent compositor thread is only 3 % on c19;
   its remaining per-frame maps are probably new video surfaces - inference), one glFinish per CGL write-back (GPU Renderer 8.3 -> 8.4 %).
+- CODEX-FX's opt-in 0218 (layer-tree notifications batched to 60 Hz ticks), built on c19 QuartzCore and enabled in my
+  instance (runs F-base-1 / F-coal-1, frozen runtime): compositor commits 70 -> 61/s, shown 50 -> 44/s, but family CPU
+  101.9 -> 102.5 % and parent main thread 38.7 -> 39.6 %: no CPU gain (one pair; not pursued).
 - File system (kernel): unlink and fsync of a 4 KB file take 15 / 14 ms (p50) on the M1's ext4; Firefox's IndexedDB,
   cache and quota threads spend their idle time there.
 
@@ -71,7 +74,10 @@ pages). Per process, our libraries' private dirty pages are small (Mesa ~5 MB, A
 XUL's relocated data is 55-66 MB per process (Mozilla's, as on macOS). Gecko's own accounting at 30 tabs: explicit
 602 MB, heap-allocated 772 MB across all processes.
 
-### FX-030 (tab switch) - partial attribution (profile with 1 ms sampling, inflated)
+### FX-030 (tab switch)
+Installed c19, 12 Command-number switches among 10 static tabs (run B2, no profiler, inject request time -> the page's
+Date.now, FXQA's method): visibilitychange p50 80 ms, second rAF p50 117 ms, p95 297 ms (unchanged from FXQA's 119 ms).
+Partial attribution (profile B1 with 1 ms sampling, inflated):
 Key -> AsyncTabSwitch:Start 3-5 ms; the content repaints at once (PaintWhileInterruptingJS) and the GPU process
 composites the new tab within ~3 ms (DidComposite); AsyncTabSwitch:Finish at ~21 ms; but the parent's compositor
 thread receives the native-layer commit for that frame only ~55 ms after Start and renders it (CARenderer) at ~57 ms,
