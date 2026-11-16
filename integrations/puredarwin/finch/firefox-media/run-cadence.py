@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','youtubehw','mse','mse-installed','mse-scroll'])
+p.add_argument('stage',type=Path);p.add_argument('phase',choices=['control','browser','profile','rates','copy','shared','codecs','youtube','youtube-profile','youtube1080','youtubehw','youtube-policy','av1-policy','mse','mse-installed','mse-scroll'])
 p.add_argument('--reuse-media-profile',type=Path)
 p.add_argument('--start-media',type=float)
 p.add_argument('--compare-pixels',action='store_true')
@@ -75,11 +75,13 @@ try:
             argv+=['--mse','--installed-media','--frame-mode','require','--without-trace']
             if a.phase=='mse-scroll':argv+=['--mse-scroll']
         if a.view_state:argv+=['--view-state']
-        if a.phase in ['youtube','youtube-profile','youtube1080','youtubehw']:
+        if a.phase in ['youtube','youtube-profile','youtube1080','youtubehw','youtube-policy']:
             argv+=['--youtube','--without-trace']
             if a.phase=='youtube-profile':argv+=['--youtube-profile']
-            if a.phase in ['youtube1080','youtubehw']:argv+=['--youtube-1080']
+            if a.phase in ['youtube1080','youtubehw','youtube-policy']:argv+=['--youtube-1080']
             if a.phase=='youtubehw':argv+=['--disable-av1']
+            if a.phase=='youtube-policy':argv+=['--installed-codec-policy']
+        if a.phase=='av1-policy':argv+=['--installed-codec-policy','--installed-media','--codec-matrix','--av1-switchback','--without-trace']
         if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
         if a.start_media is not None:argv+=['--start-media',str(a.start_media)]
         if a.compare_pixels:argv+=['--compare-pixels']

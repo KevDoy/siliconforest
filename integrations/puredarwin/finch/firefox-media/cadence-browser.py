@@ -53,6 +53,8 @@ def main():
     p.add_argument('--reuse-media-profile',type=Path,help='Previously completed own1080 profile; requires the reviewed copy-only runner patch')
     p.add_argument('--start-media',type=float,help='Own public1080 video seek before timing, seconds0..60')
     p.add_argument('--compare-pixels',action='store_true',help='After measurement, seek own video to10s and read128x72 diagnostic pixels')
+    p.add_argument('--installed-codec-policy',action='store_true',help='Fresh actual installed codec default; no test codec preference assignment')
+    p.add_argument('--av1-switchback',action='store_true',help='Fresh generated AV1-only control via installed SFFX_AV1=1 opt-in')
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     p.add_argument('--mse',action='store_true',help='Own local muxed H264/AAC init-segment/representation sequence, not a network-adaptation benchmark')
@@ -72,6 +74,15 @@ def main():
     if (a.disable_av1 or a.reuse_media_profile or a.start_media is not None or a.compare_pixels) and not a.youtube_1080:
         raise ValueError('Codec/profile/seek controls require our admitted1080 public video')
     if a.start_media is not None and not 0<=a.start_media<=60:raise ValueError('Own content-window seek must be0..60s')
+    if a.installed_codec_policy and (a.disable_av1 or a.reuse_media_profile or a.staged_media or a.graphics_override):
+        raise ValueError('Installed policy gate requires a fresh profile and no private preference/provider override')
+    if a.av1_switchback and (not a.installed_codec_policy or not a.installed_media or not a.codec_matrix or a.youtube):
+        raise ValueError('Switchback requires its installed policy/generated AV1 case')
+    if a.installed_codec_policy and not (a.youtube_1080 or a.av1_switchback):
+        raise ValueError('Installed policy gate requires its fresh YouTube or generated AV1 case')
+    if a.installed_codec_policy:
+        if 'SFFX_AV1' in os.environ:raise ValueError('Policy gate refuses inherited codec override')
+        if a.av1_switchback:os.environ['SFFX_AV1']='1'
     if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
     if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):
         raise ValueError('Lifetime control requires separate strict owned fixtures')
@@ -200,6 +211,16 @@ def main():
                           userValue:p.prefHasUserValue(name)}}catch(e){result[name]={error:String(e)}}
                       }return result;''','args':[],'newSandbox':True})
                 (a.run/'owned-startup-preferences.json').write_text(json.dumps(observed,indent=2)+'\n')
+                if a.installed_codec_policy:
+                    settings=(a.run/'browser/profile/user.js').read_text()
+                    value='true' if a.av1_switchback else 'false'
+                    marker='// BEGIN SiliconForest hardware video preference\n'
+                    end='// END SiliconForest hardware video preference\n'
+                    block=settings.partition(marker)[2].partition(end)[0] if marker in settings and end in settings else ''
+                    (a.run/'postlaunch-codec-profile.json').write_text(json.dumps(dict(
+                        codec_marker_applied=('user_pref("media.av1.enabled",'+value+');') in block,
+                        actual_av1_value=observed.get('media.av1.enabled',{}).get('value'),
+                        test_pref_assigned=False),indent=2)+'\n')
             finally:self.command('Marionette:SetContext',{'value':'content'})
             return result
 
@@ -220,7 +241,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -361,6 +382,8 @@ def main():
         from video_selection import installed_family
         installed_frameworks=installed_family(manifest)
         if not installed_frameworks.is_dir():raise ValueError('Selected video family is absent')
+    if a.installed_codec_policy and manifest.get('av1_enabled') is not False:
+        raise ValueError('Installed hardware-codec policy is not selected; no browser launched')
     if a.staged_media or a.installed_media or a.youtube_1080:os.environ['SF_VT_COPY_COUNTS']='1'
     if a.timer_control:os.environ['PD_CV_TIMER']='1'
     if a.retire_pool:os.environ['SF_VT_RETIRE_POOL_AT_INVALIDATE']='1'
@@ -384,6 +407,7 @@ def main():
         youtube_1080=a.youtube_1080,
         youtube_disable_av1=a.disable_av1,reused_media_profile=str(a.reuse_media_profile) if a.reuse_media_profile else None,
         requested_start_media=a.start_media,diagnostic_pixels=a.compare_pixels,
+        installed_codec_policy=a.installed_codec_policy,av1_switchback=a.av1_switchback,
         lifetime_control=a.lifetime_control,retire_pool=a.retire_pool,
         marionette_port=port,trace_library=str(library)),indent=2)+'\n')
     # The shared runner requires a nonexistent destination.
@@ -396,7 +420,7 @@ def main():
           '--pref','media.autoplay.default='+('1' if a.youtube else '0'),'--pref','marionette.port='+str(port),
           '--pref','termsofuse.bypassNotification=true']
     argv+=['--vt-frame-mode',a.frame_mode]
-    if a.youtube_1080:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
+    if a.youtube_1080 and not a.installed_codec_policy:argv+=['--pref','media.av1.enabled='+('false' if a.disable_av1 else 'true')]
     if a.reuse_media_profile:argv+=['--reuse-media-profile',str(a.reuse_media_profile)]
     if a.installed_media or a.youtube_1080:argv+=['--expect-system-gpu']
     if a.no_native_compositor:argv+=['--pref','gfx.webrender.compositor=false']
@@ -423,6 +447,7 @@ def main():
             allowed={'av1-1080p30.webm','vp9-1080p60.webm','hevc-main10-pq.mp4','vp9-profile2-pq.webm','av1-1080p60.webm','vp9-4k30.webm'}
             if not names or len(names)>4 or len(names)!=len(set(names)) or any(name not in allowed for name in names):
                 raise ValueError('Invalid frozen codec selection')
+        if a.av1_switchback:names=['av1-1080p60.webm']
         clips=[(name,1) for name in names]
     if a.mse:clips=[]
     for clip,rate in clips:
@@ -453,8 +478,14 @@ def main():
         server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
         argv+=['--url','http://127.0.0.1:'+str(server.server_port)+'/index.html'+('?activity=scroll' if a.mse_scroll else '')]
     sys.argv=argv
+    from contextlib import nullcontext
+    if a.installed_codec_policy:
+        import codec_policy_guard
+        policy_scope=codec_policy_guard.observe(a.run,override=a.av1_switchback)
+    else:policy_scope=nullcontext()
     try:
-        try:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
+        try:
+            with policy_scope:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
         except SystemExit as error:
             if not (a.installed_media or a.youtube_1080):raise
             # Intentional Quit makes the shared survival-oriented runner return1.

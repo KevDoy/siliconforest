@@ -64,7 +64,12 @@ def analyze(run,require_hardware=False):
     delta={k:b[k]-a[k] for k in ['jobs','done','errors','timeouts','dart_faults','quarantined_desc'] if k in a and k in b}
     if require_hardware:
         preferences=json.loads((run/'owned-startup-preferences.json').read_text())
-        checks['own_private_av1_disabled']=launch.get('youtube_disable_av1') is True and preferences.get('media.av1.enabled',{}).get('value') is False
+        if launch.get('installed_codec_policy') is True:
+            from codec_policy_guard import checks as policy_checks
+            checks.update(policy_checks(run,False))
+            checks['installed_policy_manifest']=launch['release'].get('av1_enabled') is False
+            checks['actual_installed_av1_default']=preferences.get('media.av1.enabled',{}).get('value') is False
+        else:checks['own_private_av1_disabled']=launch.get('youtube_disable_av1') is True and preferences.get('media.av1.enabled',{}).get('value') is False
         checks['selected_hardware_codec']=bool(re.search(r'codecs="(?:vp09|vp9|avc1)',selected.get('mimeType','')))
         positive=[row for row in footers if row[0]>0]
         checks['owned_shared_frames']=any(row[0]>=frames for row in positive) and all(row[1]==0 for row in positive)

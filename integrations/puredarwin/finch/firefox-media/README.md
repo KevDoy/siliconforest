@@ -137,6 +137,19 @@ RDD/family CPU and diagnostic-sample PSNR. Both actual renderer images still
 need inspection. Small samples are not lossless equality or a complete quality
 comparison, and one pair never installs a codec preference automatically.
 
+`run-codec-policy.py --stage <fresh-owner-packet>` is the integration owner's
+two-case acceptance after selecting its reversible codec policy. Both profiles
+are new: the first uses the installed hardware default with no test AV1 pref or
+environment override; the second plays only the generated AV1 1080p60 fixture
+through `SFFX_AV1=1`, also without a test preference assignment. A scoped
+`Popen` observer records absent AV1 keys/prior prefs.js immediately before the
+actual installed outer launch. After launch it checks the marked codec block
+and live preference. The gates require900 real YouTube hardware frames and600
+generated software AV1 frames, zero drops, actual providers/GPU output and
+natural status0/family disappearance. Both GPU images still require inspection.
+FX owns selection and checked rollback; this command changes no installed file.
+The opt-in demonstrates switchback, not default support for AV1-only content.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A
