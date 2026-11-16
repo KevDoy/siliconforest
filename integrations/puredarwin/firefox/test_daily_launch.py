@@ -120,6 +120,22 @@ class LaunchPlanPolicy(unittest.TestCase):
         exported = json.loads(stream.getvalue())['environment']
         self.assertEqual(exported, {'SF_AU_NORMALIZE_HAL_CLOCK': '1', 'MOZ_CRASHREPORTER_DISABLE': '1'})
 
+    def test_damage_is_explicit_and_requires_canonical_providers(self):
+        os.environ['SFFX_GPU_DAMAGE']='1'
+        _,env=self.plan()
+        self.assertNotIn('SFFX_GPU_DAMAGE',env)
+        self.manifest.update(system_ui=True,system_gpu_providers=True,gpu_damage=True)
+        _,env=self.plan()
+        self.assertEqual(env['SFFX_GPU_DAMAGE'],'1')
+        self.manifest['system_gpu_providers']=False
+        with self.assertRaises(ValueError):self.plan()
+
+    def test_damage_selector_rejects_truthy_non_booleans(self):
+        self.manifest.update(system_ui=True,system_gpu_providers=True)
+        for value in ['true',1,None]:
+            self.manifest['gpu_damage']=value
+            with self.assertRaises(ValueError):self.plan()
+
     def test_network_override_keeps_canonical_ui_and_precedes_system_frameworks(self):
         self.manifest.update(system_ui=True, system_gpu_providers=True,
                              network_override=str(self.root / 'overrides/network-v1/Frameworks'))

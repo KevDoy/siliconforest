@@ -79,13 +79,21 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
         return _request(inject, lines)
 
     def state():
-        return chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
+        current = chrome('''const w=Services.wm.getMostRecentWindow("navigator:browser");
           if(!w)return {windows:0};
           return {windows:[...Services.wm.getEnumerator("navigator:browser")].length,
             panel:w.document.getElementById("appMenu-popup")?.state,
             events:w.__sffxPopupEvents??[],input:w.__sffxPopupInput??[],
             windowInput:w.__sffxPopupWindowInput??[],
             lifecycle:w.__sffxPopupLifecycle??[],tabs:w.gBrowser.tabs.length};''')
+        unexpected = [event for event in current.get('windowInput', [])
+                      if event['type'] == 'mousedown' and event.get('target') != 'PanelUI-menu-button']
+        if unexpected:
+            result['unexpected_window_input'] = unexpected
+            result['state_at_unexpected_input'] = current
+            save()
+            raise RuntimeError('Unrequested mouse input reached the owned window; stop further synthetic input')
+        return current
 
     try:
         if admission is None:
@@ -135,7 +143,7 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
             row = dict(attempt=index+1, point=point, complete=False)
             result['repetitions'].append(row)
             save()
-            request('abs %d %d\nbuttons 1\nwait 50\nbuttons 0\nwait 250' %
+            row['click_inject_status'] = request('abs %d %d\nbuttons 1\nwait 50\nbuttons 0\nwait 250' %
                     (round(px*65535/2559), round(py*65535/1599)))
             row['opened'] = state()
             # First-open module loading can outlast the injected click. Keep
