@@ -2,8 +2,9 @@
 # GPU IOSurface bridge; private prefix by default, explicit canonical packaging.
 {prefix ? "/private/var/db/sffx/gl-gpu-v3", canonical ? false, nv12Backing ? false,
  contextLocalFBO ? false, imageCache ? false, frameIdentity ? false,
- nv12GPUCopy ? false}:
+ nv12GPUCopy ? false, nv12BatchCopy ? false}:
 assert !nv12GPUCopy || nv12Backing;
+assert !nv12BatchCopy || nv12GPUCopy;
 let base=import ./cgl.nix {inherit prefix canonical;};
 in base.overrideAttrs(old:{patches=old.patches++[./cgl-patches/0002-gpu-iosurface-alias-and-rectangle-blit.patch ./cgl-patches/0003-export-framebuffer-and-import-layer-gpu-storage.patch ./cgl-patches/0004-opt-in-export-framebuffer-resource-cache.patch]++
  (if nv12Backing then [./cgl-patches/0005-nv12-rectangle-gpu-planes-and-completion-lease.patch] else [])++
@@ -17,7 +18,7 @@ in base.overrideAttrs(old:{patches=old.patches++[./cgl-patches/0002-gpu-iosurfac
    cp ${../finch/firefox-media/frame-id-decode.h} src/Frameworks/OpenGL/sffx-frame-id-decode.h
  '' else "")+
  (if nv12GPUCopy then ''
-   cp ${../finch/firefox-media/strict-nv12-plane.h} src/Frameworks/OpenGL/sffx-strict-nv12-plane.h
+   cp ${if nv12BatchCopy then ../finch/firefox-media/strict-nv12-batched-plane.h else ../finch/firefox-media/strict-nv12-plane.h} src/Frameworks/OpenGL/sffx-strict-nv12-plane.h
    cat >> src/Frameworks/OpenGL/CGL.c <<'SF_NV12_COPY'
    #include "sffx-strict-nv12-plane.h"
    SF_NV12_COPY
