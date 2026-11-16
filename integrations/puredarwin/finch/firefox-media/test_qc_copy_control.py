@@ -82,4 +82,14 @@ class Admission(unittest.TestCase):
         self.assertFalse(module.compare(value,other)['passed'])
         other=copy.deepcopy(value);other['installed_admission']=True
         self.assertFalse(module.compare(value,other)['passed'])
+        candidate=copy.deepcopy(value);candidate['identity']['cgl']['uuid']='dd'*16
+        for process in candidate['providers']['processes']:
+            process['images'][-1]=process['images'][-1].replace('bb'*16,'dd'*16)
+        required=['same_exports','same_drv_inputs','env_only_postpatch_out','null_control_exact',
+            'GLAPI_unchanged','GLU_unchanged','not_installed','paired_function_only_source_change']
+        proof=dict(checks={k:True for k in required},baseline=value['identity']['cgl'],candidate=candidate['identity']['cgl'])
+        self.assertFalse(module.compare(value,candidate)['passed'])
+        self.assertTrue(module.compare(value,candidate,proof)['passed'])
+        proof['checks']['paired_function_only_source_change']=False
+        self.assertFalse(module.compare(value,candidate,proof)['passed'])
 if __name__=='__main__':unittest.main()

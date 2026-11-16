@@ -482,6 +482,60 @@ all CPU/playback measurements, with no quiet preferences or owner-idle wait.
 Its analyzer requires `--partial-1080` and explicitly leaves4K qualification
 open. TERM owns canonical adoption/installation, and FX owns CGL selection.
 
+The subsequent fixed-cohort H264-only pair passes:600 decoded frames and zero
+drops per arm, with the exact hardware-job count and decoded hash. QC records
+600 frames,1,200 CPU uploads and1,866,240,000 visible bytes with its GPU switch
+off; with it on,600 GPU copies and zero CPU calls/bytes/failures. Both actual
+renderer images show the correct final frame; both browsers Quit normally and
+their families disappear. This removes the measured QC CPU upload, but family
+CPU changes74.085→75.133% of one core, so it establishes no CPU improvement.
+It qualifies only the private H264 caller. The earlier cold failures remain;
+both clip selection and startup settling changed between the two experiments.
+
+`strict-nv12-batched-plane.h` is a separate paired-function experiment. The
+single-plane function remains byte-for-byte unchanged. Both independent
+destinations are checked before a source read; both imports/source textures
+and one global surface use stay live across both blits and one actual
+`glFinish`. Failed completion quarantines that use. Both destinations still
+require overwrite on failure. It adds no asynchronous completion or image
+cache. Build it through `private-cgl-extension.nix` with
+`replaceExistingHeader=true`, or pass it as `extensionHeader` to
+`strict-nv12-host.nix`. The null control still reproduces the frozen original.
+Literal original and batched helpers pass the sanitizer host controls.
+
+The native probe prints `SFNV12COPYCOST` around only the paired call.
+`nv12_copy_cost.analyze()` keeps first/second calls separate and excludes
+unavailable CPU counters rather than treating them as zero. The matched
+current/batched primitive controls pass48 cases and746,496,000 exact bytes
+after source overwrite, including GL-state restoration and natural cleanup.
+Their twelve second-call medians are:
+
+| Geometry | Current wall | Batched wall | Current process CPU | Batched process CPU |
+| --- | ---: | ---: | ---: | ---: |
+| 1920×1080 | 1.340 ms | 0.9715 ms | 0.7475 ms | 0.5765 ms |
+| 3840×2160 | 2.806 ms | 2.6255 ms | 1.409 ms | 1.3875 ms |
+
+These are descriptive isolated-call costs, including driver worker CPU and
+clock overhead. They establish neither sustained throughput nor browser CPU,
+panel cadence or asynchronous-fence safety. A private browser comparison can
+pass `--cgl-variant-proof` to `analyze-qc-pair.py`: both arms must use the GPU
+caller, all other providers must match, and the explicit proof must admit only
+the paired-function change, unchanged exports/inputs/GLAPI/GLU and exact null
+control. The ordinary GPU-off/on comparison retains its original cohort gate.
+Neither private helper is installed by these tools. Full4K browser acceptance
+still requires the kernel owner's IOVA-capacity/fragmentation fix.
+
+The one matched H264 browser pair with both GPU callers enabled subsequently
+passes28 checks per arm and nine cohort checks. Both decode600 frames with zero
+reported drops, exact hardware jobs/hash, zero VT/CGL/QC CPU transport and no
+GPU-copy failures. The current/batched caller observes596/597 QC frames; those
+counts are not completed panel presentations. Both actual renderer images
+show the correct final599 pattern and both families exit normally without
+signals. Matched family CPU is77.350→73.495%, parent44.818→41.947% and
+RDD9.026→8.499% of one core. This is one ordered fresh-profile pair, subject to
+background/order noise, not a general speedup guarantee. rVFC stays40.02ms;
+neither helper is installed and4K/panel acceptance remains open.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore

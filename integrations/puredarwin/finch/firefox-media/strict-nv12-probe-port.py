@@ -27,7 +27,7 @@ replace('#define ALLOC 16384',f'#define ALLOC {allocation}')
 if s.count('layout?192:STRIDE')!=2:raise ValueError('Two top-stride anchors required')
 s=s.replace('layout?192:STRIDE','layout?(STRIDE+64):STRIDE')
 replace('odd_visible=%dx%d','visible=%dx%d')
-replace('#include <dlfcn.h>','#include <dlfcn.h>\n#include <mach-o/loader.h>\n#include <mach-o/dyld.h>')
+replace('#include <dlfcn.h>','#include <dlfcn.h>\n#include <mach-o/loader.h>\n#include <mach-o/dyld.h>\n#include <time.h>\n#include <sys/resource.h>')
 replace('static int width(int p){return p?(W+1)/2:W;}',r'''
 static int images(void){
  unsigned gl=0,surface=0,cgl=0;
@@ -86,7 +86,16 @@ replace('''  for(int p=0;p<2;p++){
    unsigned format=p?0x8227:0x1903;
    REQUIRE(!CGLTexImageIOSurface2D(ctx,0x84f5,format,width(p),height(p),format,0x1401,s,p));
   }''',r'''
+  struct rusage cpu_before={0},cpu_after={0};struct timespec wall_before={0},wall_after={0};
+  int cpu_begin=getrusage(RUSAGE_SELF,&cpu_before),wall_begin=clock_gettime(CLOCK_MONOTONIC,&wall_before);
   REQUIRE(CGLPDCopyNV12ToTextures2D(s,texture)==1);
+  int wall_end=clock_gettime(CLOCK_MONOTONIC,&wall_after),cpu_end=getrusage(RUSAGE_SELF,&cpu_after);
+  int64_t wall_ns=(int64_t)(wall_after.tv_sec-wall_before.tv_sec)*1000000000+wall_after.tv_nsec-wall_before.tv_nsec;
+  int64_t cpu_first=(int64_t)cpu_before.ru_utime.tv_sec*1000000+cpu_before.ru_utime.tv_usec+(int64_t)cpu_before.ru_stime.tv_sec*1000000+cpu_before.ru_stime.tv_usec;
+  int64_t cpu_last=(int64_t)cpu_after.ru_utime.tv_sec*1000000+cpu_after.ru_utime.tv_usec+(int64_t)cpu_after.ru_stime.tv_sec*1000000+cpu_after.ru_stime.tv_usec;
+  printf("SFNV12COPYCOST profile=%x revision=%d wall_ns=%lld wall_available=%d process_cpu_us=%lld cpu_available=%d\n",
+    profile,revision,(long long)wall_ns,wall_begin==0&&wall_end==0&&wall_ns>=0,
+    (long long)(cpu_last-cpu_first),cpu_begin==0&&cpu_end==0&&cpu_last>0&&cpu_last>=cpu_first);
   for(int k=0;k<9;k++){glGetIntegerv(state_names[k],&state_after[k]);REQUIRE(state_after[k]==state_before[k]);}
   REQUIRE(glIsEnabled(0xc11)&&glIsEnabled(0x8db9)&&glGetError()==0);
   REQUIRE(!CGLPDCopyNV12ToTextures2D(NULL,texture));

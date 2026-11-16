@@ -54,15 +54,21 @@ def arm(stage,mode,partial1080=False):
         partial_1080_only=partial1080,
         scope='Owned private QC/CGL caller, not an installed provider, panel FPS or all browser memory copies.'+(' H264 ONLY: 4K admission remains open.' if partial1080 else ''))
 
-def compare(off,on):
+def compare(off,on,cgl_variant_proof=None):
+    variant=cgl_variant_proof is not None
+    source_checks=['same_exports','same_drv_inputs','env_only_postpatch_out','null_control_exact',
+        'GLAPI_unchanged','GLU_unchanged','not_installed','paired_function_only_source_change']
+    approved_variant=variant and all(cgl_variant_proof.get('checks',{}).get(k) is True for k in source_checks) and all(cgl_variant_proof.get('checks',{}).values()) and cgl_variant_proof.get('baseline')==off['identity'].get('cgl') and cgl_variant_proof.get('candidate')==on['identity'].get('cgl') and off['identity'].get('cgl')!=on['identity'].get('cgl')
+    def other_originals(value):return {k:v for k,v in value['identity'].items() if k!='cgl'}
     checks=dict(both_arms=off['passed'] and on['passed'],
         same_release=off['launch']['release']==on['launch']['release'],
         same_kernel=off['launch']['kernel_uuid']==on['launch']['kernel_uuid'],
-        same_originals=off['identity']==on['identity'],
+        same_originals=other_originals(off)==other_originals(on) if variant else off['identity']==on['identity'],
         installed_claim_refused=off['installed_admission'] is False and on['installed_admission'] is False)
+    if variant:checks['exact_private_cgl_change']=approved_variant
     checks['same_settle_selection']=off['launch'].get('qc_startup_settle_seconds',0)==on['launch'].get('qc_startup_settle_seconds',0) and off['launch'].get('qc_1080_only',False)==on['launch'].get('qc_1080_only',False)
     def providers(value):
-        return sorted((p['role'],x['name'],x['uuid'],x['path'].split('/qc-nv12/',1)[-1]
+        return sorted((p['role'],x['name'],'approved-private-CGL' if variant and x['name']=='OpenGL' else x['uuid'],x['path'].split('/qc-nv12/',1)[-1]
                        if '/qc-nv12/' in x['path'] else x['path'])
             for p in value['providers']['processes'] for x in qc.image_rows(p['images']))
     checks['same_actual_providers']=providers(off)==providers(on)
@@ -75,11 +81,14 @@ def compare(off,on):
             qc_off=a['qc_uploads']['total'],qc_on=b['qc_uploads']['total'],
             off_callback_gap_ms=a.get('rvfc_ms'),on_callback_gap_ms=b.get('rvfc_ms')))
     return dict(passed=all(checks.values()),checks=checks,clips=rows,
+        controlled_change='Private CGL paired function' if variant else 'Owned PD_CA_NV12_GPU_COPY switch',
+        arm_labels=dict(off='current helper',on='batched helper') if variant else dict(off='CPU upload',on='GPU copy'),
         partial_1080_only=off.get('partial_1080_only',False),
         visual_review='REQUIRED: independently inspect all '+('two' if off.get('partial_1080_only') else 'four')+' actual renderer images',
         limits='One fresh-profile OFF then ON pair; startup/background work and ordering can confound CPU. Counter-zero applies to observed decoder/CGL/QC transport, not every driver/browser copy. Not panel FPS, completed flips or asynchronous-fence qualification.')
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--off',type=Path,required=True);p.add_argument('--on',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--partial-1080',action='store_true');a=p.parse_args()
-    off=arm(a.off,'off',a.partial_1080);on=arm(a.on,'on',a.partial_1080);result=dict(off=off,on=on,pair=compare(off,on))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--off',type=Path,required=True);p.add_argument('--on',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--partial-1080',action='store_true');p.add_argument('--cgl-variant-proof',type=Path);a=p.parse_args()
+    proof=json.loads(a.cgl_variant_proof.read_text()) if a.cgl_variant_proof else None
+    off=arm(a.off,'on' if proof is not None else 'off',a.partial_1080);on=arm(a.on,'on',a.partial_1080);result=dict(off=off,on=on,pair=compare(off,on,proof))
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result['pair'],indent=2));raise SystemExit(0 if result['pair']['passed'] else 1)
