@@ -450,6 +450,9 @@
 #         for a GPU frame, the desk answers those; a frame callback for the others, done at the flip with its time):
 #         the latest flip (in host time), the measured refresh and the commits still waiting, for CoreVideo's display link
 #         (_windowServerDisplayClock/_windowServerDisplayClockWait: ./patches/0149-corevideo-...)
+#   0156w WindowServer (TERM9, FXPERF's FX-029 ask; opt-in PD_WS_PACE_PRESENTS=1, off by default): a window presents at
+#         most once per frame callback; a flush while its last commit is not drawn only marks the present pending and
+#         the callback presents the newest backing store (a callback missing for 100 ms holds nothing back)
 #   0149  CoreVideo (TERM9; built by ./corevideo-displaylink.nix on CODEX's ../finch/CoreVideo/pd-displaylink.nix): the
 #         display link ticks right after the flip that showed the application's last frame (inNow = that flip,
 #         inOutputTime = the next), waits for a frame still in flight (at most two refreshes), else ticks on the
@@ -604,6 +607,7 @@ let
     ./patches/0145w-windowserver-same-cursor-image-not-sent-again.patch
     ./patches/0209w-windowserver-whole-window-gpu-presenter.patch
     ./patches/0148w-windowserver-display-clock-from-presentation-feedback.patch
+    ./patches/0156w-windowserver-presents-paced-by-frame-callbacks.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
