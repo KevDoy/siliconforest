@@ -5,6 +5,7 @@ base.overrideAttrs(old:{
  pname="siliconforest-ffmpeg-pdavd-external-capture";
  nativeBuildInputs=(old.nativeBuildInputs or [])++[e.pkgs.python3];
  postPatch=(old.postPatch or "")+''
+  cp ${./capture-pool.h} libavutil/sf_pdavd_capture_pool.h
   python3 ${./ffmpeg-port.py} .
  '';
 })

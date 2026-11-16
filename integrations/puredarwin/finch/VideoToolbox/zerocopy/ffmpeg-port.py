@@ -42,6 +42,7 @@ s=replace(s,'    uint64_t       timestamp;\n} AVPDAVDFrame;','''    uint64_t    
 } AVPDAVDFrame;''')
 p.write_text(s)
 p=root/'libavutil/hwcontext_pdavd.c';s=p.read_text()
+s='#include <stdlib.h>\n#include <stdio.h>\n#include "sf_pdavd_capture_pool.h"\n'+s
 s=replace(s,'    unsigned next;\n} PDAVDFramesPriv;','''    unsigned next;
     AVPDAVDExternalBuffer external[PDAVD_MAX_BUFFERS];
     void (*release_external)(AVPDAVDExternalBuffer *buffer);
@@ -118,8 +119,14 @@ s=replace(s,'    struct pdavd_create create = { 0 };','''    struct pdavd_create
 s=replace(s,'''    create.buffers = FFMIN(hwfc->initial_pool_size > 0 ? hwfc->initial_pool_size : 20,
                            PDAVD_MAX_BUFFERS);''','''    create.buffers = FFMIN(hwfc->initial_pool_size > 0 ? hwfc->initial_pool_size : 20,
                            PDAVD_MAX_BUFFERS);
-    if (try_external)
-        create.buffers = PDAVD_MAX_BUFFERS;
+    if (try_external) {
+        const char *requested = getenv("SF_VT_CAPTURE_BUFFERS");
+        unsigned minimum = hwfc->initial_pool_size > 0 ? hwfc->initial_pool_size : 20;
+        create.buffers = sf_pdavd_capture_pool(minimum, PDAVD_MAX_BUFFERS, requested);
+        if (requested)
+            fprintf(stderr, "SF_VT_CAPTURE_POOL codec-minimum=%u maximum=%u selected=%u\\n",
+                    minimum, PDAVD_MAX_BUFFERS, create.buffers);
+    }
     else if (dev->allocate_external)
         av_log(hwfc, AV_LOG_VERBOSE, "AVD external capture capability/release callback absent; kernel-buffer fallback\\n");''')
 s=replace(s,'    ffhwframesctx(hwfc)->pool_internal =\n', '    if (try_external)\n        pdavd_external_import(hwfc);\n\n    ffhwframesctx(hwfc)->pool_internal =\n')

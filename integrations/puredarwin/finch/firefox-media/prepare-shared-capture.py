@@ -15,6 +15,7 @@ import subprocess
 p=argparse.ArgumentParser(description=__doc__)
 for name in ['surface','providers','probe','fixtures','stage']:
     p.add_argument('--'+name,type=Path,required=True)
+p.add_argument('--capture-buffers',type=int,choices=range(1,33),help='Private bounded-pool measurement; codec minimum still applies')
 a=p.parse_args();here=Path(__file__).resolve().parent
 if a.stage.exists():raise ValueError('Fresh stage required')
 a.stage.mkdir();(a.stage/'Frameworks').mkdir();(a.stage/'bin').mkdir();(a.stage/'fixtures').mkdir()
@@ -42,6 +43,8 @@ for clip in ['pattern-1080p60-h264','pattern-4k30-hevc']:
             'SF_VT_ZERO_COPY':'require','VT_AVD_TIMING':'1',
             'SFFX_IOSURFACE_SERVICE':'org.puredarwin.iosurfaced.sffx.codex.strict.'+clip}))
 shutil.copy2(a.fixtures/'manifest.json',a.stage/'fixture-manifest.json')
+if a.capture_buffers:
+    for test in manifest:test['env']['SF_VT_CAPTURE_BUFFERS']=str(a.capture_buffers)
 (a.stage/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (a.stage/'scope.json').write_text(json.dumps(dict(
     scope='STRICT real GPU storage/import, independent visible-pixel hashes/PTS, retained-picture64. Not GPU sampling/completion/browser performance.',

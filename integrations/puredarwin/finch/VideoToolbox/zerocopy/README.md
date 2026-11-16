@@ -170,3 +170,25 @@ runs on M5 and M1. M1 installed/private CV each produce121callbacks at measured
 GetActualOutputVideoRefreshPeriod returns the nominal constant, so measured
 arrival is the relevant control. This isolated observation does not locate
 Firefox's40ms cause or establish panel delivery, and motivates no timer patch.
+
+## Capture-pool measurement (private, not enabled)
+
+The shared-capture FFmpeg adapter uses the full32-buffer pool by default.
+`SF_VT_CAPTURE_BUFFERS=20` is a private measurement opt-in: a request must be a
+bounded decimal count at least as large as FFmpeg's codec minimum. Invalid,
+overflowing or undersized requests retain32. The codec minimum alone does not
+bound outstanding browser/GPU consumers, so a smaller count needs held-picture,
+complete frame/PTS and browser pressure gates before selection. It changes no
+reuse predicate, IOSurface/GPU hold, kernel lifetime or default policy.
+
+The Linux/Nix candidate builds, and hosted ASan/UBSan codec-bound/input/overflow
+controls pass. Native20-buffer H264 passes600 independent pixels/PTS/held64 plus clean kernel
+accounting. HEVC300 matches all pixels/PTS/held64 and zero-copy counters, but its
+strict global classifier FAILS:585 jobs included concurrent decoder activity,
+with one preexisting context. No new faults occurred; raw failure is retained.
+There is no whole-browser smaller-pool qualification or measured memory saving.
+The new `firefox-media/prepare-shared-capture.py --capture-buffers 20` and
+`run-shared-capture.py` retain the full independent NV12/PTS/held64 gate, use a
+fresh cold prefix for each codec, and require the actual selected count in the
+native log before calling it a20-buffer result. These correctness clients hash
+pixels on the CPU; their runtime is not a playback-FPS/CPU benchmark.
