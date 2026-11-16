@@ -640,20 +640,50 @@ virtual seat, into windows that appeared after my own launch; own fresh profiles
 
 ### Clipboard (DESK10's 0 bytes)
 Another client's paste request was answered on Firefox's main thread from the board as it was then; the installed
-files answered 0 bytes (reproduced: cl7a). 0168: answered from the data offered, on a thread of its own; lazily
-provided data through the main thread; 0175: a request between an offer and its data reads the board's own data.
-Candidate: plain text both ways in cl6a/cl7b; HTML (bold kept) once (cl9a); one run each still got only a BOM: open.
+files answered 0 bytes (reproduced, cl7a). Three causes, three fixes: 0168 answers from the data offered, on a thread
+of its own (lazily provided data still through the main thread); 0176 data written after its type was offered goes
+into that at once (Firefox's offer can go out before its data); 0177 within a second of a write, another client's
+selection does not replace the board before the write's offer is out (the desk's clipboard keeper re-offers the old
+copy: the offer then carried the other client's types and no data, a lone BOM on the other side). Result, two own
+Firefox instances, synthetic Command-C/V: text A->B, B->A and HTML (bold/italic kept) 3/3 runs (cl12a-c); installed
+t11c re-test below. Images: not tested.
 
 ### Windowless Quit (DESK9/CODEX-FX)
 Gecko replaces `-terminate:` by a notification only and quits itself from `-applicationShouldTerminate:`; the desk's
-Quit called `-terminate:`. 0164/0169: as macOS's quit Apple event, the delegate is asked first (once). Candidate: Command-W,
-then the desk's Quit to the Firefox parent: natural exit in 3.1-3.3 s, family gone, 3/3; installed: alive after 12 s.
+Quit called `-terminate:`. 0164/0169: as macOS's quit Apple event, the delegate is asked first, once (AppKit's own
+`-terminate:` does not ask it again). Command-W, then the desk's Quit to the Firefox parent (`app <pid> quit`): natural
+exit 2.6-3.3 s, family gone, 3/3 candidate and 3/3 installed t11b; t10s7: answered ok, alive after 12 s (2/2).
+
+### Trackpad momentum (owner: a hard flick coasted ~7 screens)
+0166w: release speed capped at 6000 points/s, decay 0.95 per 16.7 ms by elapsed time. Synthetic touchswipe 50 mm into
+my Firefox: 150 mm/s 2113 CSS px (old 2063); 440 mm/s 4123 px 2/2 (old 9273 px 2/2). Firefox scrolls by pixels with a
+coast (no line steps). Touch-to-stop needs a contact signal from the driver/desk (asked of DESK10: a zero finger frame
+at touch-down; the client already ends the coast at any finger frame).
 
 ### Presented frame rate (FXPERF2's bistable ~30/s)
-Firefox's display link runs in its GPU process (ticks traced to files with PD_CV_TRACE=<dir>). The old 0149 link waits
-for a pending frame's flip and sometimes ticks every second refresh; 0172 ticks once per refresh on the display's phase
-(a first version re-phased on flip reports and skipped refreshes: 34 ticks/s, kept as a lesson). In slow runs Firefox
-itself committed ~30 frames/s; our present costs 1.5 ms. 0306 (FXPERF2) adopted. Damage path not default-on.
+Firefox's display link runs in its GPU process (PD_CV_TRACE=<dir> writes every tick to <dir>/cvtick-<pid>.txt). The
+installed 0149 link waits for a pending frame's flip (up to two refreshes) and then ticks every second refresh. 0172:
+one tick per refresh on the display's phase, the thread under THREAD_TIME_CONSTRAINT_POLICY: 58.8-59.8 ticks/s in 6/6
+runs (CSS animation, wheel scroll, 1080p60; p10/p50/p90 16.6/16.7/16.7 ms), no half-rate run in 12; presented
+50-55 frames/s: Firefox produces fewer frames than ticks (parent main-thread cost). The link Firefox loads is CODEX-FX's
+video-shared CoreVideo (built from `corevideo-displaylink.nix`, which applies 0172): asked to rebuild and select it.
+A first 0172 that re-phased on flip reports skipped refreshes (34 ticks/s): discarded. Damage path still opt-in.
+
+### Installs (direct, the file of before kept as `<path>.pre-t11` = t10s7, hashed on the M1 before anything ran it)
+- t11a 11:47Z (AppKit 671aec54, libWindowServer c2cdfcf8, QuartzCore.pd 3c6d9530 with FXPERF2's 0306): REVERTED 12:05Z
+  (Firefox crashed when a window or panel closed; t11a kept as `<path>.t11a`).
+- t11b ~12:50Z: AppKit 84fc8d2b (+0175). Gates before: visual = installed, AM 252 / Terminal 228 actions alive, compat
+  18/18; after: the same. Installed: menu 20/20, all doorhangers and the permission prompt, 0 protocol errors.
+- t11c ~13:35Z: AppKit 2e5a5266 (+0176/0177 clipboard); libWindowServer and QuartzCore.pd as t11b. Gates before: menu
+  6/6, visual = installed, AM 252 / Terminal 228 alive, compat 18/18.
+Revert: `ln -f <path>.pre-t11 <path>.back && mv -f <path>.back <path>` for AppKit, /usr/lib/libWindowServer.dylib,
+QuartzCore.pd.
+
+### Not done in this round
+Reddit video-scroll line artefacts (item 3; CODEX withdrew the blank-video claim: capture artefact); FXPERF2's missing
+position:fixed marker on pages with rounded/rotated boxes (filed; CARenderer clip/stencil suspected, not examined);
+damage path default-on (held by the coordinator until 59.5+ presented in 12/12); Terminal/Activity Monitor momentum
+not measured; FX-002 client-side decorations, FX-027 panel placement, COLR emoji.
 
 ## TERM10 round (16 November, early morning): Firefox's stale tiles, its menu panel, trackpad scrolling
 Tools in `runs/sf-term10` (not committed): `tools/t10_m1.py` (FXLEAD's launcher helper, my own area
