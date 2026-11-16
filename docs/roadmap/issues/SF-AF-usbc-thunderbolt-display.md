@@ -3607,3 +3607,45 @@ claim; incomplete runs remain incomplete. No pointer/key injection is needed.
 A shared-capture PASS still does not prove actual GPU-consumer completion,
 browser60fps,4K30 delivery or physical pinch. Those remain the media/FX/DESK
 integration gates after the kernel returns. No extra Linux visit for benchmarks.
+
+
+### Kernel44 shared capture qualified, 2026-11-16 02:37:43Z
+
+The fixed private-UPL core is now installed and retained normal with the
+reviewed import driver, exactly8 changed/49 unchanged executable modules versus
+CIO29; only core and AVD differ from qualified43. Capsule7b2eba23…,
+prelink9ACED54D…. Speaker extra cap remains0 with its enabling boot argument,
+and K14/HID plus the qualified killable-wait drivers remain unchanged.
+
+Observed on the M1:3 no-job rounds each imported/destroyed14 real writeback GPU
+BOs of6965056 bytes (42616KiB DATA pages), with distinct duplicate mappings,
+alias unmap, original mapping alive and header canaries preserved. The real
+complete/unpin path ran without the prior UPL overflow. DART allocations,
+contexts and quarantine returned to zero; no decoder or GPU job was submitted.
+
+Strict H264600 and HEVC300 pictures both pass the independent Linux full-visible
+NV12 MD5+PTS oracle, actual GPU backing/two planes/DATA offset, first picture
+held64 callbacks and copied-bytes0. Fresh cold prefixes per codec avoid reusing
+Mach-O files after XNU's instruction lowering; all45 staged files were verified
+before loading. Kernel jobs900/done900, errors/timeouts/stale/DART faults0,
+contexts0/DART KiB0/quarantine0. Final GL pixel hashes and Vulkan each pass10
+launches; clone slots remain3. This proves the tested shared-capture paths,
+not GPU-consumer completion, producer-task death, browser presentation or60fps.
+H264's instrumented decoder average4221us and MD5 callback21377us must not be
+read as a playback-rate result. Those remaining integration gates stay explicit.
+
+The clean /bin/reboot reached Linux without reset. Read-only fsck returned4:
+the previous two EOF extents plus one new three-block EOF extent in an agent's
+Firefox startup cache, with bitmap/count differences. Exact ncheck/stat are
+private; no repair and no clean-filesystem claim. Three4KiB blocks beyond a
+52208-byte EOF complete a16KiB VM page: a pager/truncation rounding hypothesis
+was passed for source audit, not established as the cause. Root mounted.
+
+No installed Linux Firefox was found, so the requested reference was skipped:
+no browser install, headless substitute, scores or extra boot. An initial nested
+helper syntax error ran no browser; its failure is retained alongside the
+corrected availability check. The normal installer kept43 as rollback; original
+CIO29 and devfs-only kits remain local. DESK9-next001 df5a3290/socket/inject and
+non-input stats were verified; UART stopped, actual core/gui/bench released by
+SystemExit at the02:37:43 return marker. Private receipts and classifications:
+runs/sftb/firefox-install-0044. No dock/AVE trial or push.

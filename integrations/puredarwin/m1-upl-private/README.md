@@ -69,3 +69,15 @@ The complete core and collection builds succeed. Native instruction inspection
 finds the added object-private bit13 test selecting per-page completion, absent
 from image43. These recipes do not install or boot anything. Image43 is now
 natively qualified with original AVD; the private-UPL/import image is uninstalled.
+
+
+Native44 qualification, 2026-11-16: three14-buffer no-job rounds pass real
+GPU-BO duplicate mapping/alias unmap, DATA import and context destruction;
+426-page buffers complete without the old overflow. Strict H264600/HEVC300
+full visible NV12 hashes and PTS match independent Linux references; held64,
+copied bytes0 and exact900 hardware-job completions pass, with zero errors,
+DART faults, remaining contexts/allocations or quarantine. GL/Vulkan10 pass.
+The fixed image is retained normal with speaker extra cap0 and qualified43
+rollback. This is capture correctness, not a GPU-consumer fence, task-death,
+real browser presentation or60fps qualification; those gates remain pending.
+Private machine receipts are under runs/sftb/firefox-install-0044, never in git.
