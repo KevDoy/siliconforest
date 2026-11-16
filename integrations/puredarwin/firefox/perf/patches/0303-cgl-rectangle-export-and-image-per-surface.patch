@@ -1,0 +1,132 @@
+--- a/src/Frameworks/OpenGL/CGL.c
++++ b/src/Frameworks/OpenGL/CGL.c
+@@ -1349,10 +1349,71 @@
+     memcpy(values,pd_gpu_stats,sizeof(pd_gpu_stats));
+     pthread_mutex_unlock(&pd_cgl_track_lock);
+ }
++// (FXPERF2) SFFX_GPU_IMAGE_CACHE=1: an IOSurface's EGLImage is kept per surface, not per texture. A layer's texture
++// re-pointed at a surface imported before (Firefox's tiles and the window's frames alternate between a few surfaces)
++// only re-targets that image instead of importing the dma-buf again. Each entry retains its surface, so its storage
++// cannot go and come back as another surface; an entry no texture uses is let go once nothing else holds the
++// surface, or when the cache is full. Called with pd_cgl_track_lock held.
++#define PD_CGL_IMAGES 96
++static struct pd_cgl_image {
++    IOSurfaceRef surface;size_t offset,row;GLsizei width,height;EGLint fourcc;EGLImage image;int users;uint64_t used;
++} pd_cgl_images[PD_CGL_IMAGES];
++static int pd_cgl_image_count;
++static uint64_t pd_cgl_image_clock,pd_cgl_image_stats[3]; // hits, imports, let go
++static int pd_cgl_image_cache_on(void){
++    static int on=-1;
++    if(on<0){const char *v=getenv("SFFX_GPU_IMAGE_CACHE");on=v&&!strcmp(v,"1");}
++    return on;
++}
++void CGLSFFXImageCacheStats(uint64_t values[3]){if(values)memcpy(values,pd_cgl_image_stats,sizeof(pd_cgl_image_stats));}
++static void pd_cgl_image_forget(int i){
++    if(pd_present.destroyImage)pd_present.destroyImage(pd_cgl_get_display(),pd_cgl_images[i].image);
++    if(pd_cf_release)pd_cf_release(pd_cgl_images[i].surface);
++    pd_cgl_images[i]=pd_cgl_images[--pd_cgl_image_count];
++    pd_cgl_image_stats[2]++;
++}
++static void pd_cgl_image_sweep(void){
++    static long (*retainCount)(const void *);
++    static int looked;
++    if(!looked){retainCount=(long (*)(const void *))dlsym(RTLD_DEFAULT,"CFGetRetainCount");looked=1;}
++    for(int i=0;i<pd_cgl_image_count;)
++        if(pd_cgl_images[i].users<=0&&retainCount&&retainCount(pd_cgl_images[i].surface)<=1)pd_cgl_image_forget(i);
++        else i++;
++}
++static EGLImage pd_cgl_image_find(IOSurfaceRef surface,size_t offset,size_t row,GLsizei w,GLsizei h,EGLint fourcc){
++    // surfaces the application let go of are released now and then, not only when a new one is imported
++    if((pd_cgl_image_clock&127)==127)pd_cgl_image_sweep();
++    for(int i=0;i<pd_cgl_image_count;i++){
++        struct pd_cgl_image *e=&pd_cgl_images[i];
++        if(e->surface==surface&&e->offset==offset&&e->row==row&&e->width==w&&e->height==h&&e->fourcc==fourcc){
++            e->users++;e->used=++pd_cgl_image_clock;pd_cgl_image_stats[0]++;return e->image;
++        }
++    }
++    return EGL_NO_IMAGE_KHR;
++}
++static void pd_cgl_image_keep(IOSurfaceRef surface,size_t offset,size_t row,GLsizei w,GLsizei h,EGLint fourcc,EGLImage image){
++    pd_cgl_image_stats[1]++;
++    if(!pd_cf_retain)return;
++    pd_cgl_image_sweep();
++    if(pd_cgl_image_count==PD_CGL_IMAGES){
++        int oldest=-1;
++        for(int i=0;i<pd_cgl_image_count;i++)
++            if(pd_cgl_images[i].users<=0&&(oldest<0||pd_cgl_images[i].used<pd_cgl_images[oldest].used))oldest=i;
++        if(oldest<0)return; // all in use: this image stays the texture's own
++        pd_cgl_image_forget(oldest);
++    }
++    pd_cgl_images[pd_cgl_image_count++]=(struct pd_cgl_image){(IOSurfaceRef)pd_cf_retain(surface),offset,row,w,h,fourcc,image,1,++pd_cgl_image_clock};
++}
++// a texture no longer uses its image: 1 when the cache owns it (it stays), 0 when the caller destroys it
++static int pd_cgl_image_release(EGLImage image){
++    for(int i=0;i<pd_cgl_image_count;i++)
++        if(pd_cgl_images[i].image==image){pd_cgl_images[i].users--;return 1;}
++    return 0;
++}
+ static void pd_cgl_drop_gpu(struct pd_cgl_surftex *t) {
+     void (*deleteTextures)(GLsizei,const GLuint *)=(void *)eglGetProcAddress("glDeleteTextures");
+     if(t->gpu_texture&&deleteTextures)deleteTextures(1,&t->gpu_texture);
+-    if(t->gpu_image&&pd_present.destroyImage)pd_present.destroyImage(pd_cgl_get_display(),t->gpu_image);
++    if(t->gpu_image&&!pd_cgl_image_release(t->gpu_image)&&pd_present.destroyImage)pd_present.destroyImage(pd_cgl_get_display(),t->gpu_image);
+     t->gpu_texture=0;t->gpu_image=EGL_NO_IMAGE_KHR;
+ }
+ static int pd_cgl_ensure_gpu(struct pd_cgl_surftex *t) {
+@@ -1367,11 +1428,13 @@
+     pthread_once(&pd_cgl_present_once,pd_cgl_load_present);
+     if(!pd_present.createImage||!pd_present.destroyImage||!pd_present.targetTexture)return 0;
+     if(t->gpu_image)return 1;
++    size_t offset=nv12?pd_iosurface.gpuPlaneOffset(t->surface,t->plane):pd_iosurface.gpuOffset(t->surface);
++    EGLint fourcc=nv12?(t->plane?0x38385247:0x20203852):0x34325241;
++    if(pd_cgl_image_cache_on()&&offset&&(t->gpu_image=pd_cgl_image_find(t->surface,offset,t->row_bytes,t->width,t->height,fourcc))!=EGL_NO_IMAGE_KHR)
++        return 1;
+     int fd=pd_iosurface.gpuCopyFD(t->surface);
+     if(fd<0)return 0;
+-    size_t offset=nv12?pd_iosurface.gpuPlaneOffset(t->surface,t->plane):pd_iosurface.gpuOffset(t->surface);
+     if(!offset||offset>INT32_MAX||t->row_bytes>INT32_MAX){close(fd);return 0;}
+-    EGLint fourcc=nv12?(t->plane?0x38385247:0x20203852):0x34325241;
+     EGLint attributes[]={EGL_WIDTH,t->width,EGL_HEIGHT,t->height,
+         EGL_LINUX_DRM_FOURCC_EXT,fourcc, // DRM_FORMAT_ARGB8888: native BGRA bytes
+         EGL_DMA_BUF_PLANE0_FD_EXT,fd,EGL_DMA_BUF_PLANE0_OFFSET_EXT,(EGLint)offset,
+@@ -1379,6 +1442,7 @@
+         EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,0,EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,0,EGL_NONE};
+     t->gpu_image=pd_present.createImage(pd_cgl_get_display(),EGL_NO_CONTEXT,EGL_LINUX_DMA_BUF_EXT,NULL,attributes);
+     close(fd);
++    if(t->gpu_image!=EGL_NO_IMAGE_KHR&&pd_cgl_image_cache_on())pd_cgl_image_keep(t->surface,offset,t->row_bytes,t->width,t->height,fourcc,t->gpu_image);
+     return t->gpu_image!=EGL_NO_IMAGE_KHR;
+ }
+ static int pd_cgl_gpu_transfer_unleased(struct pd_cgl_surftex *t,int to_surface) {
+@@ -2275,8 +2339,21 @@
+ // storage. Failure leaves the existing CPU renderer available to the caller.
+ static uint64_t pd_sffx_export_stats[3];
+ void CGLSFFXExportCacheStats(uint64_t values[3]) { if(values)for(int i=0;i<3;i++)values[i]=__atomic_load_n(&pd_sffx_export_stats[i],__ATOMIC_RELAXED); }
++static int pd_sffx_copy_framebuffer(IOSurfaceRef surface,int flip,int rx,int ry,int rw,int rh);
+ int CGLSFFXCopyFramebuffer(IOSurfaceRef surface,int flip) {
+     CGLContextObj ctx=pd_cgl_current;
++    if(!ctx)return 0;
++    return pd_sffx_copy_framebuffer(surface,flip,0,0,ctx->width,ctx->height);
++}
++// (FXPERF2) only a rectangle of the drawable (GL rows, bottom-up) into the same place of the surface, for a frame
++// whose other pixels are current already (QuartzCore's damage frames)
++int CGLSFFXCopyFramebufferRect(IOSurfaceRef surface,int flip,int x,int y,int w,int h) {
++    CGLContextObj ctx=pd_cgl_current;
++    if(!ctx||w<=0||h<=0||x<0||y<0||x+w>ctx->width||y+h>ctx->height)return 0;
++    return pd_sffx_copy_framebuffer(surface,flip,x,y,w,h);
++}
++static int pd_sffx_copy_framebuffer(IOSurfaceRef surface,int flip,int rx,int ry,int rw,int rh) {
++    CGLContextObj ctx=pd_cgl_current;
+     pthread_once(&pd_cgl_present_once,pd_cgl_load_present);
+     if(!ctx||!surface||!pd_iosurface.gpuOffset||!pd_iosurface.gpuOffset(surface)||
+        !pd_iosurface.width||!pd_iosurface.height||pd_iosurface.width(surface)!=(size_t)ctx->width||
+@@ -2307,8 +2384,8 @@
+         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,copy_texture,0);
+         if(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE){
+             glBindFramebuffer(GL_READ_FRAMEBUFFER,0);glDisable(GL_SCISSOR_TEST);glDisable(GL_FRAMEBUFFER_SRGB);
+-            glBlitFramebuffer(0,0,ctx->width,ctx->height,0,flip?ctx->height:0,ctx->width,
+-                flip?0:ctx->height,GL_COLOR_BUFFER_BIT,GL_NEAREST);
++            glBlitFramebuffer(rx,ry,rx+rw,ry+rh,rx,flip?ctx->height-ry:ry,rx+rw,
++                flip?ctx->height-ry-rh:ry+rh,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+             glFinish();good=glGetError()==GL_NO_ERROR;
+             if(verify){glBindFramebuffer(GL_READ_FRAMEBUFFER,copy_fbo);glReadPixels(ctx->width/4,ctx->height/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,dest_pixel);}
+         }
