@@ -29,34 +29,57 @@ cleanup, and pending-fence references. Stub fences are appropriate only for
 an empty reservation. This does not test GPU completion, poll wake-ups,
 concurrent reservation updates or real descriptor lifetime.
 
-`pending-probe.c` is a separate native probe, not a kernel change. A real
-Vulkan transfer waits on an initially-unsignalled host timeline. Its completion
-sync file is imported as a dma-buf writer fence and exported as a reader's
-reservation snapshot. A separately executed child receives both descriptors
-through SCM_RIGHTS, must observe them not ready, then polls and verifies every
-word of the GPU-written 4 KiB pattern after the parent signals the timeline.
-A five-second release watchdog prevents the probe deliberately leaving a job
-waiting on its host signal. The queue is drained before storage teardown.
-The original completion fd is closed after obtaining the reservation snapshot,
-which must retain the fence. This first probe tests a GPU producer and CPU
-consumer; it does not yet qualify a subsequent GPU consumer, IOSurface broker
-leases, resize, image reuse or producer death.
+`pending-probe.c` is a separate native probe, not a kernel change. Its
+successful default mode prestarts an exec child, submits finite GPU compute,
+imports its real completion sync file as a dma-buf writer fence, and exports
+the reservation snapshot for a reader. The original completion descriptor is
+closed. The child receives the dma-buf and snapshot through SCM_RIGHTS,
+must observe **both not ready**, then polls each independently and verifies
+all 1024 words of the GPU-written 4 KiB buffer against an independent CPU
+xorshift oracle. Storage is coherent host-visible memory with an explicit
+shader-write to host-read barrier. The queue is drained before teardown.
+Already-ready work exits 77 (pending state not observed), not PASS or a
+kernel failure; poll errors and wrong data fail. Work is finite, without a
+GPU busy-wait on a host event. M1/G13's event implementation does not provide
+such a host dependency.
 
-The probe builds against the existing staged Vulkan loader, whose renamed
-`libvulkan.1.dylib` requires an explicit load-command rewrite and code-signature
-rehash. The first native attempt failed in dyld before reaching the driver
-because it requested the original versioned loader name; that failure is
-retained, not a fence failure. Earlier SDK preparation failures (deprecated
-linker flag, SDK feature macros and unavailable dsymutil) are also retained.
-The fresh attempt created a real Vulkan device, but the five-second release
-watchdog fired before the child zero-time poll, which then found the fence
-ready. That pending gate failed and is retained. A timed variant now records
-queue submission, sync-file export, reservation import/export, spawn and child
-poll separately to distinguish a synchronous operation from startup delay.
-No pending-fence success or kernel root cause is claimed yet.
+On the actual kernel 48, whose GPU/core modules are identical to 47, this
+probe passed. Fence fd export took about 20 microseconds, writer import
+10 microseconds and reader snapshot export 4 microseconds. The child first
+observed both descriptors not ready, then woke after 46.52 ms and verified
+the full pattern `33c657f5`. Clone slots returned to three used, zero failures.
+This qualifies a GPU producer and independent CPU consumer, pending poll
+wake-up, reservation/fd lifetime and cross-process transfer. It does not
+qualify a subsequent GPU consumer, IOSurface broker leases, resize, image
+reuse or producer death. No GPU kernel code was changed to obtain this result.
 
-Do not remove CGL's `glFinish` or completion/VideoToolbox leases based on an
-already-signalled probe. CODEX-FX and TERM11 have the live UAPI result and can
-prepare the Mesa/EGL native-fence and window-export paths, with activation
-following real producer/consumer data and lifetime checks. No new kernel boot
+Build the standalone Darwin SDK executable with `build-probe.nix`. On the M1
+it uses the existing staged Vulkan loader and ICD. The installed test can be
+run under the GUI/bench locks, without a window or input:
+
+```sh
+env VK_ICD_FILENAMES=/private/var/db/sfvk/icd.d/asahi_icd.json \
+  DYLD_LIBRARY_PATH=/private/var/db/sfvk/lib \
+  /private/var/db/sftb/firefox0048/pending-probe
+```
+
+Earlier failures are retained. The first native attempt failed in dyld before
+reaching the driver because it requested the original versioned loader name;
+the SDK now rewrites that load command and rehashes its signature. Earlier
+SDK failures concerned a deprecated linker flag, feature macros and missing
+dsymutil. Two subsequent probes queued work behind an unsubmitted future host
+timeline point. Their five-second watchdog released that point before the
+child's zero-time poll, so the pending gate failed. Timing located the delay
+in `vkGetFenceFdKHR` (about 5.35 seconds), not the reservation ioctls. The exact
+pinned Mesa source explains this: threaded submission waits for input-point
+availability, and fence export uses `VK_SYNC_WAIT_PENDING` until submission.
+The test's own dependency prevented creation of the output fence before its
+host signal. This is not an established kernel bug. That design remains as
+`--unsubmitted-control`; the default successful probe uses submitted finite
+GPU work and a child already waiting for descriptors.
+
+CODEX-FX and TERM11 have the live UAPI result, pending producer/CPU-consumer
+proof and tiny probe for the Mesa/EGL native-fence and window-export paths.
+Keep completion/VideoToolbox leases until their actual GPU consumer and image
+lifetime gates pass; this standalone test does not establish those contracts. No new kernel boot
 is required merely to introduce these already-live ioctl commands.

@@ -845,3 +845,53 @@ before identity cleanup; a remaining PID is therefore not exit-hang evidence.
 No exit-status qualification is claimed. Kernel 47 is normal with 46 rollback,
 UART stopped and install locks released; private receipts are in
 `runs/sftb/firefox-install-0047/`.
+
+
+### 2026-11-16: real pending dma-buf fence and kernel 48 qualification
+
+The request to add missing dma-buf sync-file ioctls was based on stale source
+assumptions. Actual kernel 47's frozen AGX/DCP trees already contain export/
+import, poll, cross-kext recognition and ioctl-owner dispatch patches. The
+existing signalled sync-probe passed again on 47; CODEX-FX withdrew its
+unsupported missing-ioctl claim. No GPU kernel patch was required.
+
+The new standalone `m1-dmabuf-fences/pending-probe.c` passes on native kernel 48,
+whose AGX/DCP/core modules are identical to 47. A prestarted exec child receives
+an actual finite-compute GPU producer's dma-buf and exported reservation
+snapshot through SCM_RIGHTS. Both descriptors are first observed not ready;
+they wake after 46.52 ms and every word of the 4 KiB GPU output matches the
+independent CPU oracle. The original completion fd was closed after the
+snapshot, and the queue drains before storage destruction. Fence export,
+writer import and reader snapshot export took about 20/10/4 microseconds.
+Clone slots return to three used, zero failures. The actual deployed ioctl
+implementation also passes extracted-function ASan/UBSan validation, failure
+and reference-cleanup controls; the final SDK executable is byte-identical
+to the native-tested build.
+
+The previous pending probe failed because it waited on its own unsubmitted
+future host timeline point. Timings placed the five-second wait in Mesa's
+fence export. The pinned Mesa source waits for threaded submission/input-point
+availability before returning that output fence (`VK_SYNC_WAIT_PENDING`).
+This is a test dependency error, not evidence of absent ioctls or a kernel
+fence bug. The failed control is retained; the successful default uses finite
+GPU work and an already-ready child, with exit 77 if pending state is missed.
+
+CODEX-FX and TERM11 have the live UAPI, tiny probe and producer/CPU-consumer
+contract in their requests files. Actual subsequent GPU consumer, image reuse,
+resize/death and broker/VideoToolbox leases still require client qualification;
+this result alone does not authorize dropping those leases. Reproduction,
+reference paths and retained failures: `m1-dmabuf-fences/README.md`.
+
+Kernel 48 changes only ext4's journal-image read shortcut, with core and 56
+other UUIDs and the 599-byte command line unchanged. Its source/SDK/sanitizers,
+real QEMU metadata/I/O oracles and clean scratch fsck passed before installation.
+Native cache controls/data pass, GL/Vulkan five each, and three desktop plus
+three SSH installed Firefox launches paint readable distinct pages with all
+captures inspected. All owned identities disappear naturally in 1.48–1.92 s
+without cleanup signals (SSH launcher status zero; desktop exit status unknown).
+No synthetic input was injected. Standard DESK10 `.next` starts automatically
+this boot and responds to stats. This does not resolve earlier intermittent
+bootstrap/startup failures or establish media/FPS/page-load performance.
+Qualified 47 is verified rollback. The root's read-only fsck retains known
+extent/i_size/bitmap/count errors; no repair or clean-root claim. UART and all
+install locks are released. Private receipts: `runs/sftb/firefox-install-0048/`.

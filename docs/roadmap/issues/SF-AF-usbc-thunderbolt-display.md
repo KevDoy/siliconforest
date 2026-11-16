@@ -3926,3 +3926,27 @@ check retained its known error classes; no repair or clean-root claim.
 UART and install locks were released at the logged return to SiliconForest.
 AVE remains paused. See `integrations/puredarwin/m1-wifi-pm/README.md` for
 reproduction, exact test scopes and the unresolved startup observation.
+
+
+### 2026-11-16: Firefox kernel 48; dock hardware remains paused
+
+Kernel 48 is qualified normal with 47 rollback. This authorized Firefox cycle
+changes only ext4's journal-image read shortcut; core and 56 other modules,
+Wi-Fi PM 2000, 599 boot-argument bytes and `pdm1tpscroll=20` are unchanged.
+Source, SDK, sanitizer controls and real QEMU storage/USB oracles precede the
+normal install. Native runtime cache controls/data, GL/Vulkan five each, six
+Firefox paint/natural-quit checks and standard DESK10 `.next` pass. No synthetic
+input. Known root fsck errors remain; no repair or clean-root claim. UART and
+all install locks were released.
+
+| Path | Observed on the M1 in this cycle | Built or pending |
+| --- | --- | --- |
+| GPU shared-buffer fences | Actual pending GPU producer, reservation snapshot and cross-process CPU consumer poll/data pass; UAPI already existed on 47 | Mesa/CGL/WindowServer activation and actual GPU-consumer/image-lifetime gates belong to client agents |
+| Small storage operations | Metadata journal hits bypass disk reads; fsync/unlink stacks show journal flush waits and reclaim-triggered fsync | No demonstrated append latency gain; remaining queue/flush and batching attribution |
+| Wi-Fi and trackpad | Firmware timeout 2000 ms; compositor scroll conversion 0.206 mm retained | No new physical pinch or idle-power result |
+| Dock router/PCIe/I210/USB/DP/hotplug | No new hardware evidence | All Thunderbolt/dock hardware trials still paused; offline source/SDK evidence from earlier sections unchanged |
+
+No dock or AVE hardware trial was scheduled. Current status, client handoffs
+and private install receipts are in the coordinator files; the next dock
+window still follows the existing ranked measurement plan, without claiming
+kernel 48 advances physical dock milestones.

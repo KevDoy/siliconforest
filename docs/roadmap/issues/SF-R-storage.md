@@ -726,3 +726,45 @@ and failed extending-write paths are now explicit hypotheses with disposable
 VM low-space/failure controls planned in `m1-ext4-eof/README.md`. FXNET's
 13–33 ms buffered-append tail is a separate stage-timing task. No owner-root
 space exhaustion, storage error injection or barrier reduction is proposed.
+
+
+### 2026-11-16: kernel 48 metadata read shortcut and latency attribution
+
+Kernel 48 changes only ext4: when the authoritative full metadata image is in
+the pending journal transaction, use it before issuing a physical disk read.
+The prior reader read disk first and then overlaid that image. A native append
+stackshot caught the writer blocked on the mount mutex, owned by a compositor
+close/inactive path freeing extents and reading metadata synchronously through
+NVMe. Other snapshots caught allocation zeroing. The new reader preserves the
+journal, two flushes, write allocation/EOF fix, NVMe and all frozen write-gate/
+fence files. It is described and reproduced in `m1-ext4-journal-cache/README.md`.
+
+Source-aware ASan/UBSan controls, full SDK and real QEMU pass: runtime cache
+0/1, independent full byte oracles for 64 metadata and 29 write/resize cases,
+8 MiB USB read, clean scratch unmount and e2fsck -fn status 0. An initial
+missing-sysctl-registration failure was retained and fixed before this pass.
+Only ext4's UUID changes from 47. Native cache 0/1/1/0 controls, 4000 appends
+and 128 metadata cases pass full data checks; enabled phases avoid about
+12000 bread calls each, disabled phases have no hits. Neither controls nor
+enabled phases reproduce the original append tail, so there is no demonstrated
+append speedup. Metadata operation timings also remain variable.
+
+A bounded native 64-cycle write/fsync/close/unlink trace on 48 finds median
+fsync 11.84 ms and unlink 11.30 ms. Of 32 writer stack samples, 25 sleep in
+NVMe flushes issued by `ext4_jnl_commit`: 16 at the post-commit-record flush,
+nine at the post-checkpoint flush, confirmed against the exact bundle's
+symbols and disassembly. This is a sample count, not wall-time attribution.
+Unlink's captured chain enters `VNOP_FSYNC` through vnode reclamation (`vclean`),
+which commits the mount transaction synchronously. Other samples show a
+physical group-descriptor read or mount-lock contention. The reader shortcut
+cannot eliminate these two ordered flushes. Earlier 40000 ordinary appends
+coincided with only ten global flushes including background activity; there
+is no commit-per-ordinary-write conclusion. Queue/device flush latency and
+reclaim batching are next attribution questions; durability is unchanged.
+
+The installation used the normal installer, exact qualified 47 rollback,
+notice/locks/UART and one-time boot. Clean shutdown reached Linux without an
+external reset; the read-only root check retained the previous error classes,
+status 4, with no repair or new finding in the comparison. Root is not clean.
+The standard desktop, GL/Vulkan and six Firefox paint/natural-quit gates pass;
+UART and locks are released. No root-fill or error injection was performed.
