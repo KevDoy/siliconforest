@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import time
 
-from lifecycle_observer import AudioFixture, gecko_windows, native_menu
+from lifecycle_observer import AudioFixture, close_button, gecko_windows, native_menu
 from marionette import Marionette
 from owner_guard import OwnerInputGuard
 
@@ -209,10 +209,12 @@ def main():
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
                 if args.action == 'close-box':
-                    x, y, width, height = admission['frame']
-                    tx, ty = x + width - 15, y + 12
-                    if not (0 <= tx <= 2559 and 0 <= ty <= 1599):
-                        raise RuntimeError('Owned close box is outside the panel')
+                    name = 'sffx-lifecycle-%d-close-frame' % parent
+                    _request(inject, 'dump ' + name)
+                    dump = (inject / (name + '.txt')).read_text()
+                    (args.run / 'close-frame.txt').write_text(dump)
+                    tx, ty = close_button(dump, admission['window_id'])
+                    result['close_button_point'] = [tx, ty]
                     lines = 'abs %d %d\nbuttons 1\nwait 60\nbuttons 0' % (round(tx * 65535 / 2559), round(ty * 65535 / 1599))
                 else:
                     lines = 'key e3 down\nkey 1a down\nkey 1a up\nkey e3 up'

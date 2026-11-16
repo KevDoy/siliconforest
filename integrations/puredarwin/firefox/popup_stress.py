@@ -85,6 +85,7 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
             panel:w.document.getElementById("appMenu-popup")?.state,
             events:w.__sffxPopupEvents??[],input:w.__sffxPopupInput??[],
             windowInput:w.__sffxPopupWindowInput??[],
+            focusEvents:w.__sffxPopupFocus??[],documentFocused:w.document.hasFocus(),
             lifecycle:w.__sffxPopupLifecycle??[],tabs:w.gBrowser.tabs.length};''')
         unexpected = [event for event in current.get('windowInput', [])
                       if event['type'] == 'mousedown' and event.get('target') != 'PanelUI-menu-button']
@@ -117,7 +118,10 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
           const b=w.document.getElementById("PanelUI-menu-button");
           if(!b)throw new Error("No application menu button");
           w.__sffxPopupEvents=[];
-          w.__sffxPopupInput=[];w.__sffxPopupLifecycle=[];w.__sffxPopupWindowInput=[];
+          w.__sffxPopupInput=[];w.__sffxPopupLifecycle=[];w.__sffxPopupWindowInput=[];w.__sffxPopupFocus=[];
+          for(const type of ["focus","blur","activate","deactivate"])
+            w.addEventListener(type,e=>w.__sffxPopupFocus.push({type,time:performance.now(),
+              target:e.target===w?"window":e.target.id,documentFocused:w.document.hasFocus()}),true);
           b.addEventListener("mousedown",e=>w.__sffxPopupEvents.push({trusted:e.isTrusted,
             button:e.button,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,shift:e.shiftKey}),true);
           for(const type of ["mousedown","mouseup","click"])
@@ -129,7 +133,8 @@ def measure(client, output, deadline, admission=None, observe_auto_close=False):
               client:[e.clientX,e.clientY],screen:[e.screenX,e.screenY]}),true);
           const panel=w.document.getElementById("appMenu-popup");
           for(const type of ["popupshowing","popupshown","popuphiding","popuphidden"])
-            panel.addEventListener(type,e=>w.__sffxPopupLifecycle.push({type,time:performance.now()}),true);
+            panel.addEventListener(type,e=>w.__sffxPopupLifecycle.push({type,time:performance.now(),
+              documentFocused:w.document.hasFocus(),stack:type==="popuphiding"?new Error().stack:null}),true);
           return true;''')
         calibration_path = output.with_name('popup-chrome-calibration.ppm')
         result['chrome_capture'] = capture(calibration_path)

@@ -6,8 +6,10 @@ owner's per-process HAL observer and native close/reopen/connection-loss tests.
 Only a loopback server is opened; no installed browser or profile is touched.
 """
 import io
+import ast
 import json
 import math
+import re
 from pathlib import Path
 import secrets
 import socket
@@ -16,6 +18,26 @@ import threading
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def close_button(dump, window_id):
+    """Use the compositor's actual button center for this admitted window."""
+    rows = [line for line in dump.splitlines()
+            if re.match(r'window %d ' % window_id, line) and 'mapped=true' in line]
+    if len(rows) != 1:
+        raise ValueError('Expected exactly one mapped owned window')
+    frame = re.search(r'frame=Some\((.*?)\)', rows[0])
+    bounds = list(map(int, re.findall(r'-?\d+', frame[1]))) if frame else []
+    buttons = re.search(r'buttons=(\[[^\]]*\])', rows[0])
+    points = [item[1:] for item in ast.literal_eval(buttons[1]) if item[0] == 'Close'] if buttons else []
+    if len(bounds) != 4 or len(points) != 1 or len(points[0]) != 2:
+        raise ValueError('Owned close-button geometry absent or ambiguous')
+    x, y, width, height = bounds
+    tx, ty = points[0]
+    if not (type(tx) is int and type(ty) is int and 0 <= tx <= 2559 and 0 <= ty <= 1599 and
+            x <= tx < x + width and y <= ty < y + height):
+        raise ValueError('Owned close button is outside its frame or panel')
+    return tx, ty
 
 
 class AudioFixture:

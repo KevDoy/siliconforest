@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from lifecycle_observer import close_button
 
 spec = importlib.util.spec_from_file_location('lifecycle_gate', Path(__file__).with_name('analyze-lifecycle.py'))
 gate = importlib.util.module_from_spec(spec)
@@ -81,6 +82,25 @@ class LifecycleEvidence(unittest.TestCase):
         self.assertTrue(self.analyze(result, log)['complete'])
         result['after_reopen_windows'][0]['tabs'][0]['uri'] = 'about:newtab'
         self.assertFalse(self.analyze(result, log)['complete'])
+
+
+class CloseButtonGeometry(unittest.TestCase):
+    row = ('window 92 mapped=true frame=Some(Rect { pos: Point { x: 112, y: 59 }, '
+           'size: Size { w: 1942, h: 1541 } }) '
+           'buttons=[("Close", 2014, 92), ("Maximize", 1972, 92)]')
+
+    def test_observed_compositor_center(self):
+        self.assertEqual(close_button(self.row, 92), (2014, 92))
+
+    def test_foreign_hidden_ambiguous_or_offscreen_target_refused(self):
+        for dump in [self.row.replace('window 92', 'window 93'),
+                     self.row.replace('mapped=true', 'mapped=false'),
+                     self.row + '\n' + self.row,
+                     self.row.replace('2014, 92', '2600, 92'),
+                     self.row.replace('"Close"', '"Miniaturize"')]:
+            with self.subTest(dump=dump):
+                with self.assertRaises(ValueError):
+                    close_button(dump, 92)
 
 
 if __name__ == '__main__':

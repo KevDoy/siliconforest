@@ -36,7 +36,7 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             admission=admit(client,directory/(image_prefix+'-admission.json'),fixture=False,handle=handle)
             if client.command('WebDriver:GetWindowHandle') != handle:
                 raise RuntimeError('Presentation admission changed the requested legibility tab')
-        row=script('''const runs=[],excluded=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
+        collect_source='''const runs=[],excluded=[],walk=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let node;
           function visibleBox(rect,element){
             // A partially offscreen glyph is not a measurable complete run.
             if(rect.left<0||rect.top<0||rect.right>innerWidth||rect.bottom>innerHeight)return null;
@@ -63,7 +63,21 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
           return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
-            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};''')
+            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};'''
+        row=script(collect_source)
+        from legibility_documents import discover, document, translate_runs, mask
+        documents, skipped = discover(client, script)
+        row['frame_documents']=[]
+        row['unsupported_frames']=skipped
+        for item in documents[1:]:
+            with document(client, item['path']):
+                child=script(collect_source)
+            child_runs=translate_runs(child['runs'], item['offset'], item['clip'])
+            row['runs'].extend(child_runs)
+            row['faces'].extend(child['faces'])
+            row['fontResources'].extend(child['fontResources'])
+            row['frame_documents'].append(dict(url=child['url'],offset=item['offset'],clip=item['clip'],
+                measured_runs=len(child_runs),fontsStatus=child['fontsStatus']))
         row['per_page_virtual_admission']=admission
         from renderer_capture import capture
         from screen_calibration import calibrate
@@ -77,13 +91,11 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
         paint();shot(directory/(image_prefix+'-visible.png'))
         capture(directory/(image_prefix+'-visible-renderer.ppm'))
         try:
-            script('''if(window.__sffxLegibilityMask)throw new Error('Text mask already exists');const style=document.createElement('style');
-              style.textContent='*{color:transparent!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}';
-              document.documentElement.append(style);window.__sffxLegibilityMask=style;return true;''')
+            mask(client,script,documents,True)
             paint();shot(directory/(image_prefix+'-hidden.png'))
             capture(directory/(image_prefix+'-hidden-renderer.ppm'))
         finally:
-            script('window.__sffxLegibilityMask?.remove();delete window.__sffxLegibilityMask;return true;')
+            mask(client,script,documents,False)
         paint()
         from renderer_capture import capture
         row['renderer']=capture(directory/(image_prefix+'-renderer.ppm'))
@@ -96,4 +108,7 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
     if not rows:raise RuntimeError('No owned ordinary page found for legibility checks')
     from legibility_pixels import analyze
     pixels=analyze(directory,prefix+'.json')
-    return dict(pages=rows,pixel_checks=pixels,complete=all(p['paint_check_pass'] for p in pixels),diagnostic_complete=True,legibility_qualified=False,method='Laid-out visible text ranges plus paired paint-only text masks and actual renderer captures. Pixel analysis and visual review required; no load-only PASS.')
+    return dict(pages=rows,pixel_checks=pixels,
+                complete=all(p['paint_check_pass'] for p in pixels) and not any(r['unsupported_frames'] for r in rows),
+                diagnostic_complete=True,legibility_qualified=False,
+                method='Laid-out visible text ranges including admitted frame documents, paired paint-only text masks and actual renderer captures. Pixel analysis and visual review required; no load-only PASS.')
