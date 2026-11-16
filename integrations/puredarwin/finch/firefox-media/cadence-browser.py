@@ -35,6 +35,9 @@ def main():
     p.add_argument('--lifetime-control',action='store_true',help='Observe owned ended-video idle, then unload its source; not a visible-memory qualification')
     p.add_argument('--retire-pool',action='store_true',help='Private invalidated-session pool retirement; requires strict lifetime control')
     a=p.parse_args()
+    # Do not leave crashreporter helpers from owned tests of the open platform
+    # shutdown defect (FX-003). No owner process environment is changed.
+    os.environ['MOZ_CRASHREPORTER_DISABLE']='1'
     if a.youtube_profile and not a.youtube:raise ValueError('YouTube profile requires its owned playback case')
     if a.youtube and (a.codec_matrix or a.rate_control):raise ValueError('Separate finite playback cases required')
     if a.lifetime_control and (not a.staged_media or a.frame_mode!='require' or a.youtube or a.codec_matrix or a.rate_control):

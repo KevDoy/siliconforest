@@ -7,6 +7,46 @@ CV/VT/audio producer and diagnostics. Shared claims/results live in
 `runs/m1-coord/firefox-defects.md` and the CODEX/FX/TB request files. No AVE,
 pointer/key injection, owner-profile attachment/signals or push.
 
+## Per-stream audio controls
+
+`audio-state-probe.nix` builds our M1-only client and an explicitly needed,
+default-inactive HAL aggregate meter. `SF_HAL_PCM_AUDIT=1` wraps only validated
+packed stereo Float32 output callbacks. It forwards every argument/status,
+records power/frame/error counters and never records PCM, mutates output or
+changes global volume/device/rate. Sixteen callback contexts remain allocated
+until exit. The direct snapshot API requires all registered callbacks stopped
+from a non-render thread; PD Stop waits for the active cycle. Reinitialization
+creates a fresh IOProc/context. Do not unload the diagnostic image.
+
+`SF_HAL_PCM_TRACE=1` additionally publishes atomic snapshots to a bounded90s
+background logger at10Hz. PCM scanning and publication add diagnostic cost;
+these runs never qualify performance. Every published word is atomic, with a
+bounded sequence check; the worker cannot race a plain C statistics read.
+No allocation, logging, waiting or mutex acquisition occurs on the callback.
+
+Native M1 controls on16November passed with the installed and private
+clock-normalized AudioToolbox families: half volume gives approximately quarter
+power, mute gives exact zero PCM, stopped callbacks remain stable for250ms,
+a second stream continues while the first is stopped/muted, and a44.1kHz
+client reinitializes into the48kHz output ring. The ring accepted and consumed
+frames. The first control failed by reading a retired IOProc after reinit;
+that raw failure remains. Corrected controls also pass with background
+publication enabled. Startup callback gaps reach166ms and later gaps about34ms:
+this is not a glitch-free, acoustic, browser or perceptual-sync qualification.
+
+`prepare-audio-death.py --pcm-observer ...` freezes the new meter and own-page
+state helper. `run-audio-browser-state.py` requires gui.lock then bench, checks
+the current coordination gate and cold-verifies the packet before execution.
+It launches two fresh diagnostic profiles, comparing installed and private
+audio, with no injected input. HTML controls cover volume, mute, pause,
+restart, concurrent tabs, closing media tabs and normal quit. All diagnostic
+browser paths explicitly disable the crash reporter while FX-003 is open.
+`analyze-audio-state.py` bridges the independently observed Python/C monotonic
+epochs before selecting steady-state native power deltas; missing clocks,
+missing meters and invalid PCM observations are refusals. Document state alone
+cannot prove output or silence. Acoustic output and per-client server underruns
+remain separate measurements.
+
 ## Baseline and deployment gap
 
 FX's private20:05Z browser test decodes6001080p H264 pictures and3004K HEVC

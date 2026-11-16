@@ -21,6 +21,7 @@ import time
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True)
     p.add_argument('--audio-clock-family',action='store_true',help='Private full AudioToolbox comparison, never changes installed selection')
+    p.add_argument('--state-controls',action='store_true',help='Own media volume/mute/pause/two-tab controls and normal quit, no disconnect')
     a=p.parse_args()
     root=Path(__file__).resolve().parent
     if os.uname().sysname!='Darwin' or not root.is_relative_to(Path('/private/var/db/sffx')):
@@ -72,12 +73,15 @@ def main():
     try:
         if server.exists():st=server.stat();inode=st.st_ino;offset=st.st_size
         result['coreaudiod_start']=dict(inode=inode,offset=offset)
-        observers=[root/'lib/SFFirefoxMediaObserver.dylib',root/'lib/SFFirefoxWaylandLoss.dylib']
+        observers=[root/'lib/SFFirefoxMediaObserver.dylib',root/'lib'/('SFHALPCMTrace.dylib' if a.state_controls else 'SFFirefoxWaylandLoss.dylib')]
         if not all(path.is_file() for path in observers):raise ValueError('Both Linux-built observers required')
         env=os.environ.copy();env.update(SFFX_DIAGNOSTIC_OBSERVER=':'.join(map(str,observers)),
             SFFX_TEST_WAYLAND_LOSS='1',SF_FIREFOX_MEDIA_TRACE='1',SF_FIREFOX_MEDIA_TRACE_SECONDS='50',
             MOZ_REMOTE_ALLOW_SYSTEM_ACCESS='1',MOZ_NO_REMOTE='1',MOZ_CRASHREPORTER_DISABLE='1',
             HOME=str(home),CFFIXED_USER_HOME=str(home))
+        if a.state_controls:
+            env.pop('SFFX_TEST_WAYLAND_LOSS',None)
+            env.update(SF_HAL_PCM_AUDIT='1',SF_HAL_PCM_TRACE='1')
         arguments=['--no-remote','--profile',str(profile),'--marionette',fixture.url]
         if a.audio_clock_family:
             if not (root/'Frameworks/AudioToolbox.framework').is_dir():raise ValueError('Full staged AudioToolbox family required')
@@ -114,8 +118,15 @@ def main():
                 result['media_providers']=media_images.inspect(
                     [dict(pid=parent,type='browser',os_start_identity=owned[parent])],directory,root/'Frameworks')
                 if not result['media_providers']['complete']:raise RuntimeError('Full normalized AudioToolbox family not selected')
-            pause(2);result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
-            (a.run/'wayland-disconnect.trigger').write_text('Disconnect only this admitted own Firefox client\n')
+            if a.state_controls:
+                import audio_state_controls
+                result['state_controls']=audio_state_controls.run(client,fixture.url,pause)
+                result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
+                try:result['quit_reply']=client.command('Marionette:Quit',{'flags':[]})
+                except (OSError,EOFError) as error:result['quit_transport_end']=type(error).__name__
+            else:
+                pause(2);result['action_monotonic']=time.monotonic();result['action_epoch']=time.time()
+                (a.run/'wayland-disconnect.trigger').write_text('Disconnect only this admitted own Firefox client\n')
             pause(8);result['exit_before_cleanup']=process.poll();result['before_cleanup_owned']=result['timeline'][-1]['own_alive']
             result['diagnostic_complete']=True;save()
     except Exception as error:result['error']=repr(error)
