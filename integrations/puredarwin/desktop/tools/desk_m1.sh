@@ -17,6 +17,13 @@
 #                                          the installed .next itself (DESK7); `cursors-remove` takes it away
 #   desk_m1.sh relaunch next|daily         the session starts its compositor again (sf-session of 14 November,
 #                                          night, or later): every window ends. Take runs/m1-coord/gui.lock first.
+#                                          DESK8: refused unless the owner has been idle 5 min, no process is stuck
+#                                          in the kernel (ps state U or E: a GPU client stuck so made the next
+#                                          compositor hang opening the DRM device, 23:20Z on 15 November) and a
+#                                          test open of every /dev/dri/card* returns within 3 s (DESK_FORCE=1 skips)
+#   desk_m1.sh preflight                   those checks alone
+#   desk_m1.sh policy [key=value ...]      the desk's switches that change without a relaunch (DESK8, policy.rs):
+#                                          shown, or set in /private/var/db/desktop-state/chonkstep/policy
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
 #                                          wait for SiliconForest with .next and the inject directory (gui.lock first)
 set -euo pipefail
@@ -33,8 +40,36 @@ put() {
   "${SF[@]}" "cat > $dst.desk-new && chmod 755 $dst.desk-new" < "$src"
   "${SF[@]}" "[ -e $dst ] && [ ! -e $dst.before-$tag ] && ln $dst $dst.before-$tag; mv -f $dst.desk-new $dst; shasum -a 256 $dst | cut -c1-16"
 }
+preflight() {
+  "${SF[@]}" 'F=/private/var/run/gpu-desktop/owner-input; ok=1
+    now=$(($(date +%s)*1000)); act=$(grep "^active=" $F 2>/dev/null | cut -d= -f2); last=$(grep "^last_real_input_unix_ms=" $F 2>/dev/null | cut -d= -f2)
+    pid=$(pgrep -x chonkstep-darwin-desktop.next || pgrep -x chonkstep-darwin-desktop); up=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d " ")
+    upm=$(echo "${up:-0}" | awk -F"[-:]" "{n=NF; m=\$(n-1); if (n>=3) m+=\$(n-2)*60; if (n>=4) m+=\$(n-3)*1440; print int(m)}")
+    if [ "$act" != 0 ]; then echo "PREFLIGHT owner active or no owner-input file (active=$act)"; ok=0
+    elif [ "${last:-0}" -gt 0 ] && [ $(( (now - last) / 1000 )) -lt 300 ]; then echo "PREFLIGHT owner input $(( (now - last) / 1000 )) s ago (< 300)"; ok=0
+    elif [ "${last:-0}" = 0 ] && [ "$upm" -lt 5 ]; then echo "PREFLIGHT no owner input since the compositor started $up ago (< 5 min): unknown"; ok=0
+    else echo "PREFLIGHT owner idle (last real input: ${last:-0}, compositor up $up)"; fi
+    stuck=$(ps axo stat=,pid=,comm= | awk "\$1 ~ /^[UE]/" | head -5)
+    if [ -n "$stuck" ]; then echo "PREFLIGHT processes stuck in the kernel (U/E): $stuck"; ok=0; fi
+    for c in /dev/dri/card*; do
+      ( exec 3<>"$c" ) 2>/dev/null & p=$!; i=0; while kill -0 $p 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+      if kill -0 $p 2>/dev/null; then echo "PREFLIGHT open of $c did not return in 3 s (pid $p): a new compositor would hang"; ok=0; else echo "PREFLIGHT open of $c returned"; fi
+    done
+    [ $ok = 1 ]'
+}
 case "${1:-}" in
   state) state;;
+  preflight) preflight;;
+  policy)
+    shift
+    if [ $# = 0 ]; then "${SF[@]}" 'cat /private/var/db/desktop-state/chonkstep/policy 2>/dev/null || echo "(no policy file: defaults)"; grep -a WMPOLICY /var/log/desktop-session.log | tail -3'
+    else
+      lines=$(printf '%s\n' "$@")
+      printf '%s\n' "$lines" | grep -qvE '^[a-z_]+=(on|off)$' && { echo "key=on|off only" >&2; exit 2; }
+      printf '%s\n' "$lines" | "${SF[@]}" 'P=/private/var/db/desktop-state/chonkstep/policy; T=$P.desk-new; [ -e $P ] && cp $P $T || : > $T
+        while read -r l; do k=${l%%=*}; grep -v "^$k=" $T > $T.2; echo "$l" >> $T.2; mv $T.2 $T; done; mv $T $P; cat $P'
+      echo "$(date -u +%FT%TZ) DESK policy $* (no relaunch; policy.rs)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
+    fi;;
   install) put "$2" $D.next "${4:-desk}"; put "$3" $D "${4:-desk}";;
   put) put "$2" "$3" "${4:-desk}";;
   dock)
@@ -57,6 +92,7 @@ case "${1:-}" in
     "${SF[@]}" 'rm -rf /usr/share/icons/default; ls /usr/share/icons';;
   relaunch)
     case "$2" in next) word=relaunch-next;; daily) word=relaunch;; *) echo "next|daily" >&2; exit 2;; esac
+    [ "${DESK_FORCE:-0}" = 1 ] || preflight || { echo "relaunch refused by the preflight (DESK_FORCE=1 to override)"; exit 3; }
     "${SF[@]}" "grep -q relaunch-next /usr/libexec/sf-session || { echo 'the running session has no relaunch: reboot-next'; exit 1; }
       [ -e /private/var/db/desktop-inject ] || touch /private/var/db/desktop-inject
       echo $word > /private/var/run/gpu-desktop/session-end-request; pkill -TERM -x chonkstep-darwin-desktop || pkill -TERM -x chonkstep-darwin-desktop.next
