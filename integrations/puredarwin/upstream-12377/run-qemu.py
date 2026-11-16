@@ -8,6 +8,7 @@ here=Path(__file__).resolve().parent;repo=here.parents[2]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output',required=True,type=Path)
 parser.add_argument('--image-recipe',type=Path,default=here/'build-qemu-image.nix')
+parser.add_argument('--guest-script',type=Path,default=here/'qemu-guest.sh')
 a=parser.parse_args();out=a.output.resolve();out.mkdir(parents=True,exist_ok=False)
 nix=str(Path.home()/'.nix-profile/bin/nix-build')
 def run(argv,name,timeout=1200,env=None):
@@ -37,7 +38,7 @@ system=repo/'runs/qemu-dev/upstream-12377'/(out.name+'.img')
 system.parent.mkdir(parents=True,exist_ok=True)
 assert not system.exists(),'Do not overwrite another run image'
 run(['python3',str(here.parent/'qemu-dev/qd_image.py'),'--output',str(system),'--kernel','debug','--bootargs',' -s sfqemu_eof=1 sf_upstream_rehearsal=1',
-    '--file',str(here/'qemu-guest.sh')+'=/usr/bin/upstream-guest',
+    '--file',str(a.guest_script.resolve())+'=/usr/bin/upstream-guest',
     '--file',str(io/'bin/eof-io')+'=/usr/bin/eof-io',
     '--file',str(usb/'bin/usb-read')+'=/usr/bin/usb-read',
     '--file',str(ioreg/'usr/sbin/ioreg')+'=/usr/bin/ioreg',
