@@ -1,4 +1,4 @@
-# Firefox network support
+# Firefox integration and verification
 
 ## Network notification backend and quit-crash qualification
 
@@ -46,3 +46,45 @@ refuses live process and installed-runtime references, and records before/after
 free space. It never removes a tool or provider prefix. The workstation archive
 and extracted evidence remain available; executed image bytes in an archive
 remain diagnostic evidence, not a pristine build source.
+
+## Installed page and window gates
+
+Run browser diagnostics through `launch.py --installed-bundle --bundle
+/Applications/Firefox.app` with a fresh owned profile, the coordination gate and
+shared GUI lock. All synthetic input uses the virtual seat and an explicitly
+admitted owned window. Agent launches disable crash reporting.
+
+`--functional-qa --presentation-seat --site-legibility` collects actual renderer
+visible, text-hidden and restored captures. The checker includes supported
+iframe documents, suppresses CSS transitions throughout the paint control,
+and requires ink in every eligible visible text run plus faithful restoration.
+`--paired-site-legibility` repeats with web fonts on/off in the same owned
+profile, preserving cookies and restoring the original preference even on a
+measurement failure. Compare its `legibility-on` and `legibility-off` outputs
+with `compare-legibility.py --on-prefix legibility-on --off-prefix legibility-off`.
+Inspect the actual renderer pictures, final URLs and requested-site coverage:
+a CAPTCHA, interstitial, empty page or duplicate tab never qualifies ordinary
+site legibility. Pixel differences alone cannot establish correct glyphs/fonts.
+
+`lifecycle-run.py` pairs the owned audio fixture with per-process callbacks,
+content-process identities and compositor window observations before cleanup.
+`analyze-lifecycle.py` requires media teardown after close, no invisible live
+window after close, and an actual compositor reopen/Quit route. Hidden and
+minimised windows must retain their media and reopen the same tab. The
+`--quit-menu-control` diagnostic can isolate an application termination-routing
+failure, but cannot qualify desktop Quit. Cleanup signals never prove natural
+shutdown, and callback silence does not establish acoustic output.
+
+## Shared decoder video selection
+
+`install-video-runtime.py` selects the complete qualified CoreVideo/VideoToolbox
+family, preserving system graphics, the network fix and corrected audio clock.
+Its dry plan checks the retained matched playback evidence, original cold-file
+ledger, reviewed renderer pictures and loaded-image UUIDs. Apply only under the
+shared GUI/core/bench locks after notice; follow immediately with the media
+owner's `run-installed-video.py` acceptance packet and inspect both renderer
+pictures. Failed or incomplete acceptance requires checked rollback. The
+installed gate requires complete 600/300-frame playback, hardware jobs, pixels,
+provider paths, natural status0 and no surviving browser family before cleanup.
+Decoder pool retirement remains disabled. These gates do not establish panel
+pacing, acoustic synchronisation or smooth playback while interacting.
