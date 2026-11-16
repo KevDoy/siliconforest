@@ -371,6 +371,18 @@ Capture attempts retain arm/finish receipts even on failure. Earlier two-clip
 capture timeouts remain incomplete evidence; decoded frames and clean exit
 alone cannot qualify their images.
 
+The clock candidate subsequently passes49 private checks with both actual GPU
+images inspected. FX selects `video-clock-0172-v1`, retaining the original video
+family as rollback. Fresh installed-outer acceptance passes600 H2641080p60 and
+300 HEVC4K30 frames with0 reported drops, exact final hashes and hardware jobs,
+no new decoder faults, and0 decoder/CGL CPU transport bytes. Actual browser,
+GPU and decoder processes load the new clock and unchanged VideoToolbox main
+and child. FX and CODEX independently inspect both renderer images. Ordinary
+Quit returns0, with the family gone in1.651s and no cleanup signals or input.
+The installed result is accepted2026-11-16. Completed presentation-rate testing
+and eliminating QuartzCore's separate CPU uploads remain open. The earlier
+startup/bootstrap failure and capture failures are retained separately.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore
