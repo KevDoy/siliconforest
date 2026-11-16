@@ -80,8 +80,14 @@ def main():
         if collection.returncode==0:
             with tarfile.open(archive) as t:
                 t.extractall(stage/'evidence',members=[m for m in t.getmembers() if m.isfile() and m.name in ['native.log','result.json']],filter='data')
+        (stage/'transport-status.json').write_text(json.dumps(dict(returncode=status,
+            collection=collection.returncode,completed=status==0 and collection.returncode==0))+'\n')
         note('strictNV12 control END: transport='+str(status)+' collection='+str(collection.returncode)+'; no installed changes.')
-    if status!=0 or collection.returncode!=0:return 1
+    if status!=0 or collection.returncode!=0:
+        (stage/'admission.json').write_text(json.dumps(dict(passed=False,
+            checks=dict(transport=status==0,collection=collection.returncode==0),
+            scope='Native control did not complete; inspect retained stdout/stderr before retry'))+'\n')
+        return 1
     result=json.loads((stage/'evidence/result.json').read_text())
     text=(stage/'evidence/native.log').read_text()
     children=re.findall(r'^SFNV12STRICT child profile=([0-9a-f]+) exact_bytes=(\d+) cpu_upload=(\d+) cpu_readback=(\d+) gpu_blit=(\d+) reuse_after_completion=1 state_restored=9 paired_copy=1 local_use=0 global_in_use=0 pass=1$',text,re.M)

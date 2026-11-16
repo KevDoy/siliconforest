@@ -406,8 +406,14 @@ completion quarantine. These controls are not GPU evidence.
 `strict-nv12-probe.nix` ports the reviewed exec-separated rectangle control in
 a private source copy. It tests independent 2D storage, source overwrite after
 completion, odd visible dimensions/padding, both NV12 ranges, three GL profiles
-and nine GL state values. The Linux build is complete; native qualification is
-pending the integration owner's current presentation series. Prepare with
+and nine GL state values. The M1 control subsequently passes all12 cases:
+78,408 exact bytes after source overwrite,0 CPU transport bytes, the exact
+expected GPU-copy counts, three actual provider identities and restored GL
+state. The private broker exits naturally, the process group is empty, and
+global clone usage returns3→3 with no allocation failures. An earlier wrapper
+attempt used a refused private service prefix and never executed the GPU test;
+that failure is retained. These cases qualify the private helper, while
+QuartzCore integration and Firefox performance remain open. Prepare with
 `strict-nv12-native.py prepare --stage OWN_PACKET --cgl ORIGINAL_BUILD --probe
 PROBE_BUILD`, then call its `run --stage OWN_PACKET` phase only under gui/core/
 bench locks and the fresh coordination gate. The prefix must be a new

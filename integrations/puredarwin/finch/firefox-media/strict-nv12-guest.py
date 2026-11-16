@@ -17,7 +17,7 @@ for name in ['DYLD_FRAMEWORK_PATH','DYLD_FALLBACK_FRAMEWORK_PATH','DYLD_INSERT_L
              'SFFX_FRAME_ID_GEOMETRY','SFFX_FRAME_ID_DIMENSIONS']:
     env.pop(name,None)
 env.update(SFFX_GPU_IMAGE_CACHE='0',SFFX_IOSURFACE_GPU='1',
-    SFFX_IOSURFACE_SERVICE='org.puredarwin.iosurfaced.sffinch.strictnv12.'+str(os.getpid()),
+    SFFX_IOSURFACE_SERVICE='org.puredarwin.iosurfaced.sffx.strictnv12.'+str(os.getpid()),
     SFFX_CGL_PROBE_LIBRARY=str(root/'Frameworks/OpenGL.framework/Versions/A/OpenGL'),
     DYLD_LIBRARY_PATH='/usr/local/lib/siliconforest/opengl/v1/lib')
 command=['/usr/local/lib/siliconforest/firefox/160-system1/surface/bin/surface-session',
