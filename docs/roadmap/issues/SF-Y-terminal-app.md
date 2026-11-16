@@ -665,6 +665,25 @@ Page Downs, stale/foreign tiles 3/3 -> correct 3/3. FXPERF's 0154 (Onyx2D maps a
 Firefox's parent held ten private 30 MB copies of the CJK collection; footprint 921 -> 634 MB). QuartzCore.pd d2ecc6eb
 (byte-identical to FXLEAD's build), Onyx2D 8dabe746.
 
+Installed 03:11Z: Onyx2D 8dabe746 only (0154; `.pre-c20` kept = c18's ace5dc3d). FXLEAD withdrew 0155 at 02:21Z (its
+repeat showed FX-011/012 unchanged with it; Firefox's parent counts the surface use itself): out of the series, not
+installed; QuartzCore.pd stays c19's 95e0c621. Gates before: visual check (looked at; an empty Disk table in the
+candidate's Activity Monitor was data timing: the installed capture after has it full), 3 minutes of late views, random
+input Activity Monitor 240 / Terminal 216 actions alive; after: visual check of the installed files (looked at; a 3 px
+shift of Terminal's window between the runs, the new compositor's placement), random input Activity Monitor 240 /
+Terminal 228 actions alive, no report; `sf_compat_push.sh check` 18/18.
+Not done: my second Firefox check (FX-022 with the Terms modal off, PD_CV_TIMER A/B, the CPU path, about:support's
+Graphics, the keydown timestamp, a view-tree dump for the tab strip that sits half under the menu strip): after the
+03:4xZ boot my SSH-started Firefox could not start any child (`child bootstrap_look_up failed: 0x44e`), so it had no
+window; reported to CODEX-TB. Script ready: `runs/sf-term9/verify20.sh`.
+
+### FX-029 (FXPERF): presents paced by frame callbacks, built for FXPERF's A/B
+0156w (opt-in PD_WS_PACE_PRESENTS=1, off by default): a window presents at most once per wl_surface frame callback; a
+flush while its last commit is undrawn marks the present pending and the callback presents the newest backing store
+(a callback missing 100 ms holds nothing back). libWindowServer d0cea40f, staged in /private/var/db/sft8/c21; not
+installed. Next on the same path: damage (render, compose and commit only the changed rectangle) - QuartzCore and
+WindowServer, with CGL's EGLImage cache and fence (CODEX-FX) and the desk's damage use (DESK9).
+
 ### FX-003 (a crash report at every Firefox exit): cause, fix not built
 Breakpad symbols: nsNetworkLinkService::Shutdown() calls CFRunLoopRemoveSource(mCFRunLoop = NULL): Init() gave up when
 our SystemConfiguration's SCNetworkReachabilitySetCallback returned FALSE (PureDarwin's pd_sc_reachability.c answers
