@@ -127,6 +127,62 @@ Public `streaming-dash-002` uses the official dash.js4.7.4 reference player with
 
 Final `audio-gpu-004` launches the original executable with exactly the R7 providers plus a transparent clock observer. Canonical AudioToolbox.output-pd returns AudioOutputUnitStart/property status0. Unmuted volume.2 playback ends60.1s,1802/0, with235 actual same-process HAL consumed-frame samples at about48kHz. Interpolating at JS callback wall times, median video-minus-HAL offset changes **-2.601ms** from media1..10s to50..59s. Constant output latency is unknown; this is not acoustic or perceptual A/V proof. The earlier audio-hw-002's separately defined5..15/45..55s windows give-3.17ms; those older results are preserved, not silently redefined.
 
+## Media handover, 16 November wind-down
+
+The media stream is stopped at the owner's request. There is no new experiment,
+install or reboot queued. The full [media handover](../../../integrations/puredarwin/finch/firefox-media/HANDOVER-2026-11-16.md)
+records the cold hashes, selectors, rollback guards, exact build/test commands,
+private enable procedure, ranked defects and next five steps. Source07372dff6
+is committed, not installed or pushed. Claude owns the GitHub issue update.
+
+Firefox still selects video-clock-0172-v1 and audio-clock-v1 under
+/usr/local/lib/siliconforest/firefox/160-system1/overrides. CoreVideo UUID9FB0E7EB,
+VT5058E4F3 and its PD child49F4564E retain their qualified sharing path. The
+video-shared-v1 family and maintenance-video-clock-0172-v1 selector receipt are
+the clock rollback; maintenance-audio-clock-v1 retains the audio launcher and
+selector. Canonical media .pre-finch images and FX's full R7 rollback remain.
+Kernel48 remains the last qualified system; the proposed49 capacity change
+must not be installed or booted during wind-down. Retirement stays off and the
+pool stays32 buffers; actual completion waits and frame leases remain.
+
+Installed sharing passed600H2641080p60/300HEVC4K30 with zero reported drops,
+exact jobs/hashes and both actual renderer images inspected. Decoder copies
+fell1→0/frame, with matched RDD14.745→8.558% and26.889→16.533% of one core.
+The0172 installed gate passed separately. These successes do not erase the
+later4K failure: both private arms could not create an AVD context, with no
+contiguous1597 pages available at1,985,472KiB mapped in a2GiB IOVA window.
+Physical memory was available. Context ownership and allocation fragmentation
+need the kernel owner's diagnostics; seven contexts are not automatically leaks.
+
+The private QC caller removes its measured1.866GB H264 CPU upload but initially
+showed no CPU gain. The separate batched CGL candidate retains both imported
+planes and their global use through one real completion wait, without async
+completion, image caching or damage changes. Its48 native cases verify
+746,496,000 bytes after source overwrite. One same-cohort private H264 pair
+passes65 checks,600/0 each, zero observed VT/CGL/QC CPU transport and correct
+actual final pictures; family CPU77.350→73.495% of one core. This ordered pair
+is not installed, full4K or panel-FPS qualification. Full OFF/ON packets are
+prepared only on Linux, unexecuted. TERM must rebase the caller on current QC
+and FX must integrate/qualify a new coherent family before any selection.
+
+FX035's40ms callbacks come from Gecko progress invalidation, not25Hz decoder
+or CV output. Visible input-gap stalls remain open: FXQA measured20/600 drops
+and280ms. Intrusive matched diagnostics link XPI synchronous writes to long
+MAIN gaps, but do not attribute every stall or qualify a quiet-pref workaround.
+No perfect60fps claim is made. Installed audio corrects10.66/15.96ms model
+under-report at48/44.1kHz; ten PCM state phases pass. One own abnormal
+connection-loss case clears its exact coreaudiod slot within12.193ms and exits
+the whole family within400.742ms without signals. Acoustic lip sync, output
+drain, all crash variants and browser underruns under load remain unqualified.
+
+VLC/QuickTime/AVKit stay parked. VLC reached a transport panel/first-run alert,
+not visible movie playback; its latest prepared retries are unexecuted. AVKit's
+strict controller remains failed149/150 hashes with a stale completion. QuickTime
+still stops in dyld at Quartz.framework. AVE remains paused: INFO boot had no
+panic but ENODEV19/segments0; the metadata fix was built, never booted. Preserve
+all private inputs. The handover ranks resource exhaustion, input-gap stalls,
+full QC adoption, audio and codec coverage for the next resumed session.
+
 ## UI, fonts and speed
 
 All input below is synthetic and admitted to the owned uniquely titled Firefox window before delivery through the compositor seat/AppKit.

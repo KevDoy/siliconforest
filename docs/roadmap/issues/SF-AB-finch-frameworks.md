@@ -373,3 +373,36 @@ decoder contexts, with one new global stale completion; frame40 differs before
 any transport action. This is an unresolved decoder/copy/concurrency bug, not
 an accepted arithmetic difference. See finch/AVKit/CONTROLLER-2026-11-15.md;
 older quiet single-client passes remain scoped to their own receipts.
+
+## Media handover, 16 November wind-down
+
+The owner ended the session. No experiment, install, reboot or kernel install
+is queued by this stream. See the [complete media handover](../../../integrations/puredarwin/finch/firefox-media/HANDOVER-2026-11-16.md)
+and [SF-AG's current media section](SF-AG-firefox.md#media-handover-16-november-wind-down)
+for installed hashes/selectors/rollback, commands, exact private enable procedure,
+failed evidence, ranked defects and the next five steps. Source07372dff6 is
+committed and not pushed; its batched CGL is not installed.
+
+The Firefox selector retains CoreVideo clock0172 plus the qualified shared VT
+producer and normalized audio family. The earlier600H264/300HEVC installed
+zero-drop/pixel/job gate remains valid. Decoder copies are0/frame; matched RDD
+CPU14.745→8.558% at1080p60 and26.889→16.533% at4K30. Separate private QC/CGL
+work removes the remaining measured CPU upload: one batched H264 pair passes
+65 checks/600 frames each/zero drops, both actual images inspected, family
+CPU77.350→73.495% of one core. This is not a full4K, installed or panel claim.
+The current4K AVD failure is IOVA capacity/fragmentation in its2GiB aperture,
+not proof of absent physical memory. Proposed kernel49 was not installed;
+48 stays qualified and no reboot is authorized during wind-down. Pool32 and
+retirement-off remain the installed defaults, with completion waits/leases kept.
+
+The1080p60 input-gap stalls remain open. Gecko40ms rVFC notifications are not
+25Hz panel delivery. XPI write/profile evidence and the failed strict60fps
+presentation runs remain preserved. Audio's10.66/15.96ms model correction and
+ten PCM-state checks pass; the exact own server slot clears within12.193ms
+after connection loss, but acoustic sync and all abnormal exits are unqualified.
+VLC/QuickTime/AVKit remain parked: VLC has no movie-window playback proof;
+AVKit's strict controller fails149/150 hashes; QuickTime still lacks Quartz at
+load. AVE remains paused exactly as SF-AD records, with source/private inputs
+preserved and no further builds, extraction or probes. Historical staged-only
+and zero-copy-unqualified statements above describe their earlier cohorts;
+this handover records the later installed Firefox state without erasing them.

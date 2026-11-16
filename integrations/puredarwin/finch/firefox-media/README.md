@@ -1,5 +1,9 @@
 # Firefox media ownership
 
+**Wound down 16 November 2026:** see the [resumption handover](HANDOVER-2026-11-16.md)
+for the installed identities, rollback, private candidates, failures and next
+five steps. No experiments, installs or kernel boots are queued.
+
 Owner priority changed2026-11-15: VLC/QuickTime/AVKit are parked in
 `d9673c3c1`. CODEX-FX leads Firefox and owns its one IOSurface/CGL cohort,
 launcher/manifest activation and integrated GUI runs. This stream owns the
