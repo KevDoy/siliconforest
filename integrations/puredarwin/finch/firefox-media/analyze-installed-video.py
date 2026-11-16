@@ -11,7 +11,7 @@ import sys
 
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
-from video_selection import installed_family
+from video_selection import installed_family,VIDEO_FAMILIES
 spec=importlib.util.spec_from_file_location('video_pair',HERE/'analyze-video-pair.py')
 pair=importlib.util.module_from_spec(spec);spec.loader.exec_module(pair)
 
@@ -45,7 +45,8 @@ def analyze(run,staged=False):
         if len(data)!=receipt['bytes'] or hashlib.sha256(data).hexdigest()!=receipt['sha256']:
             raise ValueError('Collected native log receipt differs')
         text+='\n'+data.decode(errors='replace')
-    checks['native_output_collected']=bool(receipts)
+    if staged:checks['native_stdout_captured']=bool(text)
+    else:checks['native_output_collected']=bool(receipts)
     footers=[tuple(map(int,m)) for m in re.findall(r'SF_VT_GPU frames=(\d+) copied-bytes=(\d+) required=(\d+)',text)]
     clips=[pair.case_summary(c,footers,'shared') for c in raw.get('video_measurements',[])]
     checks['two_frozen_clips']=len(clips)==2 and {c['expected_frames'] for c in clips}=={600,300}
@@ -63,6 +64,11 @@ def analyze(run,staged=False):
         processes=observed.get('processes',[])
         checks[prefix+'images']=observed.get('complete') is True and {'browser','rdd'}.issubset({p['type'] for p in processes}) and all(
             p.get('passed') is True and all(p.get('staged_media_checks',{}).get(name) is True for name in ['CoreVideo','VideoToolbox','VideoToolbox.pd']) for p in processes)
+        if not staged:
+            expected=VIDEO_FAMILIES.get(launch.get('release',{}).get('video_override'))
+            actual=[re.findall(r'\sCoreVideo\s+<([^>]+)>','\n'.join(p.get('images',[]))) for p in processes]
+            checks[prefix+'corevideo_uuid']=bool(expected) and bool(actual) and all(
+                len(found)==1 and found[0].replace('-','').lower()==expected for found in actual)
         audio='/usr/local/lib/siliconforest/firefox/160-system1/overrides/audio-clock-v1/Frameworks/AudioToolbox.framework/'
         checks[prefix+'retained_audio']=bool(processes) and all(
             len(p.get('selected',{}).get(name,[]))==1 and p['selected'][name][0].startswith(audio)

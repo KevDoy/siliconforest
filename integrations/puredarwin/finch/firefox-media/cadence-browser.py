@@ -342,17 +342,26 @@ def main():
                         (a.run/'frame-id-export-geometry-admission.json').exists()),indent=2)+'\n')
                 raise
 
-        def frame_id_capture(self,path):
+        def frame_id_capture(self,path,kind='FrameID'):
+            if kind not in ['FrameID','Media']:raise ValueError('Only our fixture capture functions')
             self.command('Marionette:SetContext',{'value':'content'})
             armed=self.command('WebDriver:ExecuteScript',dict(
-                script='return window.fxArmFrameIDCapture();',args=[],newSandbox=False))
-            try:receipt=renderer_readback(path)
+                script='return window.fxArm'+kind+'Capture();',args=[],newSandbox=False))
+            attempt=dict(kind=kind,armed=armed,input_injected=False)
+            try:
+                receipt=renderer_readback(path)
+                attempt['capture']=receipt
+            except Exception as error:
+                attempt['error']=str(error)
+                raise
             finally:
                 finished=self.command('WebDriver:ExecuteAsyncScript',dict(
-                    script='const done=arguments[arguments.length-1]; window.fxFinishFrameIDCapture().then(done,e=>done({error:String(e)}));',
+                    script='const done=arguments[arguments.length-1]; window.fxFinish'+kind+'Capture().then(done,e=>done({error:String(e)}));',
                     args=[],scriptTimeout=4000,newSandbox=False))
+                attempt['finished']=finished
+                path.with_suffix('.capture-attempt.json').write_text(json.dumps(attempt,indent=2)+'\n')
                 if finished.get('error'):raise RuntimeError('Capture repaint cleanup failed: '+str(finished))
-            receipt['own_fixture_calibration_repaint']=dict(armed=armed,finished=finished,
+            receipt['own_fixture_calibration_repaint' if kind=='FrameID' else 'own_fixture_postplay_repaint']=dict(armed=armed,finished=finished,
                 outside_timed_playback=True,input_injected=False)
             return receipt
 
@@ -464,6 +473,7 @@ def main():
                                                      timing='CPU reconstruction omits external GPU windows; not a visibility gate')
                     except Exception as error:video['cpu_scene_capture_error']=str(error)
                     try:video['renderer_capture']=(self.frame_id_capture(directory/'renderer.ppm') if a.frame_id
+                                                   else self.frame_id_capture(directory/'renderer.ppm','Media') if not a.mse
                                                    else renderer_readback(directory/'renderer.ppm'))
                     except Exception as error:video['renderer_capture_error']=str(error)
             if a.frame_id_cgl and json.loads((root/'frame-id-cgl/identity.json').read_text()).get('explicit_log_flush'):
@@ -631,7 +641,7 @@ def main():
         try:
             with policy_scope:runpy.run_path(str(tools/'remote-run.py'),run_name='__main__')
         except SystemExit as error:
-            if not (a.installed_media or a.youtube_1080):raise
+            if not (a.installed_media or a.staged_media or a.youtube_1080):raise
             # Intentional Quit makes the shared survival-oriented runner return1.
             # Preserve its raw status/verdict and admit only via the exact gate.
             (a.run/'shared-runner-status.json').write_text(json.dumps(dict(returncode=error.code,

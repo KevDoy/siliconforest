@@ -26,7 +26,7 @@ def fixtures():
     clips=[]
     for frames,file,hash in [(600,'pattern-1080p60-h264.mp4','b424348'),(300,'pattern-4k30-hevc.mp4','88999ae5')]:
         audio=str(RUNTIME/'overrides/audio-clock-v1/Frameworks/AudioToolbox.framework/Versions/A')
-        images=dict(complete=True,processes=[dict(type=kind,passed=True,selected={
+        images=dict(complete=True,processes=[dict(type=kind,passed=True,images=['0 - 1 CoreVideo <ADF50510-1DC8-3759-ACAF-A2AA1F7D6310> /own/CoreVideo'],selected={
             name:[audio+'/'+name] for name in ['AudioToolbox','AudioToolbox.output-pd']},staged_media_checks={
             name:True for name in ['CoreVideo','VideoToolbox','VideoToolbox.pd']}) for kind in ['browser','rdd']])
         video=dict(source='file:///private/var/db/sffx/media-highrate-v1/'+file,
@@ -74,6 +74,17 @@ class InstalledVideoTests(unittest.TestCase):
             candidate(launch);raw['providers']['expected_system_gpu']=False
         self.assertFalse(self.analyze(wrong_graphics,staged=True)['passed'])
         self.assertFalse(self.analyze(staged=True)['passed'])
+
+    def test_clock_family_requires_actual_new_uuid(self):
+        from video_selection import CLOCK_FAMILY
+        def selected(launch,*_):launch['release']['video_override']=str(CLOCK_FAMILY/'Frameworks')
+        self.assertFalse(self.analyze(selected)['passed'])
+        def actual_clock(launch,raw,*_):
+            selected(launch)
+            for clip in raw['video_measurements']:
+                for process in clip['video']['media_providers']['processes']:
+                    process['images']=['0 - 1 CoreVideo <9FB0E7EB-4CFA-35AB-B18F-2C9F21B5AFDE> /own/CoreVideo']
+        self.assertTrue(self.analyze(actual_clock)['passed'])
 
     def test_cleanup_exit_or_live_family_refused(self):
         for mutate in [lambda l,r,q:r.update(exit_before_cleanup=None,exit_after_cleanup=143),

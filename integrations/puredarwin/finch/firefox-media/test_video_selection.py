@@ -29,6 +29,15 @@ class SelectionTests(unittest.TestCase):
         for key in manifest():
             row=manifest();row.pop(key)
             with self.subTest(key=key),self.assertRaises(ValueError):selection.installed_family(row)
+
+    def test_only_explicit_clock_candidate_is_admitted(self):
+        row=manifest();row['video_override']=str(selection.CLOCK_FAMILY/'Frameworks')
+        self.assertEqual(selection.installed_family(row),selection.CLOCK_FAMILY/'Frameworks')
+        for value in [str(selection.CLOCK_FAMILY/'Frameworks')+'/',
+                      str(selection.RUNTIME/'overrides/video-clock-other/Frameworks'),
+                      str(selection.CLOCK_FAMILY/'../video-shared-v1/Frameworks')]:
+            row['video_override']=value
+            with self.subTest(value=value),self.assertRaises(ValueError):selection.installed_family(row)
         for key,value in [('video_zero_copy',1),('audio_output_clock',1),
                           ('graphics_override','/private/another'),('diagnostics',{'args':['--marionette']})]:
             row=manifest();row[key]=value

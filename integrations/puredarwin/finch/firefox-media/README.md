@@ -360,6 +360,17 @@ shared runner's cleanup, as the installed gate already does. Both actual GPU
 images still require inspection. This supports qualifying a new CoreVideo clock
 while retaining the byte-identical reviewed VideoToolbox main and child.
 
+The installed gate accepts only the original `video-shared-v1` family or the
+explicit `video-clock-0172-v1` candidate and checks the corresponding actual
+CoreVideo UUID in every observed media process. Other paths remain refused.
+For the two local clips, `media-capture.js` adds three bounded repaints in a
+fixed badge after playback ends, then removes it and waits two animation frames.
+The badge stays in view when the runner has scrolled past the heading. It never
+changes video pixels, preferences, input or the measured playback interval.
+Capture attempts retain arm/finish receipts even on failure. Earlier two-clip
+capture timeouts remain incomplete evidence; decoded frames and clean exit
+alone cannot qualify their images.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore
