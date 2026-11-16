@@ -89,4 +89,33 @@ provider paths, natural status0 and no surviving browser family before cleanup.
 Decoder pool retirement remains disabled. These gates do not establish panel
 pacing, acoustic synchronisation or smooth playback while interacting.
 
+`install-video-clock.py` advances that family to the display-phase clock from
+TERM's 0172 recipe while requiring the same qualified VideoToolbox UUIDs.
+The cold payload comes from Finch's `firefox-media/clocked-providers.nix`, which
+imports TERM's CoreVideo recipe. The selector changes only `video_override`
+and retains the previous family and manifest for checked rollback. Repeat the
+installed media acceptance immediately; a successful build or display-link
+tick count alone does not qualify Firefox presentation.
+
+`presentation-series.py --root /private/var/db/sffx/<owned-prefix> --round N`
+measures ten active seconds each of long scrolling, CSS animation and H264
+1080p60 through the installed outer launcher. Stage its sibling Python modules,
+`presentation-series.html` and a fifteen-second `frame-id-1080p60.mp4` fixture
+first. Run rounds 1–12 with GUI/core-shared/bench locks, releasing between rounds.
+One own profile is reused only after natural status 0 and full family exit.
+The initial targeted virtual modifier tap wakes the display before timing;
+there is no pointer/key injection during the measured phases. Background
+services retain their ordinary preferences. The runner checks hardware
+WebRender, actual system graphics and the selected clock in parent and GPU.
+
+Use `presentation-report.py <collected-directory>` on the workstation. It sums
+per-window shown counts over their reported intervals, lists replaced commits,
+retains separate histogram percentiles and derives matched-process CPU deltas.
+It does not average percentiles or treat browser rAF/decoded-frame counts as
+presentation. Stats commands and synchronous log output may perturb the
+measurement; preserve that limitation when reporting long intervals or rates.
+Inspect all three first-round renderer captures. Keep failed runs, natural-exit
+failures and below-threshold rates; they cannot be replaced by cleanup success
+or a selected subset of the twelve rounds.
+
 The optional `av1_enabled` runtime policy has a strict `SFFX_AV1=0|1` switch. On this M1, disabling AV1 lets sites negotiate hardware VP9/H264/HEVC instead of software AV1; it does not request a lower resolution or frame rate. Explicit `media.av1.enabled` entries outside the launcher's marked `user.js` block win. `SFFX_AV1=1` enables software AV1 when needed for an AV1-only source. Removing the manifest policy removes only that managed block on the next launch. `install-codec-policy.py` admits the matched native comparison and inspected renderer pictures, keeps a checked rollback, and requires an immediate installed-launcher acceptance without a test preference overriding the default. The measured YouTube pair is one clip, not a universal codec quality or panel cadence claim.
