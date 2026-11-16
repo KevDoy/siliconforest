@@ -14,6 +14,34 @@ spec.loader.exec_module(daily)
 
 
 class LaunchPlanPolicy(unittest.TestCase):
+    def test_versioned_audio_family_preserves_system_ui_and_selected_graphics(self):
+        self.manifest.update(system_ui=True, graphics_override=str(self.root/'overrides/nv12-v1'),
+                             audio_override=str(self.root/'overrides/audio-clock-v1/Frameworks'),
+                             audio_output_clock=True)
+        command, env = self.plan()
+        self.assertEqual(env['DYLD_FRAMEWORK_PATH'].split(':')[0], self.manifest['audio_override'])
+        self.assertIn('/System/Library/Frameworks', env['DYLD_FRAMEWORK_PATH'].split(':'))
+        self.assertIn(str(self.root/'overrides/nv12-v1/gl/lib'), env['DYLD_LIBRARY_PATH'].split(':'))
+        self.assertEqual(command[1], str(self.root/'overrides/nv12-v1/surface/bin/iosurfaced'))
+        self.assertEqual(env['SF_AU_NORMALIZE_HAL_CLOCK'], '1')
+
+    def test_audio_family_cannot_escape_or_use_an_unversioned_runtime_prefix(self):
+        for value in ['/System/Library/Frameworks', str(self.root/'overrides/Frameworks'),
+                      str(self.root/'overrides/audio/../Frameworks'), str(self.root/'overrides/audio')]:
+            self.manifest['audio_override'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
+
+    def test_audio_clock_requires_a_family_and_false_removes_an_inherited_enable(self):
+        for value in [True, 1, 'true']:
+            self.manifest['audio_output_clock'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
+        self.manifest['audio_output_clock'] = False
+        os.environ['SF_AU_NORMALIZE_HAL_CLOCK'] = '1'
+        _, env = self.plan()
+        self.assertNotIn('SF_AU_NORMALIZE_HAL_CLOCK', env)
+
     def test_versioned_graphics_cohort_keeps_storage_dispatch_and_broker_together(self):
         graphics = self.root / 'overrides/nv12-v1'
         self.manifest.update(system_ui=True, graphics_override=str(graphics),
