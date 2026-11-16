@@ -256,7 +256,7 @@ def main():
             return process_cpu.capture(self,parent,owned)
 
         def close(self):
-            if (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
+            if (a.frame_id and getattr(self,'frame_id_preview_completed',False)) or (a.frame_id_dimensions_only and getattr(self,'frame_id_preflight_completed',False)) or (a.installed_media and getattr(self,'completed_installed_videos',0)==(1 if a.mse or a.av1_switchback or a.frame_id else 2)) or (a.youtube_1080 and getattr(self,'youtube_completed',False)):
                 import time
                 # After both measurements/pages/captures, request ordinary Quit
                 # from this admitted client, before the shared runner's cleanup.
@@ -323,6 +323,30 @@ def main():
             return result
 
         def measure_video(self,handle=None):
+            try:return self.measure_video_with_admission(handle)
+            except Exception as error:
+                if a.frame_id:
+                    import traceback
+                    (a.run/'frame-id-failure.json').write_text(json.dumps(dict(
+                        error=repr(error),traceback=traceback.format_exc(),timed_playback_admitted=
+                        (a.run/'frame-id-export-geometry-admission.json').exists()),indent=2)+'\n')
+                raise
+
+        def frame_id_capture(self,path):
+            self.command('Marionette:SetContext',{'value':'content'})
+            armed=self.command('WebDriver:ExecuteScript',dict(
+                script='return window.fxArmFrameIDCapture();',args=[],newSandbox=False))
+            try:receipt=renderer_readback(path)
+            finally:
+                finished=self.command('WebDriver:ExecuteAsyncScript',dict(
+                    script='const done=arguments[arguments.length-1]; window.fxFinishFrameIDCapture().then(done,e=>done({error:String(e)}));',
+                    args=[],scriptTimeout=4000,newSandbox=False))
+                if finished.get('error'):raise RuntimeError('Capture repaint cleanup failed: '+str(finished))
+            receipt['own_fixture_calibration_repaint']=dict(armed=armed,finished=finished,
+                outside_timed_playback=True,input_injected=False)
+            return receipt
+
+        def measure_video_with_admission(self,handle=None):
             # Snapshot outside the fixture interval. No profiler, per-frame
             # sampling or dependency on zero counters being valid CPU time.
             import process_cpu
@@ -335,7 +359,11 @@ def main():
                     script='const done=arguments[arguments.length-1]; window.fxPrepareFrameID().then(done,e=>done({error:String(e)}));',
                     args=[],scriptTimeout=16000,newSandbox=False))
                 if marker_preparation.get('error'):raise RuntimeError('Own marker calibration failed: '+str(marker_preparation))
-                marker_preparation['renderer_capture']=renderer_readback(a.run/'frame-id-calibration.ppm')
+                self.frame_id_preview_completed=True
+                (a.run/'frame-id-preview.json').write_text(json.dumps(dict(
+                    preview=marker_preparation,owned_parent=self.owned_parent,
+                    owned_parent_start=self.owned_parent_start,pixel_admission_complete=False),indent=2)+'\n')
+                marker_preparation['renderer_capture']=self.frame_id_capture(a.run/'frame-id-calibration.ppm')
                 marker_preparation['owned_parent']=self.owned_parent
                 marker_preparation['owned_parent_start']=self.owned_parent_start
                 self.command('Marionette:SetContext',{'value':'chrome'})
@@ -401,7 +429,8 @@ def main():
                                                      file=str(directory/'cpu-scene.ppm'),source='cpu-scene',input_injected=False,
                                                      timing='CPU reconstruction omits external GPU windows; not a visibility gate')
                     except Exception as error:video['cpu_scene_capture_error']=str(error)
-                    try:video['renderer_capture']=renderer_readback(directory/'renderer.ppm')
+                    try:video['renderer_capture']=(self.frame_id_capture(directory/'renderer.ppm') if a.frame_id
+                                                   else renderer_readback(directory/'renderer.ppm'))
                     except Exception as error:video['renderer_capture_error']=str(error)
             if a.lifetime_control:
                 try:video['lifetime_control']=self.lifetime_control(video)

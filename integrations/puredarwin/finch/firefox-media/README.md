@@ -274,6 +274,18 @@ actual private providers, a JS/native clock bridge or completed display flips;
 those require their separate evidence. It never reports panel or production
 performance success from native export identities.
 
+Paused capture can fail when no new compositor frame completes. The owned
+frame-ID page therefore makes exactly three status-text repaints during
+calibration, restores the text, and waits for that activity to finish before
+timed playback. The same bounded activity occurs after measurement for the final
+capture. Its timing is recorded in each receipt; no input or global renderer
+setting changes occur. Playback refuses an unfinished calibration repaint.
+Original capture failures remain failures. `frame-id-preview.json` and
+`frame-id-failure.json` preserve preview state and primary exceptions even if
+the shared runner subsequently fails while writing its result. An admitted own
+preview requests ordinary Quit on that failure path; it never becomes a
+completed-playback or cadence pass.
+
 `context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
 libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
 kernel's additive128-byte/version1/capability17 contract only at successful

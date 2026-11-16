@@ -25,6 +25,29 @@ if(video.requestVideoFrameCallback){
  };video.requestVideoFrameCallback(callback);
 }
 function quality(){const q=video.getVideoPlaybackQuality();return {total:q.totalVideoFrames,dropped:q.droppedVideoFrames,corrupted:q.corruptedVideoFrames};}
+let capturePaint=null;
+window.fxArmFrameIDCapture=()=>{
+ if(capturePaint)throw new Error('Own capture paint already armed');
+ const node=document.querySelector('#status'),previous=node.textContent;
+ const state={start:performance.now(),updates:0,finishBy:performance.now()+650};
+ capturePaint={state,node,previous};
+ // A paused/static page need not submit another frame. Force only three own
+ // calibration repaints after the capture request can be armed, outside play.
+ for(const delay of [100,300,600])setTimeout(()=>{
+  node.textContent='Calibration capture repaint '+(++state.updates);},delay);
+ return state;
+};
+window.fxFinishFrameIDCapture=async()=>{
+ if(!capturePaint)throw new Error('Own capture paint not armed');
+ const {state,node,previous}=capturePaint;
+ await new Promise(resolve=>setTimeout(resolve,Math.max(0,state.finishBy-performance.now())));
+ if(state.updates!==3)throw new Error('Own capture repaint did not complete');
+ node.textContent=previous;
+ await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ state.end=performance.now();capturePaint=null;
+ fxVideoResult.capturePaints??=[];fxVideoResult.capturePaints.push({...state});
+ return state;
+};
 window.fxPrepareFrameID=async()=>{
  const deadline=performance.now()+12000;
  while(video.readyState<2&&!video.error){
@@ -41,6 +64,7 @@ window.fxPrepareFrameID=async()=>{
   innerScreenX:window.mozInnerScreenX,innerScreenY:window.mozInnerScreenY};
 };
 window.fxMeasureVideo=async()=>{
+ if(capturePaint)throw new Error('Capture paint must finish before timed playback');
  const r=window.fxVideoResult;r.events=[];r.presented=[];r.quality=[];
  r.initialQuality=quality();r.initialMediaTime=video.currentTime;r.measureStart=performance.now();
  let timer,ended;
