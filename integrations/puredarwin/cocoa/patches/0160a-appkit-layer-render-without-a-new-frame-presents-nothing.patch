@@ -1,6 +1,6 @@
 --- a/src/Frameworks/AppKit/NSView.m
 +++ b/src/Frameworks/AppKit/NSView.m
-@@ -1927,6 +1927,11 @@
+@@ -1936,6 +1936,11 @@
      return;
     }
     [self _drawLayerContext];

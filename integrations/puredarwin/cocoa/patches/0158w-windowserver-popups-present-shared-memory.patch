@@ -59,7 +59,7 @@
                      windowDestroyRole(window);
                      window->configured = 0;
                      // what it shows next has to be drawn and flushed after this
-@@ -4798,6 +4825,9 @@
+@@ -4798,12 +4825,24 @@
      if(!enabled||strcmp(enabled,"1")||!ensureConnected()||!ws.dmabuf)return 0;
      pthread_mutex_lock(&ws.pixelsLock);
      struct wsWindow *window=windowForID(windowID);int good=0;
@@ -69,3 +69,18 @@
      if(window){
          if(!window->gpuPresenter&&surface)window->gpuPresenter=sfGPUCreate();
          good=sfGPUSetLayer(window->gpuPresenter,key,surface,sx,sy,sw,sh,dx,dy,dw,dh);
+     }
+     pthread_mutex_unlock(&ws.pixelsLock);return good;
+ }
++// (TERM10) whether a window's layers can go to the GPU presenter at all (no: a popup or layer surface, which the desk
++// takes as shared memory only): AppKit asks before it copies a frame for it, and reads the layers back instead
++int _windowServerSFFXTakesGPULayers(int windowID){
++    const char *enabled=getenv("SFFX_GPU_PRESENT");
++    if(!enabled||strcmp(enabled,"1")||!ensureConnected()||!ws.dmabuf)return 0;
++    pthread_mutex_lock(&ws.pixelsLock);
++    struct wsWindow *window=windowForID(windowID);int good=window&&sfGPURoleTakesDmabuf(window);
++    pthread_mutex_unlock(&ws.pixelsLock);return good;
++}
+ int _windowServerSFFXGPUStats(int windowID,uint64_t values[4]){
+     pthread_mutex_lock(&ws.pixelsLock);
+     struct wsWindow *window=windowForID(windowID);int good=window&&window->gpuPresenter;

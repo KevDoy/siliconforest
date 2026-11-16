@@ -607,6 +607,70 @@ Figures from runs judged by DESK7's real-input counters before and after (unchan
 - Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
   the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
+## TERM10 round (16 November, early morning): Firefox's stale tiles, its menu panel, trackpad scrolling
+Tools in `runs/sf-term10` (not committed): `tools/t10_m1.py` (FXLEAD's launcher helper, my own area
+/private/var/db/sft10), `tools/ab.py` (sites + five Page Down), `tools/popt.py`, `tools/popstress.py`, `tools/scrollt.py`,
+`tools/emojit*.py`; TERM9's gates (visgate/fuzz/compat) through `vis10.sh`, `gate10.sh`. Synthetic input only, on the
+virtual seat, to my own windows; a window counts as mine only if it appeared after my own launch (one run at 04:43Z
+took another Firefox window by its title and sent it 3 Shift + 5 Page Down: logged; the rule above since).
+
+### FX-011/012: stale or foreign tiles (cause found, fixed, installed)
+Cause (QuartzCore, 0157): CARenderer gave layers their texture names in a pass before it drew, while Firefox's
+compositor thread changes the tree at the same time; a layer added between the two (a new tile, or one taken out and
+put back) was drawn with texture name 0: it bound none, so its IOSurface was bound into the texture of the layer drawn
+before it, and that layer showed this other surface until its own contents changed - a static chrome tile kept a page
+tile or an uninitialised surface (FX-012's stripes) for good. With `PD_CA_DIAG=1` (each frame: layers met without a
+name, layers whose texture holds another surface than their own) and `PD_CA_OLD=1` (the old naming) on my own Firefox:
+old naming wiki 69 / GitHub 59 frames with a wrong layer, captures wrong; 0157: 2-15 unnamed layers met per run, 0 wrong
+frames, in 12 of 12 runs (wiki, BBC, Reddit, GitHub code x 3; captures looked at). 0157 also: the render-scheduled
+flag as a full-barrier atomic, texture names swapped under the tree lock, nested transactions inherit their outer
+values, an implicit transaction is committed on its own thread. Installed 05:30Z: QuartzCore.pd 432fa011
+(`.pre-t10` = c19's 95e0c621). Gates before (with libWindowServer 3170eacc in the prefix) and after: visual check looked at
+(data only differs), random input alive (AM 180 / Terminal 168 actions after), compat 18/18. Revert:
+`ln -f <path>.pre-t10 <path>.back && mv -f <path>.back <path>`.
+
+### FX-022: Firefox's menu panel (≡)
+Found on the way, each in my own Firefox with PD_WS_TRACE (synthetic clicks at the ≡ button, Escape after each):
+- The desk reads popup and layer-surface buffers as shared memory only (`popups.rs`/`layers.rs` `import_shm`); the
+  panel's window has GPU layers, so libWindowServer attached linux-dmabuf buffers: `WMPOPUP refused buffer: SHM access
+  failed: NotManaged`. 0158w: a window that is or will be a popup/layer surface presents through shm; 0158 (AppKit) asks
+  `_windowServerSFFXTakesGPULayers` and reads such a window's layers back without copying a GPU frame first.
+- `-[NSWindow addChildWindow:ordered:]` made the child key (`makeKeyAndOrderFront:`). Firefox attaches the panel as a
+  child of the browser window right after showing it, so the browser window resigned key and Firefox rolled the panel
+  up at once (CODEX-FX's "showing, hiding before shown"); the hidden panel window was then flushed at level 8, made a
+  toplevel, focused by the desk and unmapped again, and the next click died on `wrong configure serial` (seen here at
+  06:0xZ with the installed files and with 0158w). 0162: a child is ordered above its visible parent and not made key;
+  -removeChildWindow: only detaches (macOS). 0158w also: a menu-level window finds a parent in the active or any
+  mapped window of the application before it is made a toplevel, and drops a toplevel role when hidden.
+- Also learnt: my first traces clicked 32 px too high (the tab strip's "List all tabs" button, also a panel with the
+  same show-then-hide); the ≡ button is 128 px below the window content's top at 150 %.
+
+### Trackpad scrolling ("I have to scroll a lot")
+The trackpad reaches the desk as wheel steps (the trackpad child's libinput emulation: one step per 3.6 mm of
+two-finger travel, Hyprland's scroll_factor 0.4) and libWindowServer made a step one line: 19 points in Firefox,
+5.3 points per mm of finger travel at any speed. 0159w turns wheel steps into precise points as a Mac trackpad gives
+them (50 points a step at up to 100 mm/s, rising to 3.5x at 400 mm/s; times the system scroll speed
+`/private/var/db/desktop-state/chonkstep/scroll-speed`, percent, default 100), as a gesture that ends after a pause of
+2.5 steps (90-200 ms), then a momentum phase (0.95 a refresh) after three or more steps; 0159 gives NSEvent
+-momentumPhase; 0161 moves Cocoa scroll views by whole points (fractional offsets drew Activity Monitor's rows over each
+other in the visual check). Measured (my own Firefox, a long page whose title is scrollY, 14 synthetic wheel steps = a
+50 mm swipe): installed 280 CSS px at every speed; with 0159w 1053 / 2359 / 4184 px at about 70 / 200 / 400 mm/s,
+momentum included. Not felt by a hand yet (synthetic steps). DESK9 asked for the trackpad as `AxisSource::Finger`
+with real per-frame travel and `axis_stop` (requests-for-DESK6.md); then the finger path becomes the default.
+
+### Other items
+- FX-024 (emoji boxes): not reproduced at 05:4xZ: emoji render as Noto Emoji/DejaVu outlines on my page and on FXQA's
+  forms.html, with and without the launcher helper's FONTCONFIG_FILE; the CoreText probe (`runs/sf-term10/probe`) finds
+  Noto Emoji, its cmap/glyf through CGFont, the same with c20's and the pre-c20 Onyx2D.
+- Tab strip half under the menu strip: with tabs in the title bar Firefox makes its ChildView the whole window frame
+  (960 pt in AppKit's 938 pt content view, the 22 pt strip over its top); CODEX-FX asked to default
+  browser.tabs.inTitlebar=0 until FX-002 (client-side decorations) exists.
+- FX-027: Escape cancels the modal open panel (TERM9's probe returned Cancel); AppKit centres it, the desk places it
+  lower right: DESK9 asked to honour the app's position for panels.
+- FX-003: SystemConfiguration rebuild with 0152 requested of the root owner (requests-for-CLAUDE.md).
+- FX-029: 0160/0160a built for FXPERF's A/B (unchanged layer properties render nothing; opt-in
+  SFFX_GPU_SKIP_UNCHANGED reuses the frame for a bare commit and presents nothing); PD_CA_DIAG counts.
+
 ## TERM9 round (16 November, night): Firefox on the system frameworks
 Tools in `runs/sf-term9` (not committed; TERM8's gates with `target` lines for DESK8's bound keys). Synthetic input only,
 on DESK8's virtual seat, to my own windows. Firefox checks use my own instance of the INSTALLED app (its launcher's

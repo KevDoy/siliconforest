@@ -468,7 +468,15 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0162  AppKit (TERM10, FX-022): -addChildWindow:ordered: orders the child above its visible parent and no longer makes
+#         it key (Firefox attaches its menu panel as a child right after showing it: the browser window resigned key and
+#         Firefox closed the panel at once); -removeChildWindow: only detaches, as on macOS
+#   0161  AppKit (TERM10): precise scroll deltas move a Cocoa scroll view by whole points (fractional offsets from
+#         0159w's momentum drew Activity Monitor's table rows over each other)
 #   0160a AppKit (TERM10, FX-029): a layer render that made no new frame (-_sfcaTakeNewFrame) flushes nothing
+#   0158  AppKit (TERM10, FX-022): a layer-backed view in a window the window server cannot give GPU layers (a popup
+#         or layer surface: _windowServerSFFXTakesGPULayers, 0158w) reads its layers back without copying a GPU frame
+#         first (a copied-then-refused frame left the read-back empty: Firefox's menu panel was transparent)
 #   0159w WindowServer (TERM10, the owner's "I have to scroll a lot"): the trackpad reaches the desk as wheel steps (one
 #         per 3.6 mm of two-finger travel), and a step was one line (19 points in Firefox); now a step is sent as precise
 #         points like a Mac trackpad's: 50 at slow finger speed, up to 3.5x when fast, times the system scroll speed
@@ -609,8 +617,11 @@ let
     ./patches/0209-view-registers-gpu-layer-with-private-windowserver.patch
     ./patches/0206-window-class-content-geometry-counts-menu-strip.patch
     ./patches/0150-appkit-event-timestamps-since-startup.patch
+    ./patches/0158-appkit-popup-layers-read-back-without-a-gpu-frame.patch
     ./patches/0159-appkit-scroll-momentum-phase.patch
     ./patches/0160a-appkit-layer-render-without-a-new-frame-presents-nothing.patch
+    ./patches/0161-appkit-precise-scrolling-by-whole-points.patch
+    ./patches/0162-appkit-child-windows-ordered-not-made-key.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
