@@ -16,6 +16,15 @@ class FrameCoordinates(unittest.TestCase):
         run = dict(text='Clipped label', boxes=[dict(x=2, y=3, width=20, height=10)])
         self.assertEqual(translate_runs([run], [100, 200], [110, 200, 500, 500]), [])
 
+    def test_han_samples_translate_and_clip_with_the_child_document(self):
+        run=dict(text='日本語',boxes=[dict(x=2,y=3,width=20,height=10)],han_samples=[
+            dict(text='日',boxes=[dict(x=2,y=3,width=8,height=10)]),
+            dict(text='語',boxes=[dict(x=30,y=3,width=8,height=10)])])
+        result=translate_runs([run],[100,200],[100,200,125,250])[0]
+        self.assertEqual(result['han_samples'],[
+            dict(text='日',boxes=[dict(x=102,y=203,width=8,height=10)])])
+        self.assertEqual(run['han_samples'][0]['boxes'][0]['x'],2)
+
     def test_frame_failure_restores_top_document(self):
         class Client:
             calls = []

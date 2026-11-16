@@ -59,12 +59,19 @@ def discover(client, script):
 
 def translate_runs(runs, offset, clip):
     translated = []
+    def translate_boxes(boxes):
+        boxes = [dict(box, x=box['x'] + offset[0], y=box['y'] + offset[1]) for box in boxes]
+        return [b for b in boxes if clip[0] <= b['x'] and clip[1] <= b['y'] and
+                b['x'] + b['width'] <= clip[2] and b['y'] + b['height'] <= clip[3]]
     for run in runs:
-        boxes = [dict(box, x=box['x'] + offset[0], y=box['y'] + offset[1]) for box in run['boxes']]
-        boxes = [b for b in boxes if clip[0] <= b['x'] and clip[1] <= b['y'] and
-                 b['x'] + b['width'] <= clip[2] and b['y'] + b['height'] <= clip[3]]
+        boxes = translate_boxes(run['boxes'])
         if boxes:
-            translated.append(dict(run, boxes=boxes))
+            result = dict(run, boxes=boxes)
+            if 'han_samples' in run:
+                result['han_samples'] = [dict(sample, boxes=sample_boxes)
+                    for sample in run['han_samples']
+                    if (sample_boxes := translate_boxes(sample['boxes']))]
+            translated.append(result)
     return translated
 
 

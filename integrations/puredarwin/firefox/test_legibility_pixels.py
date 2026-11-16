@@ -57,6 +57,30 @@ class TextPaintClassifier(unittest.TestCase):
             self.fixture(Path(d),missing_last=True);r=analyze(Path(d))[0]
             self.assertFalse(r['paint_check_pass']);self.assertEqual(r['runs_with_ink'],4)
 
+    def test_missing_han_character_cannot_hide_in_a_painted_run(self):
+        for middle_painted in [False, True]:
+            with self.subTest(middle_painted=middle_painted), tempfile.TemporaryDirectory() as d:
+                root=Path(d);self.fixture(root)
+                pixels=bytearray([255])*(80*40*3)
+                for index in [0, 1, 2] if middle_painted else [0, 2]:
+                    for y in range(11,17):
+                        for x in range(7+index*14,11+index*14):
+                            at=(y*80+x)*3;pixels[at:at+3]=b'\0\0\0'
+                (root/'visible.ppm').write_bytes(b'P6\n80 40\n255\n'+pixels)
+                rows=json.loads((root/'legibility.json').read_text())
+                rows[0]['han_sampling']=True
+                rows[0]['runs']=[dict(text='日本語',font='synthetic',
+                    boxes=[dict(x=4,y=8,width=42,height=12)],
+                    han_samples=[dict(text=c,boxes=[dict(x=4+i*14,y=8,width=14,height=12)])
+                                 for i,c in enumerate('日本語')])]
+                (root/'legibility.json').write_text(json.dumps(rows))
+                result=analyze(root)[0]
+                self.assertTrue(result['ink_check_pass'])
+                self.assertEqual(result['han_measured_characters'],3)
+                self.assertEqual(result['han_characters_with_ink'],3 if middle_painted else 2)
+                self.assertEqual(result['han_check_pass'],middle_painted)
+                self.assertEqual(result['paint_check_pass'],middle_painted)
+
     def test_restored_text_must_recover_original_pixels(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);self.fixture(root)

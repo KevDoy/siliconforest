@@ -58,12 +58,25 @@ def measure(client, directory, handles=None, prefix="legibility", seat_activity=
             const range=document.createRange();range.selectNodeContents(node);
             const boxes=[...range.getClientRects()].map(r=>visibleBox(r,node.parentElement)).filter(Boolean);
             if(!boxes.length){excluded.push({text:node.textContent.trim().slice(0,120),reason:'No complete viewport rectangle, hidden content, or empty accessibility clip'});continue;}
-            if(boxes.length&&!boxes.some(r=>{const hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,r.x+r.width/2)),Math.max(0,Math.min(innerHeight-1,r.y+r.height/2)));return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))runs.push({text:node.textContent.trim().slice(0,120),boxes,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor,fontVariantCaps:s.fontVariantCaps,fontFeatureSettings:s.fontFeatureSettings,fontVariationSettings:s.fontVariationSettings,transitionProperty:s.transitionProperty,transitionDuration:s.transitionDuration});
+            if(boxes.some(r=>{const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit&&!(node.parentElement.contains(hit)||hit.contains(node.parentElement));}))continue;
+            // A run with one missing glyph still has ink. Observe individual Han
+            // ranges too; these are not Latin/Arabic ligature or combining units.
+            const han_samples=[];let offset=0;
+            for(const character of node.textContent.slice(0,256)){
+              const start=offset;offset+=character.length;const cp=character.codePointAt(0);
+              if(!((cp>=0x3400&&cp<=0x9fff)||(cp>=0xf900&&cp<=0xfaff)||(cp>=0x20000&&cp<=0x323af)))continue;
+              const glyphRange=document.createRange();glyphRange.setStart(node,start);glyphRange.setEnd(node,offset);
+              const glyphBoxes=[...glyphRange.getClientRects()].map(r=>visibleBox(r,node.parentElement)).filter(Boolean).filter(r=>{
+                const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+                return hit&&(node.parentElement.contains(hit)||hit.contains(node.parentElement));});
+              if(glyphBoxes.length)han_samples.push({text:character,boxes:glyphBoxes});
+            }
+            runs.push({text:node.textContent.trim().slice(0,120),boxes,han_samples,font:s.font,fontFamily:s.fontFamily,fontWeight:s.fontWeight,color:s.color,background:s.backgroundColor,fontVariantCaps:s.fontVariantCaps,fontFeatureSettings:s.fontFeatureSettings,fontVariationSettings:s.fontVariationSettings,transitionProperty:s.transitionProperty,transitionDuration:s.transitionDuration});
           }
           return {url:location.href,title:document.title,readyState:document.readyState,bodyTextLength:document.body?.innerText.length||0,
             devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},fontsStatus:document.fonts.status,
             faces:[...document.fonts].map(f=>({family:f.family,status:f.status,weight:f.weight,style:f.style,stretch:f.stretch})),
-            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),runs,excluded};'''
+            fontResources:performance.getEntriesByType('resource').map(r=>r.name).filter(n=>/\\.(woff2?|ttf|otf)([?#]|$)/i.test(n)),han_sampling:true,runs,excluded};'''
         row=script(collect_source)
         from used_fonts import observe
         row['actual_font_faces']=observe(client)
