@@ -7,6 +7,21 @@ CV/VT/audio producer and diagnostics. Shared claims/results live in
 `runs/m1-coord/firefox-defects.md` and the CODEX/FX/TB request files. No AVE,
 pointer/key injection, owner-profile attachment/signals or push.
 
+**Capture correction,16November:** historical media files named
+`renderer.ppm`/`youtube-renderer.ppm` came from `--screencapture`, whose CPU
+scene omits external GPU window buffers. Their transparent bodies do **not**
+prove on-screen blank media. Preserve the original files and failed verdicts
+for audit; reclassify their visibility evidence as unqualified. Decoder hashes,
+PTS, kernel jobs, CPU and transport counters are independent observations.
+
+The corrected runner keeps a separate `cpu-scene.ppm` and uses the existing
+Firefox `renderer_capture.capture` helper for actual GPU readback. It requires
+its `source=renderer` log/receipt before accepting the route. This sends only a
+capture command under gui.lock; the owner-idle lift applies in a local scope
+that restores its previous value. No pointer, key, seat, focus or renderer
+setting changes occur. Actual pixels still require inspection; a successful
+readback alone is not visible playback or panel cadence proof.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

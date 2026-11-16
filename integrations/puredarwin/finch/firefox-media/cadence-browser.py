@@ -18,6 +18,21 @@ import sys
 import types
 
 
+def renderer_readback(destination):
+    """Existing capture-only protocol; unlike --screencapture, includes GPU buffers."""
+    from renderer_capture import capture
+    import presentation_seat
+    previous=presentation_seat.functional_qa_enabled()
+    # Durable owner-idle lift. This scope sends ONLY a capture command; no
+    # pointer, key, focus, seat or renderer settings are changed.
+    presentation_seat.functional_qa(True)
+    try:result=capture(destination)
+    finally:presentation_seat.functional_qa(previous)
+    if result.get('source')!='renderer':raise RuntimeError('Actual renderer readback was not established')
+    result.update(input_injected=False,visible_playback_qualified=False)
+    return result
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run',type=Path,required=True)
@@ -116,11 +131,13 @@ def main():
             playback['profile_diagnostic_only']=a.youtube_profile
             if admission:playback['gecko_profile']=profile
             try:
-                capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(a.run/'youtube-renderer.ppm')],
+                capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(a.run/'youtube-cpu-scene.ppm')],
                     capture_output=True,text=True,timeout=5,
                     env=dict(os.environ,XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',WAYLAND_DISPLAY='wayland-0'))
-                playback['renderer_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
-                    file=str(a.run/'youtube-renderer.ppm'),input_injected=False,visible_playback_qualified=False)
+                playback['cpu_scene_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
+                    file=str(a.run/'youtube-cpu-scene.ppm'),source='cpu-scene',input_injected=False,visible_playback_qualified=False)
+            except Exception as error:playback['cpu_scene_capture_error']=str(error)
+            try:playback['renderer_capture']=renderer_readback(a.run/'youtube-renderer.ppm')
             except Exception as error:playback['renderer_capture_error']=str(error)
             return playback
 
@@ -229,12 +246,14 @@ def main():
                 except Exception as error:video['media_provider_error']=str(error)
                 if a.staged_media:
                     try:
-                        capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(directory/'renderer.ppm')],
+                        capture=subprocess.run(['/usr/bin/chonkstep-darwin-desktop','--screencapture',str(directory/'cpu-scene.ppm')],
                                                capture_output=True,text=True,timeout=5,
                                                env=dict(os.environ,XDG_RUNTIME_DIR='/private/var/run/gpu-desktop',WAYLAND_DISPLAY='wayland-0'))
-                        video['renderer_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
-                                                     file=str(directory/'renderer.ppm'),input_injected=False,
-                                                     timing='After measurement; visibility/pixels still require inspection')
+                        video['cpu_scene_capture']=dict(returncode=capture.returncode,stdout=capture.stdout,stderr=capture.stderr,
+                                                     file=str(directory/'cpu-scene.ppm'),source='cpu-scene',input_injected=False,
+                                                     timing='CPU reconstruction omits external GPU windows; not a visibility gate')
+                    except Exception as error:video['cpu_scene_capture_error']=str(error)
+                    try:video['renderer_capture']=renderer_readback(directory/'renderer.ppm')
                     except Exception as error:video['renderer_capture_error']=str(error)
             if a.lifetime_control:
                 try:video['lifetime_control']=self.lifetime_control(video)

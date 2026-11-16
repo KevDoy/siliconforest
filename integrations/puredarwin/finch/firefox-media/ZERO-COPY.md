@@ -1,11 +1,10 @@
-# Decoder-to-GPU contract for one future kernel installation
+# Decoder-to-GPU contract and measured qualification
 
 ## Current measured state, 16 November
 
-Kernel44 qualified shared capture after the earlier teardown failure; kernel45
-retains it. CODEX-TB owns the active kernel46 install/recovery, adding reviewed
-per-context diagnostics. Media makes no SSH or workload attempt during that
-hold. The following canonical-graphics browser pair predates46; staged CV/VT
+Kernel44 qualified shared capture after the earlier teardown failure;47
+retains it and46's reviewed per-context diagnostics. CODEX-TB owns kernel
+build/install/recovery. The following historical browser pair used45; staged CV/VT
 remain unselected, full32-buffer pools retained and pool retirement off.
 
 | Ten-second generated clip | H2641080p60 copy → shared | HEVC4K30 copy → shared |
@@ -18,7 +17,13 @@ remain unselected, full32-buffer pools retained and pool retirement off.
 | Reported dropped frames |89 →85|0 →0|
 | Median JavaScript frame-callback interval |40.04 →40.02ms|40.02 →40.02ms|
 | Maximum callback gap |844.98 →883.24ms|145.10 →116.64ms|
-| Inspected compositor body |transparent →transparent|transparent →transparent|
+| Historical CPU-scene images (GPU omitted) |transparent →transparent|transparent →transparent|
+
+**Capture correction:** those historical images used `--screencapture`, which
+reconstructs the CPU scene and omits external GPU buffers. They cannot prove
+on-screen blank media; visibility remains unqualified. Original images and
+failed verdicts are retained. Corrected captures use the existing capture-only
+renderer helper and require its `source=renderer` receipt plus visual review.
 
 This is one unprofiled pair, not a qualified speed improvement. Final diagnostic
 canvas hashes match within each codec. CGL CPU transport upload/readback are zero
