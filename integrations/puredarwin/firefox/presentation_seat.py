@@ -113,9 +113,10 @@ def admit(client, output, fixture=True, verify_renderer=True):
     tx, ty = x+width//2, y+10
     if not (width>100 and height>100 and 0<=tx<=2559 and 0<=ty<=1599):
         raise RuntimeError('Owned titlebar outside the admitted panel')
-    # Pointer motion wakes a sleeping display; the following click belongs to
-    # the admitted window. No desktop power/idle configuration is changed.
-    request('abs %d %d\nwait 500\nbuttons 1\nwait 60\nbuttons 0\nwait 300' %
+    # Wake with a modifier tap on this explicit virtual target. Recent desktop
+    # builds do not wake the panel on virtual pointer motion alone. No desktop
+    # power/idle configuration is changed.
+    request('key e1 down\nkey e1 up\nabs %d %d\nwait 500\nbuttons 1\nwait 60\nbuttons 0\nwait 300' %
             (round(tx*65535/2559), round(ty*65535/1599)))
     client.command('Marionette:SetContext', {'value': 'chrome'})
     focused = script('const w=Services.wm.getMostRecentWindow("navigator:browser");return !!w&&w.document.hasFocus();')

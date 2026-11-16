@@ -14,6 +14,30 @@ spec.loader.exec_module(daily)
 
 
 class LaunchPlanPolicy(unittest.TestCase):
+    def test_versioned_graphics_cohort_keeps_storage_dispatch_and_broker_together(self):
+        graphics = self.root / 'overrides/nv12-v1'
+        self.manifest.update(system_ui=True, graphics_override=str(graphics),
+                             surface_override=str(self.root / 'overrides/surface-old/Frameworks'))
+        command, env = self.plan()
+        self.assertEqual(command[1], str(graphics / 'surface/bin/iosurfaced'))
+        self.assertEqual(env['DYLD_FRAMEWORK_PATH'].split(':')[0], str(graphics / 'surface/Frameworks'))
+        self.assertIn(str(graphics / 'gl/Frameworks'), env['DYLD_FRAMEWORK_PATH'].split(':'))
+        self.assertIn(str(graphics / 'gl/lib'), env['DYLD_LIBRARY_PATH'].split(':'))
+        for path in [str(self.root / 'gl/lib'), str(self.root / 'gl/Frameworks'),
+                     str(self.root / 'overrides/surface-old/Frameworks')]:
+            self.assertNotIn(path, env['DYLD_FRAMEWORK_PATH'].split(':') + env['DYLD_LIBRARY_PATH'].split(':'))
+
+    def test_graphics_cohort_refuses_mixed_system_or_foreign_prefix(self):
+        self.manifest.update(system_ui=True)
+        for value in ['/System/Library', str(self.root / 'overrides'),
+                      str(self.root / 'overrides/nv12/../other')]:
+            self.manifest['graphics_override'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
+        self.manifest.update(graphics_override=str(self.root / 'overrides/nv12-v1'), system_gpu_providers=True)
+        with self.assertRaises(ValueError):
+            self.plan()
+
     def test_each_observer_in_a_combined_diagnostic_is_validated(self):
         os.environ['SFFX_DIAGNOSTIC_OBSERVER'] = '/private/var/db/sffx/hal.dylib:/private/var/db/sffx/loss.dylib'
         _, env = self.plan(['--profile', '/private/var/db/sffx/control/profile'])

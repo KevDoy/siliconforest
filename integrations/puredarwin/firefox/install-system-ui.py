@@ -109,6 +109,7 @@ def main():
         providers['iosurfaced'] = Path('/usr/libexec/iosurfaced')
         manifest['system_gpu_providers'] = True
         manifest.pop('surface_override', None)
+        manifest.pop('graphics_override', None)
     uuids = {name: dict(path=str(path), uuid=image_uuid(path)) for name, path in providers.items()}
     if args.system_gpu:
         identity_path = source / 'canonical-gpu-identities.json'

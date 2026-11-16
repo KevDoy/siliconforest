@@ -82,7 +82,9 @@ def measure(client, output, deadline, admission=None):
           if(!w)return {windows:0};
           return {windows:[...Services.wm.getEnumerator("navigator:browser")].length,
             panel:w.document.getElementById("appMenu-popup")?.state,
-            events:w.__sffxPopupEvents??[],tabs:w.gBrowser.tabs.length};''')
+            events:w.__sffxPopupEvents??[],input:w.__sffxPopupInput??[],
+            windowInput:w.__sffxPopupWindowInput??[],
+            lifecycle:w.__sffxPopupLifecycle??[],tabs:w.gBrowser.tabs.length};''')
 
     try:
         if admission is None:
@@ -106,7 +108,18 @@ def measure(client, output, deadline, admission=None):
           const b=w.document.getElementById("PanelUI-menu-button");
           if(!b)throw new Error("No application menu button");
           w.__sffxPopupEvents=[];
+          w.__sffxPopupInput=[];w.__sffxPopupLifecycle=[];w.__sffxPopupWindowInput=[];
           b.addEventListener("mousedown",e=>w.__sffxPopupEvents.push({trusted:e.isTrusted,button:e.button}),true);
+          for(const type of ["mousedown","mouseup","click"])
+            b.addEventListener(type,e=>w.__sffxPopupInput.push({type,trusted:e.isTrusted,
+              button:e.button,time:performance.now(),target:e.target.id}),true);
+          for(const type of ["mousedown","mouseup","click"])
+            w.addEventListener(type,e=>w.__sffxPopupWindowInput.push({type,trusted:e.isTrusted,
+              button:e.button,time:performance.now(),target:e.target.id,
+              client:[e.clientX,e.clientY],screen:[e.screenX,e.screenY]}),true);
+          const panel=w.document.getElementById("appMenu-popup");
+          for(const type of ["popupshowing","popupshown","popuphiding","popuphidden"])
+            panel.addEventListener(type,e=>w.__sffxPopupLifecycle.push({type,time:performance.now()}),true);
           return true;''')
         calibration_path = output.with_name('popup-chrome-calibration.ppm')
         result['chrome_capture'] = capture(calibration_path)
@@ -123,6 +136,14 @@ def measure(client, output, deadline, admission=None):
             request('abs %d %d\nbuttons 1\nwait 50\nbuttons 0\nwait 250' %
                     (round(px*65535/2559), round(py*65535/1599)))
             row['opened'] = state()
+            # First-open module loading can outlast the injected click. Keep
+            # actual event history and a bounded state wait; never infer that
+            # a mousedown alone opened a native popup.
+            opening_end = min(deadline-10, time.monotonic()+3)
+            while row['opened'].get('panel') != 'open' and time.monotonic() < opening_end:
+                time.sleep(.1)
+                row['opened'] = state()
+            save()
             events = row['opened'].get('events', [])
             if (row['opened'].get('panel') != 'open' or len(events) != index+1 or
                     not all(event['trusted'] and event['button'] == 0 for event in events)):

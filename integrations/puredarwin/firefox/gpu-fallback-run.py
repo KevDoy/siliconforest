@@ -43,6 +43,7 @@ def main():
     if args.provider_control != 'current':
         manifest['system_ui'] = True
         manifest['system_gpu_providers'] = True
+        manifest.pop('graphics_override', None)
     original = Path(manifest['original_bundle'])
     if original != Path('/Applications/Firefox.app/Contents/Resources/Mozilla.app'):
         raise ValueError('Unexpected installed Mozilla payload')
