@@ -32,7 +32,7 @@ def module(name, filename):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', type=Path, required=True)
-    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'close-box', 'cmd-w', 'connection-loss'], required=True)
+    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'desktop-quit', 'close-box', 'cmd-w', 'connection-loss'], required=True)
     ap.add_argument('--ui-prefix', type=Path)
     ap.add_argument('--system-coretext', action='store_true')
     ap.add_argument('--observer', type=Path)
@@ -202,6 +202,9 @@ def main():
             if args.action == 'connection-loss':
                 (args.run / 'wayland-disconnect.trigger').write_text('Disconnect only this admitted private Firefox\n')
                 result['native_action'] = dict(own_wayland_shutdown_trigger=True, compositor_restarted=False)
+            elif args.action == 'desktop-quit':
+                result['native_action'] = dict(route='compositor-app-request', pid=parent,
+                    response=_request(Path('/private/var/run/gpu-desktop/inject'), 'app %d quit' % parent))
             elif args.action in ['close-box', 'cmd-w']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
@@ -241,7 +244,10 @@ def main():
             if parent in current and current[parent][1] == owned[parent]:
                 result['after_menu'] = native_menu(parent)
                 if args.action in ['hide', 'minimize', 'close-tab', 'close-window', 'close-box', 'cmd-w']:
-                    result['reopen_reply'] = native_menu(parent, 'reopen')
+                    # This invokes the compositor's dock/switcher app-action
+                    # handler, including its windowless-process routing.
+                    result['reopen_route'] = 'compositor-app-request'
+                    result['reopen_reply'] = _request(inject, 'app %d reopen' % parent)
                     pause(2)
                     client.command('Marionette:SetContext', {'value': 'chrome'})
                     handles = client.command('WebDriver:GetWindowHandles')

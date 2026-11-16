@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Host evidence controls; no browser, desktop, or acoustic claim."""
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+spec = importlib.util.spec_from_file_location('lifecycle_gate', Path(__file__).with_name('analyze-lifecycle.py'))
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+
+
+class LifecycleEvidence(unittest.TestCase):
+    def setUp(self):
+        self.result = dict(action='close-box', installed_outer_or_dock=True,
+            action_monotonic=100, after_action_monotonic=106, cleanup_monotonic=109,
+            before_action_owned_identities={'11': 'parent', '22': 'content'},
+            after_action_owned_alive={'11': 'parent'}, before_content_identities={'22': 'content'},
+            admission={'window_id': 9}, after_action_native_windows='stack []\n',
+            after_reopen_windows=[{'tabs': [{'uri': 'about:newtab'}]}],
+            reopen_admission={'complete': True}, reopen_route='compositor-app-request',
+            document={'url': 'http://127.0.0.1/test'}, diagnostic_complete=True,
+            providers={'complete': True})
+        self.log = [
+            'SFMEDIA_AU phase=state pid=11 event=start unit=0x123 status=0 monotonic=99',
+            'SFMEDIA_CALLBACK pid=11 unit=0x123 monotonic=99.5 calls=8 successes=8 active=1',
+            'SFMEDIA_AU phase=state pid=11 event=stop unit=0x123 status=0 monotonic=100.2',
+        ] + ['SFMEDIA_CALLBACK pid=11 unit=0x123 monotonic=%s calls=10 successes=10 active=0' % t
+             for t in [101.2, 101.7, 102.2, 102.7, 103.2]]
+
+    def analyze(self, result=None, log=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'result.json').write_text(json.dumps(self.result if result is None else result))
+            (root / 'firefox.log').write_text('\n'.join(self.log if log is None else log))
+            return gate.analyze(root)
+
+    def test_closed_media_and_compositor_reopen(self):
+        self.assertTrue(self.analyze()['complete'])
+        for route in [None, 'app-menu-socket']:
+            with self.subTest(route=route):
+                self.result['reopen_route'] = route
+                self.assertFalse(self.analyze()['complete'])
+
+    def test_invisible_or_duplicate_reopen_fails(self):
+        for changes in [dict(reopen_admission={}),
+                        dict(after_reopen_windows=[{'tabs': []}, {'tabs': []}]),
+                        dict(after_action_native_windows='stack [9]\nwindow 9 mapped=true\n')]:
+            with self.subTest(changes=changes):
+                self.assertFalse(self.analyze(dict(self.result, **changes))['complete'])
+
+    def test_observer_loss_or_late_stop_does_not_prove_silence(self):
+        self.assertFalse(self.analyze(log=self.log[:2])['complete'])
+        self.assertFalse(self.analyze(log=[line.replace('monotonic=100.2', 'monotonic=110')
+                                          for line in self.log])['complete'])
+
+    def test_closed_content_must_end_before_cleanup(self):
+        self.result['after_action_owned_alive']['22'] = 'content'
+        self.assertFalse(self.analyze()['complete'])
+
+    def test_compositor_quit_requires_success_and_whole_family_exit(self):
+        result = dict(self.result, action='desktop-quit', after_action_owned_alive={},
+                      exit_before_cleanup=0, native_action={'route': 'compositor-app-request'})
+        self.assertTrue(self.analyze(result, self.log[:2])['complete'])
+        for change in [dict(exit_before_cleanup=139), dict(native_action={}),
+                       dict(after_action_owned_alive={'22': 'content'})]:
+            with self.subTest(change=change):
+                self.assertFalse(self.analyze(dict(result, **change), self.log[:2])['complete'])
+
+    def test_hidden_media_continues_and_reopens_original_tab(self):
+        result = copy.deepcopy(self.result)
+        result.update(action='hide', after_action_owned_alive={'11': 'parent', '22': 'content'},
+            after_action_native_windows='stack []\nwindow 9 mapped=true lifecycle=Hidden\n',
+            after_reopen_windows=[{'tabs': [{'uri': result['document']['url']}]}])
+        log = self.log[:2] + [
+            'SFMEDIA_CALLBACK pid=11 unit=0x123 monotonic=%s calls=%s successes=%s active=1' % (t, n, n)
+            for t, n in [(101.2, 10), (101.7, 20), (102.2, 30), (102.7, 40)]]
+        self.assertTrue(self.analyze(result, log)['complete'])
+        result['after_reopen_windows'][0]['tabs'][0]['uri'] = 'about:newtab'
+        self.assertFalse(self.analyze(result, log)['complete'])
+
+
+if __name__ == '__main__':
+    unittest.main()
