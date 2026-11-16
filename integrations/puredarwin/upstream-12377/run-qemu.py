@@ -7,6 +7,7 @@ import argparse,hashlib,json,os,re,subprocess,time
 here=Path(__file__).resolve().parent;repo=here.parents[2]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output',required=True,type=Path)
+parser.add_argument('--image-recipe',type=Path,default=here/'build-qemu-image.nix')
 a=parser.parse_args();out=a.output.resolve();out.mkdir(parents=True,exist_ok=False)
 nix=str(Path.home()/'.nix-profile/bin/nix-build')
 def run(argv,name,timeout=1200,env=None):
@@ -18,7 +19,7 @@ def build(file,name,extra=()):
     paths=[Path(s) for s in (out/name).read_text().splitlines() if s.startswith('/nix/store/') and Path(s).is_dir()]
     assert paths,name
     return paths[-1]
-image=build(here/'build-qemu-image.nix','image-build.log')
+image=build(a.image_recipe.resolve(),'image-build.log')
 io=build(here.parent/'m1-ext4-eof/build-io-test.nix','io-build.log')
 usb=build(here/'build-usb-read.nix','usb-build.log')
 utility=build(here/'build-ext4util.nix','utility-build.log')
