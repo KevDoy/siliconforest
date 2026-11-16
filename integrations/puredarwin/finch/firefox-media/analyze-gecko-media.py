@@ -38,7 +38,9 @@ def symbols(path):
                           path=str(path), sha256=digest(path))
 
 
-def analyze(profile, tables, roles):
+def analyze(profile, tables, roles, top_labels=20):
+    if not 1 <= top_labels <= 1000:
+        raise ValueError('Output label limit must be1..1000')
     output = []
     for process in [profile, *profile.get('processes', [])]:
         threads = process.get('threads', [])
@@ -122,7 +124,7 @@ def analyze(profile, tables, roles):
             def top(counter):
                 return [dict(name=name, cpu_ms=value / 1000,
                              percent_observed_thread_cpu=value / total * 100)
-                        for name, value in counter.most_common(20)] if total else []
+                        for name, value in counter.most_common(top_labels)] if total else []
             output.append(dict(role=thread['processType'], pid=thread['pid'], tid=thread['tid'],
                 thread=thread['name'], cpu_ms=total / 1000, percent_one_core=total / window_us * 100,
                 sample_count=len(samples['data']), missing_cpu_delta_rows=missing,
@@ -138,6 +140,8 @@ if __name__ == '__main__':
     parser.add_argument('--profile', type=Path, required=True)
     parser.add_argument('--symbols', type=Path, action='append', required=True)
     parser.add_argument('--roles', nargs='+', default=['default', 'rdd', 'gpu'])
+    parser.add_argument('--top', type=int, default=20, choices=range(1,1001), metavar='1..1000',
+                        help='Output labels per thread; raise for codec identity without changing weights')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     tables = {}
@@ -146,7 +150,7 @@ if __name__ == '__main__':
         if name in tables:
             raise ValueError('Duplicate module symbols: ' + name)
         tables[name] = table
-    result = analyze(json.loads(args.profile.read_text()), tables, args.roles)
+    result = analyze(json.loads(args.profile.read_text()), tables, args.roles, args.top)
     result.update(profile=str(args.profile), profile_sha256=digest(args.profile),
                   symbols={name: {key: value for key, value in table.items() if key not in ['rows', 'starts']}
                            for name, table in tables.items()})

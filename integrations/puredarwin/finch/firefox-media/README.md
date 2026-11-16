@@ -769,3 +769,16 @@ a launch-comparison mismatch; whether it fixes the transparent window requires
 the same-cohort native A/B, not a host-helper test. Earlier installed-outer
 controls were also transparent, so that symptom is not assigned solely to the
 private wrapper.
+
+For low-ranked codec identities, add `--roles rdd --top 1000` to the saved
+Gecko profile analyzer. The default remains20 labels; changing the output
+limit does not change weights or module/CPU-unit validation. In the saved
+public YouTube720p60 AV1 run, two registered decoder threads have actual
+identity-matched `libdav1d_receive_frame`, `dav1d_send_data` and
+`dav1d_get_picture` samples inside bundled libmozavcodec. This confirms dav1d
+selection in that execution, beyond merely finding its symbols in the binary.
+Unregistered codec workers are still outside that profile. Neither summing
+overlapping inclusive weights nor this profiled720p run establishes full codec
+CPU or broad1080p speed. The independent unprofiled generated1080p60 pattern
+completed600/0 in10.208s at RDD58.67% of one core; visible playback and more
+complex real content remain separate gates.
