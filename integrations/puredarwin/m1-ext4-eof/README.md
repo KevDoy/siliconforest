@@ -112,3 +112,40 @@ source's two journal flushes could account for much of the13ms latency; this
 is a measurement-supported lead, not per-call attribution. DTrace was absent
 from PATH. Before choosing an optimization, obtain syscall/commit/flush-stage
 counts and timings; preserve crash consistency and all existing barriers.
+
+### Follow-up after the kernel 47 Wi-Fi priority
+
+The kernel 46 Linux precheck has additional initialized EOF/i_size findings
+following the observed root ENOSPC episode. They are not all pre-existing
+findings, and no repair was performed. Kernel 47 retains the exact kernel 45
+filesystem input; its Wi-Fi change is not a filesystem correction.
+
+Review of the actual frozen `ext4_vnop_write_impl` identifies two failure-path
+leads to test in a disposable VM before proposing another filesystem change:
+
+- `ext4_alloc_range` can allocate some blocks and then fail within a group of
+  at most 64. `mapped_end` advances only after the whole group succeeds. If
+  the first group fails, the writer goes directly to `out`, leaving those
+  allocations outside unchanged `e_size`. This is a source counterexample
+  candidate for the zero-sized files with initialized blocks seen after ENOSPC.
+- If `cluster_write` fails after extending, UBC size is restored to the old
+  size, but `e_new_size` clears only when it is at most `e_size`. A failed
+  extension can therefore retain the intended size and allocated tail. A
+  partial copy also needs explicit persisted-size/accounting verification.
+
+Neither lead establishes the cause of any particular M1 inode. Next controls:
+use the literal writer with allocator/cluster failure injection, then fresh
+small scratch filesystems with controlled free-block exhaustion, first-group
+and later-group failures, short copies, truncate/close/remount, independent
+byte/extent oracles and `e2fsck -fn`. Never fill or inject errors into the
+owner's root. Preserve successful full-write behavior and journal barriers.
+
+FXNET separately reports 100-byte buffered appends: p50 about 52 us but p90
+13 ms and p99 24–33 ms on kernel 46. The frozen mount lock can commit on its
+outermost unlock; `ext4_jnl_should_commit` checks overflow, 64 metadata blocks
+or one-second transaction age. Existing transaction blocks are updated in
+place, so a commit on every append cannot be inferred. Before optimizing,
+measure write preallocation, mount-lock wait, cluster write, inode logging,
+commit decision, journal/checkpoint writes and both flushes separately. The
+reported append tail and prior fsync/unlink times are measurements; the
+responsible stages remain unmeasured. No durability reduction is proposed.
