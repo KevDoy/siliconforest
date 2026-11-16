@@ -1,6 +1,6 @@
 --- a/src/Frameworks/CoreVideo/CVDisplayLink.m
 +++ b/src/Frameworks/CoreVideo/CVDisplayLink.m
-@@ -77,6 +77,17 @@
+@@ -77,6 +77,27 @@
  
  static void displayLinkCall(CVDisplayLink *link, CVTimeStamp *now, CVTimeStamp *out) {
      CVOptionFlags flagsOut = 0;
@@ -12,32 +12,46 @@
 +        static mach_timebase_info_data_t tb;
 +        if (tb.denom == 0)
 +            mach_timebase_info(&tb);
-+        fprintf(stderr, "CVTICK at=%.2f ran=%.2f\n", now->hostTime * (double)tb.numer / tb.denom / 1e6,
++        // to a file of this process in the directory PD_CV_TRACE names (Firefox's GPU process has no stderr)
++        static FILE *traceFile;
++        if (traceFile == NULL) {
++            char path[512];
++            snprintf(path, sizeof path, "%s/cvtick-%d.txt", getenv("PD_CV_TRACE"), (int)getpid());
++            traceFile = fopen(path, "a");
++            if (traceFile == NULL)
++                traceFile = stderr;
++        }
++        fprintf(traceFile, "CVTICK at=%.2f ran=%.2f \n", now->hostTime * (double)tb.numer / tb.denom / 1e6,
 +                mach_absolute_time() * (double)tb.numer / tb.denom / 1e6);
++        fflush(traceFile);
 +    }
      NSAutoreleasePool *pool = [NSAutoreleasePool new];
      if (link->_callback != NULL)
          link->_callback(link, now, out, 0, &flagsOut, link->_userInfo);
-@@ -84,8 +95,12 @@
+@@ -84,8 +105,13 @@
  }
  
  // one tick on the display clock; 0 when the clock knows no flip yet (the caller ticks on its timer instead)
-+/* (TERM11, the owner's "not buttery smooth"; FXPERF2's measurement) The link ticks at every refresh, on the display's
-+ * phase, as a macOS CVDisplayLink does: a flip report that comes before the next refresh only moves the phase. It
-+ * waited for a pending frame's flip (up to two refreshes after its commit); with a commit-to-flip time above one
-+ * refresh (~22 ms) Firefox's vsync locked to every second refresh: ~30-35 presented frames/s in 4 of 9 runs. */
++/* (TERM11, the owner's "not buttery smooth"; FXPERF2's measurement) The link ticks once at every refresh, on the
++ * display's phase (the last reported flip plus whole refreshes), as a macOS CVDisplayLink does. It waited for a
++ * pending frame's flip (up to two refreshes after its commit): with a commit-to-flip time above one refresh it ticked
++ * every second refresh. A link that wakes more than half a refresh late ticks for the refresh that just passed, it does
++ * not catch up with a burst. PD_CV_TRACE=<dir>: every tick to <dir>/cvtick-<pid>.txt. */
  static int displayLinkClockTick(CVDisplayLink *link, unsigned generation, uint64_t *last, uint64_t base) {
 -    uint64_t presented, refreshNs, counter, since;
-+    uint64_t presented, refreshNs, counter, since, period, next;
++    uint64_t presented, refreshNs, counter, since, period, next, now;
      int pending;
      static mach_timebase_info_data_t tb;
  
-@@ -93,33 +108,32 @@
+@@ -93,33 +119,28 @@
          mach_timebase_info(&tb);
      if (!pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since))
          return 0;
 -    uint64_t period = (uint64_t)((double)refreshNs * tb.denom / tb.numer);
--    pdMeasuredRefreshSeconds = refreshNs / 1e9;
++    period = (uint64_t)((double)refreshNs * tb.denom / tb.numer);
++    if (period == 0)
++        return 0;
+     pdMeasuredRefreshSeconds = refreshNs / 1e9;
 -    // the display's next flip after the last tick, on its phase
 -    uint64_t next = presented, now = mach_absolute_time();
 -    if (next + period <= now)
@@ -49,36 +63,28 @@
 -    if (pending > 0 && since != 0 && since + 2 * period > deadline)
 -        deadline = since + 2 * period;
 -    int moved = pdDisplayClockWait(counter, deadline);
--    if (!link->_running || link->_generation != generation)
--        return 1;
++    now = mach_absolute_time();
++    // the first refresh more than half a refresh after the last tick
++    uint64_t after = *last + period / 2;
++    if (after > presented)
++        next = presented + ((after - presented) / period + 1) * period;
++    else
++        next = presented + period;
++    // far behind (a stall, or the first tick): the refresh that just passed
++    if (next + period / 2 < now)
++        next = presented + ((now - presented) / period) * period;
++    if (next > now)
++        mach_wait_until(next);
+     if (!link->_running || link->_generation != generation)
+         return 1;
 -    uint64_t tick = next;
 -    if (moved) {
 -        pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since);
 -        // the report of a flip the timer already ticked for (its prediction came first): no second tick
 -        if (presented <= *last + period / 2)
-+    for (;;) {
-+        period = (uint64_t)((double)refreshNs * tb.denom / tb.numer);
-+        if (period == 0)
-+            return 0;
-+        pdMeasuredRefreshSeconds = refreshNs / 1e9;
-+        // the display's next refresh after the last tick, on its phase
-+        uint64_t now = mach_absolute_time();
-+        next = presented;
-+        if (next + period <= now)
-+            next += ((now - next) / period) * period;
-+        while (next <= *last + period / 2 || next <= now)
-+            next += period;
-+        if (!pdDisplayClockWait(counter, next))
-+            break;
-+        if (!link->_running || link->_generation != generation)
-             return 1;
+-            return 1;
 -        tick = presented;
-+        // a flip was reported before that refresh: its time is the phase from now on
-+        if (!pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since))
-+            break;
-     }
-+    if (!link->_running || link->_generation != generation)
-+        return 1;
+-    }
      CVTimeStamp tsNow, tsOut;
 -    fillTimeStampAt(&tsNow, tick, period, base);
 -    fillTimeStampAt(&tsOut, tick + period, period, base);

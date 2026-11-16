@@ -468,6 +468,10 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0175  AppKit (TERM11): a view that has a layer context keeps it (a second one replaced it without invalidating it; a
+#         render the first had queued messaged the freed view: Firefox SIGSEGV in -[CALayerContext _scheduleRender]'s
+#         block as a panel window closed, seen with t11a); a paste request between an offer and its data is answered
+#         from the board's own data
 #   0174  AppKit (TERM11): PD_PB_TRACE=1 logs what an application declares and writes on a pasteboard
 #   0173w WindowServer (TERM11, FX-022): the pointer entering a window is a mouse move there (a pointer arriving on
 #         Firefox's open menu panel brought no move, and the item under it did not highlight)
@@ -682,6 +686,7 @@ let
     ./patches/0170-appkit-subview-layers-follow-their-views.patch
     ./patches/0171-appkit-mouse-event-trace.patch
     ./patches/0174-appkit-pasteboard-trace.patch
+    ./patches/0175-appkit-view-keeps-its-layer-context-clipboard-fallback.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
