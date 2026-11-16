@@ -4,26 +4,31 @@
 
 Kernel44 qualified shared capture after the earlier teardown failure;47
 retains it and46's reviewed per-context diagnostics. CODEX-TB owns kernel
-build/install/recovery. The following historical browser pair used45; staged CV/VT
-remain unselected, full32-buffer pools retained and pool retirement off.
+build/install/recovery. The following current browser pair uses47; the qualified
+CV/VT family is cold-staged at a new inactive runtime prefix. FX owns selection
+and its installed-outer playback/natural-Quit gate. Full32-buffer pools remain
+the default and pool retirement is off.
 
 | Ten-second generated clip | H2641080p60 copy → shared | HEVC4K30 copy → shared |
 | --- | --- | --- |
 | Decoder frames |600 →600|300 →300|
 | CPU decoder pixel copies/frame |1 →0|1 →0|
 | Decoder copied pixel bytes |1866240000 →0|3732480000 →0|
-| RDD CPU, percent of one core |13.886 →7.944|26.322 →16.009|
-| Whole-family CPU, percent of one core |124.692 →122.298|153.914 →150.809|
-| Reported dropped frames |89 →85|0 →0|
-| Median JavaScript frame-callback interval |40.04 →40.02ms|40.02 →40.02ms|
-| Maximum callback gap |844.98 →883.24ms|145.10 →116.64ms|
-| Historical CPU-scene images (GPU omitted) |transparent →transparent|transparent →transparent|
+| RDD CPU, percent of one core |14.745 →8.558|26.889 →16.533|
+| Matched family CPU, percent of one core |119.024 →115.251|151.429 →149.472|
+| Reported dropped frames |0 →0|0 →0|
+| Median JavaScript frame-callback interval |40.02 →40.02ms|40.04 →40.02ms|
+| Maximum callback gap |55.54 →51.64ms|144.86 →112.00ms|
+| Actual GPU renderer images, inspected |browser/text/video visible in both modes|browser/text/video visible in both modes|
 
-**Capture correction:** those historical images used `--screencapture`, which
+**Capture correction:** the earlier kernel45 pair's images used `--screencapture`, which
 reconstructs the CPU scene and omits external GPU buffers. They cannot prove
 on-screen blank media; visibility remains unqualified. Original images and
 failed verdicts are retained. Corrected captures use the existing capture-only
 renderer helper and require its `source=renderer` receipt plus visual review.
+The current pair uses that corrected route; all four images were inspected.
+The historical45 pair's89/85 H264 drops and845/883ms callback gaps remain in
+the retained results; the new pair does not explain that earlier regression.
 
 This is one unprofiled pair, not a qualified speed improvement. Final diagnostic
 canvas hashes match within each codec. CGL CPU transport upload/readback are zero
@@ -40,7 +45,8 @@ invalidate the VideoFrameContainer. Observed0.5/1/2 rates yield80.06/40.04/20.02
 notifications. Isolated M1 CoreVideo callbacks run near60Hz; VT output and GPU
 plane bindings also reach the source60/30Hz. No CoreVideo25Hz timer fix follows
 from these measurements, and JavaScript notification cadence alone is not panel
-presentation cadence. H264 nevertheless has real long stalls and reported drops.
+presentation cadence. Historical H264 runs nevertheless have real long stalls
+and reported drops; no such drops occurred in the current pair.
 
 The separate submit trace places478.258/475.124/275.730ms gaps outside VT calls
 during playback; its longest playing-time H264 VT call is5.643ms. CoreVideo
@@ -49,8 +55,10 @@ This narrows the upstream submission/backpressure/scheduling investigation but
 does not identify its cause. The no-input private launcher also skipped the
 installed per-key platform defaults; its corrected private-profile path now
 uses the installed helpers and records actual pref values. Native same-cohort
-A/B and read-only AppKit view observations are prepared. No visible-playback or
-owner-ready claim follows until real captures paint and cadence gates pass.
+A/B confirms the requested preferences. The corrected actual GPU captures
+paint without a view-observer workaround; read-only AppKit observations are
+deferred. End-frame visibility is qualified, while continuous panel cadence
+and long-running all-content behavior remain separate gates.
 
 ## First native import attempt: failed and rolled back
 
@@ -71,16 +79,16 @@ This is teardown evidence, not proof that import preparation itself caused it.
 Keep the original failure; do not remove accounting assertions, skip unpinning
 or release backing without the required ownership/completion contract.
 
-## Required contract
+## Required contract and original gap
 
-The current installed AVD API allocates private capture pages and maps them
-read-only to the decoder process. It does not export a GPU-importable dma-buf.
+Before the shared-import extension, AVD allocated private capture pages and
+mapped them read-only to the decoder process, with no exported dma-buf.
 The current GPU ABI allocates/imports GEM BOs: VM_BIND.userptr names an array
 of bind operations, not arbitrary decoder image pages. Consequently an extra
 GL upload cannot honestly be called zero CPU copy without a real page-import
 path. Existing one-copy GPU-backed NV12 and CGL blits remain the fallback.
 
-Choose the already-staged **caller-owned GPU BO import into AVD**, preserving
+The implemented choice is **caller-owned GPU BO import into AVD**, preserving
 ABI1 and advertising PDAVD_CAP_EXTERNAL_BUFFERS bit16 only for implemented
 support. No second decoder buffer-export ABI or competing IOSurface/CGL
 provider is requested. FX's existing BO/fileport/broker keeps the same object
@@ -109,7 +117,10 @@ before device ownership, after real completion before CPU chroma handling and
 after CPU writes before publication. **Clean-after-device-write requires no
 stale CPU-dirty lines:** exclude CPU writers/readers during device ownership,
 otherwise writeback can overwrite fresh decoded bytes. Cache correctness and
-actual exported-BO UPL/pager retention remain hardware-unqualified.
+exported-BO UPL/pager retention were hardware-unqualified at that review. The
+subsequent corrected44 native decode, GPU-held-frame and current browser
+qualifications establish their stated tested scope; the original42 teardown
+panic remains recorded above.
 
 Producer retains AVFrame/CV/IOSurface storage; consumer acquires before producer
 release and holds through actual GPU completion. IsInUse/count zero is not a
@@ -119,7 +130,7 @@ kernel's pinning. No frame becomes recyclable merely because a callback returns.
 
 Exact source/artifact, cache-order and frozen-base review is in
 `runs/m1-coord/requests-for-CODEX-TB.md`. TB owns the one combined future kernel
-with K14 on known-good NON-AVE29, excluding failed dock diagnostics/DP changes.
+with the shared-import fix, excluding failed dock diagnostics/DP changes.
 Root does not build/install/boot a kernel. The durable owner grant now authorizes Firefox kernel optimizations without
 another decision. Owner-idle waits are lifted; TB announces and owns installations;
 source/host/SDK results remain separate from native qualification.
