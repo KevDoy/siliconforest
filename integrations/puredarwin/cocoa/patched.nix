@@ -419,6 +419,28 @@
 #         (Terminal draws its miniwindow's title with it), -[NSAttributedString drawWithRect:options:] (raised)
 #   0139  AppKit, 0139w WindowServer (TERM8): a pinch (zwp_pointer_gestures_v1, when the compositor offers it) is an
 #         NSEventTypeMagnify event with -magnification (the change of scale) and -phase, sent to -magnifyWithEvent:
+#   0141w WindowServer (TERM8): with the compositor's wp_cursor_shape_v1, NSCursor's standard cursors (and the xcursor
+#         names AppKit gives window edges) are asked for by shape: the desk draws its own pointer set at the display's
+#         scale (one pointer family; Terminal's text area shows the desk's I-beam); an application's own NSCursor
+#         image still goes as a bitmap; without the global the theme path stays
+#   0143w WindowServer (TERM8, Firefox left running with no window): a window whose next role is of another kind (a
+#         popup whose parent is gone shown as a toplevel, a level change between a layer and an ordinary window) gets
+#         a new wl_surface (a surface keeps its role for life: "Surface already has a role" ended the connection); and
+#         when the connection ends the application ends too, as a Mac application does when its window server goes
+#         (it said why; PD_WS_SURVIVE_DISCONNECT=1 keeps it alive for tests)
+#   0145w WindowServer (TERM8): an application's own cursor image that is the one already shown is not copied into a
+#         new shared-memory buffer again (AppKit sets Terminal's I-beam at every pointer motion)
+#   0146  Onyx2D (TERM8, FX-010): the glyph bitmap cache knows a face by its address and a number given the first time
+#         it is seen (FreeType's client slot): a face freed and another made at its address (Firefox's web-font subsets)
+#         was given the first one's glyphs ("Busness" on nytimes.com)
+#   0147  AppKit (TERM8, FX-004): NSTextField +labelWithString:, +wrappingLabelWithString:, +labelWithAttributedString:,
+#         +textFieldWithString:; NSButton +buttonWithTitle:target:action: (and with an image), +checkboxWithTitle:...,
+#         +radioButtonWithTitle:... (Firefox's crash reporter raised on +wrappingLabelWithString:)
+#   0144  AppKit (TERM8): the app-menu socket takes "reopen" (macOS's reopen event: the delegate asked, unhide, a
+#         minimised window back, else the untitled one: the dock's click on a windowless application) and "quit"
+#         (-terminate:, with or without a window); a reopen with no window on screen brings a minimised one back first
+#   0142  AppKit (TERM8): a tracking area made with NSTrackingInVisibleRect follows the view's visible rectangle (its own
+#         rectangle is ignored, as on macOS): Terminal's text view never got -cursorUpdate:, the pointer stayed an arrow
 #   0140  AppKit (TERM8): the layout solver meets constraints in priority order (one objective per priority,
 #         a higher priority first, as Cocoa's solver does) instead of a weighted sum: a label hugging at 750 no
 #         longer loses to six compression resistances of 749 (Activity Monitor's "Context Switches:" got 59 of 95 pt)
@@ -517,6 +539,9 @@ let
     ./patches/0137-appkit-vlc-interface-modal-events-minimise-crash.patch
     ./patches/0139-appkit-pinch-magnify.patch
     ./patches/0140-appkit-layout-priorities-in-order.patch
+    ./patches/0142-appkit-tracking-area-in-visible-rect.patch
+    ./patches/0144-appkit-reopen-and-quit-from-the-desk.patch
+    ./patches/0147-appkit-label-and-button-constructors.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -533,6 +558,9 @@ let
     ./patches/0129-windowserver-frames-kept-by-default.patch
     ./patches/0210w-windowserver-finger-pixels-and-scroll-phase.patch
     ./patches/0139w-windowserver-pinch-gestures.patch
+    ./patches/0141w-windowserver-cursor-shapes.patch
+    ./patches/0143w-windowserver-new-surface-for-a-new-role-ends-with-compositor.patch
+    ./patches/0145w-windowserver-same-cursor-image-not-sent-again.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -548,6 +576,7 @@ let
     ./patches/0122-onyx2d-clip-edges-on-pixels.patch
     ./patches/0200-onyx2d-serialize-shared-freetype-raster.patch
     ./patches/0217-graphics-font-keeps-fontconfig-collection-face-index.patch
+    ./patches/0146-onyx2d-glyph-cache-knows-a-reused-face.patch
   ];
   # upstream's framework recipes name no optimisation level: their compile lines get one here
   optimised = d: d.overrideAttrs (old: {
@@ -587,18 +616,18 @@ let
     buildPhase = builtins.replaceStrings
       [ "cc=\"" "rpc_wayland.o xdg-shell-protocol.o" ]
       [ ''
-        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1 unstable/pointer-gestures/pointer-gestures-unstable-v1; do
+        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1 unstable/pointer-gestures/pointer-gestures-unstable-v1 staging/cursor-shape/cursor-shape-v1 unstable/tablet/tablet-unstable-v2; do
           n=$(basename $x)
           wayland-scanner client-header ${wp}/$x.xml $n-client-protocol.h
           wayland-scanner private-code ${wp}/$x.xml $n-protocol.c
         done
         cc="''
-        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o pointer-gestures-unstable-v1-protocol.o xdg-shell-protocol.o" ]
+        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o pointer-gestures-unstable-v1-protocol.o cursor-shape-v1-protocol.o tablet-unstable-v2-protocol.o xdg-shell-protocol.o" ]
       (builtins.replaceStrings
         [ "$cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o" ]
         [ ''
           $cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o
-              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1 pointer-gestures-unstable-v1; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
+              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1 pointer-gestures-unstable-v1 cursor-shape-v1 tablet-unstable-v2; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
   }));
   # (0110) against the libFoundation the root has (NSIndexPath is in it), not upstream's

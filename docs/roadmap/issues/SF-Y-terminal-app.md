@@ -527,11 +527,21 @@ libFoundation a17bce22 (before 43a5fc1b, kept as `/usr/lib/libFoundation.dylib.o
 Revert: `macos-compat/sf-lib-install.sh` with `.old12` as the new file (core.lock, announced, lifeline open).
 
 ### Firefox's windowless process, cursors, reopen, FX-010, FX-004 (owner's direction: Firefox first)
-Cocoa 0141w-0147, candidate c18 = AppKit 835cdbce, Onyx2D ace5dc3d, libWindowServer 739a1630 (`runs/sf-term8/c18`).
-NOT INSTALLED: the patch files are in `cocoa/patches/` and in `mkpatches-0100.sh`, not yet in `patched.nix`'s lists
-(add them after 0139w/0140/0217 as the generator's comments say, or take TERM8's working list). c18's gates began at
-23:23Z, after the desktop froze (~23:20Z, the compositor stuck opening the DRM device): void; to be run again after
-the recovery, then the direct install with `.pre-c18` kept (`runs/sf-term8/runI11.sh c18 <tag>`).
+Cocoa 0141w-0147, candidate c18, INSTALLED 00:09Z (16 November; direct, the file of before kept as `<path>.pre-c18`):
+AppKit 835cdbce (c14's 18573adf kept), Onyx2D ace5dc3d (2db9aa17), `/usr/lib/libWindowServer.dylib` 739a1630
+(691d0ec6); the nix builds of the series, which now reproduces every installed framework byte for byte. Gates before
+(c18 from a prefix, owner idle; the first pass at 23:23Z was void, the desktop had frozen): visual check (Terminal
+identical; Activity Monitor the same but for the figures; my first installed reference lost its Activity Monitor to a
+dock menu left open and was taken again), 3 minutes of late views, random input Activity Monitor 84 and Terminal 108
+actions (each stopped by my new guard when a desk surface appeared - a dock tile's name under the resting pointer;
+the guard now lets that pass), Terminal's figures installed/c18 alternating: launch 214-398 / 352-431 ms, echo 5-11 /
+3-9 ms, `seq 1 300000` 0.96-1.01 / 0.99-1.06 s, wheel 14-16 / 6-17 ms. After: visual check of the installed files
+(as the candidate), minimise: every Command-M and frame-button round passed (Terminal 7 of 7, with tabs, split pane,
+Preferences 3 of 3 each, Activity Monitor 4 of 4), the Window > Minimize rounds by clicks did not minimise (my click
+on the menu item: not settled whether the item or my placement), the inspector's rounds 0 of 4 (the test's tile
+pick, as before), random input Activity Monitor and Terminal 240 actions each, alive, no report;
+`sf_compat_push.sh check` 18/18. Revert: `ln -f <path>.pre-c18 <path>.back && mv -f <path>.back <path>`.
+
 - **A process left with no window** (OWNER-WINDOWLESS, CODEX-FX's reading of the owner's Firefox log: `xdg_wm_base#6:
   error 0: Surface already has a role`, then `Wayland dispatch stopped with error 100`, the process alive, sound
   playing). Two faults in libWindowServer. (1) A window shown again as another kind of role (a popup whose parent is
