@@ -468,6 +468,25 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0165  AppKit (TERM11, FX-022): a window off the screen sends no flush (the window server gave a flushed hidden
+#         window a role and mapped it: Firefox paints its menu panel after hiding it, which came back at level 8);
+#         PD_WIN_TRACE=1 traces the notifications a window posts and its orders (Firefox rolls up popups on several)
+#   0164  AppKit (TERM11): the desk's Quit (dock tile, switcher) asks the delegate -applicationShouldTerminate: first, as
+#         macOS's quit Apple event does (Firefox replaces -terminate: by a notification only and quits itself from its
+#         delegate: a windowless Firefox told -terminate: stayed alive)
+#   0304, 0305w (FXPERF2's FX-029 follow-ups, adopted by TERM11 unchanged; opt-in SFFX_GPU_DAMAGE=1): a layer-only
+#         flush with nothing drawn into the window's own backing store tells the window server so, which then skips its
+#         whole-backing-store compare (11 MB a present; ~10 % of Firefox's parent main thread on cnn.com)
+#   0163  AppKit (TERM11, FX-022): ordering a window posts no move notifications (Firefox rolls its popups up in
+#         -windowWillMove:: its menu panel closed itself 26-30 ms after opening, before the button was released); a
+#         child window without a title bar tells the window server its parent (shown as a popup of it, at its frame);
+#         a popup shown for the first time sends its frame before its role is asked for; key events that arrive for a
+#         window that cannot be key (a popup holding the keyboard) go to the key window, as on macOS
+#   0163w WindowServer (TERM11, FX-022): the keyboard going to one of our own popups (its grab) is no loss of key for
+#         AppKit (a leave is told only when no enter on a window of ours follows within 40 ms; Firefox closed its
+#         panel when its window resigned key); popups are the frameless windows at the pop-up menu level, frameless
+#         child windows at any level, and a frameless window shown again after being a popup (Firefox lowers a
+#         closing panel to level 8: it came back as a separate toplevel)
 #   0300, 0301, 0302w (FXPERF2's FX-029 damage-only frames, adopted by TERM10; opt-in SFFX_GPU_DAMAGE=1, Firefox's
 #         launcher): QuartzCore renders and exports only the changed rectangle, AppKit registers the GPU layer with it,
 #         WindowServer composes and commits only it (wl_surface.damage_buffer). 0301 adapted to sit after 0158; the
@@ -627,6 +646,10 @@ let
     ./patches/0161-appkit-precise-scrolling-by-whole-points.patch
     ./patches/0162-appkit-child-windows-ordered-not-made-key.patch
     ./patches/0301-appkit-gpu-layer-registered-with-its-damage.patch
+    ./patches/0163-appkit-panels-shown-as-popups-keep-their-window-key.patch
+    ./patches/0304-appkit-layer-only-flush-says-backing-store-unchanged.patch
+    ./patches/0164-appkit-desk-quit-asks-the-delegate-first.patch
+    ./patches/0165-appkit-hidden-windows-flush-nothing-window-trace.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -652,6 +675,8 @@ let
     ./patches/0158w-windowserver-popups-present-shared-memory.patch
     ./patches/0159w-windowserver-trackpad-finger-frames-precise-with-momentum.patch
     ./patches/0302w-windowserver-damage-only-compose-and-commit.patch
+    ./patches/0163w-windowserver-popup-keyboard-and-child-popups.patch
+    ./patches/0305w-windowserver-backing-store-compared-only-after-drawing.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
