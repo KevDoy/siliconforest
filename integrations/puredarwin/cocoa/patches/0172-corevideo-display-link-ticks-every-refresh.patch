@@ -1,0 +1,91 @@
+--- a/src/Frameworks/CoreVideo/CVDisplayLink.m
++++ b/src/Frameworks/CoreVideo/CVDisplayLink.m
+@@ -77,6 +77,17 @@
+ 
+ static void displayLinkCall(CVDisplayLink *link, CVTimeStamp *now, CVTimeStamp *out) {
+     CVOptionFlags flagsOut = 0;
++    // (TERM11) PD_CV_TRACE=1: every tick, the time it stands for and when it ran (ms, host clock)
++    static int trace = -1;
++    if (trace < 0)
++        trace = getenv("PD_CV_TRACE") != NULL;
++    if (trace) {
++        static mach_timebase_info_data_t tb;
++        if (tb.denom == 0)
++            mach_timebase_info(&tb);
++        fprintf(stderr, "CVTICK at=%.2f ran=%.2f\n", now->hostTime * (double)tb.numer / tb.denom / 1e6,
++                mach_absolute_time() * (double)tb.numer / tb.denom / 1e6);
++    }
+     NSAutoreleasePool *pool = [NSAutoreleasePool new];
+     if (link->_callback != NULL)
+         link->_callback(link, now, out, 0, &flagsOut, link->_userInfo);
+@@ -84,8 +95,12 @@
+ }
+ 
+ // one tick on the display clock; 0 when the clock knows no flip yet (the caller ticks on its timer instead)
++/* (TERM11, the owner's "not buttery smooth"; FXPERF2's measurement) The link ticks at every refresh, on the display's
++ * phase, as a macOS CVDisplayLink does: a flip report that comes before the next refresh only moves the phase. It
++ * waited for a pending frame's flip (up to two refreshes after its commit); with a commit-to-flip time above one
++ * refresh (~22 ms) Firefox's vsync locked to every second refresh: ~30-35 presented frames/s in 4 of 9 runs. */
+ static int displayLinkClockTick(CVDisplayLink *link, unsigned generation, uint64_t *last, uint64_t base) {
+-    uint64_t presented, refreshNs, counter, since;
++    uint64_t presented, refreshNs, counter, since, period, next;
+     int pending;
+     static mach_timebase_info_data_t tb;
+ 
+@@ -93,33 +108,32 @@
+         mach_timebase_info(&tb);
+     if (!pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since))
+         return 0;
+-    uint64_t period = (uint64_t)((double)refreshNs * tb.denom / tb.numer);
+-    pdMeasuredRefreshSeconds = refreshNs / 1e9;
+-    // the display's next flip after the last tick, on its phase
+-    uint64_t next = presented, now = mach_absolute_time();
+-    if (next + period <= now)
+-        next += ((now - next) / period) * period;
+-    while (next <= *last + period / 2 || next <= now)
+-        next += period;
+-    // a frame of ours waiting for its flip: tick at that flip (at most two refreshes after its commit)
+-    uint64_t deadline = next;
+-    if (pending > 0 && since != 0 && since + 2 * period > deadline)
+-        deadline = since + 2 * period;
+-    int moved = pdDisplayClockWait(counter, deadline);
+-    if (!link->_running || link->_generation != generation)
+-        return 1;
+-    uint64_t tick = next;
+-    if (moved) {
+-        pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since);
+-        // the report of a flip the timer already ticked for (its prediction came first): no second tick
+-        if (presented <= *last + period / 2)
++    for (;;) {
++        period = (uint64_t)((double)refreshNs * tb.denom / tb.numer);
++        if (period == 0)
++            return 0;
++        pdMeasuredRefreshSeconds = refreshNs / 1e9;
++        // the display's next refresh after the last tick, on its phase
++        uint64_t now = mach_absolute_time();
++        next = presented;
++        if (next + period <= now)
++            next += ((now - next) / period) * period;
++        while (next <= *last + period / 2 || next <= now)
++            next += period;
++        if (!pdDisplayClockWait(counter, next))
++            break;
++        if (!link->_running || link->_generation != generation)
+             return 1;
+-        tick = presented;
++        // a flip was reported before that refresh: its time is the phase from now on
++        if (!pdDisplayClock(&presented, &refreshNs, &counter, &pending, &since))
++            break;
+     }
++    if (!link->_running || link->_generation != generation)
++        return 1;
+     CVTimeStamp tsNow, tsOut;
+-    fillTimeStampAt(&tsNow, tick, period, base);
+-    fillTimeStampAt(&tsOut, tick + period, period, base);
+-    *last = tick;
++    fillTimeStampAt(&tsNow, next, period, base);
++    fillTimeStampAt(&tsOut, next + period, period, base);
++    *last = next;
+     displayLinkCall(link, &tsNow, &tsOut);
+     return 1;
+ }

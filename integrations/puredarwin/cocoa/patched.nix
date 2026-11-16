@@ -468,12 +468,37 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
+#   0174  AppKit (TERM11): PD_PB_TRACE=1 logs what an application declares and writes on a pasteboard
+#   0173w WindowServer (TERM11, FX-022): the pointer entering a window is a mouse move there (a pointer arriving on
+#         Firefox's open menu panel brought no move, and the item under it did not highlight)
+#   0172  CoreVideo (TERM11, corevideo-displaylink.nix; FXPERF2's finding): the display link ticks at every refresh on
+#         the display's phase; a flip reported first only moves the phase (it waited for a pending frame's flip and
+#         Firefox locked to every second refresh, ~30-35 presented frames/s in 4 of 9 runs)
+#   0171  AppKit (TERM11): PD_WIN_TRACE=1 traces pointer events reaching windows above the normal level and ignoresMouseEvents
+#   0170  AppKit (TERM11, FX-022): a view with a layer that moves under another view puts its layer into the superview's
+#         layer (or renders it with a context of its own when that one has none); a removed view's layer leaves its old
+#         superlayer; before a tree renders, a subview's layer found outside it is put back. Firefox's menu panel put its
+#         ChildView (the layers with its pixels) under a layer-backed content view whose layer had no sublayers: the panel
+#         was read back empty, an invisible window that took clicks
+#   0169  AppKit (TERM11, after CODEX-FX's review of 0164): after the delegate said NSTerminateNow, an application with
+#         AppKit's own -terminate: ends without that asking the delegate a second time; a replaced -terminate: (Firefox's)
+#         is run as before
+#   0168  AppKit (TERM11, clipboard): another client's paste request is answered from the data that was offered, on a thread
+#         of its own; only lazily provided data goes through the main thread, from the offered board (it was answered on the
+#         main thread from the board as it was then: Firefox's copy reached every other client as 0 bytes)
+#   0167  AppKit (TERM11): PD_WIN_TRACE=1 names the view whose layers are read back and prints the layer tree's shape
+#   0166  AppKit (TERM11): PD_WIN_TRACE=1 also traces the layer read-back of windows above the normal level (popups)
+#   0166w WindowServer (TERM11, owner's scroll feel): the momentum's release speed capped at 6000 points/s (a hard flick
+#         coasted ~7 screens; now at most ~1900 points after the fingers' travel) and its decay by the time that passed
 #   0165  AppKit (TERM11, FX-022): a window off the screen sends no flush (the window server gave a flushed hidden
 #         window a role and mapped it: Firefox paints its menu panel after hiding it, which came back at level 8);
 #         PD_WIN_TRACE=1 traces the notifications a window posts and its orders (Firefox rolls up popups on several)
 #   0164  AppKit (TERM11): the desk's Quit (dock tile, switcher) asks the delegate -applicationShouldTerminate: first, as
 #         macOS's quit Apple event does (Firefox replaces -terminate: by a notification only and quits itself from its
 #         delegate: a windowless Firefox told -terminate: stayed alive)
+#   0306  QuartzCore (FXPERF2, adopted by TERM11 unchanged): NV12/x420 video planes go up as R8/RG8 (R16/RG16), Mesa's copy
+#         path, not LUMINANCE/LUMINANCE_ALPHA, which Mesa converted pixel by pixel (44 % of Firefox's parent main thread on
+#         cnn.com; 1080p60 parent 78.4 -> 29.4 % of a core); luminance stays the fallback if the driver refuses
 #   0304, 0305w (FXPERF2's FX-029 follow-ups, adopted by TERM11 unchanged; opt-in SFFX_GPU_DAMAGE=1): a layer-only
 #         flush with nothing drawn into the window's own backing store tells the window server so, which then skips its
 #         whole-backing-store compare (11 MB a present; ~10 % of Firefox's parent main thread on cnn.com)
@@ -650,6 +675,13 @@ let
     ./patches/0304-appkit-layer-only-flush-says-backing-store-unchanged.patch
     ./patches/0164-appkit-desk-quit-asks-the-delegate-first.patch
     ./patches/0165-appkit-hidden-windows-flush-nothing-window-trace.patch
+    ./patches/0166-appkit-layer-readback-trace.patch
+    ./patches/0167-appkit-layer-tree-trace.patch
+    ./patches/0168-appkit-clipboard-answers-from-what-was-offered.patch
+    ./patches/0169-appkit-desk-quit-asks-the-delegate-once.patch
+    ./patches/0170-appkit-subview-layers-follow-their-views.patch
+    ./patches/0171-appkit-mouse-event-trace.patch
+    ./patches/0174-appkit-pasteboard-trace.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -677,6 +709,8 @@ let
     ./patches/0302w-windowserver-damage-only-compose-and-commit.patch
     ./patches/0163w-windowserver-popup-keyboard-and-child-popups.patch
     ./patches/0305w-windowserver-backing-store-compared-only-after-drawing.patch
+    ./patches/0166w-windowserver-momentum-capped-and-timed.patch
+    ./patches/0173w-windowserver-pointer-enter-is-a-move.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -731,6 +765,7 @@ let
     ./patches/0157-quartzcore-layer-tree-changed-from-other-threads.patch
     ./patches/0160-quartzcore-unchanged-properties-and-commits-render-nothing.patch
     ./patches/0300-quartzcore-damage-only-frames.patch
+    ./patches/0306-quartzcore-video-planes-uploaded-as-red-green.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
