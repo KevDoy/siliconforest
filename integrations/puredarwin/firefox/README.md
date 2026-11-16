@@ -88,3 +88,5 @@ installed gate requires complete 600/300-frame playback, hardware jobs, pixels,
 provider paths, natural status0 and no surviving browser family before cleanup.
 Decoder pool retirement remains disabled. These gates do not establish panel
 pacing, acoustic synchronisation or smooth playback while interacting.
+
+The optional `av1_enabled` runtime policy has a strict `SFFX_AV1=0|1` switch. On this M1, disabling AV1 lets sites negotiate hardware VP9/H264/HEVC instead of software AV1; it does not request a lower resolution or frame rate. Explicit `media.av1.enabled` entries outside the launcher's marked `user.js` block win. `SFFX_AV1=1` enables software AV1 when needed for an AV1-only source. Removing the manifest policy removes only that managed block on the next launch. `install-codec-policy.py` admits the matched native comparison and inspected renderer pictures, keeps a checked rollback, and requires an immediate installed-launcher acceptance without a test preference overriding the default. The measured YouTube pair is one clip, not a universal codec quality or panel cadence claim.

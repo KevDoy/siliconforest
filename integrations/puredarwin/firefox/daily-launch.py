@@ -16,6 +16,28 @@ COMPOSITOR_END = '// END SiliconForest FX-011/012 compositor preference\n'
 COMPOSITOR_KEY = 'gfx.webrender.compositor'
 PLATFORM_BEGIN = '// BEGIN SiliconForest window and GL defaults\n'
 PLATFORM_END = '// END SiliconForest window and GL defaults\n'
+CODEC_BEGIN = '// BEGIN SiliconForest hardware video preference\n'
+CODEC_END = '// END SiliconForest hardware video preference\n'
+
+
+def av1_preference(manifest, environment):
+    value = manifest.get('av1_enabled')
+    if value is not None and type(value) is not bool:
+        raise ValueError('av1_enabled must be a boolean when selected')
+    override = environment.get('SFFX_AV1')
+    if override is not None:
+        if override not in ['0', '1']:
+            raise ValueError('SFFX_AV1 must be 0 or 1')
+        value = override == '1'
+    return value
+
+
+def update_codec_preference(settings, value):
+    # AV1 is software-only on this M1; VP9/H264/HEVC have real hardware
+    # decoders. This reversible platform policy does not lower source quality.
+    # Explicit user.js choices win. No policy removes only our old block.
+    return update_managed_preferences(settings,
+        {} if value is None else {'media.av1.enabled': value}, CODEC_BEGIN, CODEC_END)
 
 
 def native_compositor_preference(manifest, environment):
@@ -120,6 +142,7 @@ def plan(root, args, manifest=None):
     if manifest is None:
         manifest = json.loads((root / 'release.json').read_text())
     native_compositor_preference(manifest, os.environ)  # validate even dry launch plans
+    av1_preference(manifest, os.environ)
     diagnostic = manifest.get('diagnostics', {})
     if diagnostic:
         allowed = {'PD_WS_TRACE','PD_WS_TIMING','PD_CA_TRACE','PD_SANDBOX_TRACE','MOZ_REMOTE_ALLOW_SYSTEM_ACCESS'}
@@ -355,6 +378,7 @@ def main():
                                    for k, v in preferences.items()))
     update_platform_preferences(settings)
     update_compositor_preference(settings, native_compositor_preference(manifest, os.environ))
+    update_codec_preference(settings, av1_preference(manifest, os.environ))
     logs = (Path.home() / 'Library/Logs/SiliconForest/Firefox') if manifest.get('system_layout') else root / 'logs'
     logs.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(logs / ('firefox-%d-%d.log' % (time.time(), os.getpid())), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

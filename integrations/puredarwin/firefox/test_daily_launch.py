@@ -248,6 +248,34 @@ class CompositorPreferenceSafety(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.settings = Path(self.temporary.name) / 'user.js'
 
+    def test_codec_default_and_switch_back_preserve_explicit_choices(self):
+        original = b'// existing profile\nuser_pref("browser.zoom.full",false);\n'
+        self.settings.write_bytes(original)
+        daily.update_codec_preference(self.settings, False)
+        self.assertIn(b'user_pref("media.av1.enabled",false);', self.settings.read_bytes())
+        daily.update_codec_preference(self.settings, True)
+        self.assertIn(b'user_pref("media.av1.enabled",true);', self.settings.read_bytes())
+        self.settings.write_bytes(self.settings.read_bytes() + b'user_pref("media.av1.enabled",true);\n')
+        daily.update_codec_preference(self.settings, False)
+        self.assertEqual(self.settings.read_bytes(), original + b'user_pref("media.av1.enabled",true);\n')
+
+    def test_removing_codec_policy_removes_only_its_block(self):
+        original = b'// profile\n'
+        self.settings.write_bytes(original)
+        daily.update_codec_preference(self.settings, False)
+        daily.update_codec_preference(self.settings, None)
+        self.assertEqual(self.settings.read_bytes(), original)
+
+    def test_codec_policy_is_strict_and_explicit_override_is_reversible(self):
+        self.assertIsNone(daily.av1_preference({}, {}))
+        self.assertIs(daily.av1_preference({'av1_enabled': False}, {}), False)
+        self.assertIs(daily.av1_preference({'av1_enabled': False}, {'SFFX_AV1': '1'}), True)
+        for value in [0, 'false', [], {}]:
+            with self.assertRaises(ValueError):
+                daily.av1_preference({'av1_enabled': value}, {})
+        with self.assertRaises(ValueError):
+            daily.av1_preference({}, {'SFFX_AV1': 'false'})
+
     def test_existing_other_preferences_still_receive_safe_window_and_gl_defaults(self):
         original = b'// existing profile\nuser_pref("browser.zoom.full",false);\n'
         self.settings.write_bytes(original)
