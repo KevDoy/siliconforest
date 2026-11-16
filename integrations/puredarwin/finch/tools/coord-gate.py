@@ -20,6 +20,10 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
         if event:
             owner, body = event[1], event[2]
             lower_body = body.lower()
+            # The kernel owner also uses an undated two-minute install notice.
+            # Refuse new work at that announcement, before a reboot command.
+            if re.match(r'^\d+-min install notice\b',lower_body):
+                active[(owner,'install-notice')] = (line,[],owner)
             # A coordinator-declared frozen desktop blocks even CLI media
             # work until the designated recovery owner confirms restoration.
             # Do not infer recovery from time passing or a physical lock.
@@ -138,6 +142,7 @@ def pending_hold(text, install_reservation=False, now=None, max_seconds=None):
                 re.fullmatch(r'[a-z0-9-]+ recovered [a-z0-9-]+; m1 back in siliconforest', lower_body) or
                 (lower_body.startswith('idle-') and ' restored ' in lower_body and
                  lower_body.endswith('; m1 back in siliconforest'))):
+                active.pop((owner,'install-notice'),None)
                 if owner in {'CODEX-TB', 'COORDINATOR'}:
                     active.pop(('COORDINATOR', 'recovery-freeze'), None)
                 # A verified matching reboot ends old desktop processes even

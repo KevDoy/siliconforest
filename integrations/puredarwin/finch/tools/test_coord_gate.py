@@ -8,6 +8,22 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 class HoldTests(unittest.TestCase):
+    def test_two_minute_install_notice_blocks_before_reboot_or_lock(self):
+        notice='2026-11-16T08:06:26Z CODEX-TB 2-MIN INSTALL NOTICE Firefox47; no queued work once acquired\n'
+        self.assertIsNotNone(gate.pending_hold(notice,max_seconds=170))
+        self.assertIsNotNone(gate.pending_hold(notice+'T OTHER M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(notice+'T CODEX-TB quoted: M1 back in SiliconForest\n'))
+        self.assertIsNotNone(gate.pending_hold(notice+'T CODEX-TB gui.lock released\n'))
+        self.assertIsNone(gate.pending_hold(notice+'T CODEX-TB M1 back in SiliconForest (Firefox47)\n'))
+
+    def test_two_minute_notice_never_clears_other_install_or_future_notice(self):
+        notice='T CODEX-TB 2-MIN INSTALL NOTICE Firefox47\n'
+        other='U TERM10 core.lock: GUARDED INSTALL now\n'
+        recovered='V CODEX-TB M1 back in SiliconForest\n'
+        self.assertIsNotNone(gate.pending_hold(notice+other+recovered))
+        self.assertIsNotNone(gate.pending_hold(notice+recovered+notice))
+        self.assertIsNone(gate.pending_hold('T CODEX quoted: 2-MIN INSTALL NOTICE Firefox47\n'))
+
     def test_iso_offer_uses_actual_earliest_calendar_date(self):
         from datetime import datetime,timezone
         notice='2026-11-16T23:58:00Z CODEX-TB NOTICE next Firefox install earliest2026-11-17T00:02:00Z. Otheragents mayuseM1normallybefore23:59; owner offer.\n'
