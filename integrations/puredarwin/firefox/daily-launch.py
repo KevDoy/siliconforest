@@ -141,6 +141,7 @@ def plan(root, args, manifest=None):
                 not graphics.is_relative_to(root / 'overrides') or graphics == root / 'overrides'):
             raise ValueError('Graphics cohort requires system UI and a versioned private runtime prefix')
     env = os.environ.copy()
+    env['MOZ_CRASHREPORTER_DISABLE'] = '1'
     env.update(diagnostic.get('environment',{}))
     compositor = native_compositor_preference(manifest, env)
     if compositor is not None:
@@ -291,7 +292,7 @@ def main():
     command, env = plan(root, arguments[1:] if dry else arguments)
     if dry:
         print(json.dumps(dict(command=command, environment={k: v for k, v in env.items()
-            if k.startswith(('DYLD_', 'SFFX_'))}, sandbox_enabled=True), indent=2))
+            if k.startswith(('DYLD_', 'SFFX_')) or k=='MOZ_CRASHREPORTER_DISABLE'}, sandbox_enabled=True), indent=2))
         return
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Runtime requires SiliconForest')

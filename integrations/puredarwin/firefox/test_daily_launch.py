@@ -113,6 +113,12 @@ class LaunchPlanPolicy(unittest.TestCase):
         self.assertEqual(env['WAYLAND_DISPLAY'], 'wayland-0')
         self.assertEqual(os.environ['WAYLAND_DISPLAY'], 'wayland-stale')
 
+    def test_hung_crash_reporter_is_disabled_for_owner_and_agent_launch_plans(self):
+        os.environ['MOZ_CRASHREPORTER_DISABLE'] = '0'
+        _, env = self.plan()
+        self.assertEqual(env['MOZ_CRASHREPORTER_DISABLE'], '1')
+        self.assertEqual(os.environ['MOZ_CRASHREPORTER_DISABLE'], '0')
+
     def test_coherent_ui_selection_and_system_coretext(self):
         ui = self.root / 'overrides/ui-c17-v1'
         self.manifest.update(ui_override=str(ui), coretext_source='system')
