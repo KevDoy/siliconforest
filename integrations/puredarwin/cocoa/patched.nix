@@ -397,7 +397,7 @@
 #         Noto Emoji copy with Inter)
 #   0217  Onyx2D: a font of a collection keeps fontconfig's face index (CJK fonts drew their first, Japanese, face)
 #   0219  QuartzCore: a layer context releases its renderer, root layer and CGL context and pixel format (adapted:
-#         the main series has no 0208)
+#         the main series had no 0208; replaced by 0219q since TERM9 adopted 0208, the file is kept for its history)
 #   0220  CoreText (CODEX-FX, merged by TERM8 unchanged): a font descriptor made from data holds its own graphics font
 #         (every face of a collection) and is not registered by name, as on macOS; no file in /tmp (Firefox's GPU
 #         process may not write files, so every web font drew no text)
@@ -446,6 +446,35 @@
 #         longer loses to six compression resistances of 749 (Activity Monitor's "Context Switches:" got 59 of 95 pt)
 #   0138  QuartzCore (TERM8): CALayer -needsDisplayOnBoundsChange, -autoresizingMask (sublayers follow their
 #         superlayer by their masks, as with no layout manager on macOS) -visibleRect and -layoutSublayers/-setNeedsLayout/-layoutIfNeeded (VLC's CAOpenGLLayer raised on them)
+#   0148w WindowServer (TERM9, frame pacing): wp_presentation feedback for every frame committed; the latest flip (in
+#         host time), the measured refresh and the commits still waiting for their flip, for CoreVideo's display link
+#         (_windowServerDisplayClock/_windowServerDisplayClockWait: ./patches/0149-corevideo-...)
+#   0149  CoreVideo (TERM9; built by ./corevideo-displaylink.nix on CODEX's ../finch/CoreVideo/pd-displaylink.nix): the
+#         display link ticks right after the flip that showed the application's last frame (inNow = that flip,
+#         inOutputTime = the next), waits for a frame still in flight (at most two refreshes), else ticks on the
+#         display's phase; the 60 Hz timer only without the clock (PD_CV_TIMER=1 keeps it); the measured refresh
+#   0150  AppKit (TERM9, FX-023): NSEvent timestamps are seconds since the system started (mach_absolute_time), as on
+#         macOS, not since 2001 (Firefox's Event.timeStamp was 26 years ahead of performance.now())
+#   0230-0233 IOSurface (./iosurface.nix; CODEX-FX's iosurface-patches 0001-0004, FXLEAD's 0004): the per-session broker
+#         (SFFX_IOSURFACE_SERVICE, iosurfaced --standalone), dma-buf storage (SFFX_IOSURFACE_GPU=1), NV12 GPU planes and
+#         a process-local use count, a lookup never revives a surface being finalised (Firefox's crash firefox-5950)
+#   0151  IOSurface (TERM9): libdrm loaded the first time GPU storage is asked for (nothing links it)
+#   Firefox's GPU path in the main series (CODEX-FX's private R7 cohort adopted by TERM9, numbers kept; every piece acts
+#   only with the launcher's SFFX_* variables, which no other application has: Terminal and Activity Monitor unchanged):
+#   0208  QuartzCore: a layer context copies its rendered framebuffer into an IOSurface (CGLSFFXCopyFramebuffer) for the
+#         window server, two per context, only with SFFX_GPU_PRESENT=1
+#   0213  QuartzCore: that copy's IOSurface/CGL lookups made once (SFFX_GPU_CACHE_LOOKUPS)
+#   0216  QuartzCore: a context whose tree, contents and IOSurface seeds did not change since the last render reuses its
+#         frame (SFFX_GPU_DIRTY_FRAMES; read once)
+#   0219q QuartzCore: CODEX-FX's own 0219 in place of the adapted one (it releases the exported frames too)
+#   0209  AppKit: a layer-backed view's rendered IOSurface registered with the window server's GPU presenter instead of a
+#         CPU read-back (SFFX_GPU_PRESENT=1, looked up once; without it AppKit never calls the presenter)
+#   0209w WindowServer: the whole-window GPU presenter (sffx_gpu_present.h): the CPU backing store uploaded when changed,
+#         registered layer surfaces drawn on the GPU into a dma-buf frame (zwp_linux_dmabuf_v1); only for a window that
+#         has a registered layer
+#   0206  AppKit: +frameRectForContentRect:styleMask: and +contentRectForFrameRect:styleMask: count the menu strip, as the
+#         instance methods do (only applications that use the class conversions see it: Firefox; Terminal and Activity
+#         Monitor send neither)
 #   The five frameworks below are compiled with -O2 (upstream's recipes compile without -O: every
 #   drawing, text and event path ran unoptimised); -fno-strict-aliasing for old code that casts.
 #   0009  Security: SecItemCopyMatching writes its result on every path and answers
@@ -542,6 +571,9 @@ let
     ./patches/0142-appkit-tracking-area-in-visible-rect.patch
     ./patches/0144-appkit-reopen-and-quit-from-the-desk.patch
     ./patches/0147-appkit-label-and-button-constructors.patch
+    ./patches/0209-view-registers-gpu-layer-with-private-windowserver.patch
+    ./patches/0206-window-class-content-geometry-counts-menu-strip.patch
+    ./patches/0150-appkit-event-timestamps-since-startup.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -561,6 +593,8 @@ let
     ./patches/0141w-windowserver-cursor-shapes.patch
     ./patches/0143w-windowserver-new-surface-for-a-new-role-ends-with-compositor.patch
     ./patches/0145w-windowserver-same-cursor-image-not-sent-again.patch
+    ./patches/0209w-windowserver-whole-window-gpu-presenter.patch
+    ./patches/0148w-windowserver-display-clock-from-presentation-feedback.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -605,8 +639,11 @@ let
     ./patches/0202-layer-context-backing-pixel-scale.patch
     ./patches/0207-layer-context-detaches-retained-tree.patch
     ./patches/0134-quartzcore-layer-display-opengl-layer.patch
-    ./patches/0219-layer-context-releases-owned-renderer-and-cgl-resources.patch
     ./patches/0138-quartzcore-layer-autoresizing-visible-rect-display-on-resize.patch
+    ./patches/0208-layer-context-exportable-gpu-frame.patch
+    ./patches/0213-cache-gpu-frame-export-provider-lookups.patch
+    ./patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch
+    ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
@@ -616,18 +653,18 @@ let
     buildPhase = builtins.replaceStrings
       [ "cc=\"" "rpc_wayland.o xdg-shell-protocol.o" ]
       [ ''
-        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1 unstable/pointer-gestures/pointer-gestures-unstable-v1 staging/cursor-shape/cursor-shape-v1 unstable/tablet/tablet-unstable-v2; do
+        for x in unstable/xdg-decoration/xdg-decoration-unstable-v1 staging/fractional-scale/fractional-scale-v1 stable/viewporter/viewporter staging/xdg-activation/xdg-activation-v1 unstable/pointer-gestures/pointer-gestures-unstable-v1 staging/cursor-shape/cursor-shape-v1 unstable/tablet/tablet-unstable-v2 stable/presentation-time/presentation-time; do
           n=$(basename $x)
           wayland-scanner client-header ${wp}/$x.xml $n-client-protocol.h
           wayland-scanner private-code ${wp}/$x.xml $n-protocol.c
         done
         cc="''
-        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o pointer-gestures-unstable-v1-protocol.o cursor-shape-v1-protocol.o tablet-unstable-v2-protocol.o xdg-shell-protocol.o" ]
+        "rpc_wayland.o xdg-decoration-unstable-v1-protocol.o fractional-scale-v1-protocol.o viewporter-protocol.o xdg-activation-v1-protocol.o pointer-gestures-unstable-v1-protocol.o cursor-shape-v1-protocol.o tablet-unstable-v2-protocol.o presentation-time-protocol.o xdg-shell-protocol.o" ]
       (builtins.replaceStrings
         [ "$cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o" ]
         [ ''
           $cc $cflags -c xdg-shell-protocol.c -o xdg-shell-protocol.o
-              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1 pointer-gestures-unstable-v1 cursor-shape-v1 tablet-unstable-v2; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
+              for n in xdg-decoration-unstable-v1 fractional-scale-v1 viewporter xdg-activation-v1 pointer-gestures-unstable-v1 cursor-shape-v1 tablet-unstable-v2 presentation-time; do $cc $cflags -c $n-protocol.c -o $n-protocol.o; done'' ]
         old.buildPhase);
   }));
   # (0110) against the libFoundation the root has (NSIndexPath is in it), not upstream's
