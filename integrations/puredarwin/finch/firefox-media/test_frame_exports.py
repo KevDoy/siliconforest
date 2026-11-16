@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import unittest
+import re
 import frame_export_analysis as a
 import frame_marker as m
 
@@ -10,6 +11,12 @@ def row(sequence,frame,time,pid=100):
 
 
 class Export(unittest.TestCase):
+    @staticmethod
+    def buffered():
+        text=''.join(row(i,frame,i*7500).replace('readback_bytes=','log_buffered=1 readback_bytes=')
+                     for i,frame in enumerate([0,1,899]))
+        return text+f'FXFRAMEID_BUFFER pid=100 records=3 bytes={len(text.encode())} write_return={len(text.encode())} write_errno=0 write_ms=1 overflow=0 format_sum_ms=.03 format_max_ms=.01 hook_sum_ms=.4 hook_max_ms=.2\n'
+
     def test_all900_native_ids(self):
         result=a.analyze(''.join(row(i,i,i*1000/60) for i in range(900)),100)
         self.assertTrue(result['all900_ids_observed']);self.assertAlmostEqual(result['diagnostic_distinct_id_hz'],60)
@@ -46,6 +53,23 @@ class Export(unittest.TestCase):
         result=a.analyze(text,100)
         self.assertEqual(result['previous_log_write_cost_ms_excluding_last']['count'],1)
         self.assertEqual(result['previous_log_write_cost_ms_excluding_last']['p50'],2.5)
+
+    def test_complete_deferred_log_and_preview_separate(self):
+        preview=row(0,0,0).replace('FXFRAMEID ','FXFRAMEID_PREVIEW ')
+        result=a.analyze(preview+self.buffered(),100)
+        self.assertEqual(result['samples'],3);self.assertTrue(result['buffered_log_receipt']['complete'])
+        self.assertIsNone(result['previous_log_write_cost_ms_excluding_last'])
+
+    def test_short_missing_overflow_or_foreign_dump_refused(self):
+        text=self.buffered()
+        for bad in [text.rsplit('FXFRAMEID_BUFFER',1)[0],text.replace('records=3','records=2'),
+                    re.sub(r'write_return=\d+','write_return=1',text),
+                    text.replace('overflow=0','overflow=1'),text.replace('write_errno=0','write_errno=5'),
+                    text.replace('FXFRAMEID_BUFFER pid=100','FXFRAMEID_BUFFER pid=101')]:
+            with self.assertRaises(ValueError):a.analyze(bad,100)
+
+    def test_mixed_deferred_and_live_rows_refused(self):
+        with self.assertRaises(ValueError):a.analyze(self.buffered().replace('log_buffered=1 ','',1),100)
 
 
 if __name__=='__main__':unittest.main()

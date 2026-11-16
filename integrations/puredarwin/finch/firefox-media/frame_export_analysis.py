@@ -17,11 +17,13 @@ def distribution(values):
 
 
 def analyze(text,parent):
-    samples=[];foreign=0
+    samples=[];foreign=0;record_bytes=0
     for line in text.splitlines():
         if not line.startswith('FXFRAMEID '):continue
         f=dict(re.findall(r'([A-Za-z0-9_]+)=(\S+)',line))
         if int(f['pid'])!=parent:foreign+=1;continue
+        if f.get('log_buffered') not in [None,'1']:raise ValueError('Unknown native log buffering protocol')
+        record_bytes+=len((line+'\n').encode())
         before=float(f['before_ms']);after=float(f['after_ms']);sequence=int(f['sequence'])
         previous_emit=float(f['previous_emit_ms']) if 'previous_emit_ms' in f else None
         if previous_emit is not None and (not math.isfinite(previous_emit) or previous_emit<0):
@@ -41,9 +43,26 @@ def analyze(text,parent):
             raise ValueError('Invalid native rejection row')
         samples.append(dict(sequence=sequence,surface=surface,frame=frame,valid=valid,gl_error=error,
             before_ms=before,after_ms=after,readback_ms=after-before,readback_bytes=size,
-            previous_emit_ms=previous_emit if sequence>0 else None))
+            previous_emit_ms=previous_emit if sequence>0 else None,log_buffered=f.get('log_buffered')=='1'))
         if len(samples)>4096:raise ValueError('Unexpected own diagnostic sample count')
     if not samples:raise ValueError('No owned native frame-ID export rows')
+    buffered=None
+    if any(s['log_buffered'] for s in samples):
+        if not all(s['log_buffered'] for s in samples):raise ValueError('Mixed live and buffered native rows')
+        receipts=[]
+        for line in text.splitlines():
+            if not line.startswith('FXFRAMEID_BUFFER '):continue
+            fields=dict(re.findall(r'([A-Za-z0-9_]+)=(\S+)',line))
+            if int(fields.get('pid',0))==parent:receipts.append(fields)
+        if len(receipts)!=1:raise ValueError('One complete owned deferred-log receipt required')
+        fields=receipts[0]
+        if (int(fields['records'])!=len(samples) or int(fields['bytes'])!=record_bytes or
+            int(fields['write_return'])!=record_bytes or int(fields['write_errno']) or int(fields['overflow'])):
+            raise ValueError('Deferred native log incomplete, truncated or failed')
+        costs={k:float(fields[k]) for k in ['write_ms','format_sum_ms','format_max_ms','hook_sum_ms','hook_max_ms']}
+        if any(not math.isfinite(v) or v<0 for v in costs.values()):raise ValueError('Invalid deferred observer cost')
+        buffered=dict(records=len(samples),bytes=record_bytes,complete=True,**costs,
+            scope='Bounded RAM log emitted at process exit; excludes one frame-zero preview write before play. Hook cost ends before mutex unlock, includes formatting and buffer copy; final bulk write outside playback.')
     valid=[s for s in samples if s['valid']];positive=next((i for i,s in enumerate(valid) if s['frame']>0),None)
     start=None;end=None
     if positive is not None:
@@ -69,6 +88,7 @@ def analyze(text,parent):
         changed_id_interval_ms=distribution(changes),
         readback_cost_ms=distribution([s['readback_ms'] for s in samples]),
         previous_log_write_cost_ms_excluding_last=distribution([s['previous_emit_ms'] for s in samples if s['previous_emit_ms'] is not None]),
+        buffered_log_receipt=buffered,
         diagnostic_readback_bytes=sum(s['readback_bytes'] for s in samples),
         active_export_samples=active,panel_delivery_proved=False,production_performance_qualified=False,
         limits='Raw36 levels independently decoded; native PID supplied by the admitted own fixture. Excludes preroll0 repeats and after-end899 repeats using the last0 before positive progress/first899. No JS/native clock bridge, actual-provider admission or completed-flip association is established by this parser. Readback phase and previous-write cost are separate; the last write and formatting cost are not measured by these fields. Discontinuities remain observations.')

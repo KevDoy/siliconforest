@@ -286,6 +286,31 @@ the shared runner subsequently fails while writing its result. An admitted own
 preview requests ordinary Quit on that failure path; it never becomes a
 completed-playback or cadence pass.
 
+The first admitted private trace observes865 distinct source IDs over14.991s,
+while JavaScript receives377 callbacks with median40.02ms. It proves distinct
+parent-export images progress faster than25Hz; it does not qualify perfect FPS
+or completed panel delivery. Its35 missing IDs and238ms maximum changed-ID gap
+remain failures of that diagnostic cadence. The longest gap has short adjacent
+log writes, so it is not attributed to logging. A separate52ms active log write
+does coincide with a66ms export gap, making per-frame filesystem I/O intrusive.
+
+`frame-buffer-port.py` patches only that observer's logging: at most1200 rows
+fit in a fixed RAM buffer, then one exit-time write emits the trace. Exactly one
+`FXFRAMEID_PREVIEW` frame-zero receipt precedes playback; it is not counted again
+as a final trace row. No `previous_emit_ms=0` claim replaces missing per-frame
+write measurements. The final receipt records actual write return, overflow and
+format/hook costs. The parser refuses missing, mixed, truncated or incomplete
+deferred logs. Literal-header host controls in `host-test/frame-buffer.c` use
+fake GL/clock/write to test this policy with sanitizers, including default-off,
+the1200-row cap and a short final write; they are not GPU evidence.
+
+`frame-buffer-cgl.nix` takes the original `nix derivation show` JSON and explicit
+original/header paths. Without a replacement it must reproduce the original
+drvPath exactly. With a buffered header, independently compare the derivations:
+only the observer source input, `postPatch` and generated output path may change.
+This keeps moving UI recipes out of the diagnostic. The resulting CGL is private
+and unselected; no canonical provider, launcher or production setting changes.
+
 `context-ffmpeg.nix` builds the same external-capture FFmpeg with a private
 libpdavd metadata opt-in, `SF_PDAVD_CONTEXT_STATS=1`. It queries the installed
 kernel's additive128-byte/version1/capability17 contract only at successful
