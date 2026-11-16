@@ -28,12 +28,17 @@ def process_times(snapshot):
 
 def summarize(root):
     rounds = []
+    observation_settings = set()
     for path in sorted(root.glob('round-*/result.json')):
         receipt = json.loads(path.read_text())
         if (not receipt.get('complete') or receipt.get('natural_exit') != 0 or
                 receipt.get('surviving_family') or receipt.get('cleanup_signals') or
                 receipt.get('qualification_invalidated')):
             raise ValueError('Incomplete or invalid round: ' + str(path))
+        observation_settings.add((bool(receipt.get('automatic_intervals', False)),
+                                  receipt.get('normal_services_settle_seconds', 0)))
+        if len(observation_settings) > 1:
+            raise ValueError('Cannot combine different observation or startup-settle settings')
         phases = []
         for phase in receipt['phases']:
             if not phase['measurement_complete']:
@@ -73,10 +78,16 @@ def summarize(root):
             threshold_59_5_passes=sum(p['fps'] >= 59.5 for p in phases),
             decoded_frame_drops=sum(p['video_drops'] or 0 for p in phases),
             maximum_observed_interval_ms=max(h['max_ms'] for p in phases for h in p['per_flush_intervals']))
+    automatic, settle = next(iter(observation_settings), (False, 0))
+    observer = ('Automatic compositor log intervals; no stats/dump/input requests during observation. '
+                'Automatic log output can still perturb the compositor.' if automatic else
+                'Explicit stats flush and log output occur in the measured clock; '
+                'interval maxima include their potential cost.')
     return dict(complete=len(rounds) == 12 and [r['round'] for r in rounds] == list(range(1, 13)),
         all_59_5=len(rounds) == 12 and all(p['fps'] >= 59.5 for r in rounds for p in r['phases']),
         quantiles='Per-flush histograms retained separately; no combined percentile is inferred.',
-        observer='Stats flush and log output occur in the measured clock; interval maxima include their potential cost.',
+        automatic_intervals=automatic, normal_services_settle_seconds=settle,
+        observer=observer,
         cpu_scope='Matched process TIME deltas, percent of one core. Exited/new processes are listed and excluded; this can undercount.',
         cases=cases, rounds=rounds)
 
