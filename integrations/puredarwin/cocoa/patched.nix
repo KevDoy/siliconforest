@@ -465,6 +465,16 @@
 #   0154  Onyx2D (FXPERF, adopted unchanged): an installed font file of 1 MB or more is mapped once per process and
 #         shared by every data provider (it was read whole into a private copy each time: Firefox's parent held ten
 #         30 MB copies of the CJK collection, footprint 921 -> 634 MB)
+#   0158w WindowServer (TERM10, FX-022): a window the desk shows as a popup or a layer surface presents through
+#         shared memory (the desk reads those buffers as shm and refused Firefox's dma-buf menu panel: "NotManaged");
+#         its GPU layers are refused, so AppKit reads them back into the backing store
+#   0157  QuartzCore (TERM10, FX-011/012): a layer the renderer meets without a texture name (a client thread added it
+#         to the tree while the frame was drawn) gets its own; it bound none, so its contents went into the texture of
+#         the layer drawn before it, which showed them until its own contents changed (foreign/stale tiles). The
+#         render-scheduled flag as a full-barrier atomic (a change made while the main thread read the tree could be
+#         left undrawn); texture names swapped under the tree lock; nested transactions inherit their outer one's
+#         values; an implicit transaction is committed on its own thread. PD_CA_DIAG=1 / PD_CA_DUMP_DIR: what each frame
+#         drew; PD_CA_OLD=1: the naming and flag as before (A/B)
 #   0150  AppKit (TERM9, FX-023): NSEvent timestamps are seconds since the system started (mach_absolute_time), as on
 #         macOS, not since 2001 (Firefox's Event.timeStamp was 26 years ahead of performance.now())
 #   0230-0233 IOSurface (./iosurface.nix; CODEX-FX's iosurface-patches 0001-0004, FXLEAD's 0004): the per-session broker
@@ -608,6 +618,7 @@ let
     ./patches/0209w-windowserver-whole-window-gpu-presenter.patch
     ./patches/0148w-windowserver-display-clock-from-presentation-feedback.patch
     ./patches/0156w-windowserver-presents-paced-by-frame-callbacks.patch
+    ./patches/0158w-windowserver-popups-present-shared-memory.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -659,6 +670,7 @@ let
     ./patches/0216-opt-in-gpu-frame-reuse-until-tree-mutation.patch
     ./patches/0219q-layer-context-releases-exported-gpu-frames.patch
     ./patches/0153-quartzcore-layer-display-asks-a-view-that-updates-its-layer.patch
+    ./patches/0157-quartzcore-layer-tree-changed-from-other-threads.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";
