@@ -338,7 +338,29 @@ def main():
                 marker_preparation['renderer_capture']=renderer_readback(a.run/'frame-id-calibration.ppm')
                 marker_preparation['owned_parent']=self.owned_parent
                 marker_preparation['owned_parent_start']=self.owned_parent_start
+                self.command('Marionette:SetContext',{'value':'chrome'})
+                try:
+                    marker_preparation['chrome']=self.command('WebDriver:ExecuteScript',dict(
+                        script='''const pack=r=>({x:r.x,y:r.y,width:r.width,height:r.height});
+                          return {root:pack(document.documentElement.getBoundingClientRect()),
+                            browser:pack(gBrowser.selectedBrowser.getBoundingClientRect()),
+                            innerWidth,innerHeight,outerWidth,outerHeight,devicePixelRatio};''',
+                        args=[],newSandbox=True))
+                except Exception as error:marker_preparation['chrome_error']=str(error)
+                finally:self.command('Marionette:SetContext',{'value':'content'})
                 (a.run/'frame-id-calibration.json').write_text(json.dumps(marker_preparation,indent=2)+'\n')
+                if a.frame_id_cgl and not a.frame_id_dimensions_only:
+                    import time
+                    from frame_geometry import parse
+                    from frame_probe_admission import native_zero
+                    deadline=time.monotonic()+2;admission=None
+                    while not admission and time.monotonic()<deadline:
+                        with (a.run/'browser/firefox.log').open('rb') as log:data=log.read(8_000_001)
+                        if len(data)>8_000_000:raise ValueError('Own native marker log exceeds bound')
+                        admission=native_zero(data.decode(errors='replace'),self.owned_parent,parse(a.frame_id_geometry))
+                        if not admission:time.sleep(.05)
+                    if not admission:raise RuntimeError('No independently decoded owned native frame0; timed playback REFUSED')
+                    (a.run/'frame-id-export-geometry-admission.json').write_text(json.dumps(admission,indent=2)+'\n')
             cpu={}
             try:cpu['before']=self.cpu_snapshot()
             except Exception as error:cpu['before_error']=str(error)

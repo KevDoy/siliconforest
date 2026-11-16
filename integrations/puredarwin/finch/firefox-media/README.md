@@ -281,6 +281,22 @@ IOVA and prepared bytes. They exclude coded/private/firmware allocations and
 post-destroy retirement; they are not unique physical-memory usage or GPU-fence
 proof. EINVAL after destruction must never be interpreted as zero mappings.
 
+The private paused dimensions preflight passed on the M1: completed main exports
+are1920×1440 with flip1, rather than the1472/1473 heights suggested by rounded
+DOM values. Parent and GPU both use the packaged CGL; their single GLAPI and
+SYSTEM IOSurface match the canonical control. The actual GPU image was inspected
+and its marker independently decodes0. No marker-row readback or playback occurs;
+ordinary Quit returns0 and the family disappears within1.821s without signals.
+
+The subsequent private timed case records exact chrome-root/selected-browser
+rectangles as well as the content video rectangle. Candidate sampling is admitted
+only by `frame_probe_admission.py` finding this own parent's completed native
+frame0 with the exact dimensions/readback extent, no GL error and independently
+decoded36 raw levels. It writes a separate admission before calling play. Missing
+or contradictory evidence refuses the timed run; no arbitrary timed samples are
+discarded to repair bad geometry. This first-frame gate does not admit every
+later export or a completed compositor flip.
+
 `audio-state-trace.c` is an opt-in, process-local output meter. It forwards
 the original HAL IOProc and records aggregate Float32 power/counters, never
 PCM. Render work is bounded and performs no logging/allocation/locking. A

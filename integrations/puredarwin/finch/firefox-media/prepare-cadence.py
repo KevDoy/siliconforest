@@ -99,7 +99,7 @@ for directory in ['bin','lib']:
     subprocess.run(['python3',str(here.parent/'tools/portable-tests.py'),
         str(here.parents[1]/'homebrew/hb_macho.py'),str(a.stage/directory),
         str(a.stage/('portable-'+directory+'.json'))],check=True)
-for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py','frame_geometry.py']:
+for name in ['cadence-browser.py','cadence-control.py','cadence-rate.js','process_cpu.py','media-launch.py','media_images.py','video_selection.py','audio_logs.py','youtube_quality.py','media_profile_admission.py','codec_policy_guard.py','frame_geometry.py','frame_marker.py','frame_probe_admission.py']:
     shutil.copy2(here/name,a.stage/name)
 shutil.copy2(here.parent/'tools/owner_input.py',a.stage/'owner_input.py')
 tools=here.parents[1]/'firefox';(a.stage/'tools').mkdir()
