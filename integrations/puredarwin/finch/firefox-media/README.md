@@ -72,17 +72,37 @@ all108 traced at59.984Hz. Nominal/actual refresh properties remain100/6000
 and1/60. The Main10 P010 admission control cleanly returned-12906/null with
 the same status recorded by the tracer; no samples were submitted.
 
-A source candidate for25Hz is Gecko's periodic progress invalidation. At the
-revision identified by FX's Breakpad FILE audit, MDSM uses40ms divided by
-playbackRate for position updates. MediaDecoder's position watcher invalidates
-HTMLVideoElement, which schedules video-frame callbacks. Its callback request
-method queues a callback without directly scheduling a document tick; ordinary
-VideoFrameContainer image updates do not invalidate every frame. These are
-source observations, not a complete binary/source identity or measured cause.
-The rate0.5/1/2 prediction is80/40/20ms callbacks; compare actual decoder, CGL,
-display-link and compositor events before attributing it to the Darwin port.
-The source also explicitly advances reported picture serials independently
-of actual visible composition. rVFC rate alone cannot qualify panel FPS.
+The first installed-browser boundary trace reproduced the notification limit.
+At normal speed,1080p60 H264 produced600 VT callbacks and600 GPU NV12 plane1
+bindings at about60Hz, with617 CV callbacks at60.015Hz, while rVFC delivered252
+callbacks with median40.02ms.4K30 HEVC produced300 VT callbacks and300 GPU
+plane1 bindings at about30Hz,619 CV callbacks at59.614Hz, and250 rVFC callbacks
+with median40.04ms. Both reported zero drops and exact matching kernel job/done
+deltas; no new errors/timeouts/DART faults, and contexts returned to zero.
+
+The playback-rate discriminator then measured actual rates0.5/1/2 and median
+rVFC intervals80.06/40.04/20.02ms. At0.5x/1x, all600 frames were decoded and
+bound with zero reported drops. **2x failed:**600 decoded,341 reported drops,
+only141 GPU plane1 bindings; rVFCp95 144.62ms/max550.14ms. Preserve this stress
+failure rather than interpreting its20ms median as smooth120fps playback.
+
+This rate law matches Gecko's40ms/playbackRate progress updates. At FX's
+Breakpad FILE revision2887d9de (not full release-source identity proof),
+MDSM position changes reach MediaDecoder's watcher/UpdateLogicalPositionInternal,
+then VideoFrameContainer::Invalidate and HTMLVideoElement::Invalidate, which
+schedules document video callbacks. RequestVideoFrameCallback queues without
+scheduling a document tick. Ordinary image replacement does not invalidate
+every frame. Decode and CV are therefore not limited to25Hz in these runs.
+The source explicitly advances reported picture serials independently of
+visible composition. Do not fix this notification path by changing CV's clock.
+
+These are instrumented callback/binding observations, **not visible playback
+or panel FPS**. Actual sampled parent/GPU images used system GL+IOSurface during
+the graphics lead's temporary selection trial, which independently displayed
+blank content with missing OES dispatch. That trial is being rolled back.
+No all-provider or visible-video qualification follows from these traces.
+Repeating visual/video qualification with the coherent graphics cohort, fixing
+actual callback scheduling, and the busy-input regression remain open.
 
 `prepare-cadence.py` packages those Linux outputs and a snapshot of the shared
 Firefox diagnostic sources. `run-cadence.py` requires caller-held gui.lock and
@@ -92,6 +112,9 @@ and cold-verifies the packet; `browser` and `profile` use the recorded receipt.
 observer hook and refuses if that hook is absent. It records owner activity
 without waiting, injects no keys/pointer events and runs only its own Firefox
 family. The optional Gecko profile is diagnostic, not a performance result.
+The fixture selects its own loopback automation port and checks the returned
+Firefox PID's ancestry before support/runtime/page commands. It also collects
+native image lists from the owned parent/GPU to record the selected providers.
 The `rates` phase uses `cadence-rate.js` only in our fixture snapshot, setting
 and reporting its requested/actual playback rate. It changes no global browser
 preference, decoder clock, display pacing or installed source.
