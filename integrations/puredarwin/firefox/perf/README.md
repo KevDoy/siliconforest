@@ -144,8 +144,9 @@ with the opt-in env off vs on, quiet warm profile (background services off for e
   colour bars sampled identical (same RGB). Applies to the whole-frame path too.
 - presented frames: with the display link on the compositor clock (0149) 4 of 9 "on" runs and 1 of 3 "off" runs fell
   into a bursty ~30-35 shown/s mode (anim A7, video V1, A9); with PD_CV_TIMER=1 (the old 60 Hz timer) 3/3 runs at
-  59.2-59.8/s (A9). 0149 waits up to two refreshes for a pending frame's flip before ticking; with commit->flip ~22 ms
-  that loop can lock at half rate. Scroll (S3): 53.5 / 53.9 shown/s in both variants (below 59.5 with or without).
+  59.2-59.8/s in A9 but 1/3 slow in A11 (video). Totals: damage-on with the compositor clock 6/15 runs slow, with the
+  timer 1/6, damage-off 1/6: more frequent with the damage path, cause open (0149 not established). Scroll (S3):
+  53.5 / 53.9 shown/s in both variants (below 59.5 with or without).
 - pixel compare (marker-cropped, same layout): scrolled page 0 differing pixels (X1, X2), unscrolled tile page 0 (X2),
   scrolled tile page 0 (X1; X2's two runs ended at different scroll offsets). On three static pages a position:fixed
   marker is missing in BOTH variants (reported to TERM10/FXLEAD), so they could not be compared: 3 pages compared, not 6.
