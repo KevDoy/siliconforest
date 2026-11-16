@@ -32,7 +32,7 @@ def module(name, filename):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', type=Path, required=True)
-    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'desktop-quit', 'close-box', 'cmd-w', 'connection-loss'], required=True)
+    ap.add_argument('--action', choices=['close-tab', 'close-window', 'hide', 'minimize', 'quit', 'desktop-quit', 'windowless-quit', 'close-box', 'cmd-w', 'connection-loss'], required=True)
     ap.add_argument('--ui-prefix', type=Path)
     ap.add_argument('--system-coretext', action='store_true')
     ap.add_argument('--observer', type=Path)
@@ -205,6 +205,23 @@ def main():
             elif args.action == 'desktop-quit':
                 result['native_action'] = dict(route='compositor-app-request', pid=parent,
                     response=_request(Path('/private/var/run/gpu-desktop/inject'), 'app %d quit' % parent))
+            elif args.action == 'windowless-quit':
+                inject = Path('/private/var/run/gpu-desktop/inject')
+                name = 'sffx-lifecycle-%d-prequit' % parent
+                _request(inject, 'dump ' + name)
+                tx, ty = close_button((inject / (name + '.txt')).read_text(), result['admission']['window_id'])
+                result['close_button_point'] = [tx, ty]
+                result['close_reply'] = _request(inject,
+                    'abs %d %d\nbuttons 1\nwait 60\nbuttons 0' %
+                    (round(tx * 65535 / 2559), round(ty * 65535 / 1599)))
+                pause(2.5)
+                _request(inject, 'dump ' + name)
+                result['prequit_native_windows'] = (inject / (name + '.txt')).read_text()
+                current = identity()
+                if parent not in current or current[parent][1] != owned[parent]:
+                    raise RuntimeError('Browser already ended; windowless desktop Quit was not exercised')
+                result['native_action'] = dict(route='compositor-app-request', pid=parent,
+                    response=_request(inject, 'app %d quit' % parent))
             elif args.action in ['close-box', 'cmd-w']:
                 admission = result['admission']
                 inject = Path('/private/var/run/gpu-desktop/inject')
@@ -239,6 +256,11 @@ def main():
             result['after_action_owned_alive'] = {
                 str(pid): current[pid][1] for pid, start in owned.items()
                 if pid in current and current[pid][1] == start}
+            if args.action in ['desktop-quit', 'windowless-quit'] and parent in current and current[parent][1] == owned[parent]:
+                with (args.run / 'parent-after-quit-sample.txt').open('w') as trace:
+                    sample = subprocess.run([args.sample_path, '-p', str(parent), '-d', '0.1', '-i', '5'],
+                        stdout=trace, stderr=subprocess.STDOUT, timeout=8)
+                result['parent_after_quit_sample_status'] = sample.returncode
             inject = Path('/private/var/run/gpu-desktop/inject')
             from presentation_seat import _request
             _request(inject, 'dump sffx-lifecycle-%d-after' % parent)

@@ -40,7 +40,7 @@ def analyze(directory):
     checks['audio_unit_started_before_action'] = bool(starts)
     callbacks = [r for r in rows if r['kind'] == 'SFMEDIA_CALLBACK']
     checks['callbacks_ran_before_action'] = any(r['time'] < begin and int(r.get('successes', 0)) > 0 for r in callbacks)
-    closing = action in ['close-tab', 'close-window', 'close-box', 'cmd-w', 'quit', 'desktop-quit', 'connection-loss']
+    closing = action in ['close-tab', 'close-window', 'close-box', 'cmd-w', 'quit', 'desktop-quit', 'windowless-quit', 'connection-loss']
     owned_alive = result.get('after_action_owned_alive', {})
     owned_before = result.get('before_action_owned_identities', {})
     unit_checks = []
@@ -77,11 +77,16 @@ def analyze(directory):
         checks['hidden_or_minimized_before_reopen'] = bool(own_rows) and all(
             'mapped=false' in line or ('lifecycle=' in line and 'lifecycle=Normal' not in line) for line in own_rows)
     reopened = result.get('after_reopen_windows', [])
-    ending_process = action in ['quit', 'desktop-quit', 'connection-loss']
+    ending_process = action in ['quit', 'desktop-quit', 'windowless-quit', 'connection-loss']
     checks['reopen_available_or_quit'] = (not owned_alive if ending_process else bool(reopened))
-    if action == 'desktop-quit':
+    if action in ['desktop-quit', 'windowless-quit']:
         checks['compositor_quit_route'] = result.get('native_action', {}).get('route') == 'compositor-app-request'
         checks['natural_quit_success'] = result.get('exit_before_cleanup') == 0
+    if action == 'windowless-quit':
+        before_quit = result.get('prequit_native_windows', '')
+        before_rows = [line for line in before_quit.splitlines() if re.match(r'window %s ' % window_id, line)]
+        checks['window_closed_before_desktop_quit'] = ('stack [' in before_quit and
+            not any('mapped=true' in line for line in before_rows))
     if action == 'connection-loss':
         loss = log.read_text(errors='replace')
         checks['single_owned_connection_lost'] = bool(re.search(r'SFFX_WAYLAND_LOSS pid=%d fd=\d+ shutdown=0 errno=0\b' % result.get('parent_pid', -1), loss))

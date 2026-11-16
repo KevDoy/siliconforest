@@ -83,6 +83,14 @@ class LifecycleEvidence(unittest.TestCase):
         result['after_reopen_windows'][0]['tabs'][0]['uri'] = 'about:newtab'
         self.assertFalse(self.analyze(result, log)['complete'])
 
+    def test_windowless_quit_must_really_follow_window_close(self):
+        result = dict(self.result, action='windowless-quit', after_action_owned_alive={},
+            exit_before_cleanup=0, native_action={'route': 'compositor-app-request'},
+            prequit_native_windows='stack []\n')
+        self.assertTrue(self.analyze(result, self.log[:2])['complete'])
+        for dump in ['', 'stack [9]\nwindow 9 mapped=true\n']:
+            self.assertFalse(self.analyze(dict(result, prequit_native_windows=dump), self.log[:2])['complete'])
+
 
 class CloseButtonGeometry(unittest.TestCase):
     row = ('window 92 mapped=true frame=Some(Rect { pos: Point { x: 112, y: 59 }, '
