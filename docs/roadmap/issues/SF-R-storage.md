@@ -768,3 +768,122 @@ external reset; the read-only root check retained the previous error classes,
 status 4, with no repair or new finding in the comparison. Root is not clean.
 The standard desktop, GL/Vulkan and six Firefox paint/natural-quit gates pass;
 UART and locks are released. No root-fill or error injection was performed.
+
+
+### Wind-down hand-over, 2026-11-16: delete stalls remain unfixed
+
+Kernel 48 is still normal. Its capsule SHA256 is
+`2ec8d7c41e1395cf092cc24f8f17b8393b2753d8f6910d6f192cb6c7164c904f`,
+with runtime UUID `E042DBE8-9934-4A88-A71A-16DCAD877E05` and stage-two
+boot SHA256 `81d58f1b40e8139dc797ceac8314bb74a6308ccf18b28e42f1c902c7b4912e3e`.
+Its private complete kit is `runs/sftb/firefox-install-0048/kit/`.
+Qualified 47 rollback is `runs/sftb/firefox-install-0047/kit/`, capsule
+`adad24e98cb17873fb671d97e6c1c0ea4d2f769daf43abc2dacbda6f466802d0`.
+The installer receipt confirms `sf/kernel.bin` is 48 and
+`sf/kernel.bin.old` is 47. Important: `sf/boot.bin.old` is a retained legacy
+14 MB image too large for the current stage-one footprint. Do not blindly
+swap both old files. Restore the complete verified 47 pair through the normal
+installer; its current boot.bin is the qualified small stage-two image.
+
+In a later recovery/install session, use the private SFBOOT identifier from
+the verified inventory, never a guessed partition. The normal command is
+`sudo sf-bootbin-install.sh "$SFBOOT_ID" kit/boot.bin kit/kernel.bin`.
+`--show` gives a read-only receipt. The script is
+`integrations/puredarwin/m1-native-boot/install/linux/sf-bootbin-install.sh`.
+Use only `asahi-bless --next --set-boot SiliconForest -y`; default Linux stays.
+No install, reboot or filesystem repair was performed during wind-down.
+Known extent/i_size/bitmap/count errors remain in the last read-only fn check;
+root is not claimed clean. Kernel 48's existing metadata read shortcut can be
+switched with `sysctl kern.pd_ext4.journal_cache=0` or `=1` (default 1), with
+read counters at `kern.pd_ext4.cache_stats`. It does not fix delete latency.
+
+The owner reported failed page loads and 5–10 second Terminal startup during
+about 24 GB of profile cleanup. Our native evidence already identifies a
+mechanism: ordinary appends can wait on the mount mutex while another thread
+performs synchronous metadata reads; unlink can enter `vclean -> VNOP_FSYNC`
+and commit the mount transaction, sleeping in the two NVMe flushes. The
+64-cycle trace measured fsync/unlink medians 11.84/11.30 ms, with 25 of 32
+writer samples in those flush waits. That sample fraction is not a wall-time
+percentage or proof of every owner-visible stall. No simultaneous 2 GiB
+rm/1000-append benchmark has been run yet. No asynchronous journal rework
+source or install exists; only the following design and qualification plan.
+
+The proposed design follows the running/committing transaction separation
+in the pinned `sources/gpu-plan/linux-aurora/fs/jbd2` and `fs/ext4`, without
+pretending the current small port already has JBD2's transaction machinery:
+
+1. Introduce explicit transaction handles, monotonically ordered generations,
+   metadata credits and separate running and immutable committing images.
+   Reserve credits before a VNOP starts changing metadata; a full 128-block
+   array must never force a commit halfway through a multi-block operation.
+   Preserve running-over-committing-over-disk read precedence while an older
+   checkpoint is in flight. Simply releasing the mount mutex around the
+   existing mutable `j_tx` array would race readers/writers and corrupt data.
+2. A per-mount sleeping worker requests a commit on a bounded slow deadline
+   or credit pressure. Snapshot at a completed operation boundary under the
+   metadata lock, then release it before journal/device I/O. Serialize commit
+   and checkpoint order with their own state/lock. New writers may update a
+   different running transaction while the immutable snapshot is flushed.
+   Do not create a fast polling loop, hold an inode/allocator lock across the
+   wait, or merely move global blocking into another lock that every writer
+   still needs. Physical metadata cache misses and allocation zeroing also
+   need a versioned cache/per-buffer protocol; the installed shortcut alone
+   does not remove every synchronous read from the mount lock.
+3. Explicit fsync must push that file's dirty UBC data, capture the dependency
+   generation and wait for its durable completion, outside the mount lock.
+   Preserve both ordered flushes, propagate errors and keep failed committed
+   images available for replay. Current helpers ignore some flush/commit
+   errors; an asynchronous design must make error state sticky and visible.
+   Distinguish an internal reclaim flush from a real application fsync using
+   the actual XNU call contract. Do not simply ignore all fsync calls on
+   unlinked files: an application can still own and fsync an open unlinked
+   vnode. Reclaim should enqueue its metadata generation without forcing a
+   whole-mount commit on each removed vnode.
+4. Defer reuse of freed blocks until the relevant transaction is durable,
+   and implement the required revoke/forget behavior across both images.
+   Otherwise a new allocation could overwrite data or metadata still named
+   by the prior committed transaction or its checkpoint. Preserve orphan
+   list recovery and operation atomicity during unlink/rename/reallocation.
+   Data-before-metadata ordering must cover the new concurrent transaction.
+5. Freeze, unmount and shutdown must stop new handles, drain worker/data and
+   wait for all durable generations, then release the mount. Worker lifetime
+   must hold a mount reference; failure/cancel paths must not leave dangling
+   timers or lose dirty images. The frozen NVMe write-gate/fence files and
+   halt constants remain untouched. All changes belong to the filesystem.
+
+Qualification before any install must include actual-function host concurrency
+and fault controls, then disposable real QEMU power-cut/replay tests. Start
+from fresh scratch images and cut at descriptor/data/commit writes, each
+ordered flush, checkpoint and journal-superblock advancement. Reboot the VM,
+allow its real replay path, verify acknowledged-fsync data and namespace
+oracles, then unmount and run e2fsck -fn. Test rename/unlink with open files,
+reallocation after free, metadata overflow, ENOSPC, short/error I/O, failed
+flush, freeze/unmount races and repeated mounts. Unsynced operations may be
+lost; acknowledged durable ones may not. Preserve failed images and markers.
+Host fake disks and clean-unmount fsck alone cannot establish crash consistency.
+
+The requested performance test is still pending. Create a fresh, bounded 2 GiB
+owned tree with a documented fixed file-count/size distribution; prepare and
+fsync it before timing. Run its rm concurrently with exactly 1000 100-byte
+appends and file creations in another process. Save raw per-operation wall
+and thread-CPU latency, p50/p99/max, deletion duration, flush counts and actual
+cohort/boot identity. Run the same fixed workload on qualified 48 and the
+candidate, with unrelated agent cleanup stopped. Report create and append
+latencies separately; do not include fixture preparation or cleanup in timing.
+Use only disposable VM scratch until crash gates pass; any later native run
+must stop for active owner input and never approach root ENOSPC.
+
+The next five steps are: implement and review the transaction/handle model;
+qualify real snapshot/error/reuse behavior in host controls; run QEMU crash
+cuts and replay oracles; compare the fixed concurrent-delete benchmark; only
+then prepare a later noticed install with exact 48 rollback and full desktop,
+GL/Vulkan/Firefox/data gates. Build/check commands for installed 48 remain
+`nix-build --extra-experimental-features 'nix-command flakes'
+integrations/puredarwin/m1-ext4-journal-cache/build-kc.nix --no-out-link`,
+`python3 integrations/puredarwin/m1-ext4-journal-cache/test-source.py`, and the
+six required AGENTS.md commands. QEMU reproduction uses
+`python3 integrations/puredarwin/upstream-12377/run-qemu.py --output <new-run>
+--image-recipe integrations/puredarwin/m1-ext4-journal-cache/build-qemu-image.nix
+--guest-script integrations/puredarwin/m1-ext4-journal-cache/qemu-guest.sh`,
+followed by `m1-ext4-journal-cache/verify-qemu.py`. Those are the existing clean
+rehearsals, not the still-unwritten crash-consistency harness.

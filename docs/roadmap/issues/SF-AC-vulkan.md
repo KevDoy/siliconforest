@@ -895,3 +895,51 @@ bootstrap/startup failures or establish media/FPS/page-load performance.
 Qualified 47 is verified rollback. The root's read-only fsck retains known
 extent/i_size/bitmap/count errors; no repair or clean-root claim. UART and all
 install locks are released. Private receipts: `runs/sftb/firefox-install-0048/`.
+
+
+### Wind-down hand-over: installed 48, pending 4K capacity work
+
+The owner stopped all new installs and experiments on 2026-11-16. Kernel 48
+remains normal (`2ec8d7c4…`, runtime `E042DBE8-9934-4A88-A71A-16DCAD877E05`),
+with the complete qualified 47 kit as rollback. SF-R records the full hashes,
+installer, retained filesystem errors and the legacy oversized boot.bin.old
+caveat. No kernel install or reboot was in flight when the stop arrived.
+The standard `.next` compositor and the owner's Firefox were alive at the
+wind-down read-only audit. No CODEX-TB native test clients remained.
+
+The sync-file finding is settled at the kernel-UAPI level: the deployed
+kernel already implements dma-buf EXPORT/IMPORT_SYNC_FILE, reservation fences,
+sync_file descriptors and poll. The native pending-compute probe passed a
+real unsignalled-to-signalled cross-process producer/CPU-consumer transition,
+verified all 4 KiB and returned clone slots to three. It is retained at
+`/private/var/db/sftb/firefox0048/pending-probe`; run it with
+`VK_ICD_FILENAMES=/private/var/db/sfvk/icd.d/asahi_icd.json` and
+`DYLD_LIBRARY_PATH=/private/var/db/sfvk/lib` under GUI/bench in a later session.
+Source/build and exact limits are in `m1-dmabuf-fences/README.md`. No new GPU
+kernel patch was needed, and no evidence here qualifies arbitrary GPU consumer,
+resize/reuse/death or VideoToolbox lease removal. CODEX-FX/TERM own that part.
+
+The 4K capacity fix is **not done**. Media's 15:38–15:46 evidence on kernel 48
+shows CREATE failing for a 1597-page contiguous IOVA range with 1985472 KiB
+mapped in a 2 GiB window, despite physical free memory. Existing contexts and
+fragmentation both matter. Transactional IMPORT maps the complete new capture
+pool before releasing the old one; its peak must be budgeted, not bypassed.
+A separate source candidate in `m1-avd-capacity/` expands to 3 GiB below the
+32-bit ceiling and adds owner/task/codec/buffer/IOVA-run diagnostics. The full
+arm64 SDK and collection built before stop, with only AVD changing from 48.
+It has no new host fault tests, QEMU, native decode/data/retirement validation,
+packed capsule or install. Do not call the successful build a working 4K fix.
+The preparation's first assertion failure and corrected no-fuzz source build
+are retained privately. README there names the build output and exact resume
+requirements; do not install it during this wind-down.
+
+Ranked kernel defects are filesystem-wide delete/flush contention, 4K decoder
+IOVA capacity/fragmentation, unresolved failed-write/ENOSPC filesystem findings,
+then intermittent earlier bootstrap/startup and the remaining GPU-client
+lifetime cases. The next five actions are to review and host-test the AVD
+bounds/allocator/diagnostic patch; budget coexisting CREATE and atomic IMPORT;
+rehearse the unchanged boot cohort in QEMU; in a later authorized kernel
+session qualify actual concurrent 4K/1080p decode and retirement with 48 rollback;
+and have FX/media/TERM measure the real consumer and presentation paths.
+Filesystem batching needs its separate crash-consistency gates from SF-R.
+No new installation, owner-profile change or push was performed at wind-down.

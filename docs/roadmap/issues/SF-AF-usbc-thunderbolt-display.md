@@ -3950,3 +3950,61 @@ No dock or AVE hardware trial was scheduled. Current status, client handoffs
 and private install receipts are in the coordinator files; the next dock
 window still follows the existing ranked measurement plan, without claiming
 kernel 48 advances physical dock milestones.
+
+
+### Wind-down hand-over, 2026-11-16: dock paused; exact upstream dispositions
+
+Kernel 48 remains normal, 47 is rollback, and no install/reboot is pending.
+Its full hashes, exact restore path and standard desktop selectors are in
+SF-R's wind-down section and `runs/m1-coord/status-CODEX-TB.md`. The driver
+cohort still contains the earlier native dock enumeration work. The owner's
+exclusive Thunderbolt window has not opened; winding down is not permission
+to resume it. AVE remains separately paused. Firefox kernel authorization did
+not authorize dock hardware trials.
+
+The last physical dock evidence is the CalDigit TS3 Plus: Type-C negotiation,
+ATC/NHI, authorized router and PCIe tunnel, with twelve PCI functions including
+four xHCI endpoints and I210. I210 en1 reached 1 Gb/s link, but two submitted TX
+descriptors advanced tail 0 to 1 to 2 while head stayed zero; no completed TX,
+DHCP lease or usable Ethernet was established. There is no native dock USB
+keyboard typing or stick mount, external HPD/EDID/scanout, or ten physical
+unplug/replug cycles. Built helpers and QEMU USB do not change those facts.
+
+| Requested upstream commit | Applied/conflicts | Build/test and installed state |
+| --- | --- | --- |
+| a25f0365 IOPCI | Source hunk applies cleanly to c713; no rebase or Nix reorganization. | SDK and actual fallback host controls pass; installed in kernel 46 and retained through 48. QEMU root-port enumeration passes. Ordinary bridges only; tunnel-class exclusion remains. No new physical dock qualification. |
+| 2617f566 shared PCI/iflib/igc | Shared PCI helpers, iflib and selected driver source hunks apply cleanly; upstream flake wiring ported separately. | em and igc SDKs plus helper controls pass; ix is x86-only and unbuilt. Full M1 network collection fails the frozen 16 MiB slot, payload 0x1250000. Not installed. igc handles I225/I226, not the dock's I210; no no-packets fix. |
+| aaf3604d USB | Clean generic apply; deployed frozen Apple/DART xHCI accepts offset hunks 120/124 without fuzz. | Exact baseline reproduction and patched SDK/host/real QEMU USB pass. Installed 46, retained 47/48: heap transfer arrays, IAD composites and mixed storage. No physical dock HID/storage/hotplug proof. |
+| ca1fd5ed ext4.util | Exact source hunk applies cleanly. | SDK and actual reader sanitizer controls pass; raw 4 KiB QEMU control rejects with old utility and succeeds with new. Userspace tool not installed on M1. This is not an ext4 kernel commit/allocator fix. |
+| aa82116c image | Exact converter source copied as a patch; old image Nix hunks apply in fixture. Shared image/installer recipes intentionally unchanged. | Synthetic and built 1.34 GB image conversions pass GPT/table CRCs and unchanged partition payload hashes. Not applied to owner disk. Existing installer already uses/checks 4 KiB GPT; do not run converter on it. |
+
+The five requested source ports have all been started and preserved; none is
+silently missing. What remains unstarted is physical qualification for paused
+dock hardware, runtime utility adoption and an installable network collection.
+Reproduction, source hashes, notices, clean-apply controls and retained failures
+are in `integrations/puredarwin/upstream-12377/README.md`. No shared pin was
+rebased. `c95aefa58` preserves the selected ports; later kernel 46 qualification
+is recorded above. The older README's initial uninstalled-candidate paragraphs
+are historical; this disposition table states the installed outcome.
+
+The next five dock steps, only after a new exclusive window is authorized,
+are: port the finite Ethernet diagnostic delta from DIAGNOSTICS.md onto the
+then-current qualified Firefox kernel, preserving its fixes; capture paired
+Linux/Darwin DART stream/TTBR/ring/tail/interrupt/bus-master/bridge measurements
+and kill or confirm the ranked no-TX hypotheses; qualify the selected Ethernet
+fix by actual completed packets, DHCP and bound-interface ping; admit the
+selected dock PCI xHCI and test the owner's Keychron and read-only stick; then
+complete native DP-provider/graph glue, HPD/EDID/modeset and independent second
+scanout before ten physical dock cycles. Do not install the old CIO41
+collection over 48: it predates the Firefox fixes and needs a current rebase
+of its narrow diagnostic source, not a repository rebase.
+
+Existing build/test entrypoints are the recipes in `m1-thunderbolt/` and the
+commands in its `DIAGNOSTICS.md`, plus `upstream-12377/test-source.py` and its
+`build-kexts.nix`, `build-qualified-xhci.nix` and `run-qemu.py`. Preserve the
+no-packets failures and source/SDK-only USB/DP boundaries. The Linux Firefox
+Speedometer/MotionMark/JetStream reference and physical pinch qualification
+are also still pending a suitable later window; no benchmark score is invented.
+The already-live dma-buf UAPI and pending-fence probe are documented in SF-AC
+and `m1-dmabuf-fences/README.md`; no further kernel install is required merely
+to introduce those ioctls.
