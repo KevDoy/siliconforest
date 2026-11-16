@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Host policy checks for safe installed-runtime launch plans, not native GUI proof."""
 import importlib.util
+import contextlib
+import io
+import sys
 import json
 import os
 from pathlib import Path
@@ -105,6 +108,32 @@ class LaunchPlanPolicy(unittest.TestCase):
     def plan(self, args=None):
         (self.root / 'release.json').write_text(json.dumps(self.manifest))
         return daily.plan(self.root, args or [])
+
+    def test_dry_plan_exports_selected_audio_clock_and_reporter_containment_only(self):
+        stream = io.StringIO()
+        environment = {'SF_AU_NORMALIZE_HAL_CLOCK': '1', 'MOZ_CRASHREPORTER_DISABLE': '1',
+                       'SF_OTHER_SECRET': 'hidden', 'UNRELATED_SECRET': 'hidden'}
+        with patch.object(daily, 'plan', return_value=([], environment)), \
+             patch.object(sys, 'argv', ['daily-launch.py', '--sf-plan']), \
+             contextlib.redirect_stdout(stream):
+            daily.main()
+        exported = json.loads(stream.getvalue())['environment']
+        self.assertEqual(exported, {'SF_AU_NORMALIZE_HAL_CLOCK': '1', 'MOZ_CRASHREPORTER_DISABLE': '1'})
+
+    def test_network_override_keeps_canonical_ui_and_precedes_system_frameworks(self):
+        self.manifest.update(system_ui=True, system_gpu_providers=True,
+                             network_override=str(self.root / 'overrides/network-v1/Frameworks'))
+        _, env = self.plan()
+        self.assertEqual(env['DYLD_FRAMEWORK_PATH'].split(':')[0], self.manifest['network_override'])
+        self.assertIn('/System/Library/Frameworks', env['DYLD_FRAMEWORK_PATH'].split(':'))
+        self.assertEqual(env['DYLD_LIBRARY_PATH'].split(':')[0], '/usr/local/lib/siliconforest/opengl/v1/lib')
+
+    def test_network_override_cannot_escape_owned_runtime(self):
+        for value in ['/System/Library/Frameworks', str(self.root / 'overrides/../Frameworks'),
+                      str(self.root / 'overrides/Frameworks')]:
+            self.manifest['network_override'] = value
+            with self.assertRaises(ValueError):
+                self.plan()
 
     def test_ssh_environment_cannot_select_an_absent_linux_display(self):
         os.environ.update(XDG_RUNTIME_DIR='/var/run/user/0', WAYLAND_DISPLAY='wayland-stale')

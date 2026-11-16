@@ -223,6 +223,14 @@ def plan(root, args, manifest=None):
                       Path('/System/Library/Frameworks')]
             libraries = [root / 'avfoundation/Frameworks/AVFoundation.framework/Versions/A',
                          graphics / 'gl/lib', root / 'compat/usr/lib']
+    network = manifest.get('network_override')
+    if network is not None:
+        network = Path(network)
+        if (not manifest.get('system_layout') or '..' in network.parts or
+                not network.is_relative_to(root / 'overrides') or network.name != 'Frameworks' or
+                network.parent == root / 'overrides'):
+            raise ValueError('Network override must be a versioned framework inside this runtime')
+        frames.insert(0, network)
     audio = manifest.get('audio_override')
     if audio is not None:
         audio = Path(audio)
@@ -292,7 +300,7 @@ def main():
     command, env = plan(root, arguments[1:] if dry else arguments)
     if dry:
         print(json.dumps(dict(command=command, environment={k: v for k, v in env.items()
-            if k.startswith(('DYLD_', 'SFFX_')) or k=='MOZ_CRASHREPORTER_DISABLE'}, sandbox_enabled=True), indent=2))
+            if k.startswith(('DYLD_', 'SFFX_')) or k in {'MOZ_CRASHREPORTER_DISABLE', 'SF_AU_NORMALIZE_HAL_CLOCK'}}, sandbox_enabled=True), indent=2))
         return
     if os.uname().sysname != 'Darwin':
         raise RuntimeError('Runtime requires SiliconForest')
