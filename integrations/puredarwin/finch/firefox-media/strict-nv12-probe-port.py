@@ -2,14 +2,31 @@
 # SPDX-License-Identifier: MIT
 """Adapt our reviewed exec/reuse probe in a private copy, never peer source."""
 from pathlib import Path
+import argparse
+import json
 import sys
 
-p=Path(sys.argv[1]);s=p.read_text()
+args=argparse.ArgumentParser(description=__doc__)
+args.add_argument('source',type=Path)
+args.add_argument('--geometry',choices=['odd','1080p','4k'],default='odd')
+a=args.parse_args()
+width,height,stride={'odd':(65,33,128),'1080p':(1920,1080,2048),'4k':(3840,2160,4096)}[a.geometry]
+uv_offset=6144 if a.geometry=='odd' else stride*(height+8)
+allocation=max(16384,(uv_offset+stride*((height+1)//2+7)+16383)//16384*16384)
+p=a.source;s=p.read_text()
 def replace(old,new):
     global s
     if s.count(old)!=1:raise ValueError('Exact NV12 probe anchor required: '+old[:80])
     s=s.replace(old,new)
 
+replace('#define W 65',f'#define W {width}')
+replace('#define H 33',f'#define H {height}')
+replace('#define STRIDE 128',f'#define STRIDE {stride}')
+replace('#define UVOFF (STRIDE*48)',f'#define UVOFF {uv_offset}')
+replace('#define ALLOC 16384',f'#define ALLOC {allocation}')
+if s.count('layout?192:STRIDE')!=2:raise ValueError('Two top-stride anchors required')
+s=s.replace('layout?192:STRIDE','layout?(STRIDE+64):STRIDE')
+replace('odd_visible=%dx%d','visible=%dx%d')
 replace('#include <dlfcn.h>','#include <dlfcn.h>\n#include <mach-o/loader.h>\n#include <mach-o/dyld.h>')
 replace('static int width(int p){return p?(W+1)/2:W;}',r'''
 static int images(void){
@@ -79,7 +96,14 @@ replace('''  for(int p=0;p<2;p++){
    unsigned char pixels[W*H*2]={0};glBindTexture(0x84f5,texture[p]);glGetTexImage(0x84f5,0,p?0x8227:0x1903,0x1401,pixels);''',r'''
   glBindBuffer(0x88eb,0); // Verification readback only, not transport.
   for(int p=0;p<2;p++){
-   unsigned char pixels[W*H*2]={0};glBindTexture(0x0de1,texture[p]);glGetTexImage(0x0de1,0,p?0x8227:0x1903,0x1401,pixels);''')
+   unsigned char *pixels=calloc((size_t)width(p)*height(p),p?2:1);REQUIRE(pixels);
+   glBindTexture(0x0de1,texture[p]);glGetTexImage(0x0de1,0,p?0x8227:0x1903,0x1401,pixels);''')
+replace('''    REQUIRE(pixels[(y*width(p)+x)*(p?2:1)+c]==sample(p,x,y,c,revision));compared++;
+   }
+  }''','''    REQUIRE(pixels[(y*width(p)+x)*(p?2:1)+c]==sample(p,x,y,c,revision));compared++;
+   }
+   free(pixels);
+  }''')
 replace('  REQUIRE(glGetError()==0&&write(fd,&overwritten,1)==1);',r'''
   glBindBuffer(0x88eb,pbo[1]);glBindTexture(0x0de1,(unsigned)state_before[0]);
   REQUIRE(glGetError()==0&&write(fd,&overwritten,1)==1);''')
@@ -92,3 +116,5 @@ replace('reuse_after_completion=1 local_use=0 global_in_use=0 pass=1',
         'reuse_after_completion=1 state_restored=9 paired_copy=1 local_use=0 global_in_use=0 pass=1')
 s=s.replace('FXNV12','SFNV12STRICT').replace('Existing RECT textures','Independent 2D textures')
 p.write_text(s)
+p.with_name('probe-layout.json').write_text(json.dumps(dict(width=width,height=height,
+    stride=stride,uv_offset=uv_offset,allocation=allocation),sort_keys=True)+'\n')

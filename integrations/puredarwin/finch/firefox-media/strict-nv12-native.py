@@ -21,6 +21,34 @@ import tarfile
 HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[3]
 
+def probe_layout(value=None):
+    """Only the three compiled, bounded fixtures are eligible for admission."""
+    choices=[]
+    for width,height,stride in [(65,33,128),(1920,1080,2048),(3840,2160,4096)]:
+        uv_offset=6144 if width==65 else stride*(height+8)
+        allocation=max(16384,(uv_offset+stride*((height+1)//2+7)+16383)//16384*16384)
+        choices.append(dict(width=width,height=height,stride=stride,
+            uv_offset=uv_offset,allocation=allocation))
+    if value is None:return choices[0] # Original reviewed odd-size build.
+    if value not in choices:raise ValueError('Known compiled probe geometry required')
+    return value
+
+def plane_checks(text,layout):
+    layout=probe_layout(layout)
+    w,h,stride,uv,allocation=(layout[k] for k in ['width','height','stride','uv_offset','allocation'])
+    exact=2*(w*h+((w+1)//2)*((h+1)//2)*2)
+    children=re.findall(r'^SFNV12STRICT child profile=([0-9a-f]+) exact_bytes=(\d+) cpu_upload=(\d+) cpu_readback=(\d+) gpu_blit=(\d+) reuse_after_completion=1 state_restored=9 paired_copy=1 local_use=0 global_in_use=0 pass=1$',text,re.M)
+    parents=re.findall(r'^SFNV12STRICT parent profile=(\d+) range=(full|video) (?:odd_visible|visible)='+str(w)+'x'+str(h)+r' stride='+str(stride)+r' y_offset=(0|512) top_stride=('+str(stride)+'|'+str(stride+64)+r') uv_offset='+str(uv)+' padded_allocation='+str(allocation)+r' cross_exec=1 local_use=0 global_in_use=0 pass=1$',text,re.M)
+    return dict(twelve_children=len(children)==12,twelve_parents=len(parents)==12,
+        exact_all_bytes=bool(children) and all(int(c[1])==exact for c in children),
+        cpu_transport_zero=bool(children) and all(c[2]==c[3]=='0' for c in children),
+        exact_gpu_blits=bool(children) and all(int(c[4])==exact for c in children),
+        profiles_complete=all(sum(c[0]==profile for c in children)==4 for profile in ['3200','4100','1000']),
+        distinct_layout_range_profiles=set(parents)=={(profile,range_,offset,top_stride)
+            for profile in ['12800','16640','4096'] for range_ in ['full','video']
+            for offset,top_stride in [('0',str(stride)),('512',str(stride+64))]},
+        layouts_refused='SFNV12STRICT malformed_layouts_rejected=4 cases=12 pass=1' in text)
+
 def uuid(path):
     data=path.read_bytes();position=32;found=[]
     if struct.unpack_from('<I',data)[0]!=0xfeedfacf:raise ValueError('Original thin Mach-O required')
@@ -48,9 +76,11 @@ def main():
         shutil.copy2(a.probe/'bin/nv12-plane-probe',stage/'nv12-plane-probe')
         shutil.copy2(HERE/'strict-nv12-guest.py',stage/'run.py')
         binary=a.cgl/'Frameworks/OpenGL.framework/Versions/A/OpenGL'
+        layout_file=a.probe/'share/probe-layout.json'
+        layout=probe_layout(json.loads(layout_file.read_text()) if layout_file.exists() else None)
         (stage/'originals.json').write_text(json.dumps(dict(cgl=str(a.cgl),probe=str(a.probe),
             cgl_uuid=uuid(binary),cgl_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-            probe_uuid=uuid(a.probe/'bin/nv12-plane-probe'),installed=False),indent=2)+'\n')
+            probe_uuid=uuid(a.probe/'bin/nv12-plane-probe'),probe_layout=layout,installed=False),indent=2)+'\n')
         print(stage);return 0
     if a.cgl or a.probe:raise ValueError('Run only the prepared packet')
     if not os.environ.get('BENCH_OWNER'):raise ValueError('Caller must hold gui/core/bench')
@@ -90,28 +120,19 @@ def main():
         return 1
     result=json.loads((stage/'evidence/result.json').read_text())
     text=(stage/'evidence/native.log').read_text()
-    children=re.findall(r'^SFNV12STRICT child profile=([0-9a-f]+) exact_bytes=(\d+) cpu_upload=(\d+) cpu_readback=(\d+) gpu_blit=(\d+) reuse_after_completion=1 state_restored=9 paired_copy=1 local_use=0 global_in_use=0 pass=1$',text,re.M)
-    parents=re.findall(r'^SFNV12STRICT parent profile=(\d+) range=(full|video) odd_visible=65x33 stride=128 y_offset=(0|512) top_stride=(128|192) uv_offset=6144 padded_allocation=16384 cross_exec=1 local_use=0 global_in_use=0 pass=1$',text,re.M)
     original=json.loads((stage/'originals.json').read_text())
+    layout=probe_layout(original.get('probe_layout'))
     expected={dest+'/Frameworks/OpenGL.framework/Versions/A/OpenGL':original['cgl_uuid'],
         '/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface':'d3d65ac4b3fd308e8c0ba2abc2784159',
         '/usr/local/lib/siliconforest/opengl/v1/lib/libGL.1.dylib':'0c7491be21f135a3a8c8376d0f2213bc'}
     images=re.findall(r'^SFNV12STRICT image uuid=([0-9a-f]{32}) path=(.+)$',text,re.M)
-    checks=dict(twelve_children=len(children)==12,twelve_parents=len(parents)==12,
-        exact_all_bytes=bool(children) and all(int(c[1])==6534 for c in children),
-        cpu_transport_zero=bool(children) and all(c[2]==c[3]=='0' for c in children),
-        exact_gpu_blits=bool(children) and all(int(c[4])==6534 for c in children),
-        profiles_complete=all(sum(c[0]==profile for c in children)==4 for profile in ['3200','4100','1000']),
-        distinct_layout_range_profiles=set(parents)=={(profile,range_,offset,stride)
-            for profile in ['12800','16640','4096'] for range_ in ['full','video']
-            for offset,stride in [('0','128'),('512','192')]},
-        layouts_refused='SFNV12STRICT malformed_layouts_rejected=4 cases=12 pass=1' in text,
+    checks=dict(plane_checks(text,layout),
         actual_images=len(images)==36 and all(expected.get(path)==identity for identity,path in images)
             and all(sum(path==want for _,path in images)==12 for want in expected),
         natural_exit=result.get('status')==0 and not result.get('cleanup_signals') and not result.get('remaining_group'),
         no_input=result.get('input_injected') is False,no_install=result.get('installed_changes') is False)
     admission=dict(passed=all(checks.values()),checks=checks,originals=original,
-        scope='Private 65x33 padded NV12 cross-exec 2D copies with source overwrite and nine GL-state checks. CPU fixture writes and verification readbacks are outside transport. Not Firefox/QC integration, performance, panel cadence, asynchronous fences, all driver-internal copies or forced GPU-fault qualification.')
+        scope=f'Private {layout["width"]}x{layout["height"]} padded NV12 cross-exec 2D copies with source overwrite and nine GL-state checks. CPU fixture writes and verification readbacks are outside transport. Not Firefox/QC integration, performance, panel cadence, asynchronous fences, all driver-internal copies or forced GPU-fault qualification.')
     (stage/'admission.json').write_text(json.dumps(admission,indent=2)+'\n')
     print(json.dumps(admission));return 0 if admission['passed'] else 1
 

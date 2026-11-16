@@ -19,6 +19,7 @@ for name in ['DYLD_FRAMEWORK_PATH','DYLD_FALLBACK_FRAMEWORK_PATH','DYLD_INSERT_L
 env.update(SFFX_GPU_IMAGE_CACHE='0',SFFX_IOSURFACE_GPU='1',
     SFFX_IOSURFACE_SERVICE='org.puredarwin.iosurfaced.sffx.strictnv12.'+str(os.getpid()),
     SFFX_CGL_PROBE_LIBRARY=str(root/'Frameworks/OpenGL.framework/Versions/A/OpenGL'),
+    MESA_SHADER_CACHE_DIR=str(root/'mesa-cache'),XDG_CACHE_HOME=str(root/'cache'),
     DYLD_LIBRARY_PATH='/usr/local/lib/siliconforest/opengl/v1/lib')
 command=['/usr/local/lib/siliconforest/firefox/160-system1/surface/bin/surface-session',
          '/usr/libexec/iosurfaced',str(root/'nv12-plane-probe')]

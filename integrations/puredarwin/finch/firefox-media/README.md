@@ -424,6 +424,18 @@ verification readbacks and CPU fixture writes are separate from transport;
 neither host controls nor these native cases qualify Firefox throughput or
 whole-browser zero CPU copies.
 
+The same twelve-case control can now be built with
+`nix-build strict-nv12-probe.nix --argstr geometry 1080p` or `geometry 4k`
+(the default remains `odd`). These fixtures use1920×1080/2048-byte pitch and
+3840×2160/4096-byte pitch, two plane layouts, both NV12 ranges and all three GL
+profiles. Verification buffers are heap allocated. Each build carries its
+compiled layout metadata; admission checks the exact dimensions, padding and
+both revisions' byte totals, so a tiny successful control cannot admit a large
+surface. A CPU fallback, one-plane result or duplicate range also fails
+admission. The probe's shader cache stays inside its disposable test prefix.
+These are source/build controls until their separate native receipts pass;
+they do not measure Firefox cadence or CPU use.
+
 The profile also identifies a remaining QuartzCore `uploadPlane`→`glTexImage2D`
 CPU copy and retained CGL completion waits. Those lie outside the decoder/CGL
 transport counters. Their exact API and lifetime handoff is with the QuartzCore
