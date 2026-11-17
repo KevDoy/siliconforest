@@ -30,7 +30,7 @@ same pair.
 | Mesa (GL, Vulkan), libdrm glue, `libPDSurface`, `libPDGOP` | class and library names | `libSFSurface`, `libSFGOP`, … | `m1-mesa-asahi`, `m1-vulkan`, upstream |
 | Compositor, dock, terminal (`chonkstep-darwin-desktop` and `.next`, `chonk-terminal-darwin`) | display make `PureDarwin`, `PDGOP`/`PDHID` seats, `pd_window_position_v1`, reads `pdm1tp*=` | renamed | `sources/chonkstep-darwin` + `terminal-app/compositor/*.patch` |
 | Daemons and tools | `pd-netd`, `pd-dhcp`, `pd-net-up`, `pd-backlight`, `pd-wifipm`, `pdplay`, `pdtone`, `pdvolume`, `pdvideo`, `pdtbtest`, `pdpowerd`, `pdaccountsd` | `sf-…`, `sf…`. Old binaries are removed after the switch is confirmed | the recipes of `tools/staged.sh` |
-| Audio server and its frameworks | built from the **pin**, with old names | **cannot be built renamed today**: the recipes still build these from upstream's old pin (`PIN_ONLY` in `tools/staged.sh`, open in SF-I). Until they build at the tip they stay as installed and keep working only if the kernel side they talk to keeps its names. This blocks the switch for sound; see "Order" |
+| Audio server and its frameworks | the **pin**'s build (upstream `e7aa00a6`), old names: `/dev/pdaudio`, `/dev/pdspeaker`, `kern.pd_sound.*`, `kern.pd_speaker.*`, Mach service `org.puredarwin.audio.coreaudiod`, `/Library/Preferences/org.puredarwin.audio.plist` | the **tip**'s build with our `/dev` backend and the new names only (`/dev/sfaudio`, `/dev/sfspeaker`, `kern.sf_sound.*`, `kern.sf_speaker.*`, `org.siliconforest.audio.coreaudiod`, `org.siliconforest.audio.plist`). This is also a change of server generation (upstream's reworked `coreaudiod`), which the M1 has not run; checked in QEMU as far as a machine without sound hardware can (SF-I, "The renamed audio server"). `coreaudiod`, CoreAudio, AudioUnit and the AudioToolbox family go in together | `m1-sound/sysaudio`, `m1-sound/build-sfplay.nix`; the session script `m1-storage/system/sf-session` (it sets `kern.sf_speaker.hold_probe=1`) |
 | Firefox, VLC, the video player | media glue names `/dev/pdavd`, `AV_PIX_FMT_PDAVD` | renamed; a rebuild of Firefox | `firefox/`, `finch/`, `m1-avd` |
 | Apple's Terminal and Activity Monitor | not ours, no PD name | unchanged; the libraries they load are ours and are replaced | |
 | `/usr/share/doc/siliconforest/NOTICE` | absent | new | `NOTICE` |
@@ -57,9 +57,9 @@ applications, Firefox's bundled third-party libraries, recorded evidence under
 
 ## Order
 
-1. **Finish what cannot be built yet** (workstation): the audio server at the tip (SF-I), then
-   every staged piece and the Cocoa, Firefox and Homebrew-overlay builds from `sf-rename`. Until
-   then the switch would lose sound.
+1. **Build what is installed** (workstation): every staged piece and the Cocoa, Finch, Firefox
+   and Homebrew-overlay builds from `sf-rename`. The audio server builds at the tip from the
+   renamed tree (17 November, SF-I; file list in `runs/m1-coord/done-AUDIO`).
 2. **Launcher** (only if a hypervisor boot is wanted as a rehearsal): the launcher base tree's
    member gate names the old kexts; change it there and regenerate the launcher patches
    (`docs/design/siliconforest-naming.md`, exceptions). A disk boot needs none of this.
