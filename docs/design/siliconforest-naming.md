@@ -29,6 +29,7 @@ repository, a checkout of upstream PureDarwin, and the Chonkstep Darwin source.
 | the same inside a longer name | `sysctl__kern_pd_avd`, `virgl_pd_winsys`, `F_PD_SAMEFILE`, `DYLD_PD_MISSING_OK` | `sysctl__kern_sf_avd`, `virgl_sf_winsys`, `F_SF_SAMEFILE`, `DYLD_SF_MISSING_OK` | R2: lower case `x_pd_y` always, except behind other people's prefixes (`pf_pd_*`, `usb_pd_*`, …); upper case `X_PD_Y` only behind listed prefixes (`kHIDUsage_PD_*` and register names stay) |
 | compiler definitions | `-DPD_CORECRYPTO_DIR=…`, `-DPDGOP=1` | `-DSF_CORECRYPTO_DIR=…`, `-DSFGOP=1` | all rules also apply after `-D`/`-U` |
 | libraries | `libPDGOP.a`, `-lPDGOP`, `libpdavd`, `-lpdavd`, `libpd_virgl_shim`, `kPDGPU_Present` | `libSFGOP.a`, `-lSFGOP`, `libsfavd`, `-lsfavd`, `libsf_virgl_shim`, `kSFGPU_Present` | R3 to R5 also apply after `lib`, `-l` and the constant prefix `k` |
+| Rust types generated from `pd_` names | `PdWindowPositionV1`, `PdSpeaker` | `SfWindowPositionV1`, `SfSpeaker` | R12 |
 | directories named `pd` | `src/Kernel/fbsdkpi/pd/`, `${FBSDKPI_DIR}/pd` | `…/sf/`, `${FBSDKPI_DIR}/sf` | R11 |
 | two-prefix names | `PD_SF_FENCE_FIRST` | `SF_FENCE_FIRST` | R2b |
 | Classes, kexts, frameworks, constants | `PDAppleAVD`, `PDArmPlatformExpert`, `kPDAudioOutputDevice`, `libPDSurface` | `SFAppleAVD`, `SFArmPlatformExpert`, `kSFAudioOutputDevice`, `libSFSurface` | R3 |
@@ -123,7 +124,8 @@ ones, 5 hyphenated, 23 prefixes of `x_pd_y`, Apple's PDFKit family, 4 single ide
 `tools/sf_rename.py inventory` prints every mapped name that already exists in the tree; the
 table above is that list, read.
 
-Not renamed, knowingly: a name inside a longer camelCase word (`initWithPDSurface:`,
+Not renamed, knowingly: two Rust type names in the speaker safety daemon, `PdspkInfo` and `PdspkVolume`
+(`m1-sound/safetyd`): R12 asks for a capital after `Pd`, and they name nothing outside their file. And a name inside a longer camelCase word (`initWithPDSurface:`,
 `isPDKext`). The class it mentions is renamed; the selector or variable keeps its spelling. It
 compiles (definition and use carry the same word) and is visible nowhere outside the source.
 
@@ -162,12 +164,23 @@ Taking upstream changes later:
 4. a single upstream commit can be taken as a patch the same way: `git format-patch -1`, run the
    patch text through the rules (`transform_text`), apply.
 
-The Chonkstep Darwin source (`sources/chonkstep-darwin`, ours, never pushed) is renamed with the
+The Chonkstep Darwin source (`sources/chonkstep-darwin`, a local clone that is never pushed from here; Chonkstep
+itself is public, GPL-3.0-only, and a copy of it is vendored in this repository, see `NOTICE`) is renamed with the
 same command (`tree`), without its `vendor/` directory. "Chonkstep" itself is the desktop's name
 and stays.
 
-The old pin (`SF_PD=pin`, upstream `e7aa00a6`) is not renamed. The recipes of `sf-rename` carry the
-new names and do not build it; the pin builds from commit `93738b915`.
+The old pin (upstream `e7aa00a6`) is forked the same way, because the Cocoa stream still builds from it
+(`integrations/siliconforest/cocoa/pin.nix`, `arm64.nix`, `build-cocoa-root.nix`: AppKit, CoreText, Onyx2D,
+CoreGraphics, QuartzCore, libWindowServer, IOSurface, OpenGL and everything that imports them):
+
+    tools/sf_rename.py fork sources/puredarwin-baseline e7aa00a60f0b56ef35aa24252e81467787bf71ea
+
+leaves branch `siliconforest/e7aa00a6` = `00d5848dca1fc90c8877becf593034ed85bb7b44`; the three Cocoa recipes name that
+commit. Three names that exist only at the pin were classified for it (`pd-wayland-session` and the boot argument
+`pdmmcsync` renamed, `pde0` an AMD page-directory word that stays); none of them occurs at the tip, so the tip's
+fork commit is unchanged. `check --tree` is clean on the pin's fork and `licence-proof` finds 0 changed notice lines
+(32,580 files compared, 1,841 changed). `SF_PD=pin` in `rebase/pd.nix` still names upstream's own tree and is not
+built by the recipes of this branch.
 
 ## 6. What the owner sees, and where it comes from
 
