@@ -279,3 +279,35 @@ CIO07 later passed the additive capacity gate with all57 original module UUIDs
 unchanged and only PDAppleAVE added. CODEX-TB performed that first INFO boot,
 then restored non-AVE CIO07 as recorded in the pause section. The earlier CIO03
 capacity failures remain preserved; they are not the final hardware result.
+
+## The screen recorder's seam for AVE (DESK11, 17 November)
+
+The owner asked that the H.264 screen recorder be able to use AVE once it works, with the
+software encoder kept as the fallback. No AVE work was done (the stream is paused); the
+compositor (`chonkstep-darwin-desktop`, compositor patch 35) has the seam:
+
+- **Frames**: NV12 (4:2:0, two planes), BT.709 limited range, converted on the GPU from the frame on
+  the screen into one of five shareable buffers per recording size: a linear asahi GEM object
+  exported as a dma-buf, `width * height * 3 / 2` bytes, Y at offset 0 (pitch `width`), interleaved
+  U/V at `width * height` (pitch `width`), width a multiple of 8, height of 2. Each frame comes with
+  its time (microseconds, on a 60 Hz grid) after its GPU fence passed. The buffer is the encoder's
+  until it hands it back (no copy is made on the compositor's side).
+- **Interface** (`wm-darwin/src/encoder.rs`): `trait Encoder { fn push(&mut self, frame: &NvFrame)
+  -> Result<(), String>; fn finish(self: Box<Self>) -> Result<EncoderSummary, String>; }`, where
+  `NvFrame` has the mapped bytes, the size, the dma-buf fd and the time. `encoder::open` picks the
+  back end by policy `record_encoder=auto|software|hardware` when a recording starts:
+  `auto` = hardware when `hardware::open` succeeds, else software; `hardware` alone fails the
+  recording with a notice when there is none.
+- **Software back end** (in use): `/usr/local/bin/ffmpeg` with libx264, a separate GPL program
+  (`integrations/puredarwin/desktop/recording/build-ffmpeg-x264.nix`), fed a Matroska stream of
+  raw NV12 frames with their times over a socket; ffmpeg also writes the QuickTime file.
+- **Hardware back end** (`encoder::hardware`): a stub whose `probe` says "not available".
+  What the AVE side must provide for it: a `VTCompressionSession` (our VideoToolbox) or a direct
+  `/dev/pdave` session that (1) takes NV12 frames of the recording's size (up to 2560x1600) from
+  an IOSurface-compatible `CVPixelBuffer` wrapping that dma-buf (or imports the dma-buf for its own
+  DART: the "external import" deferred in the contract above), with a PTS; (2) returns H.264 (or
+  HEVC) access units with PTS/DTS, keyframe flag and the parameter sets (avcC or Annex B); (3)
+  releases each input buffer when the hardware no longer reads it (the recorder then reuses it);
+  (4) drains and finishes on demand. Muxing stays separate from encoding: the elementary stream
+  goes into a QuickTime file through ffmpeg (`-c copy` from a stream with times) or the
+  recorder's own movie writer (`record.rs`, which today writes Photo-JPEG samples).

@@ -1858,3 +1858,70 @@ fresh copy of the `desk9-next-003` build source give the build sources of desk10
 
 ### Taken from Finch (DESK10)
 Nothing.
+
+## Screen recording in H.264 at full size (DESK11, 17 November)
+
+**Truthfulness.** All input on the M1 was synthetic (the inject module's virtual seat, `seat virtual`), into my
+own Firefox windows (fresh profiles under `/private/var/db/sfdesk11/`, crash reporter off); recordings were started
+through the capture socket (`--screencapture -V 12 -F|-H`), not by keys. Never the owner's windows or pointer.
+Numbers are n=1 per row unless said; "measured" = on the M1.
+
+### What the owner can do now
+Command-Shift-5 → Record Screen (or Record Selection) → Record; stop with Command-Control-Escape or "● 0:07 Stop".
+The movie is H.264 at the panel's full 2560x1600, up to 60 frames a second (a frame only when the screen changed),
+with the pointer drawn in (as before: the pointer leaves its plane while recording), in `~/Pictures/Screenshots`
+("Screen Recording <date> at <time>.mov", QuickTime, moov at the front). The toolbar's Options add Record at Full
+Size / Half Size and 60 / 30 Frames a Second (kept in `/private/var/db/desktop-state/screencapture`).
+`--screencapture -v|-V <s> [-F|-H] [-R x,y,w,h] [file.mov]` (-H: half size; neither: the Options, else the policy).
+The owner asked for one deliverable at full resolution (2026-11-17): there is no half-size default; half size is
+an Options choice only.
+
+### How (compositor patch 35, `wm-darwin-h264-recording.patch`)
+- Right after a frame is shown, a GPU shader pass converts it (or the selected area, scaled) to NV12, BT.709 limited
+  range, into one of five shareable buffers (asahi GEM, `DRM_ASAHI_GEM_WRITEBACK`, exported as a linear dma-buf,
+  `glrender.rs` `record_capture`), then a fence; nothing waits. A later turn of the loop takes the frames whose fence
+  passed (`record_ready`) and sends them to a writer thread with their time on a 60 Hz grid. The compositor's
+  thread never reads pixels and never waits on the GPU or the encoder; when no buffer is free the frame is not taken
+  (counted: `no_buffer`).
+- The writer gives each frame to an `Encoder` (`encoder.rs`). Software (in use): `/usr/local/bin/ffmpeg` with
+  libx264, a separate program, fed a Matroska stream of raw NV12 frames with their times over a socket (variable
+  frame rate), `-preset ultrafast -crf 20`, `+faststart`, BT.709 tags, level 5.1. Hardware: a stub for AVE through
+  VideoToolbox, "not available" (seam described in SF-AD, "The screen recorder's seam for AVE").
+  Stop sends the end; the writer waits for ffmpeg to finish the file (never a truncated moov), then "Screen
+  recording saved".
+- Photo-JPEG (DESK2's path) stays: `record_codec=mjpeg`, or when `/usr/local/bin/ffmpeg` is missing.
+- Policy keys (live): `record_fps` (60), `record_scale` (full|half), `record_codec` (h264|mjpeg), `record_encoder`
+  (auto|software|hardware), `record_preset` (ultrafast), `record_crf` (20), `record_threads` (0 = x264's choice),
+  `record_nice` (0), `record_writeback` (on).
+- ffmpeg 8.1.2 + x264 (0-unstable-2025-01-03), static, linked to libSystem only, `--enable-gpl`:
+  `integrations/puredarwin/desktop/recording/build-ffmpeg-x264.nix`; GPL texts and the recipe's notes in
+  `/usr/local/share/doc/ffmpeg-x264/` on the M1. Homebrew's ffmpeg was not usable (SF-S: it needs AVFoundation and
+  the other media frameworks).
+
+### Measured on the M1 (desk11-next-002, 07:00-07:15Z)
+- **First full-size recording** (r11a): 2560x1600 H.264, 663 frames in 12.00 s = 55.2 frames/s, all 663 decoded
+  frames distinct, decodes cleanly (ffmpeg), colours exact on the test pattern's bars, text sharp, no tearing
+  (frames 30/331/640 looked at; `runs/m1-desktop-010/desk11-tests/shots/r11a-full-*.png`).
+- **Video page** (my Firefox, a 1080p60 H.264 file looping at ~2250x1270 px on the screen), full size, 5 recordings:
+  55.1, 55.2, 57.6, 58.8, 59.9 frames/s in the file; the desk presented 57.3-59.7 frames/s while recording against
+  58.5 without (WMCOST, 10 s windows); render+finish p50 2.1-2.3 ms / p95 2.9-3.5 ms (without: 2.0 / 3.2).
+  Compositor's thread per frame: submit 0.10-0.15 ms average (max 7.9 ms: the first buffer's allocation), hand-over
+  0.01 ms; compositor CPU 19-23 % of one core while recording (17 % without). ffmpeg: 33-36 CPU s per 12 s =
+  2.0-2.9 cores (`ffmpeg_cpu_pct_of_one_core`), in some runs it fell behind and finished up to 9 s after the stop
+  (frames waiting in its queue; all of them reached the file). The writer reads a 6.1 MB frame from the writeback
+  buffer in 2.1-2.8 ms (so the CPU mapping is cached; a write-combined read would be ~37 ms). Size: 47-50 MB per
+  12 s (~240 MB/min) at crf 20, 29 MB at crf 26 (19 Mbit/s; text equally sharp in a crop).
+- **Firefox's own video** (getVideoPlaybackQuality) dropped frames in 2 of 4 recordings at the default settings (34
+  and 47 of ~550 in 9 s), and in the threads=4 run (36); 0 with nice=10 and with crf 26; 0-5 without recording.
+  `record_threads=4` was worse (ffmpeg 4.5 s behind, desk 54.6 frames/s). Not settled with n=1.
+- **Scrolling page** (a wheel notch every 33 ms): full size 57.1 frames/s in the file, the desk 54.7 frames/s while
+  recording against 53.2 without, 137 MB/min; half size 57.8 frames/s, ffmpeg 0.8 cores, 203 MB/min (crf 20 at
+  half size spent more bits than full: 27 against 18 Mbit/s); the old Photo-JPEG path on the same page: 29.1
+  frames/s at half size, 366 MB/min, 127 % of a core inside the compositor.
+- **x264 alone** (no screen use, a desktop-like 2560x1600 clip decoded and re-encoded, the machine otherwise idle):
+  ultrafast 255 / 220 frames/s (video / scrolling content), superfast 170 / 140, veryfast 158 / 111: full size at 60
+  holds in software with headroom on the performance cores; on the busy desk x264 shares the cores with Firefox.
+- **Not shown**: the pointer in a recording (the owner's pointer had not moved since the relaunch; the instrument's
+  own pointer is never drawn): for the owner's checklist. desk11-003 (every drawn frame at 60, 60 Hz grid, BT.709
+  transfer/primaries in the stream, level 5.1; in 002 the stream says transfer/primaries unknown and level 6.2):
+  installed as files, measured below when it runs.
