@@ -11,8 +11,8 @@
 #   STAGE    a staged directory (manifest.tsv). Without it every hit is printed as "old"
 #
 # One line per file that has an old name in its bytes:
-#   row   PATH   a row of the manifest installs over it, removes it or keeps it (also: a file
-#                below a directory that a keep row names, and the source of a migrate row)
+#   row   PATH   a row of the manifest installs over it, removes it or keeps it (also the source of a
+#                migrate row). What a keep row names is not searched at all, file or directory
 #   OPEN  PATH   nothing in the manifest knows this file: decide before the switch
 # Before the switch OPEN must be empty or explained; after the switch the scan of the whole root
 # should print only files that are not SiliconForest's (Apple's two applications, Firefox's own
@@ -43,23 +43,105 @@ if [ -n "$STAGE" ]; then
   grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act path old new mode class note; do
     printf '%s\n' "$path" >> "$T.rows"
     case "$act" in
-      keep) printf '%s/\n' "$path" >> "$T.dirs";;
+      keep) printf '%s\n' "$path" >> "$T.dirs";;
       migrate) from=${note#from=}; printf '%s\n' "${from%%;sed=*}" >> "$T.rows";;
     esac
   done
 fi
-# not searched: other file systems, the kept files of this rename, device nodes
-find "$ROOT/" -xdev \( -path "$ROOT/private/var/db/sf-rename" -o -path "$ROOT/private/var/db/sf-audio-pretest" -o -path "$ROOT/dev" -o -path "$ROOT/nix" \) -prune -o -type f -size -800000 -print 2>/dev/null |
+# not searched: other file systems, the kept files of this rename, device nodes, and what a keep row names (a
+# directory that is not ours or is left on purpose: Homebrew's bottles, Apple's bundles, logs, retained runtimes)
+set -- -path "$ROOT/private/var/db/sf-rename" -o -path "$ROOT/private/var/db/sf-audio-pretest" -o -path "$ROOT/dev" -o -path "$ROOT/nix"
+while IFS= read -r d; do set -- "$@" -o -path "$ROOT$d"; done < "$T.dirs"
+# one grep for many files (xargs), not one per file; /dev/null keeps grep from reading its input when find gives nothing.
+# The size limit is in k: toybox's find (SiliconForest's) takes a bare number another way than GNU's
+# perl, where there is one (the M1 has /usr/bin/perl): one process per batch of files reads each file whole and tries
+# the pattern once; some hundred MiB a second. Without perl (the QEMU guest): grep, in two passes (below).
+if command -v perl > /dev/null 2>&1 && perl -e 1 2>/dev/null; then
+  find "$ROOT/" -xdev \( "$@" \) -prune -o -type f -size -409600k -print0 2>/dev/null |
+    SF_SCAN_PAT=$PAT xargs -0 perl -e 'my $re = qr/$ENV{SF_SCAN_PAT}/; undef $/;
+      for my $f (@ARGV) { open(my $h, "<", $f) or next; binmode $h; my $d = <$h>; close $h; print "$f\n" if defined $d && $d =~ $re; }' > "$T.hits" 2>/dev/null
+else
+# Two passes: fixed strings first (fast, and a superset of the pattern), the pattern itself only on those files
+  cat > "$T.fixed" <<'FIXED'
+org.puredarwin.
+/dev/pd
+kern.pd_
+machdep.pd
+hw.pd
+PDDRM
+PDApple
+PDM1
+PDBwfm
+PDDcp
+PDAgx
+PDCpu
+PDAop
+PDGOP
+PDHID
+PDIOSurface
+PDGpu
+PDArm
+PDSurface
+PDNVMe
+PDNvme
+PDAudio
+pd_window_position
+pdm1
+pdavd
+pdagx
+pdnvme
+pddcp
+pdgpu
+pddisp
+pdcpu
+pdtext
+pdapcie
+pdspeaker
+pd-netd
+pd-dhcp
+pd-net-up
+pd-backlight
+pd-wifipm
+pd-console-login
+pd-set-hostname
+pd-dmesg-save
+pd_cgl_
+pd_vk_
+pd_dri_
+pd_drm_
+pd_avd_
+pd_sound_
+pd_speaker_
+pd_backlight_
+pd_touchbar_
+pd_trackpad_
+pd_dcp_
+pd_agx_
+pd_nvme_
+pd_hid_
+pd_gop_
+pd_libdyld_
+AudioToolbox.output-pd
+/usr/bin/pdtone
+/usr/bin/pdvolume
+/usr/bin/pdplay
+/usr/bin/pdvideo
+puredarwingop_drv
+puredarwininput_drv
+FIXED
+  find "$ROOT/" -xdev \( "$@" \) -prune -o -type f -size -409600k -print0 2>/dev/null |
+    xargs -0 grep -a -l -F -f "$T.fixed" /dev/null 2>/dev/null > "$T.first"
+  : > "$T.hits"
+  while IFS= read -r f; do grep -a -q -E "$PAT" "$f" 2>/dev/null && printf '%s\n' "$f" >> "$T.hits"; done < "$T.first"
+fi
+: > "$T"
 while IFS= read -r f; do
-  grep -a -q -E "$PAT" "$f" 2>/dev/null || continue
   p=${f#"$ROOT"}
-  if grep -q -x -F "$p" "$T.rows"; then printf 'row\t%s\n' "$p"; continue; fi
-  hit=0
-  while IFS= read -r d; do case "$p" in "$d"*) hit=1; break;; esac; done < "$T.dirs"
-  if [ $hit = 1 ]; then printf 'row\t%s\n' "$p"; else printf 'OPEN\t%s\n' "$p"; fi
-done > "$T"
+  if grep -q -x -F "$p" "$T.rows"; then printf 'row\t%s\n' "$p" >> "$T"; else printf 'OPEN\t%s\n' "$p" >> "$T"; fi
+done < "$T.hits"
 [ -z "$OUT" ] || cp "$T" "$OUT"
 grep "^OPEN" "$T"
-echo "scanned ${ROOT:-/}: $(grep -c '^row' "$T") files with old names that the manifest accounts for, $(grep -c '^OPEN' "$T") that it does not"
-n=$(grep -c '^OPEN' "$T"); rm -f "$T" "$T.rows" "$T.dirs"
+[ -s "$T.dirs" ] && echo "not searched (keep rows): $(tr '\n' ' ' < "$T.dirs")"
+echo "scanned ${ROOT:-/}: $(grep -c . "$T.hits") files with an old name in their bytes: $(grep -c '^row' "$T") that the manifest accounts for, $(grep -c '^OPEN' "$T") that it does not"
+n=$(grep -c '^OPEN' "$T"); rm -f "$T" "$T.rows" "$T.dirs" "$T.hits" "$T.first" "$T.fixed"
 [ "$n" = 0 ]

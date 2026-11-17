@@ -131,6 +131,18 @@ counts, the hashes and the test records). What changed in the plan:
   `maintenance-render-thread-t13-v1-sf`): the installer with the renamed builds' hashes, the previous launchers with
   the names changed, the receipts carried over with the hashes mapped. The old directories stay for the old system.
 
+### The M1's dry run of 17 November (run by the coordinator)
+
+Eight live files were not what the records said; each was found in the store by its hash. The system-wide CoreVideo is
+`cocoa/corevideo-displaylink.nix` without 0172 (0172 is only in Firefox's private family): the renamed system file is
+built by `cocoa/corevideo-displaylink-0149.nix`. The system VideoToolbox is `finch/VideoToolbox/encoder/build.nix`, not
+the bottle variant; AudioToolbox is main's `finch/AudioToolbox/install.nix` of today; `AudioToolbox.pd` is the pin's
+AudioToolbox, left over from the pin's audio server; libdrm is the same source built with an earlier toolchain. The
+stage expects those files now and carries the renamed build of the same recipe for each. The live dyld's hash is not
+explained yet (a dyld in use reads with lowered pointer-authentication instructions; `runs/rebuild/stage/pac-lower.py`
+checks a copy page by page). The scan did not work with toybox's `find` (`-size` with a bare number) and was one
+`grep` per file: corrected.
+
 ## Tools
 
 - `tools/sf_rename_stage.py SPEC.json DIR`: lays out a staged directory from built trees:
