@@ -16,7 +16,7 @@
 { extra ? [ ], remove ? [ ] }:
 let
   pd = import ./pin.nix;
-  pkgs = import (builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=00d5848dca1fc90c8877becf593034ed85bb7b44").inputs.nixpkgs { system = "x86_64-linux"; };
+  pkgs = import (builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=04b6ecb44f8d6d8c650b8e3e1912bc57b881265d").inputs.nixpkgs { system = "x86_64-linux"; };
   parts = [
     pd."argon-desktop-msm-arm64"
     pd."framework-compat-arm64"

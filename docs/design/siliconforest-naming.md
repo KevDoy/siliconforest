@@ -27,6 +27,7 @@ repository, a checkout of upstream PureDarwin, and the Chonkstep Darwin source.
 | launchd labels | `org.puredarwin.hostname`, `org.puredarwin.dmesg-save`, … | `org.siliconforest.hostname`, … | R1 |
 | C identifiers and file names | `pd_nvme_gate`, `PD_DART_x`, `_PD_X_H`, `__pd_make` | `sf_nvme_gate`, `SF_DART_x`, `_SF_X_H`, `__sf_make` | R2 |
 | the same inside a longer name | `sysctl__kern_pd_avd`, `virgl_pd_winsys`, `F_PD_SAMEFILE`, `DYLD_PD_MISSING_OK` | `sysctl__kern_sf_avd`, `virgl_sf_winsys`, `F_SF_SAMEFILE`, `DYLD_SF_MISSING_OK` | R2: lower case `x_pd_y` always, except behind other people's prefixes (`pf_pd_*`, `usb_pd_*`, …); upper case `X_PD_Y` only behind listed prefixes (`kHIDUsage_PD_*` and register names stay) |
+| a prefix pasted by the preprocessor | `pd_##f`, `PD_##NAME` | `sf_##f`, `SF_##NAME` | R2c (found by building OpenGL: `static … pd_##f` beside the renamed use `sf_eglGetProcAddress`) |
 | compiler definitions | `-DPD_CORECRYPTO_DIR=…`, `-DPDGOP=1` | `-DSF_CORECRYPTO_DIR=…`, `-DSFGOP=1` | all rules also apply after `-D`/`-U` |
 | libraries | `libPDGOP.a`, `-lPDGOP`, `libpdavd`, `-lpdavd`, `libpd_virgl_shim`, `kPDGPU_Present` | `libSFGOP.a`, `-lSFGOP`, `libsfavd`, `-lsfavd`, `libsf_virgl_shim`, `kSFGPU_Present` | R3 to R5 also apply after `lib`, `-l` and the constant prefix `k` |
 | Rust types generated from `pd_` names | `PdWindowPositionV1`, `PdSpeaker` | `SfWindowPositionV1`, `SfSpeaker` | R12 |
@@ -175,11 +176,16 @@ CoreGraphics, QuartzCore, libWindowServer, IOSurface, OpenGL and everything that
 
     tools/sf_rename.py fork sources/puredarwin-baseline e7aa00a60f0b56ef35aa24252e81467787bf71ea
 
-leaves branch `siliconforest/e7aa00a6` = `00d5848dca1fc90c8877becf593034ed85bb7b44`; the three Cocoa recipes name that
+leaves branch `siliconforest/e7aa00a6` = `04b6ecb44f8d6d8c650b8e3e1912bc57b881265d`; the three Cocoa recipes name that
 commit. Three names that exist only at the pin were classified for it (`pd-wayland-session` and the boot argument
 `pdmmcsync` renamed, `pde0` an AMD page-directory word that stays); none of them occurs at the tip, so the tip's
 fork commit is unchanged. `check --tree` is clean on the pin's fork and `licence-proof` finds 0 changed notice lines
-(32,580 files compared, 1,841 changed). `SF_PD=pin` in `rebase/pd.nix` still names upstream's own tree and is not
+(32,580 files compared, 1,841 changed). The pin's fork was made with rule R2c; the tip's fork commit (`e7110de8`, `FORK_REV`) was made before it and still has
+`pd_##` in two files (`src/Frameworks/OpenGL/CGL.c`, where it does not compile, and
+`src/Libraries/libSystem/libc/darwin/sf_arm64_abi.c`, where it does). Nothing built from the tip so far compiles that
+`CGL.c`. Regenerating the tip's fork changes its commit id and so rebuilds everything made from it; it is to be done
+together with the kernel rebuild the M1 install needs (`siliconforest-naming-m1-install.md`), not before.
+`SF_PD=pin` in `rebase/pd.nix` still names upstream's own tree and is not
 built by the recipes of this branch.
 
 ## 6. What the owner sees, and where it comes from

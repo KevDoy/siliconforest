@@ -33,7 +33,7 @@
 +	/* A missing EGL library is an unavailable CGL renderer, never a call
 +	 * through a null function pointer. Check every entry this backend uses. */
 +	int complete = 1;
-+#define SF_EGL_CHECK(f) complete = complete && pd_##f != NULL;
++#define SF_EGL_CHECK(f) complete = complete && sf_##f != NULL;
 +	SF_EGL_FUNCS(SF_EGL_CHECK)
 +#undef SF_EGL_CHECK
 +	if (!complete) {

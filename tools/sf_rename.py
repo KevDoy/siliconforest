@@ -47,6 +47,7 @@ DATA = json.load(open(os.path.join(HERE, 'sf_rename_data.json')))
 PRODUCT = {'PureDarwin': 'SiliconForest', 'puredarwin': 'siliconforest', 'PUREDARWIN': 'SILICONFOREST',
            'Puredarwin': 'Siliconforest', 'pureDarwin': 'siliconForest'}
 # R2  pd_ / PD_ at the start of an identifier (leading underscores allowed) -> sf_ / SF_
+# R2c pd_## / PD_## (a prefix pasted onto a macro argument) -> sf_## / SF_##
 #     and after one of these prefixes inside an identifier (every other "x_pd_y" is somebody
 #     else's: pf_pd_*, kHIDUsage_PD_*, power domains of the Linux drivers)
 INNER_PREFIXES = ['virgl', 'VIRGL', 'to', 'ml', 'MTL', 'libVkLayer', 'VkLayer', 'opl', 'OPL', 'I', 'brcmfmac', 'SWC',
@@ -162,6 +163,8 @@ EXCEPT_FILES = {
     'LICENSE_STATUS.md': 'licence statement', 'tools/sf_rename.py': 'the rule table', 'tools/sf_rename_data.json': 'the vocabularies',
     'docs/design/siliconforest-naming.md': 'the naming design: it lists the old names',
     'docs/design/siliconforest-naming-m1-install.md': 'the install plan: it describes the installed system by its old names',
+    'tools/sf_rename_stage.py': 'the stage builder for the installed system: its example names an old path',
+    'tools/test_sf_rename_switch.sh': 'the switch test: its mock root is a system under the old names',
     'NOTICE': 'attribution',
     'integrations/puredarwin': 'a symbolic link to siliconforest: the frozen controllers, tests and records name files by the old path',
 }
@@ -264,12 +267,24 @@ def _garbage(tok):
     return len(re.findall(r'[0-9][A-Za-z]|[a-z][A-Z][a-z]?[A-Z0-9]', tok)) >= 3 and not re.search(r'[A-Z][a-z]{3,}', tok)
 
 
+PASTE = re.compile(r'(?<![A-Za-z0-9_])(?:pd_|PD_)(?=##)')
+
+
 def transform_line(line, counts=None):
     if 'pd' not in line and 'PD' not in line and 'Pd' not in line and 'arwin' not in line and 'ARWIN' not in line:
         return line
     if PROTECTED_LINE.search(line) or OPAQUE.match(line.strip()):
         return line
     spans = [m.span() for m in PROTECTED_SPAN.finditer(line)]
+    # R2c: a prefix pasted by the preprocessor (`pd_##f`, `PD_##NAME`): the names it makes are used as
+    # `sf_...` elsewhere (upstream's CGL.c: `static ... pd_##f` and `sf_eglGetProcAddress`)
+    if '##' in line:
+        def paste(m):
+            if counts is not None:
+                counts.setdefault('paste', {}).setdefault(m.group(0), 0)
+                counts['paste'][m.group(0)] += 1
+            return 'sf_' if m.group(0) == 'pd_' else 'SF_'
+        line = PASTE.sub(paste, line)
 
     def repl(m):
         s = m.start()
