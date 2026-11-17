@@ -143,6 +143,19 @@ explained yet (a dyld in use reads with lowered pointer-authentication instructi
 checks a copy page by page). The scan did not work with toybox's `find` (`-size` with a bare number) and was one
 `grep` per file: corrected.
 
+### The M1's scan of 17 November (run by the coordinator)
+
+The scan showed what the manifest did not know: upstream's on-disk kext bundles (`/System/Library/Extensions`, about
+50 with old names), kernel headers of the image, a second libdrm at `/lib`, and backups that earlier installs left
+beside libraries (`AppKit.pre-t13` and 25 more). The stage's base is now every file that differs between the old-name
+tip image and the renamed one, the kext directory included: bundles under an old name go with their directories,
+the renamed ones come. Nothing on the M1 loads kernel code from that directory (the kernel is the collection on
+SFBOOT); the IOKit user library looks bundles up there by identifier. Two new kinds of row carry this: `rmdir` (a
+directory is taken away once the run has emptied it; the restore makes it again) and `sweep` (every regular file
+whose path begins with the row's path is taken away like a `remove` row). The switch journals each directory chain it
+makes, and the restore takes those away again. Staging directories under `/private/var/db` are not part of the
+switch; which of them are still read is in the runbook.
+
 ## Tools
 
 - `tools/sf_rename_stage.py SPEC.json DIR`: lays out a staged directory from built trees:
@@ -157,8 +170,9 @@ checks a copy page by page). The scan did not work with toybox's `find` (`-size`
 - `tools/sf_rename_restore.sh [--dry-run] [--root DIR] [--name NAME]`: undoes a complete or an
   interrupted switch from the journal; the renamed files go to `.../new/`.
 - `tools/sf_rename_scan.sh [--root DIR] [--out FILE] [STAGE]`: see above.
-- `tools/test_sf_rename_switch.sh [SHELL] [--stage S --mock ROOT]`: 21 cases against a mock root (the 16 below, class
-  `kernel`, a restore stopped before its last step, the one-process renames by `python3` and `perl`). The 16:
+- `tools/test_sf_rename_switch.sh [SHELL] [--stage S --mock ROOT]`: 24 cases against a mock root (the 16 below, class
+  `kernel`, a restore stopped before its last step, the one-process renames by the tool, `python3` and `perl`, bundle
+  directories and swept backups). The 16:
   (dry run changes nothing; switch; second switch does nothing; restore gives the first root byte
   for byte; a switch stopped after each possible number of changes restores and resumes; a
   differing live file stops the switch; classes in two runs; a separate `--name`).

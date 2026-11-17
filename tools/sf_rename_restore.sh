@@ -85,6 +85,8 @@ while IFS=$TAB read -r what path arg; do
       elif present "$ROOT$path"; then say "back $path (was journalled, not yet moved: left as it is)"
       else say "BAD  the old $path is not in old/"; bad=$((bad + 1)); fi;;
     migrated) say "take $path (the copy of $arg) to new/";;
+    rmdir) say "back $path (a directory that was taken away)";;
+    madedir) say "take $path away again (a directory the switch made), if nothing else is in it";;
     *) say "BAD  journal line: $what $path"; bad=$((bad + 1));;
   esac
   n=$((n + 1))
@@ -122,8 +124,11 @@ while IFS=$TAB read -r what path arg; do
         fi
       fi;;
     removed)
-      if present "$OLD$path"; then mv "$OLD$path" "$ROOT$path" || die "cannot put $path back (it is in old/)"; fi;;
+      if present "$OLD$path"; then mkdir -p "$(dirname "$ROOT$path")" && mv "$OLD$path" "$ROOT$path" || die "cannot put $path back (it is in old/)"; fi;;
     migrated) aside "$path" || die "cannot take $path out";;
+    rmdir) mkdir -p "$ROOT$path" && chmod 755 "$ROOT$path" || die "cannot make the directory $path again";;
+    madedir) # only directories are left in it when the switch made it; anything else keeps it
+      [ -d "$ROOT$path" ] && find "$ROOT$path" -depth -type d -exec rmdir {} \; 2>/dev/null;;
   esac
 done < "$REV"
 rm -f "$REV"

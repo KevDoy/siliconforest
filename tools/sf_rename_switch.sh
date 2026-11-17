@@ -29,6 +29,11 @@
 #                                                "from=<old path>;sed=<expression>": the copy goes through
 #                                                sed (names inside an XML property list, hashes inside a
 #                                                receipt); a binary property list is carried over as it is
+#   sweep    PATH  -    -    -     CLASS  NOTE   every regular file whose path begins with PATH (backups an
+#                                                earlier install left beside a library: AppKit.pre-t13 ...) is taken
+#                                                away like a `remove` row; the dry run lists what it finds
+#   rmdir    PATH  -    -    -     CLASS  NOTE   the directory PATH is taken away when the class's other rows have
+#                                                left it empty (a bundle under its old name); one that is not empty stays
 #   keep     PATH  ...                           accounted for, not touched (printed by --dry-run)
 # OLD is the SHA-256 the live file is expected to have, "absent", or "unknown" (not in the lab's
 # records: any content is accepted and kept). NEW is the SHA-256 of the staged file.
@@ -91,9 +96,19 @@ elif command -v shasum >/dev/null 2>&1; then sha() { shasum -a 256 "$1" | cut -c
 else sha() { openssl dgst -sha256 "$1" | sed 's/.*= *//'; }; fi
 say() { printf '%s\n' "$*"; }
 die() { printf 'sf_rename_switch: %s\n' "$*" >&2; exit 1; }
-rows() { # the manifest's rows of one class, in file order
+rows() { # the manifest's rows of one class, in file order; its rmdir rows after the others, the deepest first
   grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act path old new mode class note; do
-    [ "$class" = "$1" ] && printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$act" "$path" "$old" "$new" "$mode" "$class" "$note"
+    [ "$class" = "$1" ] && [ "$act" != rmdir ] && printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$act" "$path" "$old" "$new" "$mode" "$class" "$note"
+  done
+  grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act path old new mode class note; do
+    [ "$class" = "$1" ] && [ "$act" = rmdir ] && printf '%s\t%s\n' "${#path}" "$path"
+  done | sort -rn | while IFS=$TAB read -r len path; do printf 'rmdir\t%s\t-\t-\t-\t%s\t-\n' "$path" "$1"; done
+}
+swept() { # the regular files a sweep row means: PATH followed by anything, not the switch's own temporary names
+  for f in "$ROOT$1"*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    case "$f" in *.sf-new|*.sf-old) continue;; esac
+    printf '%s\n' "${f#"$ROOT"}"
   done
 }
 # what is at a live path: absent, link:<target>, dir, or the file's SHA-256
@@ -179,6 +194,13 @@ grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act p
       if [ "$is" != absent ]; then say "same $path (exists; $from is left alone)"; echo skip >> "$CHECK"
       elif [ -f "$ROOT$from" ]; then say "copy $from -> $path"; echo work >> "$CHECK"
       else say "none $path: nothing at $from to carry over"; echo skip >> "$CHECK"; fi;;
+    sweep)
+      n=0; for f in $(swept "$path"); do say "rm   $f (swept; kept in old/)"; echo work >> "$CHECK"; n=$((n + 1)); done
+      [ $n = 0 ] && { say "same $path* (nothing there)"; echo skip >> "$CHECK"; };;
+    rmdir)
+      if [ "$is" = absent ]; then say "same $path (already absent)"; echo skip >> "$CHECK"
+      elif [ "$is" = dir ]; then say "rmd  $path (when this run has emptied it)"; echo work >> "$CHECK"
+      else say "BAD  rmdir of something that is not a directory: $path"; echo bad >> "$CHECK"; fi;;
     keep) say "keep $path ($note)";;
     *) say "BAD  unknown action '$act': $path"; echo bad >> "$CHECK";;
   esac
@@ -211,6 +233,11 @@ keep_old() { # gives the live file PATH a second name, old/PATH; the path itself
   [ -e "$OLD$1" ] && return 0          # kept by an earlier, interrupted run: that one is the old file
   if [ -L "$ROOT$1" ]; then cp -P "$ROOT$1" "$OLD$1"; else ln "$ROOT$1" "$OLD$1" 2>/dev/null || cp -p "$ROOT$1" "$OLD$1"; fi
 }
+made_dir() { # journals the topmost directory of PATH's chain that does not exist yet (the restore takes it away again)
+  d=$1; top=
+  while [ -n "$d" ] && [ "$d" != / ] && [ ! -d "$ROOT$d" ]; do top=$d; d=$(dirname "$d"); done
+  [ -z "$top" ] || printf 'madedir\t%s\t-\n' "$top" >> "$J"
+}
 do_class() {
   rows "$1" > "$DB/rows.$1"
   rm -f "$DB/commit.core"
@@ -220,6 +247,7 @@ do_class() {
       install)
         [ "$is" = "$new" ] && continue
         step
+        made_dir "$(dirname "$path")"
         mkdir -p "$(dirname "$live")" || die "mkdir for $path"
         cp "$STAGE/root$path" "$live.sf-new" || die "copy of $path"
         [ "$(sha "$live.sf-new")" = "$new" ] || { rm -f "$live.sf-new"; die "the copy of $path does not have the manifest's hash; stopped"; }
@@ -241,6 +269,19 @@ do_class() {
         step
         printf 'removed\t%s\t-\n' "$path" >> "$J"
         put_away "$path" || die "cannot keep the old $path";;
+      sweep)
+        for f in $(swept "$path"); do
+          step
+          printf 'removed\t%s\t-\n' "$f" >> "$J"
+          put_away "$f" || die "cannot keep the old $f"
+        done;;
+      rmdir)
+        [ "$is" = dir ] || continue
+        if [ -z "$(ls -A "$live" 2>/dev/null)" ]; then
+          step
+          printf 'rmdir\t%s\t-\n' "$path" >> "$J"
+          rmdir "$live" || die "cannot take the directory $path away"
+        else say "left $path (not empty)"; fi;;
       migrate)
         from=${note#from=}; expr=; case "$from" in *";sed="*) expr=${from#*;sed=}; from=${from%%;sed=*};; esac
         [ "$is" = absent ] && [ -f "$ROOT$from" ] || continue

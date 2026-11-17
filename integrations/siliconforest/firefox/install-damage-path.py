@@ -111,7 +111,9 @@ def select_render_thread(args, manifest_path, before, manifest, before_launcher)
     frameworks = {}
     for path, digest in TERM13.items():
         data = Path(path).read_bytes()
-        if sha(data) != digest or not Path(path + '.pre-t13').is_file():
+        # (the renamed system) TERM13's .pre-t13 copies are old-name builds and were taken away with the
+        # rename; the way back from these frameworks is the rename's own restore
+        if sha(data) != digest:
             raise ValueError('TERM13 framework/rollback differs: ' + path)
         frameworks[path] = dict(sha256=digest, uuid=image_uuid(data))
     if any(manifest.get(key) is not True for key in ['gpu_presentation', 'gpu_damage', 'gpu_image_cache']):

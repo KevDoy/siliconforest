@@ -33,6 +33,10 @@ if [ -z "$STAGE" ]; then
   echo new-job > $STAGE/root/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist; echo old-job > $MOCK/System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist
   echo notice > $STAGE/root/usr/share/doc/siliconforest/NOTICE
   mkdir -p $STAGE/root/sbin $MOCK/sbin; echo new-halt > $STAGE/root/sbin/sf-halt; echo old-halt > $MOCK/sbin/sf-halt
+  E=System/Library/Extensions; mkdir -p $MOCK/$E/PDFoo.kext/Contents/MacOS $STAGE/root/$E/SFFoo.kext/Contents/MacOS
+  echo old-plist > $MOCK/$E/PDFoo.kext/Contents/Info.plist; echo old-kext > $MOCK/$E/PDFoo.kext/Contents/MacOS/PDFoo
+  echo new-plist > $STAGE/root/$E/SFFoo.kext/Contents/Info.plist; echo new-kext > $STAGE/root/$E/SFFoo.kext/Contents/MacOS/SFFoo
+  echo backup-1 > $MOCK/usr/lib/libAppKit.dylib.pre-t13; echo backup-2 > $MOCK/usr/lib/libAppKit.dylib.old-sfy
   echo new-appkit > $STAGE/root/usr/lib/libAppKit.dylib; echo locally-changed-appkit > $MOCK/usr/lib/libAppKit.dylib
   echo networks > $MOCK/Library/Preferences/org.puredarwin.wifi.known
   printf '<?xml version="1.0"?>\n<plist><dict><key>PDAudio:speakers</key><real>0.4</real></dict></plist>\n' > $MOCK/Library/Preferences/org.puredarwin.audio.plist
@@ -50,6 +54,10 @@ if [ -z "$STAGE" ]; then
     echo "install$T/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist${T}absent$T$(h $STAGE/root/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist)${T}0644${T}launchd${T}t"
     echo "remove$T/System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist${T}unknown$T-$T-${T}launchd${T}t"
     echo "install$T/sbin/sf-halt$T$(h $MOCK/sbin/sf-halt)$T$(h $STAGE/root/sbin/sf-halt)${T}0755${T}kernel${T}t"
+  for f in Contents/Info.plist Contents/MacOS/SFFoo; do echo "install$T/$E/SFFoo.kext/$f${T}absent$T$(h $STAGE/root/$E/SFFoo.kext/$f)${T}0644${T}direct${T}t"; done
+  for f in Contents/Info.plist Contents/MacOS/PDFoo; do echo "remove$T/$E/PDFoo.kext/$f$T$(h $MOCK/$E/PDFoo.kext/$f)$T-$T-${T}direct${T}t"; done
+  for d in PDFoo.kext PDFoo.kext/Contents PDFoo.kext/Contents/MacOS; do echo "rmdir$T/$E/$d$T-$T-$T-${T}direct${T}t"; done
+  echo "sweep$T/usr/lib/libAppKit.dylib.$T-$T-$T-${T}direct${T}t"
   echo "install$T/usr/share/doc/siliconforest/NOTICE${T}absent$T$(h $STAGE/root/usr/share/doc/siliconforest/NOTICE)${T}0644${T}direct${T}t"
     echo "migrate$T/Library/Preferences/org.siliconforest.wifi.known${T}unknown$T-${T}0644${T}state${T}from=/Library/Preferences/org.puredarwin.wifi.known"
     echo "migrate$T/Library/Preferences/org.siliconforest.audio.plist${T}unknown$T-${T}0644${T}state${T}from=/Library/Preferences/org.puredarwin.audio.plist;sed=s/PDAudio:/SFAudio:/g"
@@ -151,5 +159,14 @@ for m in tool python3 perl zsh; do
   SF_RENAME_COMMIT=$m sw --root $W/r $STAGE > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/after $W/now && SF_RENAME_COMMIT=$m rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now \
     && ok "renames by one $m process: switch and restore" || { no "renames by $m"; tail -2 $W/o; }
 done
+# 13. bundles under an old name go with their directories, new ones come with theirs, swept backups go; restore undoes all of it
+if grep -q "^rmdir$T" $STAGE/manifest.tsv && [ -d "$MOCK/System/Library/Extensions/PDFoo.kext" ]; then
+  X=$W/r/System/Library/Extensions
+  fresh; sw --root $W/r $STAGE > $W/o 2>&1
+  { [ ! -e $X/PDFoo.kext ] && [ -f $X/SFFoo.kext/Contents/MacOS/SFFoo ] && [ ! -e $W/r/usr/lib/libAppKit.dylib.pre-t13 ] && [ ! -e $W/r/usr/lib/libAppKit.dylib.old-sfy ] && [ -f $W/r/usr/lib/libAppKit.dylib ]; } \
+    && ok "rmdir and sweep: the old bundle's directories are gone, the new bundle is there, the backups beside the library are gone" || { no "rmdir/sweep after the switch"; tail -3 $W/o; }
+  rs --root $W/r > $W/o 2>&1; snap $W/r > $W/now
+  { cmp -s $W/before $W/now && [ ! -e $X/SFFoo.kext ] && [ -d $X/PDFoo.kext/Contents/MacOS ]; } && ok "restore: the old bundle is back with its directories, the new bundle's directories are gone" || { no "rmdir/sweep after the restore"; tail -3 $W/o; ls -R $X | head; }
+fi
 echo "passed $pass, failed $fail (shell: $SH)"
 [ $fail = 0 ]

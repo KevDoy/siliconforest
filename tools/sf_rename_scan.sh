@@ -11,8 +11,8 @@
 #   STAGE    a staged directory (manifest.tsv). Without it every hit is printed as "old"
 #
 # One line per file that has an old name in its bytes:
-#   row   PATH   a row of the manifest installs over it, removes it or keeps it (also the source of a
-#                migrate row). What a keep row names is not searched at all, file or directory
+#   row   PATH   a row of the manifest installs over it, removes it, sweeps it or keeps it (also the
+#                source of a migrate row). What a keep row names is not searched at all, file or directory
 #   OPEN  PATH   nothing in the manifest knows this file: decide before the switch
 # Before the switch OPEN must be empty or explained; after the switch the scan of the whole root
 # should print only files that are not SiliconForest's (Apple's two applications, Firefox's own
@@ -38,12 +38,13 @@ TAB=$(printf '\t')
 # the old lookups (the same list as the stage's own strings check)
 PAT='org\.puredarwin\.|/dev/pd[a-z]|kern\.pd_|machdep\.pd|hw\.pd[a-z]|PD(DRM|Apple|M1|Bwfm|Dcp|Agx|Cpu|Aop|GOP|HID|IOSurface|Gpu|Arm|Surface|NVMe|Nvme|Audio)[A-Za-z0-9]|pd_window_position|pd(m1|avd|agx|nvme|dcp|gpu|disp|cpu|text|apcie|speaker)[a-z0-9_]*=|pd-(netd|dhcp|net-up|backlight|wifipm|console-login|set-hostname|dmesg-save)|pd_(cgl|vk|dri|drm|avd|sound|speaker|backlight|touchbar|trackpad|dcp|agx|nvme|hid|gop|libdyld)_|AudioToolbox\.output-pd|/usr/bin/pd(tone|volume|play|video)|puredarwin(gop|input)_drv'
 T=$(mktemp "${TMPDIR:-/tmp}/sf-rename-scan.XXXXXX") || exit 1
-: > "$T.rows"; : > "$T.dirs"
+: > "$T.rows"; : > "$T.dirs"; : > "$T.sweep"
 if [ -n "$STAGE" ]; then
   grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act path old new mode class note; do
     printf '%s\n' "$path" >> "$T.rows"
     case "$act" in
       keep) printf '%s\n' "$path" >> "$T.dirs";;
+      sweep) printf '%s\n' "$path" >> "$T.sweep";;
       migrate) from=${note#from=}; printf '%s\n' "${from%%;sed=*}" >> "$T.rows";;
     esac
   done
@@ -137,11 +138,13 @@ fi
 : > "$T"
 while IFS= read -r f; do
   p=${f#"$ROOT"}
-  if grep -q -x -F "$p" "$T.rows"; then printf 'row\t%s\n' "$p" >> "$T"; else printf 'OPEN\t%s\n' "$p" >> "$T"; fi
+  hit=0; grep -q -x -F "$p" "$T.rows" && hit=1
+  [ $hit = 1 ] || while IFS= read -r pre; do case "$p" in "$pre"*) hit=1; break;; esac; done < "$T.sweep"   # a sweep row takes it
+  if [ $hit = 1 ]; then printf 'row\t%s\n' "$p" >> "$T"; else printf 'OPEN\t%s\n' "$p" >> "$T"; fi
 done < "$T.hits"
 [ -z "$OUT" ] || cp "$T" "$OUT"
 grep "^OPEN" "$T"
 [ -s "$T.dirs" ] && echo "not searched (keep rows): $(tr '\n' ' ' < "$T.dirs")"
 echo "scanned ${ROOT:-/}: $(grep -c . "$T.hits") files with an old name in their bytes: $(grep -c '^row' "$T") that the manifest accounts for, $(grep -c '^OPEN' "$T") that it does not"
-n=$(grep -c '^OPEN' "$T"); rm -f "$T" "$T.rows" "$T.dirs" "$T.hits" "$T.first" "$T.fixed"
+n=$(grep -c '^OPEN' "$T"); rm -f "$T" "$T.rows" "$T.dirs" "$T.sweep" "$T.hits" "$T.first" "$T.fixed"
 [ "$n" = 0 ]
