@@ -1922,6 +1922,65 @@ an Options choice only.
   ultrafast 255 / 220 frames/s (video / scrolling content), superfast 170 / 140, veryfast 158 / 111: full size at 60
   holds in software with headroom on the performance cores; on the busy desk x264 shares the cores with Firefox.
 - **Not shown**: the pointer in a recording (the owner's pointer had not moved since the relaunch; the instrument's
-  own pointer is never drawn): for the owner's checklist. desk11-003 (every drawn frame at 60, 60 Hz grid, BT.709
-  transfer/primaries in the stream, level 5.1; in 002 the stream says transfer/primaries unknown and level 6.2):
-  installed as files, measured below when it runs.
+  own pointer is never drawn): for the owner's checklist.
+
+### desk11-003 (the coordinator's relaunch at 07:25Z, at the owner's word), measured 07:25-07:28Z
+003 takes every frame the desk drew at 60 a second (002 skipped one drawn under 12.5 ms after the last), puts the
+frames' times on a 60 Hz grid, carries BT.709 transfer/primaries into the stream (002: "unknown") and writes level
+5.1 (002: 6.2).
+- Video page, full size, n=3: **54.3, 58.1, 59.9 frames/s in the file** (652/697/719 frames in 12.0 s, every decoded
+  frame distinct); the third file: `r_frame_rate=60/1`, time base 1/60000, 715 intervals of 16.67 ms and 3 of 33.3 ms,
+  H.264 level 5.1, BT.709 matrix/transfer/primaries, decodes without a warning. The desk presented 53.1, 57.9, 59.8
+  frames/s while recording (58.5 without); render+finish p50 2.0-2.2 / p95 3.3-3.4 ms. ffmpeg 18-21 CPU s per 12 s =
+  1.0-1.7 cores (002: 33-36 s; the difference was not isolated, the level/time base is the likely cause); it finished
+  0.1-6.2 s after the stop. Firefox dropped 56 of its video's frames in the first recording (its own CPU that phase:
+  16.1 s against 5-9 s in the others), 0 in the other two. The first recording is the run where the desk fell to 53.1.
+- **Failure found**: a selection recording (`-R 301,201,1001,601 -F`) failed at once: `eglCreateImageKHR refused the
+  recorder buffer: EGL error 0x3003` - the buffer's pitch is the frame's width in bytes, and Mesa's asahi driver takes
+  a linear dma-buf only with a 16-byte aligned pitch (`agx_pipe.c`); 1000 was not. The notice said "Screen recording
+  failed" (ffmpeg, given no frame, ended with status 187). Fixed in desk11-004: an H.264 recording's width is a
+  multiple of 16 (a full-size selection is cut by at most 15 px; host test `an_h264_recording_has_a_width_the_gpu_
+  buffer_takes`). Toolbar Record Screen was never affected (2560 and 1280 are multiples of 16).
+
+### Host tests (`runs/m1-desktop-010/desk11-tests/`)
+desk11-002: wm-darwin lib 185/185 (new: `a_recorded_frame_is_converted_to_nv12_on_the_gpu`, the GPU conversion of a
+frame and of an area at half size within one step of a CPU BT.709 reference, frames back in the order taken, a slot
+not reused before it is released; `software_encoder_makes_an_h264_movie_with_the_frames_times`, 60 frames at 60 a
+second through the host's ffmpeg: H.264, yuv420p, 60 frames, 1.00 s, moov first; the Matroska framing; the policy's
+`record_*` keys; the request's size), wayland_dmabuf 9/9, wayland_outputs 2/2, wayland_theme 3/3, wayland_shm 28/29
+and wayland_scale 3/4 (the base's autopilot and scale failures, as in DESK9/10). desk11-003: the encoder test also
+checks BT.709 transfer/primaries and level 5.1. desk11-004: lib 186/186 (+ `an_h264_recording_has_a_width_the_gpu_buffer_
+takes`). Patch check: patch 35 applied to a fresh copy of the `desk10-next-003` build source gives the build source of
+`desk11-next/daily-004` exactly (`diff -r`, `runs/m1-desktop-010/desk11-patchcheck`).
+`tools/check.py --sanitize --cross`: PASSED_LOCAL_TOOLING.
+
+### On the disk and how to go back
+- Running (since the coordinator's relaunch at 07:25Z): desk11-next-003 `8ca8b694...`. Installed as files (start with the
+  next relaunch): `/usr/bin/chonkstep-darwin-desktop.next` = desk11-next-004 `846fe3dc...` (inject),
+  `/usr/bin/chonkstep-darwin-desktop` = desk11-daily-004 `c31981be...` (hashed on the M1 right after each copy). Kept:
+  `.next.before-desk11-004` / `.before-desk11-004` = 003 (`8ca8b694`/`9253ca69`), `.next.before-desk11-003` /
+  `.before-desk11-003` = 002 (`4e3c199b`/`18a15a24`, ran 06:58-07:25Z), `.next.before-desk11` / `.before-desk11` = DESK10's
+  pair (`554e8da2`/`2efe6e06`); `.safe` untouched (`b1104b75`).
+- New files: `/usr/local/bin/ffmpeg` `014a854f...`, `/usr/local/bin/ffprobe` `ce441b9e...`, `/usr/local/share/doc/ffmpeg-x264/`
+  (GPL-2.0 texts, x264 licence, README, configuration, linkage). New buffers only while recording (five 6 MB GEM objects
+  per recording size, kept for the compositor's life). Policy file untouched (all `record_*` at their defaults).
+- Revert: `desk_m1.sh policy record_codec=mjpeg` (the old Photo-JPEG recorder, live); the binaries: `ln -f
+  <path>.before-desk11 <path>.back && mv -f <path>.back <path>` for both names, then a relaunch; ffmpeg: `rm
+  /usr/local/bin/ffmpeg /usr/local/bin/ffprobe; rm -r /usr/local/share/doc/ffmpeg-x264` (the recorder then falls back to
+  Photo-JPEG by itself).
+- Source: patch 35 in `integrations/puredarwin/terminal-app/compositor/` (README); ffmpeg/x264:
+  `integrations/puredarwin/desktop/recording/build-ffmpeg-x264.nix`.
+
+### For the owner, at the M1 (real keys and pointer)
+1. Command-Shift-5 → Record Screen → Record; do something for 10-20 s (move the pointer, play a video, scroll); stop with
+   Command-Control-Escape. "Screen recording saved" appears after a moment; the file is in ~/Pictures/Screenshots.
+2. Play it (copy it to a Mac and use QuickTime; Firefox here may open it too: not tried): full size, smooth, colours as on the
+   screen, your pointer in it. Say if anything stutters or the pointer is missing.
+3. Command-Shift-5 → Options: Record at Half Size / 30 Frames a Second if a smaller file is wanted; Record Selection
+   records a dragged area - from desk11-004 on (after the next relaunch); desk11-003, running now, fails most
+   selections ("Screen recording failed").
+4. If Firefox stutters while recording: `desk_m1.sh policy record_nice=10` (the encoder yields to everything else;
+   the recording may then lose frames instead), or `record_crf=26` (smaller files, slightly softer pictures).
+
+### Taken from Finch (DESK11)
+Nothing.

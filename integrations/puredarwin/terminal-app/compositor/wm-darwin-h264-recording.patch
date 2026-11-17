@@ -608,7 +608,7 @@ index 0000000..7df89e4
 +    }
 +}
 diff --git a/crates/wm-darwin/src/glrender.rs b/crates/wm-darwin/src/glrender.rs
-index 650fa5c..b5e0969 100644
+index 650fa5c..55f528e 100644
 --- a/crates/wm-darwin/src/glrender.rs
 +++ b/crates/wm-darwin/src/glrender.rs
 @@ -16,7 +16,7 @@ use crate::damage::{DRect, ItemKey};
@@ -836,13 +836,14 @@ index 650fa5c..b5e0969 100644
      /// Bring the texture for `image` up to date and bind it. `partial` holds
      /// image-space rectangles when only those changed since the last upload.
      fn texture(&mut self, key: TextureKey, image: &DecorationBuffer, generation: u64, partial: Option<&[DRect]>) -> bool {
-@@ -1664,6 +1815,108 @@ impl Renderer for GlRenderer {
+@@ -1664,6 +1815,109 @@ impl Renderer for GlRenderer {
      /// An area of the last frame scaled to `out` by the GPU (linear filter), then read: what a
      /// recording takes. Reading the whole panel costs ~100 ms on the M1 (the frame's memory is
      /// slow to read from the CPU); a frame of a quarter of the pixels costs a quarter of that.
 +    fn record_capture(&mut self, src: (i32, i32, u32, u32), out: (u32, u32), writeback: bool, slots: usize) -> Result<Option<u64>, String> {
-+        if out.0 % 4 != 0 || out.1 % 2 != 0 || out.0 == 0 || out.1 == 0 {
-+            return Err(format!("an NV12 frame of {}x{} (the width a multiple of 4, the height of 2)", out.0, out.1));
++        // the buffer's pitch is the frame's width in bytes: the driver takes linear dma-bufs with 16-byte pitches
++        if out.0 % 16 != 0 || out.1 % 2 != 0 || out.0 == 0 || out.1 == 0 {
++            return Err(format!("an NV12 frame of {}x{} (the width a multiple of 16, the height of 2)", out.0, out.1));
 +        }
 +        let Some(texture) = self.target.last_texture() else { return Ok(None) };
 +        let (tw, th) = self.target.size();
@@ -945,7 +946,7 @@ index 650fa5c..b5e0969 100644
      fn read_back_scaled(&mut self, src: (i32, i32, u32, u32), out: (u32, u32)) -> Result<Option<Vec<u8>>, String> {
          let Some(fbo) = self.target.last() else {
              return Ok(None);
-@@ -1893,6 +2146,97 @@ mod tests {
+@@ -1893,6 +2147,97 @@ mod tests {
          assert_eq!(compare_frames(&panel, &want), (0, 0));
      }
  
@@ -1356,7 +1357,7 @@ index 0b9790a..257a7fe 100644
          assert!(!s.fifo && !s.restore && s.client_wake && s.flip_time_callbacks);
          assert_eq!(refused, vec!["bogus=1".to_string(), "client_wake=maybe".to_string()]);
 diff --git a/crates/wm-darwin/src/record.rs b/crates/wm-darwin/src/record.rs
-index 95bf499..bf202bc 100644
+index 95bf499..51a0f2a 100644
 --- a/crates/wm-darwin/src/record.rs
 +++ b/crates/wm-darwin/src/record.rs
 @@ -1,11 +1,20 @@
@@ -1468,7 +1469,7 @@ index 95bf499..bf202bc 100644
  }
  
  impl Recorder {
-@@ -380,11 +429,48 @@ fn pipeline(file: std::fs::File, path: PathBuf, target: Rect, out: Size, stop_at
+@@ -380,11 +429,64 @@ fn pipeline(file: std::fs::File, path: PathBuf, target: Rect, out: Size, stop_at
          }
          let end = stop_at.lock().map(|g| g.unwrap_or(0)).unwrap_or(0);
          let (duration_ms, bytes) = writer.finish(end).map_err(|err| format!("{}: {err}", path.display()))?;
@@ -1515,10 +1516,26 @@ index 95bf499..bf202bc 100644
 +    })
 +}
 +
++/// The area recorded and the movie's size. H.264 (DESK11): the frame's width a multiple of 16 (its rows are the
++/// shareable buffer's pitch in bytes, which the GPU driver takes only 16-byte aligned: a 1000 px wide selection
++/// was refused on the M1, EGL_BAD_ALLOC), its height of 2; at full size the area is cut to that, so its pixels
++/// stay the panel's one for one. Photo-JPEG: even sizes. At least 16 pixels either way.
++pub(crate) fn record_sizes(target: Rect, half: bool, h264: bool) -> (Rect, Size) {
++    let target = if h264 && !half { Rect::new(target.pos, Size::new((target.size.w & !15).max(16), (target.size.h & !1).max(16))) } else { target };
++    let factor = if half { 2.0 } else { 1.0 };
++    let even = |v: f64| ((v.round() as u32) & !1).max(16);
++    let out = if h264 {
++        Size::new(((f64::from(target.size.w) / factor) as u32 & !15).max(16), even(f64::from(target.size.h) / factor))
++    } else {
++        Size::new(even(f64::from(target.size.w) / factor), even(f64::from(target.size.h) / factor))
++    };
++    (target, out)
++}
++
  fn movie_name(dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
      std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
      let stamp = crate::capture::local_stamp();
-@@ -402,7 +488,7 @@ fn movie_name(dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
+@@ -402,7 +504,7 @@ fn movie_name(dir: &Path) -> Result<(PathBuf, std::fs::File), String> {
  
  impl Server {
      /// A recording of `target` (panel pixels), after the toolbar's timer when there is one.
@@ -1527,7 +1544,7 @@ index 95bf499..bf202bc 100644
          if self.recorder.recording() {
              if let Some(mut r) = reply {
                  let _ = r.write_all(b"error a recording is already running\n");
-@@ -415,17 +501,36 @@ impl Server {
+@@ -415,17 +517,26 @@ impl Server {
              self.recorder.pending = Some(Pending { due: Instant::now() + Duration::from_secs(u64::from(timer)), target, path, reply, limit, full, last_second: u64::MAX });
          }
      }
@@ -1540,6 +1557,9 @@ index 95bf499..bf202bc 100644
          };
 -        // half the panel's pixels each way by default (the CPU encodes every frame); -F: all
 -        let factor = if full { 1.0 } else { 2.0 };
+-        // even sizes (some players want them), at least 16 pixels
+-        let even = |v: f64| ((v.round() as u32) & !1).max(16);
+-        let out = Size::new(even(f64::from(target.size.w) / factor), even(f64::from(target.size.h) / factor));
 +        // DESK11: H.264 through ffmpeg unless the policy asks for Photo-JPEG or there is no encoder
 +        let policy = self.policy.now.record;
 +        let options = self.captures.options();
@@ -1553,22 +1573,11 @@ index 95bf499..bf202bc 100644
 +            crate::capture::RecordSize::Half => true,
 +            crate::capture::RecordSize::Default => if h264 { options.record_half.unwrap_or(policy.half) } else { true },
 +        };
-+        // H.264: the frame's width a multiple of 8, its height of 2; at full size the area is cut to that, so
-+        // its pixels stay the panel's one for one
-+        let target = if h264 && !half { Rect::new(target.pos, Size::new((target.size.w & !7).max(16), (target.size.h & !1).max(16))) } else { target };
-+        let factor = if half { 2.0 } else { 1.0 };
-         // even sizes (some players want them), at least 16 pixels
-         let even = |v: f64| ((v.round() as u32) & !1).max(16);
--        let out = Size::new(even(f64::from(target.size.w) / factor), even(f64::from(target.size.h) / factor));
-+        let out = if h264 {
-+            Size::new(((f64::from(target.size.w) / factor) as u32 & !7).max(16), even(f64::from(target.size.h) / factor))
-+        } else {
-+            Size::new(even(f64::from(target.size.w) / factor), even(f64::from(target.size.h) / factor))
-+        };
++        let (target, out) = record_sizes(target, half, h264);
          let opened = match &path {
              Some(p) => std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(p).map(|f| (p.clone(), f)).map_err(|e| format!("{}: {e}", p.display())),
              None => movie_name(&self.capture_dir_for_movies()),
-@@ -439,22 +544,57 @@ impl Server {
+@@ -439,22 +550,57 @@ impl Server {
          };
          let in_flight = Arc::new(AtomicUsize::new(0));
          let stop_at = Arc::new(Mutex::new(None));
@@ -1633,7 +1642,7 @@ index 95bf499..bf202bc 100644
          });
          self.wm.backend_mut().dirty = true;
          self.record_indicator();
-@@ -527,6 +667,32 @@ impl Server {
+@@ -527,6 +673,32 @@ impl Server {
              *g = Some(end);
          }
          rec.tx.take();
@@ -1666,7 +1675,7 @@ index 95bf499..bf202bc 100644
          if let Some((id, _, _)) = rec.indicator.take() {
              use wm_core::Backend;
              self.wm.backend_mut().destroy_shell_surface(id);
-@@ -539,6 +705,75 @@ impl Server {
+@@ -539,6 +711,75 @@ impl Server {
          }
          self.wm.backend_mut().dirty = true;
      }
@@ -1742,7 +1751,7 @@ index 95bf499..bf202bc 100644
      /// After each repaint: the timer, a frame when one is due and the screen changed, the
      /// indicator, the requesting connection, recordings that finished writing.
      pub fn record_after_repaint(&mut self) {
-@@ -569,10 +804,23 @@ impl Server {
+@@ -569,10 +810,23 @@ impl Server {
                  stop = Some("limit");
              }
          }
@@ -1766,7 +1775,7 @@ index 95bf499..bf202bc 100644
              Instant::now() >= rec.next_due && rec.last_frame_count != Some(frames_now)
          });
          if due {
-@@ -629,8 +877,8 @@ impl Server {
+@@ -629,8 +883,8 @@ impl Server {
                  Ok(s) => {
                      self.recorder.recorded += 1;
                      let fps = if seconds > 0.0 { s.frames as f64 / seconds } else { 0.0 };
@@ -1777,6 +1786,26 @@ index 95bf499..bf202bc 100644
                      if let Some(mut r) = reply {
                          let _ = r.set_nonblocking(false);
                          let _ = r.write_all(format!("ok {} {} {:.2}\n", s.path.display(), s.frames, seconds).as_bytes());
+@@ -661,6 +915,19 @@ mod tests {
+         assert_eq!(odd.len(), 27);
+     }
+     #[test]
++    fn an_h264_recording_has_a_width_the_gpu_buffer_takes() {
++        let r = |x, y, w, h| Rect::new(Point::new(x, y), Size::new(w, h));
++        // the panel: as it is, both sizes
++        assert_eq!(record_sizes(r(0, 0, 2560, 1600), false, true), (r(0, 0, 2560, 1600), Size::new(2560, 1600)));
++        assert_eq!(record_sizes(r(0, 0, 2560, 1600), true, true).1, Size::new(1280, 800));
++        // DESK11 on the M1: a 1001x601 selection (1000 px rows were refused): cut to 992x600 at full size
++        assert_eq!(record_sizes(r(301, 201, 1001, 601), false, true), (r(301, 201, 992, 600), Size::new(992, 600)));
++        let (_, half) = record_sizes(r(301, 201, 1001, 601), true, true);
++        assert!(half.w % 16 == 0 && half.h % 2 == 0 && half.w <= 500, "{half:?}");
++        // Photo-JPEG as before
++        assert_eq!(record_sizes(r(0, 0, 1001, 601), true, false).1, Size::new(500, 300));
++    }
++    #[test]
+     fn a_movie_of_three_frames_has_its_samples_and_durations() {
+         let dir = std::env::temp_dir().join(format!("record-test-{}", std::process::id()));
+         std::fs::create_dir_all(&dir).unwrap();
 diff --git a/crates/wm-darwin/src/render.rs b/crates/wm-darwin/src/render.rs
 index 910f184..4f2ca3b 100644
 --- a/crates/wm-darwin/src/render.rs
