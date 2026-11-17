@@ -468,8 +468,9 @@
 #   0160  QuartzCore (TERM10, FX-029): a layer property set to the value it has asks for no render; with
 #         SFFX_GPU_SKIP_UNCHANGED=1 (opt-in, for FXPERF's A/B) a bare CATransaction commit schedules a render without
 #         counting as a change, so 0216's frame reuse can apply; PD_CA_DIAG counts rendered/reused/rendered-unchanged
-#   HELD (TERM12, 16 November; patch files in ./patches, NOT in the lists below, NOT installed: the series still builds
-#   the installed t11c; add them to the lists only after the gates in docs/roadmap/issues/SF-Y-terminal-app.md "TERM12 round"):
+#   IN THE SERIES since TERM13 (17 November, owner's order "install them both"; installed 06:34Z as AppKit 6a2dd27a,
+#   libWindowServer 752999d3, QuartzCore.pd ab4f4daf; see SF-Y "TERM13"): 0178, 0178a, 0178w (TERM12's, unchanged)
+#   STILL HELD (patch files in ./patches, NOT in the lists below, NOT installed): 0179, 0180a, 0180w
 #   0178  QuartzCore: the layer tree rendered and presented on a render thread at each committed transaction
 #         (SFFX_GPU_RENDER_THREAD=1 with SFFX_GPU_PRESENT=1; inert without), a process-wide frame lock, a reader/writer
 #         gate between explicit transactions and renders (fails closed after 20 ms; PD_CA_GATE=soft / PD_CA_NO_GATE=1 for
@@ -713,6 +714,7 @@ let
     ./patches/0175-appkit-view-keeps-its-layer-context-clipboard-fallback.patch
     ./patches/0176-appkit-clipboard-offered-data-follows-writes.patch
     ./patches/0177-appkit-clipboard-write-not-replaced-before-its-offer.patch
+    ./patches/0178a-appkit-gpu-layers-presented-from-the-render-thread.patch
   ];
   windowserverSrc = patchedDir "src/Frameworks/WindowServer" [
     ./patches/0004-windowserver-server-decorations-and-scale.patch
@@ -742,6 +744,7 @@ let
     ./patches/0305w-windowserver-backing-store-compared-only-after-drawing.patch
     ./patches/0166w-windowserver-momentum-capped-and-timed.patch
     ./patches/0173w-windowserver-pointer-enter-is-a-move.patch
+    ./patches/0178w-windowserver-layers-presented-from-the-render-thread.patch
   ];
   authenticationServicesSrc = patchedDir "src/Frameworks/AuthenticationServices" [
     ./patches/0003-authenticationservices-web-session-browser-side.patch
@@ -797,6 +800,7 @@ let
     ./patches/0160-quartzcore-unchanged-properties-and-commits-render-nothing.patch
     ./patches/0300-quartzcore-damage-only-frames.patch
     ./patches/0306-quartzcore-video-planes-uploaded-as-red-green.patch
+    ./patches/0178-quartzcore-layer-tree-rendered-on-a-render-thread.patch
   ];
   quartzcore = pd."quartzcore-msm-arm64".override { src = quartzcoreSrc; };
   wp = "${pd."wayland-protocols"}/share/wayland-protocols";

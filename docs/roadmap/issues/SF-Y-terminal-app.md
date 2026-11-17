@@ -607,6 +607,49 @@ Figures from runs judged by DESK7's real-input counters before and after (unchan
 - Terminal's figures (launch, echo, `seq 1 300000`, wheel) on the candidate were stopped when the owner came at 22:08Z;
   the figures of 20:18Z were discarded for the same reason: see the install section below for the repeat.
 
+## TERM13 (17 November, ~06:10-06:50Z): the render thread installed at the owner's order
+The owner ordered "Install them both" (CODEX-FX's damage-only path, installed 06:00Z, and TERM12's render thread) and
+will judge by hand; only short safety checks, no frame-rate series. 0178 (QuartzCore render thread + transaction gate),
+0178a (AppKit presenter), 0178w (libWindowServer present from that thread) are now in patched.nix's lists, unchanged
+from TERM12. 0179 (painter's order) is NOT included: 0178 builds and behaved without it. 0180a/0180w stay held.
+- Build: the committed series without the three reproduced the installed t11c byte for byte (AppKit 2e5a5266,
+  libWindowServer c2cdfcf8, QuartzCore.pd 3c6d9530); with them: AppKit 6a2dd27a, libWindowServer 752999d3, QuartzCore.pd
+  ab4f4daf. TERM12 had tested 0178 only together with 0179; these exact QuartzCore/libWindowServer files are new.
+- Checks before installing (candidate prefix /private/var/db/sft13/c1; synthetic input on the virtual seat into my own
+  windows only; own fresh profiles/homes; ~16 min of holds in all, one rerun included):
+  Activity Monitor and Terminal with the candidate files and no other env: launch, paint (one capture each, looked at),
+  Command-Q, EXIT=0, no exception, no crash report; control with the installed files the same. (First attempt: my
+  Terminal had /bin/cat as shell, so Command-Q raised Terminal's own "terminate running processes" alert; my Activity
+  Monitor stayed up 6.5 s after Command-Q and its capture came back empty - not reproduced in the repeat, cause not
+  found.) Terminal random input (TERM9's fuzz, /bin/cat shell, MallocScribble=1, 140 s): 22 bursts / 264 actions, alive,
+  no fault. `sf_compat_push.sh check` 18/18. Own Firefox (`-no-remote`, MOZ_CRASHREPORTER_DISABLE=1, the installed
+  launcher's plan = SFFX_GPU_PRESENT/DAMAGE/IMAGE_CACHE=1 etc., plus SFFX_GPU_RENDER_THREAD=1, candidate prefix first):
+  3 rounds of en.wikipedia.org/wiki/Firefox loaded and painted (captures looked at), wheel scroll, menu panel open/closed,
+  new tab/close, second window/close, Command-W on the last window (windowless), Quit x3 (2 reopen + Command-Q, 1
+  windowless desk Quit; parent gone in 2.5-3.5 s): 32/32 steps, 0 new crash reports, 0 log faults, family gone.
+  sf-sample: the CARenderServer thread present, AppKit/libWindowServer/QuartzCore.pd loaded from the candidate prefix.
+  The first Firefox run failed "Command-W on the last window" 3/3: a tool fault (the second window went at the key-down,
+  its Command/W key-ups had no target, the virtual seat kept them held and dropped the next Command-W as "pressed again
+  while held"); the tool now lets them go first; the rerun passed.
+- Installed 06:34Z, direct: each file written beside its target, SHA-256 checked there before anything ran it, the file
+  of before kept as `<path>.pre-t13` (= t11c), renamed into place. Paths: /System/Library/Frameworks/AppKit.framework/
+  Versions/A/AppKit, /usr/lib/libWindowServer.dylib, /System/Library/Frameworks/QuartzCore.framework/Versions/A/
+  QuartzCore.pd. After: my own Activity Monitor and Terminal on the installed files launch/paint/quit (EXIT=0), compat
+  18/18. Nothing restarted: the owner's running Firefox, Terminal and Activity Monitor keep the old files until he
+  restarts them; no kernel, no compositor relaunch.
+- Without SFFX_GPU_RENDER_THREAD=1 the new code does nothing (checked: Activity Monitor/Terminal above).
+- Launcher (CODEX-FX, at TERM13's request, 06:38:44Z): the installed `firefox-sf` now sets SFFX_GPU_RENDER_THREAD=1 with
+  SFFX_GPU_PRESENT/DAMAGE/IMAGE_CACHE=1 (launcher SHA-256 412689a2..., manifest 9b13046c...; read back by TERM13 from the
+  launcher's own plan). CODEX-FX's own-profile smoke passed (page, scroll, window, tab, Command-W on the last window,
+  windowless Quit; 0 reports). Off switch: `python3 /usr/local/lib/siliconforest/firefox/160-system1/maintenance-render-thread-t13-v1/install-damage-path.py --render-thread off --apply`
+  (the launcher/manifest of before are saved beside it). The owner's Firefox picks the switch up when he restarts it.
+- Revert the three files: `ln -f <path>.pre-t13 <path>.back && mv -f <path>.back <path>` for each path above (programs
+  started afterwards get t11c; switch the launcher off first, or the env is set with nothing to read it).
+- Not done: the 12-run frame-rate series (deliberately not run); TERM12's lifecycle items maximise/restore and full
+  screen (not in this smoke); video; any real (physical) input: all input here was synthetic.
+- Tools: runs/sf-term13 (not committed): `app13.sh`, `fuzz13.sh` (TERM9's with my prefix and window lists instead of
+  picture dumps), `m1/life13.py` (TERM12's life12 trimmed to the owner's list, real page), `install13.sh`.
+
 ## TERM12 round (16 November, afternoon): Firefox frames off the main thread, video tearing, position:fixed, CSD
 Nothing installed this round: the M1 still runs t11c (AppKit 2e5a5266, libWindowServer c2cdfcf8, QuartzCore.pd 3c6d9530);
 the committed series still builds exactly those. The new patches are in `integrations/puredarwin/cocoa/patches` but HELD
