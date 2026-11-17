@@ -85,6 +85,7 @@ SUFFIX_VOCAB = ['indium', 'metal', 'libmetal', 'libindium', 'Iindium', 'debugser
                 'corecrypto', 'radeon', 'objc', 'nouveau', 'i915', 'cross', 'output', 'virgl', 'opl']
 # R9  NNNN-pd-what.patch (numbered patches "for PD") -> NNNN-sf-what.patch
 # R11 a directory named pd (fbsdkpi/pd/, corecrypto's pd/) -> sf, and /pd/ in a path
+# R12 PdPascal (Rust types generated from pd_ names: PdWindowPositionV1, PdSpeaker) -> SfPascal
 
 # Lines that are never changed: copyright and licence notices, authorship.
 PROTECTED_LINE = re.compile(
@@ -244,7 +245,8 @@ TOKEN = re.compile(
     r'|(?P<pdcamel>(?<![A-Za-z0-9])_*pd(?=[A-Z][A-Za-z0-9]*[a-z]))'
     r'|(?P<suffix>(?<![A-Za-z0-9])(?:' + _alt(SUFFIX_VOCAB) + r')[-_]pd(?![A-Za-z0-9_]))'
     r'|(?P<numbered>(?<![A-Za-z0-9])[0-9]{4}-pd-(?=[a-z]))'
-    r'|(?P<dir>(?<=/)pd(?![A-Za-z0-9_.-]))')
+    r'|(?P<dir>(?<=/)pd(?![A-Za-z0-9_.-]))'
+    r'|(?P<pascal>(?<![A-Za-z0-9])Pd(?=[A-Z][a-z]))')
 IDENT = re.compile(r'[A-Za-z0-9_]*')
 OPAQUE = re.compile(r'^[A-Za-z0-9+/=]{60,}$')          # base64 / base85 payload lines
 
@@ -263,7 +265,7 @@ def _garbage(tok):
 
 
 def transform_line(line, counts=None):
-    if 'pd' not in line and 'PD' not in line and 'arwin' not in line and 'ARWIN' not in line:
+    if 'pd' not in line and 'PD' not in line and 'Pd' not in line and 'arwin' not in line and 'ARWIN' not in line:
         return line
     if PROTECTED_LINE.search(line) or OPAQUE.match(line.strip()):
         return line
@@ -288,6 +290,8 @@ def transform_line(line, counts=None):
             out = text[:-3] + 'sf-'
         elif kind == 'dir':
             out = 'sf'
+        elif kind == 'pascal':
+            out = 'Sf'
         else:
             tok = _whole(line, m.end() - 1)
             if kind == 'snake':
@@ -368,7 +372,7 @@ def transform_name(name, counts=None):
 
 def residual_line(line):
     """Old names left in a line, after protection: what `check` reports."""
-    if 'pd' not in line and 'PD' not in line and 'arwin' not in line and 'ARWIN' not in line:
+    if 'pd' not in line and 'PD' not in line and 'Pd' not in line and 'arwin' not in line and 'ARWIN' not in line:
         return []
     if PROTECTED_LINE.search(line) or OPAQUE.match(line.strip()):
         return []
@@ -412,7 +416,8 @@ RESIDUAL = re.compile(
     r'|(?P<r_pdcamel>(?<![A-Za-z0-9])_*pd[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*)'
     r'|(?P<r_suffix>(?<![A-Za-z0-9])(?:' + _alt(SUFFIX_VOCAB) + r')[-_]pd(?![A-Za-z0-9_]))'
     r'|(?P<r_numbered>(?<![A-Za-z0-9])[0-9]{4}-pd-[a-z])'
-    r'|(?P<r_dir>(?<=/)pd(?![A-Za-z0-9_.-]))')
+    r'|(?P<r_dir>(?<=/)pd(?![A-Za-z0-9_.-]))'
+    r'|(?P<r_pascal>(?<![A-Za-z0-9])Pd[A-Z][a-z][A-Za-z0-9]*)')
 
 # ---------------------------------------------------------------------------------------------
 # Files
