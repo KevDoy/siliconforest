@@ -76,6 +76,24 @@ assertions compare against old-name store paths). A renamed kernel equal to 48 n
 made from source once, under the new names. Until then the user space below has no kernel to run on,
 and the from-source collection must not be installed in its place (no writable-root driver).
 
+What kernel 48 is made of, member by member, with the recipe of each and every frozen reference of the chain's
+recipes: `runs/rebuild/kernel48/README.md` (workstation, outside git). In short: all 57 members have their recipes
+in the tree; the collection glue of the chain's base (`runs/m1-usbc/cio*-kc.nix`, the recorded build phase) is outside
+it; seven recipes take OLD-NAME source snapshots as built store paths and would compile old-name source from this
+branch; the chain proves itself against old-name collections by module UUID, which has no counterpart after a rename.
+The work is one recipe that links the 57 members from their derivations, and an equivalence proof by source.
+
+**Audio pre-test: done on the M1 on 17 November by the coordinator.** The stage, its dry run and the switch worked on
+the real system; the hashes on the M1 matched the manifest except `/usr/bin/pcmplay`, which was absent (installed with
+`--allow-mismatch`); the old files are in `/private/var/db/sf-audio-pretest/old`. The tip's server (old names) serves
+`org.puredarwin.audio.coreaudiod`, opened `/dev/pdaudio` and `/dev/pdspeaker`, kept `hold_probe=1` and `volume_db=30`,
+read the stored volume, and a 3 s tone played through the speakers (144000 frames, no trip). Headphones, the volume keys
+and Firefox's sound were not yet heard by the owner. So the new server generation is separated from the new names.
+`coreaudiod` is not a launchd job: `/usr/libexec/sf-session` starts it (after `/dev/sfaudio` appears, having set
+`kern.sf_speaker.hold_probe=1` and `kern.sf_sound.volume_db=30`); the renamed `sf-session` of the main stage does the
+same. The main switch restarts nothing: the session's long-lived children (compositor, dock, `coreaudiod`, `sf-netd`)
+keep the old files until the machine restarts, which the kernel install needs anyway.
+
 ## Tools
 
 - `tools/sf_rename_stage.py SPEC.json DIR`: lays out a staged directory from built trees:
