@@ -11,8 +11,9 @@
  *     "sf-dhcp --daemon" running for the interface and, when a lease is configured, the
  *     resolver daemon (mdnsd -debug). A child that dies is started again. Each change of state
  *     is one line "sf-netd: IFNAME state=..." on stdout and in /var/run/sf-netd.IFNAME.status.
- *     Every line on stdout begins with the time (UTC, "2026-11-17T17:20:01Z "); the status file
- *     has none. A second instance for the same interface exits. SIGTERM stops the children it
+ *     Every line on stdout begins with the time (UTC, "2026-11-17T17:20:01Z "), the lines of
+ *     sf-dhcp and wifiutil included: their output comes through a pipe and is written out line
+ *     by line with the time it arrived. The status file has none. A second instance for the same interface exits. SIGTERM stops the children it
  *     started.
  *
  *     Liveness: while it reports online it sends the lease's router an ICMP echo at every poll.
@@ -174,6 +175,60 @@ static void say(const struct ctx *c, const char *fmt, ...)
     printf("\n");
 }
 
+/* ---- the children's output ---------------------------------------------------------------- */
+
+/* What sf-dhcp and wifiutil print arrives here and leaves with the time in front of each line. */
+static int outpipe[2] = { -1, -1 };
+static char outbuf[1024];
+static size_t outlen;
+
+static void out_line(const char *p, size_t n)
+{
+    stamp(stdout);
+    fwrite(p, 1, n, stdout);
+    fputc('\n', stdout);
+}
+
+static void drain_children(int final)
+{
+    ssize_t n;
+
+    if (outpipe[0] < 0)
+        return;
+    while ((n = read(outpipe[0], outbuf + outlen, sizeof(outbuf) - outlen)) > 0) {
+        size_t start = 0;
+
+        outlen += (size_t)n;
+        for (size_t i = 0; i < outlen; i++) {
+            if (outbuf[i] == '\n') {
+                out_line(outbuf + start, i - start);
+                start = i + 1;
+            }
+        }
+        if (start == 0 && outlen == sizeof(outbuf)) {   /* a line longer than the buffer goes out in pieces */
+            out_line(outbuf, outlen);
+            start = outlen;
+        }
+        memmove(outbuf, outbuf + start, outlen - start);
+        outlen -= start;
+    }
+    if (final && outlen > 0) {
+        out_line(outbuf, outlen);
+        outlen = 0;
+    }
+}
+
+static void open_outpipe(void)
+{
+    if (pipe(outpipe) != 0) {
+        outpipe[0] = outpipe[1] = -1;       /* the children then write to stdout themselves, without the time */
+        return;
+    }
+    for (int i = 0; i < 2; i++)
+        fcntl(outpipe[i], F_SETFD, FD_CLOEXEC);
+    fcntl(outpipe[0], F_SETFL, fcntl(outpipe[0], F_GETFL) | O_NONBLOCK);
+}
+
 /* ---- the interface ---------------------------------------------------------------------- */
 
 static int a80211(const struct ctx *c, int set, int type, void *data, uint32_t len)
@@ -289,6 +344,9 @@ static pid_t spawn(const struct ctx *c, const char *const argv[], const char *lo
             if (fd > 2)
                 close(fd);
         }
+    } else if (outpipe[1] >= 0) {
+        dup2(outpipe[1], 1);
+        dup2(outpipe[1], 2);
     }
     execv(argv[0], (char *const *)argv);
     stamp(stderr);
@@ -317,6 +375,7 @@ static int run_wait(const struct ctx *c, const char *const argv[], int seconds)
             return exit_code(status);
         if (r < 0 && errno != EINTR)
             return -1;
+        drain_children(0);
         if (stopping || now_s() > end) {
             kill(pid, SIGTERM);
             usleep(200000);
@@ -843,23 +902,29 @@ static int take_lock(struct ctx *c)
 /* Waits one poll interval; connections of would-be second instances are taken and dropped. */
 static void pause_tick(struct ctx *c)
 {
-    struct pollfd pfd = { c->lockfd, POLLIN, 0 };
+    int64_t end = now_s() + c->poll_s, left;
 
-    if (c->lockfd < 0) {
-        sleep((unsigned)c->poll_s);     /* a signal ends it early */
-        return;
-    }
-    if (poll(&pfd, 1, c->poll_s * 1000) > 0) {
-        int fd;
+    /* a signal ends the wait early; a child's output or a second instance does not */
+    while (!stopping && (left = end - now_s()) > 0) {
+        struct pollfd pfd[2] = { { c->lockfd, POLLIN, 0 }, { outpipe[0], POLLIN, 0 } };   /* poll passes over a -1 */
 
-        while ((fd = accept(c->lockfd, NULL, NULL)) >= 0)
-            close(fd);
-        /* a socket that reports anything but a connection would make this loop spin */
-        if (pfd.revents & ~POLLIN) {
-            close(c->lockfd);
-            c->lockfd = -1;
+        if (poll(pfd, 2, (int)left * 1000) <= 0)
+            break;
+        if (pfd[1].revents)
+            drain_children(0);
+        if (pfd[0].revents) {
+            int fd;
+
+            while ((fd = accept(c->lockfd, NULL, NULL)) >= 0)
+                close(fd);
+            /* a socket that reports anything but a connection would make this loop spin */
+            if (pfd[0].revents & ~POLLIN) {
+                close(c->lockfd);
+                c->lockfd = -1;
+            }
         }
     }
+    drain_children(0);
 }
 
 static void stop_children(struct ctx *c, int keep_resolver)
@@ -1020,6 +1085,7 @@ int main(int argc, char **argv)
         fprintf(f, "%d\n", (int)getpid());
         fclose(f);
     }
+    open_outpipe();
     c.state = N_START;
     say(&c, "pid %d%s%s", (int)getpid(), c.once ? " once" : "", c.wired ? " wired" : "");
     deadline = now_s() + c.timeout_s;
@@ -1038,6 +1104,7 @@ int main(int argc, char **argv)
 
     /* --once that worked leaves the resolver behind; everything else is taken down */
     stop_children(&c, c.once && rc == 1);
+    drain_children(1);
     if (!c.once)
         say(&c, "stopped");
     unlink(c.statuspath);
