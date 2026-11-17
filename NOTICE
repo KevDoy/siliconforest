@@ -11,15 +11,40 @@ the SiliconForest rename never changes such a line (docs/design/siliconforest-na
 No licence has been chosen yet for the code written in this lab (LICENSE_STATUS.md); files
 ported from GPL sources are GPL as marked in each file.
 
-On an installed system this text is /usr/share/doc/siliconforest/NOTICE (planned; see the
-naming note), with the licence texts beside it.
+How to read the licence statements below. "Read from" names the licence file the statement
+was read from (in this repository, or in the local clone the build uses). "Not verified"
+means the statement comes from the project's public description or from package metadata
+and no licence file was read for it here; it is to be checked before a release.
+
+The per-directory NOTICE files are more exact than this file and take precedence for their
+directory: integrations/siliconforest/m1-apcie-bridge/NOTICE (and NOTICE-bringup,
+NOTICE-linkup), m1-apcie-host/NOTICE, m1-atcphy/NOTICE, m1-avd/NOTICE, m1-ave/NOTICE (and
+m1-ave/tools/upstream/NOTICE, COPYING), m1-dart/NOTICE-m1n1.txt, m1-dart-survey/NOTICE-m1n1.txt,
+m1-dptx/NOTICE, m1-metal/NOTICE, m1-sound/NOTICE, m1-sound/aop/NOTICE,
+m1-sound/safetyd/LICENSE, m1-storage/NOTICE, m1-thunderbolt/NOTICE, m1-touchbar/NOTICE,
+m1-trackpad-child/multitouch/NOTICE, m1-typec/NOTICE, m1-usb-dwc3/NOTICE. Ten directories
+with GPL-derived code have no NOTICE file yet (m1-rust-kext, m1-gpu-rtkit, m1-dcp,
+m1-dcp-dart, m1-lkpi-extras, m1-cpufreq, m1-thermal, m1-drm72, m1-native-boot,
+m1-avd-capacity); there the SPDX line and notices of each file are the record.
+Licence texts: upstream PureDarwin's tree carries PUREDARWIN_LICENSE.txt, APPLE_LICENSE.txt
+and APPLE_DRIVER_LICENSE.txt at its top; the vendored Chonkstep copy carries its LICENSE files;
+each font recipe installs the font's licence text beside the font.
+
+On an installed system this text is /usr/share/doc/siliconforest/NOTICE. The licence texts
+are not installed beside it yet.
 
 
 PureDarwin
 ----------
 The PureDarwin Project, https://www.puredarwin.org, https://github.com/PureDarwin/PureDarwin
-Licence: PUREDARWIN_LICENSE.txt (BSD-style) for PureDarwin's own files; APPLE_LICENSE.txt
-(APSL 2.0) and APPLE_DRIVER_LICENSE.txt for the Apple-derived parts; each file's own notice.
+Licence: BSD-2-Clause for PureDarwin's own files ("Copyright (c) 2007-Present The PureDarwin
+Project. All rights reserved."; read from PUREDARWIN_LICENSE.txt). APPLE_LICENSE.txt (Apple
+Public Source License; its version was not read here: not verified) for the Apple-derived
+source; each file's own notice.
+APPLE_DRIVER_LICENSE.txt, also in upstream's tree, is NOT an open-source licence: it is
+Apple's "Binary Driver Software License Agreement", a restrictive licence for Apple driver
+binaries (read from the file's head). Which components of PureDarwin it covers has not been
+established here; nothing under it may be assumed redistributable.
 What we take: all of it. SiliconForest's base tree is PureDarwin's branch upstream-xnu-12377 at
 c713d8fb9b048a38e2242d67e29b9957ced8c495 (11 November 2026) with its names changed to
 SiliconForest's by tools/sf_rename.py: the XNU build, the kernel extensions and IOKit families,
@@ -32,20 +57,23 @@ Apple open-source releases
 --------------------------
 Apple Inc., https://opensource.apple.com
 Licence: Apple Public Source License 2.0, and the other licences of the individual projects
-(BSD for parts of XNU and Libc, Apache-2.0 with LLVM exception for dyld's newer parts, …).
+(BSD for parts of XNU and Libc, Apache-2.0 with LLVM exception for dyld's newer parts, …);
+not verified beyond each file's own notice.
 What we take: through PureDarwin: xnu-12377, IOKit families, libSystem components, dyld,
 CoreFoundation, Security, corecrypto (under its own corecrypto licence; not redistributed by
 this repository), mDNSResponder, and the other Darwin components PureDarwin builds.
-No Apple binary, framework, font, sound or resource is in this repository. The Apple
-applications run on SiliconForest (Terminal, Activity Monitor) are the owner's copies and are
-not part of it.
+No Apple binary, framework, font, sound or resource is in this repository (the screenshots
+of Apple System 7 inside the vendored Chonkstep copy are the one exception known; see
+Chonkstep). The Apple applications run on SiliconForest (Terminal, Activity Monitor) are the
+owner's copies and are not part of it.
 
 Asahi Linux and the Linux kernel (through Omacom linux-aurora)
 ---------------------------------------------------------------
 The Asahi Linux contributors and the Linux kernel authors; Omacom's linux-aurora, branch
 integration/aurora at 6a08a08e.
 Licence: GPL-2.0-only, or GPL-2.0-only OR MIT where a file says so; the Rust GPU driver and
-its abstractions GPL-2.0-only OR MIT.
+its abstractions GPL-2.0-only OR MIT (as each file's SPDX line says; the per-directory
+NOTICE files name the files).
 What we take, ported to IOKit (every ported file carries the SPDX line and the original
 notices): the PCIe host bridge (pcie-apple.c), the DART IOMMU (apple-dart.c,
 io-pgtable-dart.c), RTKit and its mailbox, the AGX GPU driver (drm/asahi, Rust), the DCP
@@ -59,42 +87,51 @@ integrations/siliconforest/m1-thunderbolt/upstream/).
 m1n1
 ----
 The Asahi Linux contributors, https://github.com/AsahiLinux/m1n1 (Omacom's branch)
-Licence: MIT (with the licences of its bundled parts).
+Licence: MIT, with the licences of its bundled parts (confirmed from the local clone's licence files by the audit of 17 November 2026).
 What we take: the boot loader and hypervisor used to start and debug the kernel; reference
 for hardware bring-up sequences. Not modified in the shipped system beyond configuration.
 
 Mesa
 ----
 The Mesa authors, https://www.mesa3d.org (Omacom's branch with the asahi driver)
-Licence: MIT.
+Licence: MIT (not verified: no licence file read here).
 What we take: the asahi Gallium driver, EGL, GLES and the supporting libraries, built for
 Darwin with our DRM device glue; libdrm (MIT).
 
 drm-kmod and FreeBSD
 --------------------
 The FreeBSD Project and the drm-kmod authors.
-Licence: BSD-2-Clause for FreeBSD's linuxkpi; GPL-2.0 OR MIT for the DRM core as in Linux.
+Licence: BSD-2-Clause for FreeBSD's linuxkpi; GPL-2.0 OR MIT for the DRM core as in Linux
+(not verified: no licence file read here; each file's notice is the record).
 What we take: through PureDarwin's fbsdkpi layer: linuxkpi, the DRM core (updated here to
 Linux 7.2 interfaces for the Apple drivers), iflib and network driver glue.
 
 OpenBSD bwfm
 ------------
 Patrick Wildt and the OpenBSD authors, sys/dev/ic/bwfm.c and sys/dev/pci/if_bwfm_pci.c
-Licence: ISC.
+Licence: ISC (confirmed from the local clone's licence files by the audit of 17 November 2026).
 What we take: the Broadcom FullMAC driver as the base of the Wi-Fi driver for the BCM4378
 (SFBwfm), with message-buffer and firmware-event code following Linux brcmfmac (ISC).
+
+Apple M-series AVE driver (aquarat)
+-----------------------------------
+https://github.com/aquarat/apple-m-series-ave-driver, pinned at 9ab14e45
+Licence: GPL-2.0-only (read from integrations/siliconforest/m1-ave/NOTICE and
+m1-ave/tools/upstream/COPYING).
+What we take: the hardware video encoder driver as the source of the AVE kernel extension port
+(in progress, no hardware encoder result yet); copied files keep their SPDX lines and notices.
 
 speakersafetyd
 --------------
 The Asahi Linux contributors, speakersafetyd 2.0.1 (4175df66)
-Licence: MIT.
+Licence: MIT (read from integrations/siliconforest/m1-sound/safetyd/LICENSE).
 What we take: the speaker protection model and daemon, ported to Darwin
 (integrations/siliconforest/m1-sound/safetyd, and the kernel model derived from it).
 
 Finch
 -----
 The Finch authors (local reference clone at 2d9b1bb1)
-Licence: MIT OR Apache-2.0.
+Licence: MIT OR Apache-2.0 (confirmed from the local clone's licence files by the audit of 17 November 2026).
 What we take: single files and functions, and whole frameworks where they fit (owner's
 decision), each with Finch's copyright and SPDX notice kept: libsysmon's model, CoreUI
 (CUIStore, CUIRendition, CUIDeepmap, CUICatalog), Foundation additions (NSDecimal, pointer
@@ -108,14 +145,32 @@ SF-Z-desktop-night.md and SF-AA-activity-monitor.md.
 Chonkstep
 ---------
 Chris Kearney
-Licence: GPL-3.0 (Chonkstep's LICENSE).
+Licence: GPL-3.0-only (read from the vendored copy's LICENSE, the GNU GPL version 3 text, and
+its Cargo.toml, `license = "GPL-3.0-only"`). Parts under MIT inside it (read from their own
+LICENSE files): dock/bindings and examples ("Copyright (c) 2026 iconidentify"). The two
+Omarchy plugins under omarchy/plugins carry LICENSE files of their own (not read here: not
+verified).
 What we take: the desktop: the Wayland compositor, dock, shell and terminal, ported to
-Darwin (wm-darwin). Chonkstep keeps its name. Its repositories are not part of this one.
+Darwin (wm-darwin). Chonkstep keeps its name. A copy of its source is at present vendored in
+this repository (integrations/siliconforest/chonkstep-darwin/desktop-shell/source, base
+e0fe3a00), and the Darwin changes are kept as patches derived from it
+(chonkstep-source.patch.gz, integrations/siliconforest/terminal-app/compositor/*.patch, two
+patches under m1-touchbar, keyboard-only/pdhid-keyboard.patch): all of these are GPL-3.0-only
+as derived work. Whether the copy stays vendored is the owner's decision.
+That copy also holds reference screenshots of other systems (Apple System 7.5.3 taken in
+Infinite Mac, OS/2 Warp, BeOS) under docs/decoration-styles/; they are not ours and their
+redistribution has not been cleared.
+
+smithay
+-------
+The Smithay authors, smithay 0.7.0, vendored inside the Chonkstep copy (vendor/smithay-0.7.0).
+Licence: MIT (read from its LICENSE.txt and Cargo.toml).
+What we take: the Wayland compositor library the desktop is built on, with changes for Darwin.
 
 Darling
 -------
 The Darling developers, https://www.darlinghq.org
-Licence: GPL-3.0 for Darling; darling-metal MPL-2.0.
+Licence: GPL-3.0 for Darling; darling-metal MPL-2.0 (not verified: no licence file read here).
 What we take: reference for framework behaviour; the Metal implementation (darling-metal,
 Indium, through PureDarwin's packaging) for the Metal work in progress.
 
@@ -123,7 +178,7 @@ FFmpeg and x264
 ---------------
 The FFmpeg developers, https://ffmpeg.org; the x264 project, VideoLAN.
 Licence: FFmpeg LGPL-2.1-or-later, GPL-2.0-or-later as built here with x264; x264
-GPL-2.0-or-later.
+GPL-2.0-or-later (not verified: recipes only, no licence file read here).
 What we take: the encoder for the desktop's screen recording and the demuxers and software
 decoders of the video player; our hardware decoder glue for FFmpeg (the sfavd hwaccel) is
 ours and follows FFmpeg's licence in the files that patch it.
@@ -131,33 +186,55 @@ ours and follows FFmpeg's licence in the files that patch it.
 VLC and cubeb
 -------------
 VideoLAN (VLC 3.0.24): GPL-2.0-or-later, libvlc LGPL-2.1-or-later. Mozilla (cubeb,
-cubeb-coreaudio-rs): ISC.
+cubeb-coreaudio-rs): ISC. Both (confirmed from the local clone's licence files by the audit of 17 November 2026).
 What we take: VLC as a player built for SiliconForest (work in progress); cubeb as the
 reference for the audio server's client behaviour.
 
 Firefox
 -------
 Mozilla, https://www.mozilla.org
-Licence: MPL-2.0.
-What we take: Firefox built for SiliconForest with our patches (widget, media, network
-glue) under integrations/siliconforest/firefox/.
+Licence: MPL-2.0 (not verified: no licence file read here).
+What we take: Mozilla's Firefox 160.0 release bundle, run unmodified; it is not in this
+repository. integrations/siliconforest/firefox/ holds our launcher, probes and the patches to
+our own frameworks and to FFmpeg that it needs. "Firefox" is Mozilla's trademark.
 
 neofetch
 --------
 Dylan Araps, neofetch 7.1.0
-Licence: MIT.
+Licence: MIT (not verified: no licence file read here).
 What we take: neofetch with a patch that draws the SiliconForest mark and reads this system.
 
 Fonts
 -----
-Inter (The Inter Project Authors) and Source Code Pro (Adobe): SIL Open Font License 1.1.
-What we take: the system's title and terminal faces.
+Shipped on the system or inside the desktop's binaries:
+- Inter (The Inter Project Authors) and Source Code Pro (Adobe): the system's title and
+  terminal faces. SIL Open Font License 1.1 by package metadata only; neither font nor its
+  licence text is in this repository: not verified.
+- IBM Plex Sans, IBM Plex Mono and Space Grotesk: in the vendored Chonkstep copy
+  (crates/wm-theme/assets/fonts/modern), SIL Open Font License 1.1 (read from the
+  ibmplexsans-OFL.txt, ibmplexmono-OFL.txt and spacegrotesk-OFL.txt beside them).
+- Noto Sans Mono CJK and Noto Emoji (terminal-app/build-fonts-extra.nix), Noto Color Emoji
+  (cocoa/fonts-color-emoji.nix), Noto Thai faces (cocoa/fonts-thai.nix), the Noto face Firefox's
+  process registers (firefox/noto-fonts.nix): SIL Open Font License 1.1 as each recipe states;
+  each recipe installs the licence text it fetches beside the font. The texts themselves were
+  not read here: not verified.
+- DejaVu Sans and the URW base35 set (Nimbus): in the root through upstream's image; a DejaVu
+  face is also a test fixture in the Chonkstep copy. Licences not verified.
 
 Other components reached through PureDarwin's build
 ----------------------------------------------------
 wlroots, sway and neuswc (MIT), libxkbcommon (MIT), libiconv (LGPL), Haiku headers used by the
 compatibility layer (MIT), uACPI (MIT), ravynOS drivers (BSD-2-Clause, each file's notice), the
-Rust standard library and the crates named in each Cargo.lock (their own licences).
+Rust standard library and the crates named in each Cargo.lock (their own licences). The
+licences in this paragraph are not verified: no licence file was read for them here.
+
+Reference material in the tree that is not ours
+------------------------------------------------
+Retro68 and Infinite Mac were used to study and capture the classic systems the Chonkstep
+decoration styles follow; the captures are named under Chonkstep above. Linux and
+speakersafetyd reference files kept unchanged for comparison are hash-recorded in their
+directories (m1-thunderbolt/upstream, m1-sound/safetyd/tests/upstream-ref). Licences of
+Retro68 and Infinite Mac: not verified.
 
 Tools used to build and study, not shipped
 ------------------------------------------
