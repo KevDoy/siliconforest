@@ -26,7 +26,7 @@ let
     # taken the same way: fork it, put the new id here (docs/design/siliconforest-naming.md).
     # SF_PD=pin still names upstream's own tree; the recipes of this branch carry the SiliconForest
     # names and do not build it (build the pin from the commit before the rename).
-    tip = { checkout = "sources/puredarwin-rebase"; rev = "e7110de8f0d6faa96a00e2306c03c4355dab1ba7"; };
+    tip = { checkout = "sources/puredarwin-rebase"; rev = "cd001928e0223fd77a7850f09e43580b51bde239"; };
   };
   asked = builtins.getEnv "SF_PD";
   which = if asked == "" then "tip" else asked;

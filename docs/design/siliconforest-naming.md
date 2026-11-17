@@ -180,11 +180,9 @@ leaves branch `siliconforest/e7aa00a6` = `04b6ecb44f8d6d8c650b8e3e1912bc57b88126
 commit. Three names that exist only at the pin were classified for it (`pd-wayland-session` and the boot argument
 `pdmmcsync` renamed, `pde0` an AMD page-directory word that stays); none of them occurs at the tip, so the tip's
 fork commit is unchanged. `check --tree` is clean on the pin's fork and `licence-proof` finds 0 changed notice lines
-(32,580 files compared, 1,841 changed). The pin's fork was made with rule R2c; the tip's fork commit (`e7110de8`, `FORK_REV`) was made before it and still has
-`pd_##` in two files (`src/Frameworks/OpenGL/CGL.c`, where it does not compile, and
-`src/Libraries/libSystem/libc/darwin/sf_arm64_abi.c`, where it does). Nothing built from the tip so far compiles that
-`CGL.c`. Regenerating the tip's fork changes its commit id and so rebuilds everything made from it; it is to be done
-together with the kernel rebuild the M1 install needs (`siliconforest-naming-m1-install.md`), not before.
+(32,580 files compared, 1,841 changed). Both forks were made again with rule R2c (17 November, evening): the tip's is now `cd001928` (`FORK_REV`, `rebase/pd.nix`;
+it was `e7110de8`), differing from the earlier one in `src/Frameworks/OpenGL/CGL.c` and
+`src/Libraries/libSystem/libc/darwin/sf_arm64_abi.c` only. Everything built from the tip before that is rebuilt.
 `SF_PD=pin` in `rebase/pd.nix` still names upstream's own tree and is not
 built by the recipes of this branch.
 

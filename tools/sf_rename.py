@@ -220,7 +220,7 @@ EDITS = [
      'as the patch'),
 ]
 # The renamed commit of upstream c713d8fb (printed by `fork`).
-FORK_REV = 'e7110de8f0d6faa96a00e2306c03c4355dab1ba7'
+FORK_REV = 'cd001928e0223fd77a7850f09e43580b51bde239'
 # Safety-gated sources: identifier and file-name substitution only; `safety-proof` shows the logic is untouched.
 SAFETY_FILES = [OLD_ROOT + 'm1-storage/kernel/pd_nvme_wgate.c', OLD_ROOT + 'm1-storage/kernel/pd_nvme_wgate.h',
                 OLD_ROOT + 'm1-storage/kernel-rw/pd_nvme_wring.h', OLD_ROOT + 'm1-native-boot/reboot/pd_halt_gate.h']
