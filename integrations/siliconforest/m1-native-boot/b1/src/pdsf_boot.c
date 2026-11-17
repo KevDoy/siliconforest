@@ -299,7 +299,7 @@ int pdsf_boot_records(const u8 *payload, u64 limit, int appended)
     u8 *el2 = memalign(EL2_PAGE, EL2_PAGE);
     u64 params[4];
 
-    if (el2_size != EL2_PAGE || memcmp(_pdsf_el2_start + EL2_PARAMS, "SFNB1", 5) || !el2)
+    if (el2_size != EL2_PAGE || memcmp(_pdsf_el2_start + EL2_PARAMS, "PDNB1", 5) || !el2)
         fail("no EL2 page\n");
     memcpy(el2, _pdsf_el2_start, EL2_PAGE);
     params[0] = 0x31424e4450ull;

@@ -499,7 +499,7 @@ class Stage(unittest.TestCase):
         for name, value in (('EL2_PARAMS', 0x3f00), ('EL2_HOLD_ACKS', 0x3f40), ('EL2_BOOT_ENTRY', 4),
                             ('EL2_HOLD_ENTRY', 8)):
             self.assertRegex(source, r'#define %s\s+%s\b' % (name, hex(value) if value > 9 else value))
-        self.assertEqual(blob[0x3f00:0x3f05], b'SFNB1')
+        self.assertEqual(blob[0x3f00:0x3f05], b'PDNB1')
 
     def test_stage_never_touches_storage(self):
         source = (HERE / 'src/pdsf_boot.c').read_text() + (HERE / 'src/pdsf.c').read_text()

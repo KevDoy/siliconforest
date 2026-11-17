@@ -297,7 +297,7 @@ report:
         b       3b
 
 msg_boot:       .asciz "\r\nPDNB stub at EL2\r\n"
-msg_el2:        .asciz "SFNB EL2 configured, entering EL1 at "
+msg_el2:        .asciz "PDNB EL2 configured, entering EL1 at "
 msg_code:       .asciz " code "
 msg_nosec:      .asciz "\r\nPDNB secondary reset without an entry\r\n"
 msg_exc:        .asciz "\r\nPDNB EXCEPTION at EL"
@@ -331,7 +331,7 @@ el1_vectors:                                    /* 0x1000 */
         vectors 1
 
         .org    0x3f00
-param_magic:            .quad 0x31424e4450       /* "SFNB1" */
+param_magic:            .quad 0x31424e4450       /* "PDNB1": the page keeps the bytes it booted with */
 param_uart:             .quad 0                 /* physical base of uart0, 0: silent */
 param_flags:            .quad 0
 param_secondary_entry:  .quad 0                 /* XNU's reset vector, physical; 0: none */

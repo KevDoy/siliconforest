@@ -21,7 +21,7 @@ same pair.
 | Where | Now | Renamed | Source |
 |---|---|---|---|
 | SFBOOT `sf/kernel.bin` | configuration + collection "48" with `PD…` kexts, `org.puredarwin.*` bundle ids; its command line carries `pdm1kbd=1 pdm1trackpadenum=1 pdm1trackpadchild=1 pdgpudt=2 pdagx=1 pddispdt=2 pddcp=2 pdnvme=3 pdnvme_part=… pdnvme_write=1 pdnvme_readfence=1 pdcpuheld=1 pdapciebridge=1 pdavd=1 pdtextboot=0 …` | the same with `SF…`, `org.siliconforest.*`, `sfm1kbd=1 … sfavd=1` | `m1-native-boot/install/build.sh` (the command line is packed into `kernel.bin` with the collection) |
-| SFBOOT `sf/boot.bin` (stage 2) | unchanged | unchanged: stage 2 passes the packed command line on and knows no kext or argument name *(inferred from `build.sh` and `src/pdsf_file.c`; to be confirmed by comparing the two builds' `boot.bin` byte for byte)* | |
+| SFBOOT `sf/boot.bin` (stage 2) | SHA-256 `81d58f1b…`; it starts the other seven processors only when the command line carries `pdcpuheld=1` and stops otherwise | **replaced, together with `kernel.bin`**: stage 2 from this tree looks for `sfcpuheld=1` (SHA-256 `fc8883a3…`, the same size). The earlier statement here, that stage 2 knows no argument name, was wrong (`b1/src/pdsf_boot.c`). The two builds differ in that word and in where the linker put the strings; the new one has never booted on the machine. `sf-bootbin-install.sh` now refuses a `boot.bin` and a `kernel.bin` of different namings | `m1-native-boot/install/build.sh`; `b1/src/pdsf_boot.c` |
 | stage 1 in the stub volume | unchanged | unchanged (a new stage 1 needs recovery mode; none is needed) | |
 | `/System/Library/CoreServices/SystemVersion.plist` | ProductName `PureDarwin` | `SiliconForest` | upstream `image.nix` |
 | host name | `puredarwin` (`/etc/hosts`, the job `org.puredarwin.hostname`) | `siliconforest` | upstream `image.nix`. The M1's SSH host key does not change; `known_hosts` entries are by address |
@@ -62,19 +62,22 @@ Four files were already changed on the M1 by hand on 17 November (the files of b
 ProductName, neofetch accepting both names, a draft `NOTICE` in `/usr/share/doc/siliconforest/`.
 The manifest accounts for them (rows with no recorded old hash, `keep` rows for the `.pre-sf` files).
 
-**The kernel is the open blocker.** The renamed collection built so far
-(`rebase/build-kc.nix`, the from-source default) is not the kernel the M1 runs. Kernel 48 is the
-end of a chain of recipes that each replace one module of a previously qualified collection and
-keep the others as built binaries (`m1-firefox-kernel` -> `m1-devfs-clone` -> ... ->
-`m1-wifi-pm` (47) -> `m1-ext4-journal-cache` (48); pinned store paths of old-name collections and
-a recorded build phase with a pinned hash). Compared by bundle identifier, kernel 48 has
-`PDAppleNVMeRW`, `PDAppleCIO` and `PDAppleTypeC`, which the renamed default collection lacks,
-and the chain's changes of 14 to 16 November (AVD import cache, ext4 journal cache and its
-end-of-file fix, Wi-Fi power management, the Touch Bar and HID readiness changes, killable waits,
-dma-buf fences) are not in `rebase/kernel.nix`. From `sf-rename` that chain does not evaluate (its
-assertions compare against old-name store paths). A renamed kernel equal to 48 needs the chain
-made from source once, under the new names. Until then the user space below has no kernel to run on,
-and the from-source collection must not be installed in its place (no writable-root driver).
+**The kernel: built and compared, not installed (KERNEL49, 17 November).** Kernel 48 was the end of a chain
+of recipes that each replaced one module of a previously qualified collection and kept the others
+as built binaries; from `sf-rename` that chain does not evaluate. `m1-kernel48/build-kc.nix` links
+the same 57 members once, each compiled from the renamed tree. Five member groups (the display
+drivers, the GPU driver's RTKit port, the video decoder, the Wi-Fi pair, the Thunderbolt member)
+were compiled for kernel 48 from an earlier revision of their lab directory than the tree has now;
+`m1-kernel48/back-to-48/` holds those differences, and the recipe applies them. Member by member
+against kernel 48's binaries (`m1-kernel48/compare-all.py`, table `m1-kernel48/member-proof.tsv`):
+56 of 57 identical apart from names; `apfs` differs in one instruction, the length of a string
+that contains the product name. The gate, fence, halt gate and speaker protection units: the same
+source text with the rules applied, and the code section of the three bundles that hold them has
+the same SHA-256 as kernel 48's. In QEMU the `virt` system starts from its ext4 root with this
+recipe's ext4, PCI and USB members (`m1-kernel48/qemu-image.nix`); the collection itself is a
+T8103 kernel and does not start there (the loader hands over, nothing follows). On the machine it
+is unproven until installed. The from-source default collection (`rebase/build-kc.nix`) is still
+not a substitute and must not be installed (no writable-root driver).
 
 What kernel 48 is made of, member by member, with the recipe of each and every frozen reference of the chain's
 recipes: `runs/rebuild/kernel48/README.md` (workstation, outside git). In short: all 57 members have their recipes
@@ -165,9 +168,14 @@ what a hand-over records; where the M1 carries another revision the dry run says
    pin's); the Finch AudioToolbox family, its provider and Firefox's private family stay. Restore
    with the restore script before the main switch, or leave it: the main manifest then shows `DIFF`
    for those two files, which is expected.
-2. **Kernel**: a renamed collection equal to kernel 48 (see above), packed by
-   `m1-native-boot/install/build.sh`, installed from Linux with `sf-bootbin-install.sh` (the present
-   pair becomes `.old`).
+2. **Kernel and stage 2, as one pair**: `boot.bin` from `m1-native-boot/install/build.sh` (stage 1
+   of that build is byte for byte the installed one and stays), `kernel.bin` from
+   `m1-kernel48/pack-kernel-bin.py` (the installed configuration record with its argument names
+   mapped, 599 bytes as before; `build.sh`'s own argument list is not the installed one and, with
+   the installed arguments added, does not fit a record). From Linux:
+   `sudo ./sf-bootbin-install.sh <PARTUUID of SFBOOT> boot.bin kernel.bin`. Both present files
+   become `.old`: the previous `boot.bin.old` (the first install's 14 MB image, which stage 1
+   refuses) is replaced by the stage 2 that runs today.
 3. **Main switch** (`main/`): dry run first, on the M1 or from Linux on the mounted partition. On
    the running system: `--classes "state direct launchd"` with the desktop stopped, then `core`
    (or `core` from Linux: every command the script starts loads the new dyld and libSystem on the
@@ -194,7 +202,11 @@ frameworks other than AudioToolbox, Activity Monitor's libraries).
 - `sf/kernel.bin.old` is collection 48 **with its own command line packed inside**: it reads its
   `pd…=` arguments from itself. Nothing has to be translated, and no boot argument is passed from
   outside (stage 1 passes two fixed lines, stage 2 refuses others). `sf-bootbin-install.sh
-  <PARTUUID> --rollback` from Linux brings it back, as today.
+  <PARTUUID> --rollback` from Linux brings it back **together with `boot.bin.old`, the stage 2
+  that runs today**: the two must go back as a pair, because each stage 2 starts only a command
+  line of its own naming (`pdcpuheld=1` / `sfcpuheld=1`). The script checks the pair before it
+  renames anything. Putting back `kernel.bin.old` alone, by hand, gives a system that stops in
+  stage 2.
 - Kernel 48 needs the **old user space**. After a kernel rollback the system comes up with the
   renamed user space: the text console, launchd, sshd and Wi-Fi are expected to work
   *(inferred: none of them finds the kernel by a renamed name; `sf-netd` uses BSD ioctls by

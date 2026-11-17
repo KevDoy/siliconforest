@@ -297,7 +297,7 @@ def native_init(hv, backend):
 def stub_image(uart, flags, secondary_entry=0):
     import native_stub
     blob = bytearray(bytes.fromhex(native_stub.STUB_HEX))
-    require(len(blob) == 0x4000 and blob[PARAMS:PARAMS + 5] == b'SFNB1', 'Unexpected native stub image')
+    require(len(blob) == 0x4000 and blob[PARAMS:PARAMS + 5] == b'PDNB1', 'Unexpected native stub image')
     blob[PARAMS + 8:PARAMS + 32] = b''.join(v.to_bytes(8, 'little') for v in (uart, flags, secondary_entry))
     return bytes(blob)
 

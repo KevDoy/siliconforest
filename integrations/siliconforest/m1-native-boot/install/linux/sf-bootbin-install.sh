@@ -40,7 +40,7 @@ if [ "$WHAT" = --show ]; then
 fi
 ROOT=$(blkid -L SiliconForest || true); [ -b "$ROOT" ] || refuse "no partition labelled SiliconForest on this machine"
 check() { python3 -B - "$1" "$2" "$(blkid -s UUID -o value "$ROOT")" "${3:-0}" <<'PY'
-import struct, sys, zlib
+import re, struct, sys, zlib
 boot, kernel, root, bench = open(sys.argv[1], 'rb').read(), open(sys.argv[2], 'rb').read(), sys.argv[3], sys.argv[4] == '1'
 # Stage 1 (…-siliconforest-stage1-v1, 4,325,376 bytes) refuses an image whose span,
 # ALIGN_UP(file + the variable lines it passes on + 4, 16 KiB), reaches past its own footprint
@@ -69,6 +69,10 @@ assert 'rd=uuid' in args and ('boot-uuid=' + root) in args, 'kernel.bin: built f
 assert not any(a.startswith(('sfbench', 'pdsfstop', 'sfpoweroff')) for a in args), 'kernel.bin: a bench image'
 is_bench = any(a.startswith(('sfmark', 'sfsession_seconds')) for a in args)
 assert bench or not is_bench, 'kernel.bin: a bench image (its session ends by itself)'
+# Stage 2 starts more than one processor only when the command line carries the word it was built
+# to look for (src/pdsf_boot.c): a stage 2 and a kernel.bin of different namings do not start.
+for word in sorted(set(re.findall(rb'[a-z]{2}cpuheld=1', boot))):
+    assert word.decode() in args, 'kernel.bin: its command line lacks %s, which this boot.bin requires: install the boot.bin and the kernel.bin of one build together' % word.decode()
 print('SFBOOT files ok: boot.bin %d bytes (span %d of %d), kernel.bin %d bytes%s, root %s...' % (
     len(boot), span, STAGE1, len(kernel), ' BENCH SESSION' if is_bench else '', root[:4]))
 PY

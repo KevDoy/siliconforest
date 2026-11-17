@@ -23,6 +23,6 @@ source = source.replace(include, include + '\n#include "sf_cio_rtkit.h"')
 for old, endpoint in sites:
     call = old[:-1]
     source = source.replace(old, '{ int sf_ack_result = ' + call + ';\n'
-                            '\t\tpd_cio_rtkit_observe_ack(rtk, ' + str(endpoint) +
+                            '\t\tsf_cio_rtkit_observe_ack(rtk, ' + str(endpoint) +
                             ', sf_ack_result); }')
 path.write_text(source)

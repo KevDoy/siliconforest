@@ -84,7 +84,7 @@ class NativeBoot(unittest.TestCase):
     def test_stub_parameters(self):
         blob = native_boot.stub_image(0x235200000, 3, 0x855520000)
         self.assertEqual(struct.unpack_from('<5sxxxQQQ', blob, native_boot.PARAMS),
-                         (b'SFNB1', 0x235200000, 3, 0x855520000))
+                         (b'PDNB1', 0x235200000, 3, 0x855520000))
 
     def start(self, mode, stub=0x80a000000, phys_base=0x852ebc000):
         log = []
