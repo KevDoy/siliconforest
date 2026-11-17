@@ -109,7 +109,7 @@ done
 [ $ibad = 0 ] && ok "interrupted after 1..$((n - 1)) changes (every $STRIDE): restore gives the first root; resumed switch completes and restores" || no "interrupted switch"
 # 7. a live file that differs from the record
 fresh
-first=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$1=="install" && $3 ~ /^[0-9a-f]{64}$/ {print $2; exit}')
+first=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$1=="install" && $3 ~ /^[0-9a-f]{64}$/ && !d {print $2; d = 1}')
 if [ -n "$first" ]; then
   chmod u+w "$W/r$first"; echo changed-by-hand >> "$W/r$first"; snap $W/r > $W/b7
   sw --root $W/r $STAGE > $W/o 2>&1 && rc=0 || rc=$?
@@ -130,7 +130,7 @@ sw --root $W/r --name sf-rename-audio-pretest $STAGE > $W/o 2>&1 && [ -f $W/r/pr
   && rs --root $W/r --name sf-rename-audio-pretest > $W/o 2>&1 && ok "--name: own directory, switch and restore" || no "--name"
 # 10. class kernel: not in a run unless named; then done and restored
 if grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel"' | grep -q .; then
-  kp=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" {print $2; exit}'); kn=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" {print $4; exit}')
+  kp=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" && !d {print $2; d = 1}'); kn=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" && !d {print $4; d = 1}')
   fresh; kb=$(sha256sum "$W/r$kp" 2>/dev/null | cut -c1-64)
   sw --root $W/r $STAGE > $W/o 2>&1; [ "$(sha256sum "$W/r$kp" 2>/dev/null | cut -c1-64)" = "$kb" ] && ok "class kernel is left alone by a run that does not name it ($kp)" || no "class kernel was touched by the default run"
   sw --root $W/r --classes kernel $STAGE > $W/o 2>&1 && [ "$(sha256sum "$W/r$kp" | cut -c1-64)" = "$kn" ] && rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now \
