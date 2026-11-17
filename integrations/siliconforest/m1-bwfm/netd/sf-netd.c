@@ -3,18 +3,30 @@
  *
  * Copyright (c) 2026 darwin-lab. SPDX-License-Identifier: ISC
  *
- * sf-netd [--once] [--timeout S] [--poll S] [--renew-after S] [--lease-cap S] [--no-resolver] [IFNAME]
+ * sf-netd [--once] [--timeout S] [--poll S] [--renew-after S] [--lease-cap S] [--no-resolver]
+ *         [--live-after S] [--live-target ADDR] [--wired] [IFNAME]
  *     One supervisor for one interface (default en0). It turns the radio on, and while the
  *     interface is not associated and was not left on purpose (wifiutil leave) it runs
  *     "wifiutil autojoin" with a growing pause between tries. Once associated it keeps
  *     "sf-dhcp --daemon" running for the interface and, when a lease is configured, the
  *     resolver daemon (mdnsd -debug). A child that dies is started again. Each change of state
  *     is one line "sf-netd: IFNAME state=..." on stdout and in /var/run/sf-netd.IFNAME.status.
- *     A second instance for the same interface exits. SIGTERM stops the children it started.
+ *     Every line on stdout begins with the time (UTC, "2026-11-17T17:20:01Z "); the status file
+ *     has none. A second instance for the same interface exits. SIGTERM stops the children it
+ *     started.
+ *
+ *     Liveness: while it reports online it sends the lease's router an ICMP echo at every poll.
+ *     When no reply has come for --live-after seconds (default 45; 0 turns the check off) it
+ *     says so, drops the association without the "left" marker, stops sf-dhcp and joins again
+ *     as after any lost association. A router that stays silent is tried again after twice the
+ *     time, up to ten minutes; the first reply resets that.
  *
  *     --once brings the network up once (join, one-shot sf-dhcp, resolver) and exits 0, or 1
  *     when that did not work within --timeout seconds (default 90); the resolver stays running.
  *     --renew-after and --lease-cap are handed to sf-dhcp (its test hooks).
+ *     Test hooks of the liveness check: --live-target ADDR sends the echo there instead of to
+ *     the router; --wired takes an interface without the 802.11 requests (QEMU's virtio
+ *     Ethernet) as associated, and a re-join there only starts sf-dhcp again.
  *
  * sf-netd --drop-link [IFNAME]
  *     Test hook: disassociates without leaving the "left" marker, so autojoin still applies.
@@ -28,6 +40,9 @@
 #include <sys/wait.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -102,6 +117,16 @@ struct ctx {
     int backoff;                /* seconds between autojoin tries */
     int64_t next_join;
     int once_dhcp_done;
+
+    int wired;                  /* --wired: no 802.11 requests, the interface counts as associated */
+    int live_after;             /* seconds without an echo reply before a re-join; 0: no check */
+    const char *live_target;    /* --live-target, NULL: the lease's router */
+    int live_fd;                /* the ICMP socket, -1 when there is none */
+    uint32_t live_addr;         /* whom the echoes go to now (network order), 0: nobody */
+    int64_t live_since;         /* the last reply, or when the watch of live_addr began */
+    int live_wait;              /* the silence that triggers the next re-join (grows while it stays silent) */
+    uint16_t live_seq;
+    unsigned live_sent, live_got, live_rejoins;
 };
 
 static volatile sig_atomic_t stopping;
@@ -126,10 +151,22 @@ static int64_t now_s(void)
     return (int64_t)time(NULL);
 }
 
+/* The time in front of every log line: wall clock, UTC. */
+static void stamp(FILE *f)
+{
+    time_t t = time(NULL);
+    struct tm tm;
+    char buf[24];
+
+    if (gmtime_r(&t, &tm) != NULL && strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm) > 0)
+        fprintf(f, "%s ", buf);
+}
+
 static void say(const struct ctx *c, const char *fmt, ...)
 {
     va_list ap;
 
+    stamp(stdout);
     printf("sf-netd: %s ", c->ifname);
     va_start(ap, fmt);
     vprintf(fmt, ap);
@@ -161,6 +198,8 @@ static int wifi_state(const struct ctx *c)
 {
     struct a80211_u32 st = { 1, 0 };
 
+    if (c->wired)
+        return A80211_S_RUN;
     if (a80211(c, 0, A80211_IOC_STATE, &st, sizeof(st)) < 0)
         return -1;
     return (int)st.value;
@@ -170,6 +209,8 @@ static int wifi_power(const struct ctx *c)
 {
     struct a80211_u32 p = { 1, 0 };
 
+    if (c->wired)
+        return 1;
     if (a80211(c, 0, A80211_IOC_POWER, &p, sizeof(p)) < 0)
         return 0;
     return p.value != 0;
@@ -250,6 +291,7 @@ static pid_t spawn(const struct ctx *c, const char *const argv[], const char *lo
         }
     }
     execv(argv[0], (char *const *)argv);
+    stamp(stderr);
     fprintf(stderr, "sf-netd: exec %s: %s\n", argv[0], strerror(errno));
     _exit(127);
 }
@@ -497,6 +539,160 @@ static void ensure_join(struct ctx *c, int st)
     }
 }
 
+/* ---- liveness ---------------------------------------------------------------------------- */
+
+static uint16_t icmp_sum(const uint8_t *p, size_t n)
+{
+    uint32_t sum = 0;
+
+    for (; n > 1; p += 2, n -= 2)
+        sum += (uint32_t)(p[0] << 8 | p[1]);
+    if (n)
+        sum += (uint32_t)(p[0] << 8);
+    while (sum >> 16)
+        sum = (sum & 0xffff) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+static void live_forget(struct ctx *c)
+{
+    c->live_addr = 0;
+}
+
+/* "router=a.b.c.d" of the lease line, or --live-target; 0 when there is none */
+static uint32_t live_whom(const struct ctx *c, const char *lease)
+{
+    char text[16];
+    const char *p = c->live_target;
+    struct in_addr a;
+    size_t n;
+
+    if (p == NULL) {
+        if ((p = strstr(lease, "router=")) == NULL)
+            return 0;
+        p += 7;
+    }
+    n = strcspn(p, " ");
+    if (n == 0 || n > 15)
+        return 0;
+    memcpy(text, p, n);
+    text[n] = 0;
+    if (inet_pton(AF_INET, text, &a) != 1 || a.s_addr == 0)
+        return 0;
+    return a.s_addr;
+}
+
+/*
+ * Called at every poll while online. Takes the echo replies that came, sends the next echo.
+ * Returns 1 when the router has been silent for too long and a re-join is due.
+ */
+static int live_check(struct ctx *c, const char *lease)
+{
+    uint32_t whom = c->live_after > 0 ? live_whom(c, lease) : 0;
+    uint8_t buf[256], pkt[16];
+    struct sockaddr_in from, to;
+    socklen_t flen;
+    ssize_t n;
+    int64_t now = now_s();
+
+    if (whom == 0) {
+        live_forget(c);
+        return 0;
+    }
+    if (c->live_fd < 0) {
+        /* a datagram ICMP socket needs no privilege; a raw one is the same wire format */
+        c->live_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+        if (c->live_fd < 0)
+            c->live_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (c->live_fd < 0) {
+            say(c, "no ICMP socket (%s), the router is not watched", strerror(errno));
+            c->live_after = 0;
+            return 0;
+        }
+        fcntl(c->live_fd, F_SETFL, fcntl(c->live_fd, F_GETFL) | O_NONBLOCK);
+        fcntl(c->live_fd, F_SETFD, FD_CLOEXEC);
+    }
+    if (whom != c->live_addr) {
+        /* online again, or another router: the count of silence begins now */
+        c->live_addr = whom;
+        c->live_since = now;
+        if (c->live_wait < c->live_after)
+            c->live_wait = c->live_after;
+    }
+    for (;;) {
+        const uint8_t *p = buf;
+
+        flen = sizeof(from);
+        n = recvfrom(c->live_fd, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
+        if (n <= 0)
+            break;
+        /* both kinds of socket hand over the IP header on this system; take it off when it is there */
+        if (n >= 20 && (p[0] >> 4) == 4) {
+            size_t ihl = (size_t)(p[0] & 15) * 4;
+
+            if ((size_t)n < ihl + 8)
+                continue;
+            p += ihl;
+            n -= (ssize_t)ihl;
+        }
+        if (n >= 8 && p[0] == ICMP_ECHOREPLY && from.sin_addr.s_addr == c->live_addr) {
+            c->live_got++;
+            c->live_since = now;
+            if (c->live_wait != c->live_after) {
+                say(c, "the router answers again");
+                c->live_wait = c->live_after;
+            }
+        }
+    }
+    if (now - c->live_since >= c->live_wait)
+        return 1;
+    memset(pkt, 0, sizeof(pkt));
+    pkt[0] = ICMP_ECHO;
+    pkt[4] = (uint8_t)(getpid() >> 8);
+    pkt[5] = (uint8_t)getpid();
+    c->live_seq++;
+    pkt[6] = (uint8_t)(c->live_seq >> 8);
+    pkt[7] = (uint8_t)c->live_seq;
+    memcpy(pkt + 8, "sf-netd", 8);
+    n = icmp_sum(pkt, sizeof(pkt));
+    pkt[2] = (uint8_t)(n >> 8);
+    pkt[3] = (uint8_t)n;
+    memset(&to, 0, sizeof(to));
+    to.sin_len = sizeof(to);
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = c->live_addr;
+    /* an echo that cannot be sent (no route, interface down) is an echo without a reply */
+    if (sendto(c->live_fd, pkt, sizeof(pkt), 0, (struct sockaddr *)&to, sizeof(to)) == (ssize_t)sizeof(pkt))
+        c->live_sent++;
+    return 0;
+}
+
+/* The router did not answer: leave the network the way a lost association does and join again. */
+static void live_rejoin(struct ctx *c)
+{
+    char text[16] = "?";
+    struct in_addr a;
+
+    a.s_addr = c->live_addr;
+    inet_ntop(AF_INET, &a, text, sizeof(text));
+    c->live_rejoins++;
+    say(c, "router %s unreachable for %ds while online (echoes sent %u, replies %u), re-joining (%u)", text,
+        (int)(now_s() - c->live_since), c->live_sent, c->live_got, c->live_rejoins);
+    /* a router that stays silent is not asked for a new association every 45 seconds */
+    c->live_wait = c->live_wait * 2 > 600 ? 600 : c->live_wait * 2;
+    live_forget(c);
+    if (c->dhcp > 0)
+        kill(c->dhcp, SIGTERM);         /* reaped at the next look; it is started again once associated */
+    unlink(c->leasepath);
+    if (!c->wired) {
+        if (a80211(c, 1, A80211_IOC_DISASSOCIATE, NULL, 0) < 0)
+            say(c, "disassociate: %s", strerror(errno));
+        c->was_associated = 0;
+        c->backoff = 0;
+        c->next_join = now_s();
+    }
+}
+
 /* One look at the interface and the children. Returns 0 to go on, 1 done (--once), 2 failed (--once). */
 static int tick(struct ctx *c)
 {
@@ -504,8 +700,11 @@ static int tick(struct ctx *c)
     int st;
 
     reap(c);
+    if (c->wired)
+        if_up(c);
     st = wifi_state(c);
     if (st < 0) {
+        live_forget(c);
         set_state(c, N_NO_INTERFACE, "");
         return 0;
     }
@@ -524,6 +723,7 @@ static int tick(struct ctx *c)
             return 0;
         }
         c->was_associated = 0;
+        live_forget(c);
         /* turned on again, the driver rejoins the network it had by itself; give it a moment */
         c->next_join = now_s() + 6;
         c->backoff = 0;
@@ -533,6 +733,7 @@ static int tick(struct ctx *c)
     c->powered = 1;
 
     if (st != A80211_S_RUN) {
+        live_forget(c);
         if (c->was_associated) {
             c->was_associated = 0;
             /* the driver rejoins by itself when it still has the network, give it a moment */
@@ -551,7 +752,10 @@ static int tick(struct ctx *c)
 
     c->was_associated = 1;
     c->backoff = 0;
-    wifi_ssid(c, ssid);
+    if (c->wired)
+        strlcpy(ssid, "(wired)", sizeof(ssid));
+    else
+        wifi_ssid(c, ssid);
     if (c->once) {
         if (!c->once_dhcp_done) {
             const char *argv[] = { c->sf_dhcp, c->ifname, NULL };
@@ -575,14 +779,20 @@ static int tick(struct ctx *c)
 
     ensure_dhcp(c);
     if (!read_lease(c, lease, sizeof(lease), dns)) {
+        live_forget(c);
         set_state(c, N_ASSOCIATED, "ssid=%s waiting for a lease", ssid);
         return 0;
     }
     if (!ensure_resolver(c, dns)) {
+        live_forget(c);
         set_state(c, N_ASSOCIATED, "ssid=%s %s waiting for the resolver", ssid, lease);
         return 0;
     }
     set_state(c, N_ONLINE, "ssid=%s %s", ssid, lease);
+    if (live_check(c, lease)) {
+        live_rejoin(c);
+        set_state(c, c->wired ? N_ASSOCIATED : N_JOINING, c->wired ? "waiting for a lease" : "");
+    }
     return 0;
 }
 
@@ -695,7 +905,8 @@ static void stop_children(struct ctx *c, int keep_resolver)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: sf-netd [--once] [--timeout S] [--poll S] [--renew-after S] [--lease-cap S] [--no-resolver] [IFNAME]\n"
+    fprintf(stderr, "usage: sf-netd [--once] [--timeout S] [--poll S] [--renew-after S] [--lease-cap S] [--no-resolver]\n"
+                    "               [--live-after S] [--live-target ADDR] [--wired] [IFNAME]\n"
                     "       sf-netd --drop-link [IFNAME]\n");
 }
 
@@ -711,6 +922,8 @@ int main(int argc, char **argv)
     c.timeout_s = 90;
     c.poll_s = 3;
     c.lockfd = -1;
+    c.live_fd = -1;
+    c.live_after = 45;
     for (i = 1; i < argc && strncmp(argv[i], "--", 2) == 0; i++) {
         if (strcmp(argv[i], "--once") == 0)
             c.once = 1;
@@ -726,6 +939,12 @@ int main(int argc, char **argv)
             c.renew_after = argv[++i];
         else if (strcmp(argv[i], "--lease-cap") == 0 && i + 1 < argc)
             c.lease_cap = argv[++i];
+        else if (strcmp(argv[i], "--live-after") == 0 && i + 1 < argc)
+            c.live_after = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--live-target") == 0 && i + 1 < argc)
+            c.live_target = argv[++i];
+        else if (strcmp(argv[i], "--wired") == 0)
+            c.wired = 1;
         else {
             usage();
             return 2;
@@ -741,6 +960,10 @@ int main(int argc, char **argv)
         c.poll_s = 2;
     if (c.poll_s > 5)
         c.poll_s = 5;
+    /* less than three polls of silence is no evidence */
+    if (c.live_after > 0 && c.live_after < 3 * c.poll_s)
+        c.live_after = 3 * c.poll_s;
+    c.live_wait = c.live_after;
     setvbuf(stdout, NULL, _IOLBF, 0);
 
     if (drop) {
@@ -777,7 +1000,7 @@ int main(int argc, char **argv)
     c.wifiutil = find_tool("wifiutil");
     c.sf_dhcp = find_tool("sf-dhcp");
     c.mdnsd = find_tool("mdnsd");
-    if (c.wifiutil == NULL || c.sf_dhcp == NULL || (c.mdnsd == NULL && !c.no_resolver)) {
+    if ((c.wifiutil == NULL && !c.wired) || c.sf_dhcp == NULL || (c.mdnsd == NULL && !c.no_resolver)) {
         say(&c, "missing %s", c.wifiutil == NULL ? "wifiutil" : c.sf_dhcp == NULL ? "sf-dhcp" : "mdnsd");
         if (c.lockfd >= 0)
             unlink(c.lockpath);
@@ -798,7 +1021,7 @@ int main(int argc, char **argv)
         fclose(f);
     }
     c.state = N_START;
-    say(&c, "pid %d%s", (int)getpid(), c.once ? " once" : "");
+    say(&c, "pid %d%s%s", (int)getpid(), c.once ? " once" : "", c.wired ? " wired" : "");
     deadline = now_s() + c.timeout_s;
 
     while (!stopping) {
