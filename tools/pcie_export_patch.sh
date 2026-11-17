@@ -1,9 +1,9 @@
 #!/bin/bash
-# Regenerate the PureDarwin tree patch from the lab sources:
-#   integrations/puredarwin/puredarwin-patches/0001-m1-pcie-wifi.patch
-# It adds PDApcieT8103Bridge and PDBwfm under src/Kernel/Extensions, pd-dhcp/pd-net-up under
-# src/Userspace, and registers them in CMake and nix/lib/kexts.nix. Base: the PureDarwin revision
-# integrations/puredarwin/rebase/pd.nix selects: upstream's tip c713d8fb (SF_PD=pin: e7aa00a6).
+# Regenerate the SiliconForest tree patch from the lab sources:
+#   integrations/siliconforest/siliconforest-patches/0001-m1-pcie-wifi.patch
+# It adds SFApcieT8103Bridge and SFBwfm under src/Kernel/Extensions, sf-dhcp/sf-net-up under
+# src/Userspace, and registers them in CMake and nix/lib/kexts.nix. Base: the SiliconForest revision
+# integrations/siliconforest/rebase/pd.nix selects: upstream's tip c713d8fb (SF_PD=pin: e7aa00a6).
 # The three list files are read from that commit, not from the checkout's working tree.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
@@ -12,39 +12,39 @@ case "${SF_PD:-tip}" in
   tip) PD=sources/puredarwin-rebase; REV=c713d8fb9b048a38e2242d67e29b9957ced8c495;;
   *) echo "SF_PD=$SF_PD: expected pin or tip" >&2; exit 2;;
 esac
-grep -q "rev = \"$REV\"" integrations/puredarwin/rebase/pd.nix || { echo "pcie_export_patch.sh: $REV is not a revision of rebase/pd.nix" >&2; exit 2; }
-I=integrations/puredarwin
+grep -q "rev = \"$REV\"" integrations/siliconforest/rebase/pd.nix || { echo "pcie_export_patch.sh: $REV is not a revision of rebase/pd.nix" >&2; exit 2; }
+I=integrations/siliconforest
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p $T/a/src/Kernel/Extensions $T/a/src/Userspace $T/a/nix/lib
 for f in src/Kernel/Extensions/CMakeLists.txt src/Userspace/CMakeLists.txt nix/lib/kexts.nix; do git -C $PD show $REV:$f > $T/a/$f; done
 cp -R $T/a $T/b
 
-B=$T/b/src/Kernel/Extensions/PDApcieT8103Bridge; mkdir -p $B
-cp $I/m1-apcie-host/{CMakeLists.txt,Info.plist,NOTICE,PDApcieT8103.cpp,PDApcieT8103.h,PDApcieT8103Link.cpp,PDApcieT8103Link.h} $B/
-W=$T/b/src/Kernel/Extensions/PDBwfm; mkdir -p $W
-cp $I/m1-bwfm/{CMakeLists.txt,Info.plist,OPENBSD_REVISION,PDBwfm.cpp,bwfm.c,bwfmreg.h,bwfmvar.h,if_bwfm_pci.c,if_bwfm_pci.h,pd_bwfm_compat.h,pd_bwfm_glue.c,pd_bwfm_glue.h} $W/
-cp $I/m1-apcie-host/dart/pd_dart_pool.{cpp,h} $W/
-U=$T/b/src/Userspace/pd-dhcp; mkdir -p $U
-cp $I/m1-bwfm/dhcp/pd-dhcp.c $I/m1-bwfm/dhcp/pd-net-up $U/
+B=$T/b/src/Kernel/Extensions/SFApcieT8103Bridge; mkdir -p $B
+cp $I/m1-apcie-host/{CMakeLists.txt,Info.plist,NOTICE,SFApcieT8103.cpp,SFApcieT8103.h,SFApcieT8103Link.cpp,SFApcieT8103Link.h} $B/
+W=$T/b/src/Kernel/Extensions/SFBwfm; mkdir -p $W
+cp $I/m1-bwfm/{CMakeLists.txt,Info.plist,OPENBSD_REVISION,SFBwfm.cpp,bwfm.c,bwfmreg.h,bwfmvar.h,if_bwfm_pci.c,if_bwfm_pci.h,sf_bwfm_compat.h,sf_bwfm_glue.c,sf_bwfm_glue.h} $W/
+cp $I/m1-apcie-host/dart/sf_dart_pool.{cpp,h} $W/
+U=$T/b/src/Userspace/sf-dhcp; mkdir -p $U
+cp $I/m1-bwfm/dhcp/sf-dhcp.c $I/m1-bwfm/dhcp/sf-net-up $U/
 cat > $U/CMakeLists.txt <<'C'
-# pd-dhcp: minimal DHCPv4 client; pd-net-up: DHCP plus the resolver daemon, for roots without configd
-add_darwin_executable(pd-dhcp MACOSX_VERSION_MIN 26.5)
+# sf-dhcp: minimal DHCPv4 client; sf-net-up: DHCP plus the resolver daemon, for roots without configd
+add_darwin_executable(sf-dhcp MACOSX_VERSION_MIN 26.5)
 
-get_target_property(_pd_dhcp_opts pd-dhcp COMPILE_OPTIONS)
-if(_pd_dhcp_opts)
-    list(REMOVE_ITEM _pd_dhcp_opts -nostdinc)
-    set_target_properties(pd-dhcp PROPERTIES COMPILE_OPTIONS "${_pd_dhcp_opts}")
+get_target_property(_sf_dhcp_opts sf-dhcp COMPILE_OPTIONS)
+if(_sf_dhcp_opts)
+    list(REMOVE_ITEM _sf_dhcp_opts -nostdinc)
+    set_target_properties(sf-dhcp PROPERTIES COMPILE_OPTIONS "${_sf_dhcp_opts}")
 endif()
 
-target_sources(pd-dhcp PRIVATE pd-dhcp.c)
+target_sources(sf-dhcp PRIVATE sf-dhcp.c)
 
-target_compile_options(pd-dhcp PRIVATE
-    -isysroot ${PUREDARWIN_MACOSX_SDK}
+target_compile_options(sf-dhcp PRIVATE
+    -isysroot ${SILICONFOREST_MACOSX_SDK}
     -fno-builtin
     -fno-stack-protector
 )
 
-target_link_options(pd-dhcp PRIVATE
+target_link_options(sf-dhcp PRIVATE
     -nostdlib
     -Wl,-L,$<TARGET_FILE_DIR:libSystem_B_stub>
     -Wl,-dylinker_install_name,/usr/lib/dyld
@@ -52,46 +52,46 @@ target_link_options(pd-dhcp PRIVATE
     -lSystem
 )
 
-add_dependencies(pd-dhcp libSystem_B_stub dyld)
+add_dependencies(sf-dhcp libSystem_B_stub dyld)
 
-install(TARGETS pd-dhcp DESTINATION usr/bin COMPONENT BaseSystem)
-install(PROGRAMS pd-net-up DESTINATION usr/bin COMPONENT BaseSystem)
+install(TARGETS sf-dhcp DESTINATION usr/bin COMPONENT BaseSystem)
+install(PROGRAMS sf-net-up DESTINATION usr/bin COMPONENT BaseSystem)
 C
 python3 - "$T/b" <<'P'
 import sys
 b=sys.argv[1]
 p=b+'/src/Kernel/Extensions/CMakeLists.txt'; s=open(p).read()
-a="        add_subdirectory(PDArmPCI)\n        add_subdirectory(PDEcamPCI)\n"
-assert s.count(a)==1; s=s.replace(a,a+"        # Apple Silicon (T8103) PCIe host bridge, GPL-2.0\n        add_subdirectory(PDApcieT8103Bridge)\n")
-a="add_subdirectory(PDQwx)\n"
-assert s.count(a)==1; s=s.replace(a,a+"if(PUREDARWIN_ARM64)\n    # Broadcom FullMAC Wi-Fi of Apple Silicon Macs (BCM4378)\n    add_subdirectory(PDBwfm)\nendif()\n")
-a="if(PUREDARWIN_ARM64)\n    add_dependencies(kexts PDEcamPCI)\n"
-assert s.count(a)==1; s=s.replace(a,a+"    add_dependencies(kexts PDApcieT8103Bridge.kext PDBwfm.kext)\n")
+a="        add_subdirectory(SFArmPCI)\n        add_subdirectory(SFEcamPCI)\n"
+assert s.count(a)==1; s=s.replace(a,a+"        # Apple Silicon (T8103) PCIe host bridge, GPL-2.0\n        add_subdirectory(SFApcieT8103Bridge)\n")
+a="add_subdirectory(SFQwx)\n"
+assert s.count(a)==1; s=s.replace(a,a+"if(SILICONFOREST_ARM64)\n    # Broadcom FullMAC Wi-Fi of Apple Silicon Macs (BCM4378)\n    add_subdirectory(SFBwfm)\nendif()\n")
+a="if(SILICONFOREST_ARM64)\n    add_dependencies(kexts SFEcamPCI)\n"
+assert s.count(a)==1; s=s.replace(a,a+"    add_dependencies(kexts SFApcieT8103Bridge.kext SFBwfm.kext)\n")
 open(p,'w').write(s)
 p=b+'/src/Userspace/CMakeLists.txt'; s=open(p).read()
 a="add_subdirectory(netsetup)\n"
-assert s.count(a)==1; open(p,'w').write(s.replace(a,a+"add_subdirectory(pd-dhcp)\n"))
+assert s.count(a)==1; open(p,'w').write(s.replace(a,a+"add_subdirectory(sf-dhcp)\n"))
 p=b+'/nix/lib/kexts.nix'; s=open(p).read()
-a='  { name = "PDEcamPCI.kext"; dir = "PDEcamPCI"; target = "PDEcamPCI"; headers = [ "IOPCIFamily" ]; arches = armriscv; }\n'
+a='  { name = "SFEcamPCI.kext"; dir = "SFEcamPCI"; target = "SFEcamPCI"; headers = [ "IOPCIFamily" ]; arches = armriscv; }\n'
 assert s.count(a)==1
-s=s.replace(a,a+'  { name = "PDApcieT8103Bridge.kext"; dir = "PDApcieT8103Bridge"; headers = [ "IOPCIFamily" ]; arches = arm; }\n  { name = "PDBwfm.kext"; dir = "PDBwfm"; headers = [ "IO80211Family" "IOPCIFamily" ]; arches = arm; }\n')
+s=s.replace(a,a+'  { name = "SFApcieT8103Bridge.kext"; dir = "SFApcieT8103Bridge"; headers = [ "IOPCIFamily" ]; arches = arm; }\n  { name = "SFBwfm.kext"; dir = "SFBwfm"; headers = [ "IO80211Family" "IOPCIFamily" ]; arches = arm; }\n')
 open(p,'w').write(s)
 P
 hdr() {
   echo "From: darwin-lab"
   echo "Subject: [PATCH $1/2] $2"
   echo
-  echo "Base: PureDarwin $REV."
+  echo "Base: SiliconForest $REV."
   echo "Generated by darwin-lab tools/pcie_export_patch.sh; edit the lab sources, not this file."
   echo "---"
 }
-rm -f $I/puredarwin-patches/000*.patch
-K=$I/puredarwin-patches/0001-m1-pcie-wifi-kexts.patch
+rm -f $I/siliconforest-patches/000*.patch
+K=$I/siliconforest-patches/0001-m1-pcie-wifi-kexts.patch
 { hdr 1 "Apple Silicon (T8103) PCIe host bridge and BCM4378 Wi-Fi kexts"
-  echo "PDApcieT8103Bridge: GPL-2.0, from Linux pcie-apple.c/apple-dart.c and m1n1 pcie.c."
-  echo "PDBwfm: OpenBSD bwfm(4) on IO80211Family; GPL-2.0 as a whole because of the DART pool."
+  echo "SFApcieT8103Bridge: GPL-2.0, from Linux pcie-apple.c/apple-dart.c and m1n1 pcie.c."
+  echo "SFBwfm: OpenBSD bwfm(4) on IO80211Family; GPL-2.0 as a whole because of the DART pool."
   (cd $T && diff -ruN a/src/Kernel b/src/Kernel || true); } > $K
-U2=$I/puredarwin-patches/0002-m1-pcie-wifi-userspace-and-registry.patch
-{ hdr 2 "pd-dhcp, pd-net-up and the nix kext registry entries"
+U2=$I/siliconforest-patches/0002-m1-pcie-wifi-userspace-and-registry.patch
+{ hdr 2 "sf-dhcp, sf-net-up and the nix kext registry entries"
   (cd $T && { diff -ruN a/src/Userspace b/src/Userspace || true; diff -ruN a/nix b/nix || true; }); } > $U2
 wc -l $K $U2

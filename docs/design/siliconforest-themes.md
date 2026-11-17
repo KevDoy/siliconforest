@@ -37,7 +37,7 @@ Rules for the family:
 
 Sizes are in points at 100 %; the owner's desk runs at 150 % (state `scale` = 180), where 1 pt is
 1.5 px. Contrast ratios are WCAG 2 relative-luminance ratios, computed from the values below
-(`integrations/puredarwin/desktop/themes/contrast.py` prints the table).
+(`integrations/siliconforest/desktop/themes/contrast.py` prints the table).
 
 ### Clearing (`sf-clearing`, light)
 *The forest at dawn: mist between ridgelines, the first light on moss.* The native theme done
@@ -200,7 +200,7 @@ catches it.*
 ## 3. Wallpapers
 
 All four are original and drawn by code in this repository
-(`integrations/puredarwin/desktop/themes/wallpapers/make_wallpapers.py`, numpy + Pillow): no
+(`integrations/siliconforest/desktop/themes/wallpapers/make_wallpapers.py`, numpy + Pillow): no
 photograph, no third-party image, no font. Each is rendered at 2560x1600 (the panel) and can be
 rendered at 5120x3200 (`--scale 2`). Gradients are computed in floating point and dithered with
 triangular noise of one 8-bit step before quantising, so no band is visible on the panel; the files
@@ -260,18 +260,18 @@ Not themed, and why:
    state), `DOCK_PREVIEW_DIR=<dir> DOCK_PREVIEW_THEMES=<id> cargo test -p chonk-dock column_preview
    -- --ignored` (the dock's tiles), and `tests/theme_gallery.rs` (the whole desk off screen with
    pictures for window contents).
-5. A wallpaper: a function in `integrations/puredarwin/desktop/themes/wallpapers/make_wallpapers.py`
+5. A wallpaper: a function in `integrations/siliconforest/desktop/themes/wallpapers/make_wallpapers.py`
    and a name in its table; the file `<id>.jpg` goes to `/usr/share/backgrounds/siliconforest`
    (`desk_m1.sh wallpapers`). Without it the theme shows its `background` colour.
 6. Build the compositor (both builds) and the dock, install, relaunch
-   (`integrations/puredarwin/terminal-app/compositor/README.md`).
+   (`integrations/siliconforest/terminal-app/compositor/README.md`).
 
 A new *kind* of control or top edge is a variant of `modern::Controls` / `modern::TopLine` and an
 arm in `styles/forest.rs`; nothing else knows theme ids.
 
 ## 6. What was added to the desk, and why
 
-All of it is compositor patch 36 (`integrations/puredarwin/terminal-app/compositor/`); the existing
+All of it is compositor patch 36 (`integrations/siliconforest/terminal-app/compositor/`); the existing
 themes do not use any of it.
 
 | Addition | Why | Cost |
@@ -345,7 +345,7 @@ both). Stop: Command-Control-Escape. The movie is in `~/Pictures/Screenshots`.
 **Changing theme without a menu in the picture**, from the workstation (the change cross-fades):
 
 ```sh
-T=integrations/puredarwin/desktop/tools/desk_m1.sh
+T=integrations/siliconforest/desktop/tools/desk_m1.sh
 $T theme sf-clearing     # also: sf-canopy, sf-wafer, sf-dieshot
 ```
 

@@ -10,14 +10,14 @@
 #   mesa-wl     the Wayland GL demo bundle (m1-mesa-asahi/agx-wl-demo.nix)
 #   dcp-flip    the display flip test (m1-dcp/dcp-flip-test.nix)
 #   drm-storm   the DRM stress tool (m1-smp-audit/drm-storm.nix)
-#   sysaudio    the audio server, its frameworks, pdtone, pdvolume (m1-sound/sysaudio/build-sysaudio.nix -A all)
-#   pdplay      the WAVE player on the kernel device (m1-sound/build-pdplay.nix)
-#   pdtbtest    the Touch Bar test tool (m1-touchbar/build-pdtbtest.nix)
-#   netd        pd-netd, pd-dhcp, pd-net-up and the launchd job (m1-bwfm/netd/build-pd-netd.nix)
+#   sysaudio    the audio server, its frameworks, sftone, sfvolume (m1-sound/sysaudio/build-sysaudio.nix -A all)
+#   sfplay      the WAVE player on the kernel device (m1-sound/build-sfplay.nix)
+#   sftbtest    the Touch Bar test tool (m1-touchbar/build-sftbtest.nix)
+#   netd        sf-netd, sf-dhcp, sf-net-up and the launchd job (m1-bwfm/netd/build-pd-netd.nix)
 #   avd-user    the video decoder's user tools (m1-avd/build-user.nix)
-#   pdvideo     the player with FFmpeg and the hardware decoder (m1-avd/build-pdvideo-pdavd.nix; --arg gl true)
+#   sfvideo     the player with FFmpeg and the hardware decoder (m1-avd/build-sfvideo-sfavd.nix; --arg gl true)
 #   compositor  the desktop binary (file)       terminal   the terminal binary (file)
-#   nix <directory below integrations/puredarwin> <file.nix> [arguments]    any other recipe
+#   nix <directory below integrations/siliconforest> <file.nix> [arguments]    any other recipe
 #
 # SF_STAGED=pin   every piece as it was staged before the rebase: the builds of the pinned
 #                 revision e7aa00a6 (they run on the tip's kernel and libSystem), compositor
@@ -27,11 +27,11 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
+NP=integrations/siliconforest/m1-boot-speed/tools/bs_nix_path.py
 RUNS=runs/m1-desktop-010
 # Pieces that are not proven at the tip yet and are staged from the pin's build until they are.
 # sysaudio: upstream rewrote coreaudiod; the lab's device backend is being ported (SF-I-sound.md).
-PIN_ONLY="sysaudio pdplay"
+PIN_ONLY="sysaudio sfplay"
 PIECE=${1:?piece}; shift
 from=tip
 if [ "${SF_STAGED:-tip}" = pin ]; then from=pin; fi
@@ -44,11 +44,11 @@ case "$PIECE" in
   dcp-flip) nix m1-dcp dcp-flip-test.nix "$@";;
   drm-storm) nix m1-smp-audit drm-storm.nix "$@";;
   sysaudio) nix m1-sound/sysaudio build-sysaudio.nix -A all "$@";;
-  pdplay) nix m1-sound build-pdplay.nix "$@";;
-  pdtbtest) nix m1-touchbar build-pdtbtest.nix "$@";;
+  sfplay) nix m1-sound build-sfplay.nix "$@";;
+  sftbtest) nix m1-touchbar build-sftbtest.nix "$@";;
   netd) nix m1-bwfm/netd build-pd-netd.nix "$@";;
   avd-user) nix m1-avd build-user.nix "$@";;
-  pdvideo) nix m1-avd build-pdvideo-pdavd.nix "$@";;
+  sfvideo) nix m1-avd build-sfvideo-sfavd.nix "$@";;
   nix) nix "$@";;
   compositor)
     if [ "$from" = pin ]; then file $RUNS/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop

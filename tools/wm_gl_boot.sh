@@ -6,7 +6,7 @@
 # the same destination replace the base ones, so the old binaries' 38 MB are reclaimed and the
 # new compositor is the default binary of the root. Adds the Mesa bundle (libEGL, libGLESv2,
 # libgallium, libdrm under /usr/local/lib/mesa-asahi) and a guest script, then boots through
-# tools/dcp_boot.sh with pdagx=1 pddcp=2 (a collection with PDAgx and PDDcp is required).
+# tools/dcp_boot.sh with sfagx=1 sfdcp=2 (a collection with SFAgx and SFDcp is required).
 #   WM_GL_STEP=probe (default)  guest script darwin-wm-gl-probe.in: the KMS backend alone,
 #                               clear + page flip, WMGL lines
 #   WM_GL_STEP=bench            darwin-wm-gl-bench.in: --bench with the GL renderer on KMS (pixel
@@ -35,7 +35,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 N=${1:?name}
 # The collection with the multitouch trackpad (two-finger click = right button, two-finger
-# drag = wheel). pdm1tpmt=0 as an extra boot-arg falls back to the basic pointer mode.
+# drag = wheel). sfm1tpmt=0 as an extra boot-arg falls back to the basic pointer mode.
 KC=${2:-$(tools/default_kc.sh)}
 EXTRA=${3:-}
 BIN=${WM_GL_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-desktop-build-001/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
@@ -43,13 +43,13 @@ BARE=${WM_GL_BARE_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-gl-compositor-build-0
 STAGE_BARE=0
 STAGE_DMABUF_CLIENT=0
 STAGE_WL=0
-DMABUF_CLIENT=${WM_GL_DMABUF_CLIENT:-$ROOT/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/darwin-wayland-dmabuf-client}
+DMABUF_CLIENT=${WM_GL_DMABUF_CLIENT:-$ROOT/integrations/siliconforest/chonkstep-darwin/client-dmabuf/target/aarch64-apple-darwin/release/darwin-wayland-dmabuf-client}
 case "${WM_GL_STEP:-probe}" in
-  probe) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-probe.in ;;
-  bench) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
-  dmabuf) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-dmabuf.in; STAGE_BARE=1; STAGE_DMABUF_CLIENT=1; export DCP_RUNTIME=${DCP_RUNTIME:-150} ;;
-  wlgpu) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-wlgpu.in; STAGE_BARE=1; STAGE_WL=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
-  session) TEMPLATE=$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-340} ;;
+  probe) TEMPLATE=$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-wm-gl-probe.in ;;
+  bench) TEMPLATE=$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-wm-gl-bench.in; export DCP_RUNTIME=${DCP_RUNTIME:-180} ;;
+  dmabuf) TEMPLATE=$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-wm-gl-dmabuf.in; STAGE_BARE=1; STAGE_DMABUF_CLIENT=1; export DCP_RUNTIME=${DCP_RUNTIME:-150} ;;
+  wlgpu) TEMPLATE=$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-wm-gl-wlgpu.in; STAGE_BARE=1; STAGE_WL=1; export DCP_RUNTIME=${DCP_RUNTIME:-200} ;;
+  session) TEMPLATE=$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-wm-gl-session.in; STAGE_BARE=1; export DCP_RUNTIME=${DCP_RUNTIME:-340} ;;
   *) echo "unknown WM_GL_STEP=${WM_GL_STEP}" >&2; exit 2 ;;
 esac
 TEMPLATE=${WM_GL_TEMPLATE:-$TEMPLATE}
@@ -69,7 +69,7 @@ TERM_BIN=${WM_GL_TERMINAL:-$ROOT/runs/m1-desktop-010/terminal-application-build-
 [ -x "$TERM_BIN" ] && X="$X;$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for the TERM the terminal sets (the RAM root has none), under both
 # directory spellings ncurses uses (first letter, and its hex code as on Darwin).
-TI=$ROOT/integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
+TI=$ROOT/integrations/siliconforest/chonkstep-darwin/terminfo/xterm-256color
 [ -r "$TI" ] && X="$X;$TI=/usr/share/terminfo/x/xterm-256color;$TI=/usr/share/terminfo/78/xterm-256color"
 if [ "$STAGE_BARE" = 1 ]; then
   [ -x "$BARE" ] || { echo "no bare compositor binary at $BARE" >&2; exit 2; }
@@ -93,7 +93,7 @@ fi
 # The guest script replaces the supervisor directly, as the other DCP tests do.
 export PCIE_EXTRA_FILES="$X;$TEMPLATE=/usr/bin/darwin-desktop-test"
 if [ "${WM_GL_DRY_RUN:-0}" = 1 ]; then
-  echo "kc: $KC"; echo "runtime: ${DCP_RUNTIME:-150}"; echo "boot-args: pdgpudt=2 pdgpudt_stringprops=1 pddispdt=2 pddcp=2 pdagx=1 $EXTRA"
+  echo "kc: $KC"; echo "runtime: ${DCP_RUNTIME:-150}"; echo "boot-args: sfgpudt=2 sfgpudt_stringprops=1 sfdispdt=2 sfdcp=2 sfagx=1 $EXTRA"
   echo "$PCIE_EXTRA_FILES" | tr ';' '\n'; exit 0
 fi
 if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
@@ -102,5 +102,5 @@ if [ "${WM_GL_ASSEMBLE_ONLY:-0}" = 1 ]; then
   grep -h '"free_bytes"' "artifacts/m1-desktop-010/pcie-enum-candidate-$N/ramdisk.record.json"
   exit 0
 fi
-DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "pdagx=1 $EXTRA"
+DCP_MODE=${DCP_MODE:-2} tools/dcp_boot.sh "$N" "$KC" "sfagx=1 $EXTRA"
 strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'WMGL\|WMAUTO\|WMPOWER\|WMEXT\|WMDMABUF\|DMACLIENT\|AGXWL\|agx-wl-demo:\|CODE SIGNING.*chonk\|chonkstep-gl:\|chonkstep-darwin-desktop:\|chonkstep-darwin:\|WMSTAT\|WMBENCH\|DL10_CLIENT_DONE\|CHONKDESKTOP\|panic' | cut -c1-${WM_GL_COLS:-330}

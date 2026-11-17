@@ -10,7 +10,7 @@ set -euo pipefail
 N=${1:?candidate number}; RUNTIME=${2:-120}
 export PATH=$HOME/.nix-profile/bin:$PATH
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
-SRC=integrations/puredarwin/m1-apcie-host; RUN=runs/m1-desktop-010
+SRC=integrations/siliconforest/m1-apcie-host; RUN=runs/m1-desktop-010
 NAME=pcie-enum-candidate-$N; W=/Users/chriskearney/darwin-lab-firstboot-007
 SSH="ssh -o HostKeyAlias=10.1.1.93 -o BatchMode=yes"
 if [ -z "${M5_HOST:-}" ]; then
@@ -24,7 +24,7 @@ now() { date +%s.%N; }
 
 if [ "${PCIE__STAGE:-}" = cycle ]; then
   # Inside the bench: the launcher tree, one boot cycle, the console.
-  LSHA=$(sha256sum $R/lab/integrations/puredarwin/m1-bringup/host_progress.py | cut -d' ' -f1)
+  LSHA=$(sha256sum $R/lab/integrations/siliconforest/m1-bringup/host_progress.py | cut -d' ' -f1)
   tar -C $R -cf - lab | $SSH $M5 "sudo -n sh -c 'rm -rf $W/lab-pcie-m2-001 && mkdir -m 700 $W/lab-pcie-m2-001 && tar -xf - -C $W/lab-pcie-m2-001 --strip-components 1 && chown -R root:staff $W/lab-pcie-m2-001'"
   echo "delivered $NAME; booting"
   echo "cycle_begin $(now)" >> $R/times.txt
@@ -51,34 +51,34 @@ NIX="nix-build --extra-experimental-features nix-command --extra-experimental-fe
 if [ "${PCIE_SKIP_BUILD:-0}" = 1 ]; then
   echo "reusing the existing kernel collection and tools"
 elif [ "${PCIE_FROM_PATCH:-0}" = 1 ]; then
-  # Build everything from the PureDarwin tree patches instead of the lab directories.
-  # (At the tip puredarwin-patches/build-kc.nix is the default collection with the bridge and
+  # Build everything from the SiliconForest tree patches instead of the lab directories.
+  # (At the tip siliconforest-patches/build-kc.nix is the default collection with the bridge and
   # the Wi-Fi pair from the patch build; SF_PD=pin: the pin's collection chain as before.)
   tools/pcie_export_patch.sh
-  P=integrations/puredarwin/puredarwin-patches
-  mkdir -p $RUN/bwfm-kc-build-001 $RUN/pd-dhcp-build-001
+  P=integrations/siliconforest/siliconforest-patches
+  mkdir -p $RUN/bwfm-kc-build-001 $RUN/sf-dhcp-build-001
   (cd $P && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
-  (cd $P && $NIX build-userspace-from-patch.nix -o "$ROOT/$RUN/pd-dhcp-build-001/result" > "$ROOT/$RUN/pd-dhcp-build-001/build.log" 2>&1) || { tail -20 $RUN/pd-dhcp-build-001/build.log; exit 1; }
+  (cd $P && $NIX build-userspace-from-patch.nix -o "$ROOT/$RUN/sf-dhcp-build-001/result" > "$ROOT/$RUN/sf-dhcp-build-001/build.log" 2>&1) || { tail -20 $RUN/sf-dhcp-build-001/build.log; exit 1; }
 elif [ "${SF_PD:-tip}" != pin ]; then
   # The tip: one recipe builds the collection from the lab directories (rebase/build-kc.nix, what
-  # tools/default_kc.sh names), with and without PCIE_WIFI; pd-netd is built with it. The two
+  # tools/default_kc.sh names), with and without PCIE_WIFI; sf-netd is built with it. The two
   # shared links are set as the pin's build path below sets them.
-  mkdir -p $RUN/apcie-host-kc-build-001 $RUN/bwfm-kc-build-001 $RUN/pd-netd-build-001
-  (cd integrations/puredarwin/rebase && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
+  mkdir -p $RUN/apcie-host-kc-build-001 $RUN/bwfm-kc-build-001 $RUN/sf-netd-build-001
+  (cd integrations/siliconforest/rebase && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
   ln -sfn "$(readlink -f $RUN/bwfm-kc-build-001/result)" $RUN/apcie-host-kc-build-001/result
-  (cd integrations/puredarwin/m1-bwfm/netd && $NIX build-pd-netd.nix -o "$ROOT/$RUN/pd-netd-build-001/result" > "$ROOT/$RUN/pd-netd-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/pd-netd-build-001/build.log | head -20; exit 1; }
+  (cd integrations/siliconforest/m1-bwfm/netd && $NIX build-pd-netd.nix -o "$ROOT/$RUN/sf-netd-build-001/result" > "$ROOT/$RUN/sf-netd-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/sf-netd-build-001/build.log | head -20; exit 1; }
 else
 # SF_PD=pin: the pinned revision's collection chain (boot it with PCIE_PIN=1: the pin's RAM root)
 mkdir -p $RUN/apcie-host-build-001 $RUN/apcie-host-kc-build-001
 (cd $SRC && $NIX build-kext.nix -o "$ROOT/$RUN/apcie-host-build-001/result" > "$ROOT/$RUN/apcie-host-build-001/build.log" 2>&1) || { grep -n 'error' -A6 $RUN/apcie-host-build-001/build.log | head -40; exit 1; }
 K=$(readlink -f $RUN/apcie-host-build-001/result)
-sed -i "s|bridge = /nix/store/[^;]*;|bridge = $K/System/Library/Extensions/PDApcieT8103Bridge.kext;|" $SRC/build-kc.nix
+sed -i "s|bridge = /nix/store/[^;]*;|bridge = $K/System/Library/Extensions/SFApcieT8103Bridge.kext;|" $SRC/build-kc.nix
 (cd $SRC && $NIX build-kc.nix -o "$ROOT/$RUN/apcie-host-kc-build-001/result" > "$ROOT/$RUN/apcie-host-kc-build-001/build.log" 2>&1) || { tail -30 $RUN/apcie-host-kc-build-001/build.log; exit 1; }
 if [ "${PCIE_WIFI:-0}" = 1 ]; then
-  mkdir -p $RUN/pd-netd-build-001
-  (cd integrations/puredarwin/m1-bwfm/netd && $NIX build-pd-netd.nix -o "$ROOT/$RUN/pd-netd-build-001/result" > "$ROOT/$RUN/pd-netd-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/pd-netd-build-001/build.log | head -20; exit 1; }
+  mkdir -p $RUN/sf-netd-build-001
+  (cd integrations/siliconforest/m1-bwfm/netd && $NIX build-pd-netd.nix -o "$ROOT/$RUN/sf-netd-build-001/result" > "$ROOT/$RUN/sf-netd-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/sf-netd-build-001/build.log | head -20; exit 1; }
   mkdir -p $RUN/bwfm-kc-build-001
-  (cd integrations/puredarwin/m1-bwfm && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
+  (cd integrations/siliconforest/m1-bwfm && $NIX build-kc.nix -o "$ROOT/$RUN/bwfm-kc-build-001/result" > "$ROOT/$RUN/bwfm-kc-build-001/build.log" 2>&1) || { grep -n ' error: ' -A4 $RUN/bwfm-kc-build-001/build.log | cut -c1-240 | head -40; exit 1; }
 fi
 fi
 # A private copy of the launcher tree for this boot: its mode files are per boot, and the
@@ -95,16 +95,16 @@ if [ -n "${PCIE_LAB_FILES:-}" ]; then
     [ -f "${item%%=*}" ] && [ -d "$LAB/$(dirname "${item#*=}")" ] && cp "${item%%=*}" "$LAB/${item#*=}" || { echo "PCIE_LAB_FILES: cannot place $item" >&2; exit 2; }
   done
 fi
-echo "${PCIE_BOOTARGS:-}" > $LAB/integrations/puredarwin/m1-bringup/extra_bootargs.txt
+echo "${PCIE_BOOTARGS:-}" > $LAB/integrations/siliconforest/m1-bringup/extra_bootargs.txt
 PCIE_LAB=$LAB PCIE_ASSEMBLE_STAGE=build python3 -B tools/pcie_assemble.py $NAME | tail -2
-cp integrations/puredarwin/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/puredarwin/m1-bringup/pcie_linkup.py
-echo "${PCIE_LINK:-none}" > $LAB/integrations/puredarwin/m1-bringup/pcie_linkup_mode.txt
-echo "${PCIE_CPUFREQ:-on}" > $LAB/integrations/puredarwin/m1-bringup/cpufreq_mode.txt
-echo "${PCIE_GPU_PROBE:-off}" > $LAB/integrations/puredarwin/m1-bringup/gpu_probe_mode.txt
-echo "${PCIE_DCP_PROBE:-off}" > $LAB/integrations/puredarwin/m1-bringup/dcp_probe_mode.txt
-echo "${PCIE_DONE:-marker}" > $LAB/integrations/puredarwin/m1-bringup/done_mode.txt
-echo "${PCIE_TIMEWAIT:-off}" > $LAB/integrations/puredarwin/m1-bringup/time_wait_mode.txt
-echo "${PCIE_USB_CHUNK:-off}" > $LAB/integrations/puredarwin/m1-bringup/usb_chunk_mode.txt
+cp integrations/siliconforest/m1-apcie-bridge/proxy_linkup.py $LAB/integrations/siliconforest/m1-bringup/pcie_linkup.py
+echo "${PCIE_LINK:-none}" > $LAB/integrations/siliconforest/m1-bringup/pcie_linkup_mode.txt
+echo "${PCIE_CPUFREQ:-on}" > $LAB/integrations/siliconforest/m1-bringup/cpufreq_mode.txt
+echo "${PCIE_GPU_PROBE:-off}" > $LAB/integrations/siliconforest/m1-bringup/gpu_probe_mode.txt
+echo "${PCIE_DCP_PROBE:-off}" > $LAB/integrations/siliconforest/m1-bringup/dcp_probe_mode.txt
+echo "${PCIE_DONE:-marker}" > $LAB/integrations/siliconforest/m1-bringup/done_mode.txt
+echo "${PCIE_TIMEWAIT:-off}" > $LAB/integrations/siliconforest/m1-bringup/time_wait_mode.txt
+echo "${PCIE_USB_CHUNK:-off}" > $LAB/integrations/siliconforest/m1-bringup/usb_chunk_mode.txt
 T_ASSEMBLED=$(now)
 # The offline load check of the packet runs while it is delivered; a failure stops before the bench.
 (PCIE_LAB=$LAB PCIE_ASSEMBLE_STAGE=check python3 -B tools/pcie_assemble.py $NAME > $R/assemble-check.log 2>&1) & CHECK=$!
@@ -118,7 +118,7 @@ T_END=$(now)
 echo "end $T_END" >> $R/times.txt
 awk -v n=$N '{t[$1]=$2} END {printf "BENCH_TIMES %s assemble=%.1fs deliver=%.1fs queued=%.1fs cycle=%.1fs total=%.1fs\n", n, t["assembled"]-t["start"], t["packet_delivered"]-t["assembled"], t["cycle_begin"]-t["packet_delivered"], t["cycle_end"]-t["cycle_begin"], t["end"]-t["start"]}' $R/times.txt >&2
 grep -a 'PCIE_LINKUP\|CPUFREQ\|gpu probe\|dcp probe' $R/guest/worker.log || true
-strings -n 6 $R/guest/console.bin | grep -E 'PDApcieT8103|PDBCM4378|PDBwfm|PDDart|DL3[2-9]|DL4[0-9]|agx-offscreen|WMBENCH|WMSTAT|PDRust|PDGpuDT|PDRtkit|PDAgx|PDDrm|pd-dhcp|pd-netd|PD_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
+strings -n 6 $R/guest/console.bin | grep -E 'SFApcieT8103|SFBCM4378|SFBwfm|SFDart|DL3[2-9]|DL4[0-9]|agx-offscreen|WMBENCH|WMSTAT|SFRust|SFGpuDT|SFRtkit|SFAgx|SFDrm|sf-dhcp|sf-netd|SF_DHCP|ping|bytes from|HTTP/|netsetup|Connected|Couldn|wifiutil|SSID|interface:|power:|address:|state:|panic\(|IOPCI' | cut -c1-330 | head -${LINES_MAX:-80} || true
 exit 0
 }
 main "$@"; exit $?
@@ -130,24 +130,24 @@ main "$@"; exit $?
 # packet is assembled and delivered while waiting, from a private copy of the launcher tree
 # (runs/.../pcie-enum-attempt-<n>/lab), and the bench is held only for the boot itself.
 #   PCIE_DONE=marker|prompt|off  when the capture ends before <runtime> (the upper bound):
-#                         marker (default): the guest script prints a line PD_BENCH_DONE;
+#                         marker (default): the guest script prints a line SF_BENCH_DONE;
 #                         prompt: also when the shell prompt returns after the guest command;
 #                         off: always the full runtime
 #   PCIE_TIMEWAIT=<rtc>,<quiet>  seconds (1..30 each) for the two 30 s waits of XNU's
 #                         IOKitInitializeTime (58 s of every boot); e.g. 1,5. Default off.
 #                         An instruction-pattern patch that matches the pinned revision's kernels
 #                         only; the tip's kernel boots unpatched (worker.log: applied=false).
-#                         There, pass pd_quiet_wait=0 pd_rtc_wait=0 in PCIE_BOOTARGS instead.
+#                         There, pass sf_quiet_wait=0 sf_rtc_wait=0 in PCIE_BOOTARGS instead.
 #   PCIE_CHAIN=1          chained boots: do not wait for the M1 to return to Linux; see below
 #   PCIE_KEEP_PACKET=1    keep the delivered packet on the M5 after the boot
 #   PCIE_LAB_PATCH=<file> a patch (-p1) for this boot's private copy of the launcher tree, e.g.
-#                         integrations/puredarwin/m1-smp-audit/host/vcpu-dump.patch (worker.log
-#                         then has one PD_VCPU line per guest processor when the capture stops)
+#                         integrations/siliconforest/m1-smp-audit/host/vcpu-dump.patch (worker.log
+#                         then has one SF_VCPU line per guest processor when the capture stops)
 #   PCIE_KC=<directory>     with PCIE_SKIP_BUILD=1 and PCIE_WIFI=1: the collection to boot, instead of
 #                         the shared link runs/m1-desktop-010/bwfm-kc-build-001/result
 #   PCIE_LAB_FILES="<file>=<path>;..."  files copied into that private copy after the patch
 #                         (path relative to the tree's root). The quiet boot uses both:
-#                         integrations/puredarwin/m1-quiet-boot/quiet-boot.patch and the boot
+#                         integrations/siliconforest/m1-quiet-boot/quiet-boot.patch and the boot
 #                         picture (tools/gpu_desktop.sh shows how)
 #   M5_HOST=<address>     controller address (default: 10.1.1.127 dock Ethernet when it
 #                         answers, else 10.1.1.70 Wi-Fi)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # A persistent SiliconForest install in QEMU (arm64 `virt`, TCG): one virtual disk that keeps
 # its root filesystem between boots, next to the throw-away loop of tools/qemu_desktop.sh.
-# See integrations/puredarwin/qemu-dev/README.md ("Persistent install").
+# See integrations/siliconforest/qemu-dev/README.md ("Persistent install").
 #
 #   tools/qemu_install.sh create [--variant minimal|wayland] [--bin FILE] [--terminal FILE] [--force]
 #       makes runs/qemu-dev/install/disk.img: the upstream userland (minimal, or `wayland` =
@@ -17,24 +17,24 @@
 #       (e.g. --command 'ls /Users/sf; echo QDINSTALL_DONE')
 #   tools/qemu_install.sh update [--bin FILE] [--terminal FILE]
 #       replaces the compositor/terminal/session files on the existing disk, keeps everything else
-#   Source: upstream's tip, the default of integrations/puredarwin/rebase/pd.nix; SF_PD=pin in
+#   Source: upstream's tip, the default of integrations/siliconforest/rebase/pd.nix; SF_PD=pin in
 #       the environment of `create` makes the disk from the old pin e7aa00a6 instead. The first
 #       `create --variant wayland` of a source builds upstream's full image (about 100
 #       derivations, an arm64 LLVM among them: hours; QD_NIX_ARGS, default `--max-jobs 1
 #       --cores 6`, are nix-build's limits for it).
 #   The wayland variant also gets what programs built for macOS expect and upstream's image
 #       lacks (QD_EXTRAS=0 leaves it out): the libraries, frameworks' additions and locale
-#       data of integrations/puredarwin/homebrew/build-overlay.nix, /usr/bin/shasum,
+#       data of integrations/siliconforest/homebrew/build-overlay.nix, /usr/bin/shasum,
 #       /usr/bin/sw_vers and /usr/bin/curl at the macOS paths.
 #   tools/qemu_install.sh reset     deletes the disk (create makes a fresh one)
 #   tools/qemu_install.sh status    where the disk is, its size, the last boot's result
 # Other streams: the disk is runs/qemu-dev/install/disk.img (GPT: 1 = ESP, 2 = ext4 root,
 # read-write, boot-uuid in the image); boot it yourself with
-#   integrations/puredarwin/qemu-dev/qd_run.py --image runs/qemu-dev/install/disk.img --out DIR --command ...
+#   integrations/siliconforest/qemu-dev/qd_run.py --image runs/qemu-dev/install/disk.img --out DIR --command ...
 # One QEMU at a time per disk: `boot` takes runs/qemu-dev/install/lock.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
-Q=integrations/puredarwin/qemu-dev; D=runs/qemu-dev/install; DISK=$D/disk.img
+Q=integrations/siliconforest/qemu-dev; D=runs/qemu-dev/install; DISK=$D/disk.img
 BIN=runs/m1-desktop-010/wm-darwin-scale-desktop-build-007/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop
 TERMINAL=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
 CMD=${1:-status}; shift || true
@@ -69,7 +69,7 @@ create)
     (cd "$Q" && "${NIXB[@]}" build-image.nix --argstr variant wayland) > "$D/base-build.log" 2>&1 \
       || { tail -5 "$D/base-build.log" >&2; echo "the full image did not build ($D/base-build.log)" >&2; exit 2; }
     if [ "${QD_EXTRAS:-1}" = 1 ]; then
-      OVERLAY=$(cd integrations/puredarwin/homebrew && "${NIXB[@]}" build-overlay.nix 2> "$ROOT/$D/overlay-build.log" | tail -1)
+      OVERLAY=$(cd integrations/siliconforest/homebrew && "${NIXB[@]}" build-overlay.nix 2> "$ROOT/$D/overlay-build.log" | tail -1)
       [ -d "$OVERLAY/usr/lib" ] || { echo "the Homebrew overlay did not build ($D/overlay-build.log)" >&2; exit 2; }
       # The overlay without its two diagnostics, and without its curl: the full image has its own.
       rm -rf "$D/extras"; mkdir -p "$D/extras"; cp -a "$OVERLAY/." "$D/extras/"; chmod -R u+w "$D/extras"
@@ -97,7 +97,7 @@ plus('/etc/passwd', 'sf:*:501:20:SiliconForest User:/Users/sf:/bin/zsh', 'passwd
 plus('/etc/master.passwd', 'sf:*:501:20::0:0:SiliconForest User:/Users/sf:/bin/zsh', 'master.passwd')
 (d / 'welcome.txt').write_text('SiliconForest in QEMU: this home directory is on the persistent disk.\n')
 E
-  REMOVE=(); [ "$VARIANT" = wayland ] && REMOVE=(--remove /System/Library/LaunchDaemons/org.puredarwin.wayland-session.plist)
+  REMOVE=(); [ "$VARIANT" = wayland ] && REMOVE=(--remove /System/Library/LaunchDaemons/org.siliconforest.wayland-session.plist)
   python3 -B "$Q/qd_image.py" --output "$DISK" --variant "$VARIANT" --libsystem homebrew \
     --file "$BIN=/usr/bin/chonkstep-darwin-desktop" --file "$TERMINAL=/usr/bin/chonk-terminal-darwin" \
     --file "$D/qemu-desktop-session=/usr/bin/qemu-desktop-session" \

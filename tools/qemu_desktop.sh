@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # The SiliconForest desktop in QEMU on this workstation: the M1's own arm64 binaries
 # (compositor, terminal, audio server, session logic) on upstream PureDarwin's arm64 `virt`
-# target under TCG. No M1, no bench. See integrations/puredarwin/qemu-dev/README.md for what
+# target under TCG. No M1, no bench. See integrations/siliconforest/qemu-dev/README.md for what
 # this does and does not prove.
 #
 # Usage: tools/qemu_desktop.sh [options]
@@ -31,12 +31,12 @@
 #   --libsystem homebrew   the Homebrew stream's libSystem (issue 46) instead of the M1 RAM root's
 #   --smp N, --memory MB, --timeout S, --verbose-boot, --refresh (ask Nix again for inputs)
 # Environment: SF_PD=pin  the base image (kernel collection, upstream userland) and libSystem of
-#                    the old PureDarwin pin e7aa00a6 instead of upstream's tip, the default
-#                    (integrations/puredarwin/rebase/pd.nix); templates and remembered Nix
+#                    the old SiliconForest pin e7aa00a6 instead of upstream's tip, the default
+#                    (integrations/siliconforest/rebase/pd.nix); templates and remembered Nix
 #                    answers are kept per source
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
-Q=integrations/puredarwin/qemu-dev
+Q=integrations/siliconforest/qemu-dev
 NAME=last; WINDOW=0; AUTO=; SRC=; BIN=; ONLY=; SECS=; SCALE=; THEME=; ENVS=; TERMS=2; SOUND=1
 TERMINAL=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
 IMAGE_ARGS=(); RUN_ARGS=(); TIMEOUT=; RES=1024x768
@@ -69,7 +69,7 @@ if [ -n "$SRC" ]; then
   [ -f "$SRC/Cargo.toml" ] || { echo "no Cargo.toml in $SRC" >&2; exit 2; }
   TARGET=$ROOT/runs/qemu-dev/target
   env CARGO_TARGET_DIR="$TARGET" CARGO_BUILD_JOBS="${QD_JOBS:-8}" \
-    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-linker.py" \
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$ROOT/integrations/siliconforest/chonkstep-darwin/darwin-linker.py" \
     CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-L native=/nix/store/5shniy0j07mkrl7kys7vslm9vh02lw6d-puredarwin-libxkbcommon-nox-1.13.1/lib -L native=/nix/store/nqi47vjchbk1yv29mz7kkxbfcmz7zhp5-puredarwin-chonkstep-pdgop-static-0.1/lib -C panic=unwind -C link-arg=$ROOT/runs/m1-desktop-010/darwin-spawn-build-002/darwin_spawn.o" \
     cargo rustc --offline --locked --release --manifest-path "$(cd "$SRC" && pwd)/Cargo.toml" -p wm-darwin --features native-managed-spawn \
     --bin chonkstep-darwin-desktop --target aarch64-apple-darwin -- -C link-arg=-Wl,-dead_strip_dylibs > "$OUT/build.log" 2>&1 \

@@ -21,7 +21,7 @@ RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
 # The default collection: the desktop collection with sound and the Touch Bar and the kernel
 # that does not wait a minute for a clock and a daemon this system does not have
 # (m1-boot-speed/build-kc.nix: m1-touchbar/build-kc.nix with m1-boot-speed/kernel.nix; boots bs02, bs03).
-# It needs pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args and the launcher patch below (which waits
+# It needs sf_quiet_wait=0 sf_rtc_wait=0 in the boot-args and the launcher patch below (which waits
 # for a silent console before it types): without the patch the harness fails its console proof.
 # Since 12 November 2026 it is built from upstream's tip (tools/default_kc.sh, SF-V-rebase.md), with
 # the RAM root made from the tip's image. GPU_DESKTOP_PIN=1: the last collection and the RAM root
@@ -30,7 +30,7 @@ PIN=${GPU_DESKTOP_PIN:-0}
 [ "$PIN" = 1 ] && export SF_KC=pin PCIE_PIN=1 SF_STAGED=pin
 KC=${GPU_DESKTOP_KC:-$(tools/default_kc.sh)}
 # What is staged below (Mesa, the compositor, the terminal, the audio server and its frameworks,
-# pdplay) comes from tools/staged.sh: built from the tip against its SDK and libSystem, except
+# sfplay) comes from tools/staged.sh: built from the tip against its SDK and libSystem, except
 # what that script still takes from the pinned revision. SF_STAGED=pin (set by GPU_DESKTOP_PIN=1):
 # everything as it was staged before the rebase. Store paths are remembered while the recipes
 # are unchanged (BS_NIX_CACHE=0 evaluates always).
@@ -49,19 +49,19 @@ TERM_BIN=${GPU_DESKTOP_TERMINAL:-$(tools/staged.sh terminal)}; TERM_BIN=${TERM_B
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for that TERM; the RAM root has none.
-TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
+TI=integrations/siliconforest/chonkstep-darwin/terminfo/xterm-256color
 [ -r "$TI" ] && X="$X;$ROOT/$TI=/usr/share/terminfo/x/xterm-256color;$ROOT/$TI=/usr/share/terminfo/78/xterm-256color"
 # The desk picture; the guest script points CHONKSTEP_BACKGROUND_DIR at its directory.
-BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png}
+BG=${GPU_DESKTOP_BACKGROUND:-integrations/siliconforest/chonkstep-darwin/backgrounds/siliconforest.png}
 [ -f "$BG" ] && X="$X;$ROOT/$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 # Sound: the audio server, its frameworks and the tools (as m1-sound/tools/sd_desktop_boot.sh).
-SOUND=integrations/puredarwin/m1-sound
+SOUND=integrations/siliconforest/m1-sound
 A=$(tools/staged.sh sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
-PLAY=$(tools/staged.sh pdplay)
+PLAY=$(tools/staged.sh sfplay)
 FW=System/Library/Frameworks
-X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume;$PLAY/usr/bin/pdplay=/usr/bin/pdplay"
+X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/sftone=/usr/bin/sftone;$A/usr/bin/sfvolume=/usr/bin/sfvolume;$PLAY/usr/bin/sfplay=/usr/bin/sfplay"
 for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"; done
 # The Touch Bar digitizer's firmware (this machine's own, never committed); without it the
 # strip shows its keys but takes no touches.
@@ -75,21 +75,21 @@ QUIET=()
 # types the console challenge once the console is silent); the text boot keeps the old waits.
 FASTARGS=
 if [ "${GPU_DESKTOP_VERBOSE:-0}" != 1 ]; then
-  FASTARGS="pd_quiet_wait=0 pd_rtc_wait=0"
+  FASTARGS="sf_quiet_wait=0 sf_rtc_wait=0"
   # The launcher patch (graphics boot, no mirror, paints boot-logo.gz) and the picture in the
   # framebuffer's format, both for this boot's private copy of the launcher tree only.
-  Q=integrations/puredarwin/m1-quiet-boot; SPLASH=${GPU_DESKTOP_SPLASH:-$BG}
+  Q=integrations/siliconforest/m1-quiet-boot; SPLASH=${GPU_DESKTOP_SPLASH:-$BG}
   [ -f "$SPLASH" ] || { echo "no boot picture at $SPLASH" >&2; exit 2; }
   QD=$(mktemp -d); python3 "$Q/boot_logo.py" pack "$SPLASH" "$QD" > /dev/null
-  B=integrations/puredarwin/m1-bringup
+  B=integrations/siliconforest/m1-bringup
   # the quiet boot's launcher patch, with the boot picture painted in 0.2 s instead of 4.7 s and
   # the challenge typed only once the console is silent
-  QUIET=(PCIE_LAB_PATCH="$ROOT/integrations/puredarwin/m1-boot-speed/launcher-fast-quiet.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
+  QUIET=(PCIE_LAB_PATCH="$ROOT/integrations/siliconforest/m1-boot-speed/launcher-fast-quiet.patch" PCIE_LAB_FILES="$QD/boot-logo.gz=$B/boot-logo.gz;$QD/boot-logo.json=$B/boot-logo.json")
 fi
-S=$(mktemp); sed -e "s/@SECONDS@/$DESK/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/$VOL/g" integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
+S=$(mktemp); sed -e "s/@SECONDS@/$DESK/g" -e "s/@HOLD@/$HOLD/g" -e "s/@VOLUME@/$VOL/g" integrations/siliconforest/chonkstep-darwin/darwin-gpu-desktop-interactive.in > "$S"
 echo "GPU desktop: $MIN minutes; the desktop appears about 50 seconds after the M1 reboots"
 # The RAM root without the unused kernel archive, 384 MiB, free blocks zeroed: 92 MB on the wire instead of 150.
-env "${QUIET[@]}" PCIE_STAGER="$ROOT/integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $FASTARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
+env "${QUIET[@]}" PCIE_STAGER="$ROOT/integrations/siliconforest/m1-boot-speed/tools/stage_ramdisk_slim.py" PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${GPU_DESKTOP_CPUS:-8} sfgpudt=2 sfgpudt_stringprops=1 sfagx=1 sfdispdt=2 sfdcp=2 $FASTARGS" PCIE_EXTRA_FILES="$X" PCIE_GUEST_TEMPLATE="$S" \
 PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 | grep -a '"status"\|rror\|delivered' | cut -c1-240
 rm -rf "$S" ${QD:+"$QD"}
-strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic\|PDSpeakers:\|PDTouchBar:' | cut -c1-260 | tail -40
+strings -n 6 "runs/m1-desktop-010/pcie-enum-attempt-$N/guest/console.bin" | grep -a 'GPUDESK\|WMSTAT\|panic\|SFSpeakers:\|SFTouchBar:' | cut -c1-260 | tail -40

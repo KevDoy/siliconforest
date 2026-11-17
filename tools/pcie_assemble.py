@@ -14,20 +14,20 @@ KERNEL=(ROOT/('runs/m1-desktop-010/bwfm-kc-build-001/result/kernel' if WIFI else
 # PCIE_KC=<collection directory>: that collection instead of the shared build link, which
 # another boot being prepared at the same time may repoint
 if os.environ.get('PCIE_KC'): KERNEL=(Path(os.environ['PCIE_KC'])/'kernel').resolve(strict=True)
-SUPERVISOR=ROOT/('integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-test' if WIFI else 'integrations/puredarwin/m1-apcie-host/supervisor/darwin-pcie-enum-test')
-STAGER=ROOT/'integrations/puredarwin/chonkstep-darwin/stage_ramdisk.py'
+SUPERVISOR=ROOT/('integrations/siliconforest/m1-bwfm/supervisor/darwin-wifi-test' if WIFI else 'integrations/siliconforest/m1-apcie-host/supervisor/darwin-pcie-enum-test')
+STAGER=ROOT/'integrations/siliconforest/chonkstep-darwin/stage_ramdisk.py'
 # PCIE_STAGER=<script>: another stager with the same arguments and record (the slim RAM root:
-# integrations/puredarwin/m1-boot-speed/tools/stage_ramdisk_slim.py). Default: the one above.
+# integrations/siliconforest/m1-boot-speed/tools/stage_ramdisk_slim.py). Default: the one above.
 if os.environ.get('PCIE_STAGER'): STAGER=Path(os.environ['PCIE_STAGER']).resolve(strict=True)
 # The RAM root's base image and the base mapping. Since 12 November 2026 both are the tip's
 # (docs/roadmap/issues/SF-V-rebase.md): the root of upstream's arm64 minimal image at the tip
-# (integrations/puredarwin/rebase/tools/rb_ramdisk_base.sh) and a mapping whose libSystem is the
-# tip's build of integrations/puredarwin/libsystem-default. PCIE_PIN=1: the pin's image and the
+# (integrations/siliconforest/rebase/tools/rb_ramdisk_base.sh) and a mapping whose libSystem is the
+# tip's build of integrations/siliconforest/libsystem-default. PCIE_PIN=1: the pin's image and the
 # mapping as it was before the switch, for booting a collection of the pinned revision.
 PIN=os.environ.get('PCIE_PIN')=='1'
 ORIGINAL=ROOT/('artifacts/m1-bringup-009/ramdisk.img' if PIN else 'artifacts/rebase/ramdisk-tip.img')
 MAPPING=BASE/('mapping.json.before-tip-20261112' if PIN else 'mapping.json')
-SRC=ROOT/'integrations/puredarwin/m1-apcie-host'
+SRC=ROOT/'integrations/siliconforest/m1-apcie-host'
 _sha={}
 def sha(p):
  # One read per file state: the RAM disk (480 MiB) is hashed for the record and for the manifest.
@@ -41,7 +41,7 @@ def save(p,d):
 # an assembled packet only); tools/pcie_iterate.sh runs the check alongside the delivery.
 STAGE=os.environ.get('PCIE_ASSEMBLE_STAGE','all')
 def check():
- code='''import sys,json\nfrom pathlib import Path\nfrom types import SimpleNamespace\nlab,p=map(Path,sys.argv[1:]);sys.path[:0]=[str(lab),str(lab/'integrations/puredarwin/m1-bringup')]\nimport host_progress as h,normal_image as n\nreport,contents=n.verify_manifest(p/'manifest.json');i=SimpleNamespace(report=report,contents=contents)\nassert h.apcie_port_observer_enabled(i) is True;h.apcie_port_runtime(i,120,240)\nargs=h.guest_bootargs(i);assert args.endswith(' pdapciebridge=1'),args\nprint(json.dumps({'bootargs':args,'members':len(report['kernel']['members'])}))\n'''
+ code='''import sys,json\nfrom pathlib import Path\nfrom types import SimpleNamespace\nlab,p=map(Path,sys.argv[1:]);sys.path[:0]=[str(lab),str(lab/'integrations/siliconforest/m1-bringup')]\nimport host_progress as h,normal_image as n\nreport,contents=n.verify_manifest(p/'manifest.json');i=SimpleNamespace(report=report,contents=contents)\nassert h.apcie_port_observer_enabled(i) is True;h.apcie_port_runtime(i,120,240)\nargs=h.guest_bootargs(i);assert args.endswith(' sfapciebridge=1'),args\nprint(json.dumps({'bootargs':args,'members':len(report['kernel']['members'])}))\n'''
  x=subprocess.run([sys.executable,'-B','-c',code,str(LAB),str(OUT)],capture_output=True,text=True,timeout=120,cwd=LAB)
  print(x.stdout[-600:],x.stderr[-3000:]);x.check_returncode()
 if STAGE=='check':
@@ -52,7 +52,7 @@ if JOIN:
  env=dict(l.strip().split('=',1) for l in (ROOT/'private/wifi.env').read_text().splitlines() if '=' in l)
  assert "'" not in env['WIFI_SSID']+env['WIFI_PSK']
  filled=OUT/'darwin-wifi-join-test.private'
- filled.write_text(Path(os.environ.get('PCIE_GUEST_TEMPLATE') or ROOT/'integrations/puredarwin/m1-bwfm/supervisor/darwin-wifi-join-test.in').read_text().replace('@SSID@',env['WIFI_SSID']).replace('@PSK@',env['WIFI_PSK']).replace('@TPUT_HOST@',os.environ.get('PCIE_TPUT_HOST','')))
+ filled.write_text(Path(os.environ.get('PCIE_GUEST_TEMPLATE') or ROOT/'integrations/siliconforest/m1-bwfm/supervisor/darwin-wifi-join-test.in').read_text().replace('@SSID@',env['WIFI_SSID']).replace('@PSK@',env['WIFI_PSK']).replace('@TPUT_HOST@',os.environ.get('PCIE_TPUT_HOST','')))
  filled.chmod(0o700)
  SUPERVISOR=filled
 mapping=[]
@@ -61,11 +61,11 @@ for e in load(MAPPING)['files']:
  if e['destination']=='/usr/bin/darwin-desktop-test':e['source']=str(SUPERVISOR)
  mapping.append(e)
 if JOIN:
- # pd-dhcp, pd-net-up, pd-netd and its launchd job, all from the pd-netd build tools/staged.sh
+ # sf-dhcp, sf-net-up, sf-netd and its launchd job, all from the sf-netd build tools/staged.sh
  # names (the tip's; with PCIE_PIN=1 or SF_STAGED=pin the pinned revision's, as before the rebase)
  N=Path(subprocess.run([str(ROOT/'tools/staged.sh'),'netd'],env=dict(os.environ,**({'SF_STAGED':'pin'} if PIN else {})),stdout=subprocess.PIPE,text=True,check=True).stdout.strip())
- assert (N/'usr/sbin/pd-netd').is_file(),N
- for rel,exe in (('usr/bin/pd-dhcp',True),('usr/bin/pd-net-up',True),('usr/sbin/pd-netd',True),('System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist',False)):
+ assert (N/'usr/sbin/sf-netd').is_file(),N
+ for rel,exe in (('usr/bin/sf-dhcp',True),('usr/bin/sf-net-up',True),('usr/sbin/sf-netd',True),('System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist',False)):
   mapping.append({'source':str(N/rel),'destination':'/'+rel,'executable':exe})
 if WIFI:
  # This M1's own firmware, private and never committed.
@@ -81,16 +81,16 @@ ram=load(OUT/'ramdisk.record.json');assert ram['e2fsck_exit_code']==0
 shutil.copyfile(KERNEL,OUT/'kernel.macho')
 text=(BASE/'source.patch').read_text()
 if WIFI:
- B=ROOT/'integrations/puredarwin/m1-bwfm'
+ B=ROOT/'integrations/siliconforest/m1-bwfm'
  for q in sorted(B.iterdir()):
-  if q.is_file():text+='\n# COMPONENT PDBwfm (ISC bwfm port; GPL-2.0 as a whole with the DART pool)\n# FILE '+str(q.relative_to(ROOT))+' sha256='+sha(q)+'\n'+q.read_text(errors='replace')+'\n'
-for n in ['CMakeLists.txt','Info.plist','NOTICE','PDApcieT8103.cpp','PDApcieT8103.h','dart/pd_dart_pool.cpp','dart/pd_dart_pool.h','build-kext.nix','build-kc.nix','supervisor/darwin-pcie-enum-test']:
+  if q.is_file():text+='\n# COMPONENT SFBwfm (ISC bwfm port; GPL-2.0 as a whole with the DART pool)\n# FILE '+str(q.relative_to(ROOT))+' sha256='+sha(q)+'\n'+q.read_text(errors='replace')+'\n'
+for n in ['CMakeLists.txt','Info.plist','NOTICE','SFApcieT8103.cpp','SFApcieT8103.h','dart/sf_dart_pool.cpp','dart/sf_dart_pool.h','build-kext.nix','build-kc.nix','supervisor/darwin-pcie-enum-test']:
  p=SRC/n;text+='\n# COMPONENT PCIe host bridge (GPL-2.0)\n# FILE '+str(p.relative_to(ROOT))+' sha256='+sha(p)+'\n'+p.read_text()+'\n'
 (OUT/'source.patch').write_text(text)
 record=load(BASE/'build-record.json')
 record.update(recorded_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),source_patch_sha256=sha(OUT/'source.patch'),output_path=str(KERNEL.parent),kernel_sha256=sha(KERNEL),
  hardware_gate='PCIE_WIFI_TRACK_NO_ADMISSION_REQUIRED',desktop_test_mode='PCIE_HOST_BRIDGE_ENUMERATION',
- source_patch_scope='native50 source envelope plus the GPL-2.0 PDApcieT8103Bridge host bridge; launcher brings the link up from the proxy',
+ source_patch_scope='native50 source envelope plus the GPL-2.0 SFApcieT8103Bridge host bridge; launcher brings the link up from the proxy',
  not_claimed=['MSI','DART/DMA','BCM4378 firmware or networking'])
 record['host_input_sources']={k:sha(LAB/k) for k in record['host_input_sources']}
 record['ramdisk']={'sha256':sha(OUT/'ramdisk.img'),'payload_record_sha256':sha(OUT/'ramdisk.record.json'),'guest_script_sha256':sha(SUPERVISOR),'scope':'candidate-003 payloads with the supervisor replaced'}
