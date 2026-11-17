@@ -1,3 +1,28 @@
+# SiliconForest
+
+SiliconForest is a Darwin/XNU operating system for Apple Silicon Macs, running today on the
+13-inch M1 MacBook Pro (J293, T8103): it boots from the internal disk to the Chonkstep desktop
+with the GPU, Wi-Fi, sound, the Touch Bar, Apple's Terminal and Activity Monitor, and Firefox.
+
+It is a fork of [PureDarwin](https://github.com/PureDarwin/PureDarwin): PureDarwin's tree at one
+revision, renamed, with this repository's drivers and patches on top. The hardware drivers are
+ported from the Asahi Linux work as carried by Omacom's `linux-aurora`. Who made what, under which
+licence: [`NOTICE`](NOTICE).
+
+- Names (what is called `sf…`/`SF…`, what kept its name and why, how upstream changes are taken):
+  [`docs/design/siliconforest-naming.md`](docs/design/siliconforest-naming.md), tool `tools/sf_rename.py`.
+- Source of the system: `integrations/siliconforest/` (one directory per driver or stream; the
+  base tree and the default kernel collection are `rebase/pd.nix` and `rebase/build-kc.nix`).
+- State and plans: the issues of this repository (label `roadmap`) and `docs/roadmap/`.
+- Rules for anyone working here, human or agent: `AGENTS.md`.
+- Licence of the lab's own code: not chosen yet (`LICENSE_STATUS.md`).
+
+The repository's working name was `darwin-lab`; the text below is its first README, of
+7 to 9 November 2026, kept as written. It predates most of the system and uses the names of
+that time.
+
+---
+
 # Darwin Lab
 
 An experimental Apple Silicon Darwin/XNU project, with Omacom's m1n1,

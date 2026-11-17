@@ -42,7 +42,7 @@ TERMINAL=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple
 IMAGE_ARGS=(); RUN_ARGS=(); TIMEOUT=; RES=1024x768
 while [ $# -gt 0 ]; do
   case "$1" in
-    --window) WINDOW=1;; --autopilot) AUTO=1;; --no-sound) SOUND=0;;
+    --window) WINDOW=1;; --autopilot) AUTO=1;; --no-sound) SOUND=0; export QD_AUDIO=0;;
     --name) NAME=$2; shift;; --src) SRC=$2; shift;; --bin) BIN=$2; shift;; --terminal) TERMINAL=$2; shift;;
     --only) ONLY=$2; shift;; --seconds) SECS=$2; shift;; --scale) SCALE=$2; shift;; --theme) THEME=$2; shift;;
     --env) ENVS=$2; shift;; --terminals) TERMS=$2; shift;; --timeout) TIMEOUT=$2; shift;;

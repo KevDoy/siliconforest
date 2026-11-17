@@ -1,0 +1,165 @@
+SiliconForest
+=============
+
+SiliconForest is a fork of PureDarwin for Apple Silicon Macs (first target: the 13-inch M1
+MacBook Pro, J293). It is built from the work of many other projects. This file names them,
+with the licence each declares and what SiliconForest takes from it.
+
+The licences are as the sources declare them; this file is a provenance record, not a legal
+review. Every file taken from another project keeps its own copyright and licence notice, and
+the SiliconForest rename never changes such a line (docs/design/siliconforest-naming.md).
+No licence has been chosen yet for the code written in this lab (LICENSE_STATUS.md); files
+ported from GPL sources are GPL as marked in each file.
+
+On an installed system this text is /usr/share/doc/siliconforest/NOTICE (planned; see the
+naming note), with the licence texts beside it.
+
+
+PureDarwin
+----------
+The PureDarwin Project, https://www.puredarwin.org, https://github.com/PureDarwin/PureDarwin
+Licence: PUREDARWIN_LICENSE.txt (BSD-style) for PureDarwin's own files; APPLE_LICENSE.txt
+(APSL 2.0) and APPLE_DRIVER_LICENSE.txt for the Apple-derived parts; each file's own notice.
+What we take: all of it. SiliconForest's base tree is PureDarwin's branch upstream-xnu-12377 at
+c713d8fb9b048a38e2242d67e29b9957ced8c495 (11 November 2026) with its names changed to
+SiliconForest's by tools/sf_rename.py: the XNU build, the kernel extensions and IOKit families,
+libSystem, dyld, the Cocotron-derived Foundation and AppKit, CoreFoundation, the window server
+and Wayland pieces, the linuxkpi/FreeBSD compatibility layer, the DRM port, the tools
+(kc-tools, iig-tools, xnu-loader) and the Nix build. Our changes are patches on that tree.
+"PureDarwin" in a copyright line, a licence, a URL or a sentence about upstream is kept.
+
+Apple open-source releases
+--------------------------
+Apple Inc., https://opensource.apple.com
+Licence: Apple Public Source License 2.0, and the other licences of the individual projects
+(BSD for parts of XNU and Libc, Apache-2.0 with LLVM exception for dyld's newer parts, …).
+What we take: through PureDarwin: xnu-12377, IOKit families, libSystem components, dyld,
+CoreFoundation, Security, corecrypto (under its own corecrypto licence; not redistributed by
+this repository), mDNSResponder, and the other Darwin components PureDarwin builds.
+No Apple binary, framework, font, sound or resource is in this repository. The Apple
+applications run on SiliconForest (Terminal, Activity Monitor) are the owner's copies and are
+not part of it.
+
+Asahi Linux and the Linux kernel (through Omacom linux-aurora)
+---------------------------------------------------------------
+The Asahi Linux contributors and the Linux kernel authors; Omacom's linux-aurora, branch
+integration/aurora at 6a08a08e.
+Licence: GPL-2.0-only, or GPL-2.0-only OR MIT where a file says so; the Rust GPU driver and
+its abstractions GPL-2.0-only OR MIT.
+What we take, ported to IOKit (every ported file carries the SPDX line and the original
+notices): the PCIe host bridge (pcie-apple.c), the DART IOMMU (apple-dart.c,
+io-pgtable-dart.c), RTKit and its mailbox, the AGX GPU driver (drm/asahi, Rust), the DCP
+display driver, the SPI HID transport (keyboard, trackpad, Touch Bar digitiser), the Touch
+Bar display, the audio drivers (MCA, tas2770, cs42l83, the AOP microphones), the AVD video
+decoder, cpufreq and PMGR power states, SMC and its children (RTC, power, reboot), the NVMe
+ANS2 glue, the Type-C/ATC PHY, DWC3 and Thunderbolt work in progress, the thermal sensors.
+Some Thunderbolt and USB4 family files are taken unchanged (hash-recorded in
+integrations/siliconforest/m1-thunderbolt/upstream/).
+
+m1n1
+----
+The Asahi Linux contributors, https://github.com/AsahiLinux/m1n1 (Omacom's branch)
+Licence: MIT (with the licences of its bundled parts).
+What we take: the boot loader and hypervisor used to start and debug the kernel; reference
+for hardware bring-up sequences. Not modified in the shipped system beyond configuration.
+
+Mesa
+----
+The Mesa authors, https://www.mesa3d.org (Omacom's branch with the asahi driver)
+Licence: MIT.
+What we take: the asahi Gallium driver, EGL, GLES and the supporting libraries, built for
+Darwin with our DRM device glue; libdrm (MIT).
+
+drm-kmod and FreeBSD
+--------------------
+The FreeBSD Project and the drm-kmod authors.
+Licence: BSD-2-Clause for FreeBSD's linuxkpi; GPL-2.0 OR MIT for the DRM core as in Linux.
+What we take: through PureDarwin's fbsdkpi layer: linuxkpi, the DRM core (updated here to
+Linux 7.2 interfaces for the Apple drivers), iflib and network driver glue.
+
+OpenBSD bwfm
+------------
+Patrick Wildt and the OpenBSD authors, sys/dev/ic/bwfm.c and sys/dev/pci/if_bwfm_pci.c
+Licence: ISC.
+What we take: the Broadcom FullMAC driver as the base of the Wi-Fi driver for the BCM4378
+(SFBwfm), with message-buffer and firmware-event code following Linux brcmfmac (ISC).
+
+speakersafetyd
+--------------
+The Asahi Linux contributors, speakersafetyd 2.0.1 (4175df66)
+Licence: MIT.
+What we take: the speaker protection model and daemon, ported to Darwin
+(integrations/siliconforest/m1-sound/safetyd, and the kernel model derived from it).
+
+Finch
+-----
+The Finch authors (local reference clone at 2d9b1bb1)
+Licence: MIT OR Apache-2.0.
+What we take: single files and functions, and whole frameworks where they fit (owner's
+decision), each with Finch's copyright and SPDX notice kept: libsysmon's model, CoreUI
+(CUIStore, CUIRendition, CUIDeepmap, CUICatalog), Foundation additions (NSDecimal, pointer
+collections, person name components), AppKit pieces (window tabbing, text finder, alert
+layout, collection view, system symbol glyphs, layout constants), UniformTypeIdentifiers,
+feature flags, and the frameworks under integrations/siliconforest/finch/ (CFNetwork,
+ColorSync, CoreData, CoreMedia, CoreVideo, OpenScripting, VideoToolbox work). The complete
+record is in the "Taken from Finch" tables of docs/roadmap/issues/SF-Y-terminal-app.md,
+SF-Z-desktop-night.md and SF-AA-activity-monitor.md.
+
+Chonkstep
+---------
+Chris Kearney
+Licence: GPL-3.0 (Chonkstep's LICENSE).
+What we take: the desktop: the Wayland compositor, dock, shell and terminal, ported to
+Darwin (wm-darwin). Chonkstep keeps its name. Its repositories are not part of this one.
+
+Darling
+-------
+The Darling developers, https://www.darlinghq.org
+Licence: GPL-3.0 for Darling; darling-metal MPL-2.0.
+What we take: reference for framework behaviour; the Metal implementation (darling-metal,
+Indium, through PureDarwin's packaging) for the Metal work in progress.
+
+FFmpeg and x264
+---------------
+The FFmpeg developers, https://ffmpeg.org; the x264 project, VideoLAN.
+Licence: FFmpeg LGPL-2.1-or-later, GPL-2.0-or-later as built here with x264; x264
+GPL-2.0-or-later.
+What we take: the encoder for the desktop's screen recording and the demuxers and software
+decoders of the video player; our hardware decoder glue for FFmpeg (the sfavd hwaccel) is
+ours and follows FFmpeg's licence in the files that patch it.
+
+VLC and cubeb
+-------------
+VideoLAN (VLC 3.0.24): GPL-2.0-or-later, libvlc LGPL-2.1-or-later. Mozilla (cubeb,
+cubeb-coreaudio-rs): ISC.
+What we take: VLC as a player built for SiliconForest (work in progress); cubeb as the
+reference for the audio server's client behaviour.
+
+Firefox
+-------
+Mozilla, https://www.mozilla.org
+Licence: MPL-2.0.
+What we take: Firefox built for SiliconForest with our patches (widget, media, network
+glue) under integrations/siliconforest/firefox/.
+
+neofetch
+--------
+Dylan Araps, neofetch 7.1.0
+Licence: MIT.
+What we take: neofetch with a patch that draws the SiliconForest mark and reads this system.
+
+Fonts
+-----
+Inter (The Inter Project Authors) and Source Code Pro (Adobe): SIL Open Font License 1.1.
+What we take: the system's title and terminal faces.
+
+Other components reached through PureDarwin's build
+----------------------------------------------------
+wlroots, sway and neuswc (MIT), libxkbcommon (MIT), libiconv (LGPL), Haiku headers used by the
+compatibility layer (MIT), uACPI (MIT), ravynOS drivers (BSD-2-Clause, each file's notice), the
+Rust standard library and the crates named in each Cargo.lock (their own licences).
+
+Tools used to build and study, not shipped
+------------------------------------------
+Nix and nixpkgs (MIT), LLVM/clang (Apache-2.0 with LLVM exception), the Rust toolchain
+(MIT OR Apache-2.0), QEMU (GPL-2.0), Homebrew (BSD-2-Clause) as a compatibility test.

@@ -169,14 +169,18 @@ def stable_payload(mesa, libsystem='spawnattr'):
     # The audio server, its frameworks and tools are the pin's builds on either source: our
     # coreaudiod backend is not ported to the tip's coreaudiod (owner decision of 11 November,
     # docs/roadmap/issues/SF-V-rebase.md, "Open, not in this stream").
-    a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all', source='pin'))
-    play = Path(nix(sound, 'build-sfplay.nix', source='pin'))
-    for rel in ('usr/sbin/coreaudiod', 'usr/bin/sftone', 'usr/bin/sfvolume'):
-        files['/' + rel] = (a / rel, True)
-    files['/usr/bin/sfplay'] = (play / 'usr/bin/sfplay', True)
-    for f in ('CoreAudio', 'AudioToolbox', 'AudioUnit'):
-        rel = 'System/Library/Frameworks/%s.framework/Versions/A/%s' % (f, f)
-        files['/' + rel] = (a / rel, True)
+    # Since the rename the pin does not build from these recipes (it has upstream's old names), so
+    # the audio server cannot be staged until it builds at the tip: QD_AUDIO=0 leaves it out
+    # (tools/qemu_desktop.sh --no-sound sets it). Without QD_AUDIO=0 this fails at the pin build.
+    if os.environ.get('QD_AUDIO', '1') != '0':
+        a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all', source='pin'))
+        play = Path(nix(sound, 'build-sfplay.nix', source='pin'))
+        for rel in ('usr/sbin/coreaudiod', 'usr/bin/sftone', 'usr/bin/sfvolume'):
+            files['/' + rel] = (a / rel, True)
+        files['/usr/bin/sfplay'] = (play / 'usr/bin/sfplay', True)
+        for f in ('CoreAudio', 'AudioToolbox', 'AudioUnit'):
+            rel = 'System/Library/Frameworks/%s.framework/Versions/A/%s' % (f, f)
+            files['/' + rel] = (a / rel, True)
     # Network: the lab's DHCP client (m1-bwfm/dhcp) and this directory's qemu-net-up.
     dhcp = LAB / 'runs/m1-desktop-010/sf-netd-build-001/result/usr/bin/sf-dhcp'
     if dhcp.exists():

@@ -1528,3 +1528,26 @@ rate-limits SSH: batch commands into one session.
 - Upstream publishes the internal NVMe controller as a registry nub (`/arm-io/ans`). Nothing in
   the default collection drives it. `pdnvme=` stays forbidden; `rebase/guest/rb-prologue.sh`
   is the check to put in front of a guest script when a collection's members change.
+
+## Names since the SiliconForest rename (17 November; branch `sf-rename`)
+
+- The tree is SiliconForest's own: `integrations/puredarwin/` is `integrations/siliconforest/`,
+  `pd_`/`PD…`/`pdxxx=`/`org.puredarwin.` are `sf_`/`SF…`/`sfxxx=`/`org.siliconforest.`. The map, the
+  names that stay and the reasons: `docs/design/siliconforest-naming.md`. Everything above this
+  section is the record as it was written and uses the names of its time: read a path
+  `integrations/puredarwin/x` as `integrations/siliconforest/x`, and a kext, boot argument or
+  program by the map.
+- New names follow the map. `tools/sf_rename.py check` must stay clean; after merging work that
+  was written under old names, run `tools/sf_rename.py apply`.
+- Never change a copyright or licence line for the sake of a name
+  (`tools/sf_rename.py licence-proof <base> HEAD`). "PureDarwin" stays wherever it means upstream.
+- The safety-gated files are now `m1-storage/kernel/sf_nvme_wgate.c/.h`, the fence constants in
+  `m1-storage/kernel-rw/sf_nvme_wring.h` (`SF_FENCE_FIRST`, `SF_FENCE_BLOCKS`) and
+  `m1-native-boot/reboot/sf_halt_gate.h`. The rule is unchanged: they do not change.
+  `tools/sf_rename.py safety-proof 93738b915` shows the rename changed names only.
+- Frozen records (reports, kept revisions and attempts, the scaffold of 7 to 9 November, the
+  hash-pinned `m1-firstboot/host_console.py` and `m1-bringup/normal_image.py`) keep their bytes.
+- The base tree is the fork commit named in `integrations/siliconforest/rebase/pd.nix`, made by
+  `tools/sf_rename.py fork` from upstream's revision. The launcher base tree (hypervisor boots)
+  still asks for collection members by their old names: see the naming note before booting a
+  renamed collection through `tools/pcie_iterate.sh`.
