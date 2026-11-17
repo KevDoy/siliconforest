@@ -25,6 +25,17 @@
 #   desk_m1.sh policy [key=value ...]      the desk's switches that change without a relaunch (DESK8, policy.rs):
 #                                          shown, or set in /private/var/db/desktop-state/chonkstep/policy
 #                                          (DESK10: also scroll_speed=25..400, the trackpad's scrolling speed in %)
+#   desk_m1.sh theme [<id>]                THEME: the desk dressed in a built-in theme and its wallpaper, kept for the
+#                                          next start, as a pick in the menu's Theme rows (no relaunch; the change
+#                                          cross-fades); without an id: the theme and wallpaper worn now and the ids.
+#                                          The SiliconForest themes: sf-clearing sf-canopy sf-wafer sf-dieshot
+#   desk_m1.sh wallpaper <id>              THEME: the desk's wallpaper by id, kept (a built-in one, host:<file name>
+#                                          for a file of /usr/share/backgrounds/siliconforest, a SiliconForest theme's
+#                                          id); the owner's own before the themes: host:siliconforest
+#   desk_m1.sh wallpapers [tag]            THEME: ../themes/wallpapers/sf-*.jpg into /usr/share/backgrounds/siliconforest
+#                                          (a file of before kept as <file>.before-<tag>); hashed on the M1. The desk
+#                                          lists that directory when it starts; a theme's own picture is read when the
+#                                          theme is put on.
 #   desk_m1.sh reboot-next                 restart into Linux, bless SiliconForest for the next boot only, restart,
 #                                          wait for SiliconForest with .next and the inject directory (gui.lock first)
 set -euo pipefail
@@ -100,6 +111,24 @@ case "${1:-}" in
       i=0; while [ \$i -lt 60 ]; do sleep 0.5; i=\$((i+1)); [ -S /private/var/run/gpu-desktop/wayland-0 ] && [ ! -e /private/var/run/gpu-desktop/session-end-request ] && break; done; sleep 2"
     echo "$(date -u +%FT%TZ) DESK compositor relaunch ($2)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
     state;;
+  theme)
+    if [ -z "${2:-}" ]; then
+      "${SF[@]}" 'cd /private/var/db/desktop-state/chonkstep && echo "theme=$(cat theme 2>/dev/null) wallpaper=$(cat wallpaper 2>/dev/null)"; /usr/bin/chonkstep-darwin-desktop --desktop-request theme - 2>&1 | tail -1'
+    else
+      case "$2" in *[!a-z0-9-]*) echo "a theme id" >&2; exit 2;; esac
+      "${SF[@]}" "/usr/bin/chonkstep-darwin-desktop --desktop-request theme $2 && cd /private/var/db/desktop-state/chonkstep && echo \"theme=\$(cat theme) wallpaper=\$(cat wallpaper)\""
+      echo "$(date -u +%FT%TZ) DESK theme $2 (desktop request; no relaunch)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
+    fi;;
+  wallpaper)
+    case "${2:-}" in ""|*[!a-z0-9:_-]*) echo "a wallpaper id" >&2; exit 2;; esac
+    "${SF[@]}" "/usr/bin/chonkstep-darwin-desktop --desktop-request wallpaper $2 && cd /private/var/db/desktop-state/chonkstep && echo \"theme=\$(cat theme) wallpaper=\$(cat wallpaper)\""
+    echo "$(date -u +%FT%TZ) DESK wallpaper $2 (desktop request; no relaunch)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt";;
+  wallpapers)
+    for f in "$(dirname "$0")"/../themes/wallpapers/sf-*.jpg; do
+      n=$(basename "$f"); R=/usr/share/backgrounds/siliconforest/$n
+      "${SF[@]}" "mkdir -p /usr/share/backgrounds/siliconforest && cat > $R.desk-new && chmod 644 $R.desk-new" < "$f"
+      "${SF[@]}" "[ -e $R ] && [ ! -e $R.before-${2:-theme} ] && ln $R $R.before-${2:-theme}; mv -f $R.desk-new $R; shasum -a 256 $R | cut -c1-16" | sed "s|^|$n $(sha256sum "$f" | cut -c1-16) on the M1: |"
+    done;;
   reboot-next)
     "${SF[@]}" "touch /private/var/db/desktop-next-try /private/var/db/desktop-inject; sync; (sleep 1; /bin/reboot) > /dev/null 2>&1 &" || true
     echo "$(date -u +%FT%TZ) DESK reboot (SiliconForest -> Linux -> SiliconForest, .next with inject)" >> "$(dirname "$0")/../../../../runs/m1-coord/log.txt"
