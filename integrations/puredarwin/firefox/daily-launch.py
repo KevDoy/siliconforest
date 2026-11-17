@@ -163,6 +163,10 @@ def plan(root, args, manifest=None):
     image_cache = manifest.get('gpu_image_cache', False)
     if type(image_cache) is not bool or (image_cache and not (system_ui and system_gpu)):
         raise ValueError('GPU image cache requires an explicit canonical UI/graphics runtime')
+    render_thread = manifest.get('gpu_render_thread', False)
+    if type(render_thread) is not bool or (render_thread and not (
+            system_ui and system_gpu and manifest.get('gpu_presentation') is True)):
+        raise ValueError('GPU render thread requires canonical providers and GPU presentation')
     graphics = manifest.get('graphics_override')
     if graphics is not None:
         graphics = Path(graphics)
@@ -181,6 +185,7 @@ def plan(root, args, manifest=None):
                         ('gpu_coalesce_ticks', 'SFFX_GPU_COALESCE_TICKS'),
                         ('gpu_damage', 'SFFX_GPU_DAMAGE'),
                         ('gpu_image_cache', 'SFFX_GPU_IMAGE_CACHE'),
+                        ('gpu_render_thread', 'SFFX_GPU_RENDER_THREAD'),
                         ('precise_scroll', 'SFFX_PRECISE_SCROLL')]:
         if manifest.get(field, False):
             env[name] = '1'

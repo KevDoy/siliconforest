@@ -4,7 +4,9 @@
 
 Run on the M1 under gui/core/bench locks. --off disables both launcher flags;
 --rollback additionally restores the previous OpenGL inode's saved bytes.
-Existing applications are never signalled. No render-thread switch is added.
+--render-thread on|off selects TERM13's already-installed render thread;
+--render-thread rollback restores its previous launcher/manifest only.
+Existing applications are never signalled.
 """
 import argparse
 from datetime import datetime, timezone
@@ -23,6 +25,15 @@ BACKUP = ROOT / 'maintenance-damage-path-v4'
 LAUNCHER = Path('/Applications/Firefox.app/Contents/MacOS/firefox-sf')
 CANDIDATE_SHA = 'c4448fe9d989186a6196c2af498681c8458d61dc1c143173aa9524586b72ab36'
 BASELINE_SHA = '52bff2c2dff1cce60362f0e21cd6346a895605ae4f3230087e2cdccb6cc793c0'
+RENDER_BACKUP = ROOT / 'maintenance-render-thread-t13-v1'
+TERM13 = {
+    '/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit':
+        '6a2dd27a88828aee8211aeb97db7a47fde32380b3c01f83071295f6a17e7ca04',
+    '/usr/lib/libWindowServer.dylib':
+        '752999d3d5ce1a46aca801767a39b017c740f93a8eb0cf3af71b4c747ef0877f',
+    '/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore.pd':
+        'ab4f4daf7625f0b614d26a35cf25ff139e40da18364338d603f1d05c4383e7b9',
+}
 
 
 def sha(data):
@@ -59,10 +70,83 @@ def atomic(path, data, mode):
             temporary.unlink(missing_ok=True)
 
 
+def select_render_thread(args, manifest_path, before, manifest, before_launcher):
+    if args.off or args.rollback:
+        raise ValueError('Render-thread and damage actions are separate')
+    if args.render_thread != 'on':
+        receipt = json.loads((RENDER_BACKUP / 'receipt.json').read_text())
+        if sha(before_launcher) != receipt['selected_launcher_sha256']:
+            raise ValueError('Launcher changed since render-thread selection')
+        prior = json.loads((RENDER_BACKUP / 'release.json').read_bytes())
+        for key in set(prior) | set(manifest):
+            if key not in ['gpu_damage', 'gpu_image_cache', 'gpu_render_thread'] and prior.get(key) != manifest.get(key):
+                raise ValueError('Unrelated selection changed: ' + key)
+        print(json.dumps(dict(action='render-thread-' + args.render_thread, apply=args.apply)))
+        if args.apply:
+            if args.render_thread == 'rollback':
+                launcher = (RENDER_BACKUP / 'firefox-sf').read_bytes()
+                previous = (RENDER_BACKUP / 'release.json').read_bytes()
+                if (sha(launcher) != receipt['previous_launcher_sha256'] or
+                        sha(previous) != receipt['previous_manifest_sha256']):
+                    raise ValueError('Render-thread rollback changed')
+                atomic(manifest_path, previous, 0o600)
+                atomic(LAUNCHER, launcher, 0o755)
+            else:
+                updated = dict(manifest, gpu_render_thread=False)
+                atomic(manifest_path, (json.dumps(updated, indent=2)+'\n').encode(), 0o600)
+        return
+    if args.source is None or args.source.parent.parent != Path('/private/var/db/sffx'):
+        raise ValueError('Expected fresh owned cold launcher source')
+    cold = json.loads((args.source.parent / 'cold-verified.json').read_text())
+    launcher = args.source.read_bytes()
+    if (cold.get('cold_before_execution') is not True or
+            cold.get('destination') != str(args.source.parent) or
+            cold.get('sha256', {}).get(args.source.name) != sha(launcher)):
+        raise ValueError('Cold launcher verification differs')
+    compile(launcher, 'firefox-sf', 'exec')
+    if (sha(before_launcher) != 'f18c4fa2f77ad7b5faa35ad2aca64b3f6c8b42b9e36e56e74cfda527d5800f46' or
+            sha(before) != '6dfea8c660ceb9a6621e1b9f0a4439c16c9f051735439647244ab9771ce0f0ef' or
+            RENDER_BACKUP.exists()):
+        raise ValueError('Expected unchanged damage-only selection and fresh backup')
+    frameworks = {}
+    for path, digest in TERM13.items():
+        data = Path(path).read_bytes()
+        if sha(data) != digest or not Path(path + '.pre-t13').is_file():
+            raise ValueError('TERM13 framework/rollback differs: ' + path)
+        frameworks[path] = dict(sha256=digest, uuid=image_uuid(data))
+    if any(manifest.get(key) is not True for key in ['gpu_presentation', 'gpu_damage', 'gpu_image_cache']):
+        raise ValueError('Expected existing GPU/damage/image-cache selection')
+    after = (json.dumps(dict(manifest, gpu_render_thread=True), indent=2)+'\n').encode()
+    receipt = dict(installed_utc=datetime.now(timezone.utc).isoformat(), frameworks=frameworks,
+                   previous_launcher_sha256=sha(before_launcher), selected_launcher_sha256=sha(launcher),
+                   previous_manifest_sha256=sha(before), selected_manifest_sha256=sha(after),
+                   owner_processes_signalled=False)
+    print(json.dumps(dict(receipt, apply=args.apply), indent=2))
+    if not args.apply:
+        return
+    RENDER_BACKUP.mkdir()
+    atomic(RENDER_BACKUP / 'firefox-sf', before_launcher, 0o755)
+    atomic(RENDER_BACKUP / 'release.json', before, 0o600)
+    atomic(RENDER_BACKUP / 'receipt.json', (json.dumps(receipt, indent=2)+'\n').encode(), 0o600)
+    shutil.copy2(Path(__file__), RENDER_BACKUP / 'install-damage-path.py')
+    try:
+        if manifest_path.read_bytes() != before or LAUNCHER.read_bytes() != before_launcher:
+            raise RuntimeError('Selection changed while preparing render-thread selection')
+        atomic(LAUNCHER, launcher, 0o755)
+        atomic(manifest_path, after, 0o600)
+        # Keep the previous damage off command usable with this new launcher.
+        shutil.copy2(Path(__file__), BACKUP / 'install-damage-path.py')
+    except BaseException:
+        atomic(manifest_path, before, 0o600)
+        atomic(LAUNCHER, before_launcher, 0o755)
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--render-thread', choices=['on', 'off', 'rollback'])
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument('--off', action='store_true')
     actions.add_argument('--rollback', action='store_true')
@@ -80,16 +164,22 @@ def main():
             raise ValueError('Expected the installed canonical UI/graphics cohort')
         if manifest.get('target') != str(ROOT) or manifest.get('diagnostics'):
             raise ValueError('Unexpected installed runtime')
+        if args.render_thread:
+            select_render_thread(args, manifest_path, before, manifest, before_launcher)
+            return
         if OPENGL.is_symlink() or not OPENGL.is_file():
             raise ValueError('Expected canonical regular OpenGL file')
         if args.off or args.rollback:
             receipt = json.loads((BACKUP / 'receipt.json').read_text())
             if sha(before_launcher) != receipt['selected_launcher_sha256']:
-                raise ValueError('Launcher changed since promotion')
+                render_receipt = json.loads((RENDER_BACKUP / 'receipt.json').read_text())
+                if (sha(before_launcher) != render_receipt['selected_launcher_sha256'] or
+                        receipt['selected_launcher_sha256'] != render_receipt['previous_launcher_sha256']):
+                    raise ValueError('Launcher changed since promotion')
             if image_uuid(OPENGL.read_bytes()) != receipt['candidate_uuid']:
                 raise ValueError('OpenGL changed since this promotion')
             for key, value in json.loads((BACKUP / 'release.json').read_bytes()).items():
-                if key not in ['gpu_damage', 'gpu_image_cache'] and manifest.get(key) != value:
+                if key not in ['gpu_damage', 'gpu_image_cache', 'gpu_render_thread'] and manifest.get(key) != value:
                     raise ValueError('Unrelated runtime selection changed: ' + key)
             updated = dict(manifest, gpu_damage=False, gpu_image_cache=False)
             print(json.dumps(dict(action='rollback' if args.rollback else 'off', apply=args.apply,
