@@ -18,7 +18,7 @@
 use std::io;
 
 use super::device::{
-    PdSpeaker, PdspkInfo, PdspkVolume, SpeakerDevice, SFSPK_SENSE_CHANNELS, SFSPK_VERSION,
+    SfSpeaker, PdspkInfo, PdspkVolume, SpeakerDevice, SFSPK_SENSE_CHANNELS, SFSPK_VERSION,
 };
 use super::ini::Ini;
 
@@ -109,8 +109,8 @@ pub fn tlv_convert_from_db(
 
 /// Was: open the ALSA control device. Opening the device also takes the lock on the
 /// unlock control and the volumes (the kernel allows one opener).
-pub fn open_card(card: &str) -> PdSpeaker {
-    let ctldev: PdSpeaker = match PdSpeaker::open(card) {
+pub fn open_card(card: &str) -> SfSpeaker {
+    let ctldev: SfSpeaker = match SfSpeaker::open(card) {
         Ok(ctldev) => ctldev,
         Err(e) => {
             panic!("{}: Could not open speaker safety device! Error: {}", card, e);

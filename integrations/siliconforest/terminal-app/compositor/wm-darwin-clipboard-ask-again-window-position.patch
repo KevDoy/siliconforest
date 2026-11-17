@@ -345,14 +345,14 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/src/window_position.rs desk10-
 +    wayland_scanner::generate_server_code!("protocols/sf-window-position-v1.xml");
 +}
 +
-+use bindings::sf_window_position_manager_v1::{self, PdWindowPositionManagerV1};
-+use bindings::sf_window_position_v1::{self, PdWindowPositionV1};
++use bindings::sf_window_position_manager_v1::{self, SfWindowPositionManagerV1};
++use bindings::sf_window_position_v1::{self, SfWindowPositionV1};
 +
 +use crate::server::Server;
 +
 +/// One window's position object: its surface, and the position last told (logical units).
 +pub(crate) struct Entry {
-+    resource: PdWindowPositionV1,
++    resource: SfWindowPositionV1,
 +    surface: WlSurface,
 +    told: Option<(i32, i32)>,
 +}
@@ -374,7 +374,7 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/src/window_position.rs desk10-
 +        let dh = self.display_handle.clone();
 +        match (want, self.window_positions.global.is_some()) {
 +            (true, false) => {
-+                self.window_positions.global = Some(dh.create_global::<Server, PdWindowPositionManagerV1, ()>(1, ()));
++                self.window_positions.global = Some(dh.create_global::<Server, SfWindowPositionManagerV1, ()>(1, ()));
 +                eprintln!("WMPOS sf_window_position_v1 advertised (policy window_position=on): applications started from now on place their windows");
 +            }
 +            (false, true) => {
@@ -430,17 +430,17 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/src/window_position.rs desk10-
 +    }
 +}
 +
-+impl GlobalDispatch<PdWindowPositionManagerV1, ()> for Server {
-+    fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<PdWindowPositionManagerV1>, _: &(), data_init: &mut DataInit<'_, Self>) {
++impl GlobalDispatch<SfWindowPositionManagerV1, ()> for Server {
++    fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<SfWindowPositionManagerV1>, _: &(), data_init: &mut DataInit<'_, Self>) {
 +        data_init.init(resource, ());
 +    }
 +}
 +
-+impl Dispatch<PdWindowPositionManagerV1, ()> for Server {
++impl Dispatch<SfWindowPositionManagerV1, ()> for Server {
 +    fn request(
 +        state: &mut Self,
 +        _: &Client,
-+        _: &PdWindowPositionManagerV1,
++        _: &SfWindowPositionManagerV1,
 +        request: sf_window_position_manager_v1::Request,
 +        _: &(),
 +        _: &DisplayHandle,
@@ -457,11 +457,11 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/src/window_position.rs desk10-
 +    }
 +}
 +
-+impl Dispatch<PdWindowPositionV1, WlSurface> for Server {
++impl Dispatch<SfWindowPositionV1, WlSurface> for Server {
 +    fn request(
 +        state: &mut Self,
 +        _: &Client,
-+        resource: &PdWindowPositionV1,
++        resource: &SfWindowPositionV1,
 +        request: sf_window_position_v1::Request,
 +        surface: &WlSurface,
 +        _: &DisplayHandle,
@@ -542,7 +542,7 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/tests/wayland_shm.rs desk10-ne
 +    wayland_scanner::generate_client_code!("protocols/sf-window-position-v1.xml");
 +}
 +#[derive(Default)]
-+struct PositionClient { manager: Option<sf_position::sf_window_position_manager_v1::PdWindowPositionManagerV1>, told: Vec<(i32, i32)> }
++struct PositionClient { manager: Option<sf_position::sf_window_position_manager_v1::SfWindowPositionManagerV1>, told: Vec<(i32, i32)> }
 +impl Dispatch<wl_registry::WlRegistry, ()> for PositionClient {
 +    fn event(s: &mut Self, r: &wl_registry::WlRegistry, e: wl_registry::Event, _: &(), _: &Connection, q: &QueueHandle<Self>) {
 +        if let wl_registry::Event::Global { name, interface, .. } = e {
@@ -550,9 +550,9 @@ diff -ruN desk10-next-002/source/crates/wm-darwin/tests/wayland_shm.rs desk10-ne
 +        }
 +    }
 +}
-+delegate_noop!(PositionClient: ignore sf_position::sf_window_position_manager_v1::PdWindowPositionManagerV1);
-+impl Dispatch<sf_position::sf_window_position_v1::PdWindowPositionV1, ()> for PositionClient {
-+    fn event(s: &mut Self, _: &sf_position::sf_window_position_v1::PdWindowPositionV1, e: sf_position::sf_window_position_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
++delegate_noop!(PositionClient: ignore sf_position::sf_window_position_manager_v1::SfWindowPositionManagerV1);
++impl Dispatch<sf_position::sf_window_position_v1::SfWindowPositionV1, ()> for PositionClient {
++    fn event(s: &mut Self, _: &sf_position::sf_window_position_v1::SfWindowPositionV1, e: sf_position::sf_window_position_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
 +        if let sf_position::sf_window_position_v1::Event::Position { x, y } = e { s.told.push((x, y)); }
 +    }
 +}

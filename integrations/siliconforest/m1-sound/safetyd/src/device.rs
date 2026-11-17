@@ -73,18 +73,18 @@ pub trait SpeakerDevice {
 
 /// The real device. Opening it is what the ELEM_LOCKs are on Linux: the kernel allows
 /// one opener, and closing it (also by dying) locks the volumes at once.
-pub struct PdSpeaker {
+pub struct SfSpeaker {
     fd: libc::c_int,
 }
 
-impl PdSpeaker {
-    pub fn open(path: &str) -> io::Result<PdSpeaker> {
+impl SfSpeaker {
+    pub fn open(path: &str) -> io::Result<SfSpeaker> {
         let cpath = CString::new(path).map_err(|_| io::Error::from_raw_os_error(libc::EINVAL))?;
         let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(PdSpeaker { fd })
+        Ok(SfSpeaker { fd })
     }
 
     fn ioctl<T>(&self, request: u32, arg: *mut T) -> io::Result<()> {
@@ -95,7 +95,7 @@ impl PdSpeaker {
     }
 }
 
-impl Drop for PdSpeaker {
+impl Drop for SfSpeaker {
     fn drop(&mut self) {
         unsafe {
             libc::close(self.fd);
@@ -103,7 +103,7 @@ impl Drop for PdSpeaker {
     }
 }
 
-impl SpeakerDevice for PdSpeaker {
+impl SpeakerDevice for SfSpeaker {
     fn info(&self) -> io::Result<PdspkInfo> {
         let mut info: PdspkInfo = Default::default();
         self.ioctl(SFSPK_IOC_INFO, &mut info)?;
