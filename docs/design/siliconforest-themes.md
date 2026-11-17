@@ -126,16 +126,23 @@ catches it.*
 - Controls: **pads**. 11 pt squares with a 3 pt radius, 8 pt apart. At rest they are graphite
   (`#737c8c`): a clean room has no coloured lights. When the pointer enters the group all three take
   their hues and glyphs. Pressed darkens 12 %. Inactive: hollow.
-- Frame: title bar 28 pt, radius 7 pt (crisper than Clearing), hairline `#c3cad6`. The focused
-  window carries a 2 pt **interference line** along its top edge: teal `#19a3a8` to indigo `#4a5bd0`
-  to violet `#9a5bd6`, left to right; the only gradient in the family. Shadow: 0 / 7 pt, 28 pt
+- Frame: title bar 28 pt, radius 7 pt (crisper than Clearing), hairline `#c3cad6`. Every window
+  carries the **interference line** along its top edge: teal `#19a3a8` to indigo `#4a5bd0` to violet
+  `#9a5bd6`, left to right; 3 pt at full strength on the focused window, 2 pt paled 62 % toward the
+  hairline on the others. It is the only gradient in the family and the theme's signature. (The
+  first build drew it 2 pt on the focused window only: in a picture of the whole desk the theme
+  read as "light with a blue accent"; the coordinator's remark, and right.) Shadow: 0 / 7 pt, 28 pt
   blur, `#141d38` at 34 % focused, 20 % unfocused: tighter and cooler, light from straight above.
 - Motion: 140 ms fade, 4 pt rise, ease-out cubic: quick and exact. Theme cross-fade 200 ms.
 - Dock and clock: white enamel tiles, indigo LED ink on blue-black glass; the analog clock suits it
   (the owner's stored clock style is not changed).
-- Wallpaper `sf-wafer`: the edge of a wafer entering from the lower right: a large arc, the die
-  grid inside it in very low contrast, a restrained thin-film sheen along the arc (teal to violet),
-  the flat and a notch; the upper left two thirds are a near-white field with the faintest falloff.
+- Wallpaper `sf-wafer`: a wafer far larger than the screen entering from the lower right; its
+  edge crosses the top of the screen right of the middle and the bottom near the left, so the
+  right-hand column, the bottom strip and the gaps beside the windows are wafer: whole dies only, as
+  on a wafer map, each with the same faint layout, the film's colour turning with the angle
+  (strongest in a band inside the edge, one fine line of it at the bevel), one broad reflection, the
+  mark etched on a drop-in site beside the instrument column. The launchers' corner is plain bench.
+  (The first version showed a small arc in the lower right, hidden by any window there.)
 
 ### Die Shot (`sf-dieshot`, dark)
 *The die under the microscope: metal layers, bond pads, gold wire on black.* The liberty theme.
@@ -166,11 +173,15 @@ catches it.*
 - Motion: 120 ms fade, no rise, ease-out expo: a window is *there*, like a probe touching down.
   Theme cross-fade 180 ms.
 - Dock and clock: black tiles with a gold hairline, gold LED ink; digital clock.
-- Wallpaper `sf-dieshot`: an invented floorplan (no real chip): cache arrays, cores, an I/O ring of
-  bond pads round the edge, routing channels, in blue-black metal with thin-film tints; the mark's
-  conifer is laid out in the top metal at the centre like a mask-shop signature, at very low
-  contrast. Detail is dense at the rim and in the blocks' borders; the blocks' interiors, where
-  windows sit, are fine regular texture that reads as a flat tone from a metre away.
+- Wallpaper `sf-dieshot`: an invented floorplan (no real chip): blocks cut recursively, each made
+  of a few macros with their own texture (memory arrays, standard-cell rows, bit slices, analog
+  plates) lit from the upper left, power straps of two top metals over everything, gold routing in
+  the channels, a seal ring, and a ring of small bond pads outside it; one thin-film reflection
+  lies across the die, its colour turning along it; the mark is laid out in the top metal at the
+  centre like a mask-shop signature, a dark body with a bright core line. The detail is at the
+  macros' rims; their middles are a quiet tone. The whole is darkened and desaturated a little: a
+  wallpaper, not a photograph. (The first version had flat single-texture blocks and a heavier pad
+  ring: muddy, the coordinator said, and it was.)
 
 ### How they differ from each other and from what was there
 
@@ -181,7 +192,7 @@ catches it.*
 | controls' place | left | left | left | left | right |
 | title | centred, Inter Medium | centred, Inter SemiBold | centred, Plex Sans | left, Source Code Pro | left |
 | radius | 10 | 12 | 7 | 3 | 0 / 3 / 9 (top corners only) |
-| focus signal | shadow depth, coloured controls | copper top line | interference line | gold border + trace | accent square / title colour |
+| focus signal | shadow depth, coloured controls | copper top line | interference line at full strength | gold border + trace | accent square / title colour |
 | shadow | soft, green-black 40 % | deep, black 70 % | tight, cool 34 % | dense black 80 % | none drawn on this desk |
 | motion | 180 ms, rise 8 | 200 ms, rise 10 | 140 ms, rise 4 | 120 ms, no rise | none |
 | accent | moss `#2c7a54` | copper `#dd8f55` | indigo `#4a5bd0` | gold `#e7c15a` | red / amber / periwinkle |
@@ -257,3 +268,111 @@ Not themed, and why:
 
 A new *kind* of control or top edge is a variant of `modern::Controls` / `modern::TopLine` and an
 arm in `styles/forest.rs`; nothing else knows theme ids.
+
+## 6. What was added to the desk, and why
+
+All of it is compositor patch 36 (`integrations/puredarwin/terminal-app/compositor/`); the existing
+themes do not use any of it.
+
+| Addition | Why | Cost |
+|---|---|---|
+| Window tokens (`modern::WindowChrome`) and the band painter `styles/forest.rs` | the recipe had one kind of control (line glyphs at the right) and a title after a focus mark; a Mac user's hand goes to the top left | a title band is drawn once per title, focus and control state and cached (16 bands), as before |
+| `paint::draw_title_text` | titles were centred by their own ink: "zsh" sat lower than "Terminal". Now the capitals' height is centred: one line for every title | none |
+| Font weights Medium and SemiBold; Inter (500, 600) and Source Code Pro (500) read from SiliconForest's font files when the session's fonts are set up | the session gives the desk two DejaVu faces only; a theme change must read no file (the desk's rule, held by a test) | 1.4 MB of font bytes held by the compositor |
+| Shadows (`wm-darwin/src/effects.rs`) | this desk drew none: windows were flat rectangles on the wallpaper | eight small pictures per shadow, made once (Canopy at 150 %: 1.3 MB for both focus states; the others less); per frame only the pieces inside what is repainted are drawn, as ordinary blended pictures. No pass over the screen, no blur at run time |
+| Rounded lower corners (`effects.rs`) | the upper corners were rounded by the title band, the lower ones were the application's square pixels | a window whose pixels the desk holds: two pictures of radius x radius pixels remade when its content changes; a client GPU buffer: a few instructions in the fragment shader inside the two corner squares |
+| A window's appearing (`motion.rs`) | a window was simply there | while a window appears (120 to 200 ms) its pieces are redrawn each frame with an alpha; nothing otherwise |
+| Theme changes cross-fade (`motion.rs`, `glrender.rs` `fade_begin`) | a change of theme was a cut, with a pause while the desk dressed | one copy of the screen (a GPU texture, 16 MB) for the length of the fade, and whole-screen frames while it lasts (13 to 16 frames) |
+| `--desktop-request theme <id>` / `wallpaper <id>`, `desk_m1.sh theme` / `wallpaper` | the only way to change theme was the menu at the M1; a recording wants the change without a menu on the screen | none |
+| `Wallpaper::Forest`: a theme's own picture by the theme's id, from a file | the built-in pictures are compiled into the binary; these are 0.7 to 1.3 MB each and can be redrawn without a build | the picture is decoded when the theme is put on (part of the ~250 ms the desk takes to dress) |
+| `default_theme::standalone_appearance` | SiliconForest's desk is always "dark": Clearing and Wafer would have come up in their dark siblings' palettes | none. The appearance change signals no terminal and starts no program on this desk (it would have: found before it ran) |
+| Policy `motion=on|off` | a switch for the two animations without a relaunch | none |
+
+All three renderers (the GL one the M1 uses, and the two CPU ones the tests compare it with) draw the
+same pixels for shadows and corners: the shadow's pieces and the corner pictures are 8-bit pictures
+blended with the GPU's own arithmetic (`effects::blend_piece`), and
+`tests/wayland_theme.rs` holds every theme at four scales to exact equality.
+
+## 7. What it costs (measured on the M1)
+
+The owner's desk at 150 %, `partial_repaint=on`, my own Firefox showing a page with a small animation
+(a frame every refresh) beside my own Terminal and Activity Monitor; each look worn for 22 s through
+the test instrument; the desk's own `WMCOST` line for a 10 s window inside each (render + GPU finish
+per frame). Build theme-003, 17 November 09:02Z, n=1 per row (the chrome's drawing is the same in
+theme-005; only title faces and Wafer's top line changed since)
+(`runs/m1-desktop-010/theme-tests/m1/p1.txt`):
+
+| Look | frames/s | render+finish p50 | p95 | p99 | compositor CPU s per 22 s |
+|---|---|---|---|---|---|
+| washi (before) | 57.4 | 1.1 ms | 2.1 | 3.5 | 2.85 |
+| Clearing | 57.3 | 1.2 | 2.0 | 3.9 | 3.04 |
+| Canopy | 57.6 | 1.2 | 2.1 | 4.3 | 3.58 |
+| Wafer | 57.3 | 1.2 | 1.9 | 4.2 | 2.96 |
+| Die Shot | 57.4 | 1.2 | 1.9 | 3.6 | 2.73 |
+| washi (after) | 57.4 | 1.2 | 1.8 | 3.4 | 3.28 |
+
+A second run on theme-004 with washi between the looks (`p3.txt`, 21 s each): washi 57.7, 57.8, 57.8
+frames/s with p50 1.1 ms and p95 1.7-1.8; Wafer 57.5, 1.2 / 1.9; Die Shot 57.6, 1.2 / 2.1. No difference
+beyond the spread between two runs of the same look.
+
+Memory (RSS, same run): the compositor 142.6 MB in washi before any theme change, then Wafer 155.4,
+washi 153.6, Die Shot 157.0, washi 153.9: a SiliconForest theme is 2 to 3 MB over washi at the same
+point; the first theme change of a session leaves the process about 11 MB larger. The dock is
+61.9 MB with every look.
+
+Motion, seen frame by frame in recordings the desk made of itself: a theme change pauses the
+picture about 250 ms while the desk dresses (the wallpaper's decode, every title band redrawn; 90 to
+180 ms for the existing themes, DESK7), then cross-fades over 13 frames at 60 a second, a smooth
+ease-out; a window that appears in Clearing comes up over 10 frames (170 ms). One defect left in:
+the rise is 12 pt on the M1 where the brief says 8 (and 15 for Canopy's 10, 6 for Wafer's 4): the
+distance is scaled for the display twice. It reads well; it is not what was written.
+
+A run made while the display was asleep (`p2.txt`) is not in the table: nothing is drawn then.
+It showed something else, recorded in SF-Z "THEME" for the desk's owner: with the display asleep and
+a client that keeps drawing, the compositor uses 57 % of a core, whatever the theme.
+
+## 8. The demo: a 75-second shot list
+
+**Before recording.** Terminal, Activity Monitor and Firefox open on one Space with room around
+them (the wallpapers are quiet in the middle and say most at the bottom and the sides): Firefox at
+the upper left with a real page, Activity Monitor lower right, Terminal lower left in front.
+A second Space left empty. Theme Clearing. The pointer away from the dock (a resting pointer
+brings up a launcher's name).
+
+**Recording.** Command-Shift-5, Record Screen, Record (full size, 60 frames a second; Options has
+both). Stop: Command-Control-Escape. The movie is in `~/Pictures/Screenshots`.
+
+**Changing theme without a menu in the picture**, from the workstation (the change cross-fades):
+
+```sh
+T=integrations/puredarwin/desktop/tools/desk_m1.sh
+$T theme sf-clearing     # also: sf-canopy, sf-wafer, sf-dieshot
+```
+
+or at the M1 with the menu in the picture: Command-Space, Theme, one of the last four rows. The
+whole tour on a timer, for a hands-free take (start it, then start recording):
+
+```sh
+for t in sf-clearing sf-canopy sf-wafer sf-dieshot sf-clearing; do $T theme $t; sleep 15; done
+```
+
+Afterwards, the look of before: `$T theme washi; $T wallpaper host:siliconforest`.
+
+| Time | Theme | What is on screen | What it shows |
+|---|---|---|---|
+| 0:00 - 0:05 | Clearing | the desk at rest; the clock's colon ticks | the family's calm face: mist, moss, a Mac's window |
+| 0:05 - 0:15 | Clearing | click Terminal's tile in the dock: a new window fades in, rising. Type `neofetch`. Click Activity Monitor, then Firefox, then Terminal | the appearing (180 ms); focus moving: controls take and lose their colours, the shadow deepens under the front window |
+| 0:15 - 0:20 | Clearing | pointer onto the three discs: the glyphs appear; minimise Terminal to its tile, click the tile to bring it back | Mac muscle memory: the controls are where the hand goes |
+| 0:20 - 0:22 | to Canopy | `theme sf-canopy` | the cross-fade: day to night |
+| 0:22 - 0:35 | Canopy | scroll the page in Firefox with two fingers; drag Activity Monitor by its title bar across the trees; pointer onto the vias (they fill) | a busy application under a dark theme at full frame rate; the copper rim on the focused window; the shadow on a dark desk |
+| 0:35 - 0:37 | to Wafer | `theme sf-wafer` | night to the clean room |
+| 0:37 - 0:50 | Wafer | click through the three windows; pointer onto the pads (graphite, then colour); Activity Monitor's CPU graph running | the interference line jumping to the focused window; exactness |
+| 0:50 - 0:52 | to Die Shot | `theme sf-dieshot` | the bold one arrives |
+| 0:52 - 1:07 | Die Shot | open a second Terminal window (it is there at once: 120 ms); three-finger swipe to the empty Space: the die alone, the mark in its top metal; swipe back | the liberties: bond pads, the title as a net label with its trace and via; the wallpaper as a piece of its own |
+| 1:07 - 1:15 | to Clearing | `theme sf-clearing`; pointer to rest away from the windows | the close: back to the morning, the dock's clock in the last frame |
+
+Notes for the take: each theme change pauses the picture for about a quarter of a second before it
+fades (the desk is dressing); change theme while nothing else is moving and the pause is invisible.
+While recording the desk draws the pointer into the frames (it leaves its plane): expect it a frame
+later than usual. If Firefox stutters under the recorder, DESK11's
+section of SF-Z has the recorder's settings (`record_nice`, `record_crf`).

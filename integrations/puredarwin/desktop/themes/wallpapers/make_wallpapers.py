@@ -343,37 +343,36 @@ def canopy(c):
 def wafer(c):
     X, Y = c.x, c.y
     # the bench: near white, light from the upper left
-    d = np.sqrt(((X - BW * 0.22) / BW) ** 2 + ((Y - BH * 0.12) / BH) ** 2)
-    c.img = lerp(hexrgb('#f6f7fa'), hexrgb('#e4e8ef'), smooth(d / 1.15)[..., None]).astype(np.float32)
-    # the wafer: a disc mostly off the picture to the lower right
-    wx, wy, wr = BW * 0.985, BH * 1.52, BH * 1.18
+    d = np.sqrt(((X - BW * 0.16) / BW) ** 2 + ((Y - BH * 0.10) / BH) ** 2)
+    c.img = lerp(hexrgb('#f7f8fb'), hexrgb('#e2e6ee'), smooth(d / 1.1)[..., None]).astype(np.float32)
+    # the wafer: a disc far larger than the screen, entering from the lower right. Its edge crosses the top
+    # edge right of the middle and the bottom edge near the left: the right-hand column, the bottom strip and
+    # the gap beside the windows are wafer; the launchers' corner is bench.
+    wx, wy, wr = BW * 1.05, BH * 1.25, BH * 1.45
     rr = np.sqrt((X - wx) ** 2 + (Y - wy) ** 2)
     ang = np.arctan2(Y - wy, X - wx)
     inside = smooth((wr - rr) / 1.2 + 0.5)
     # its shadow on the bench
-    sh = np.exp(-np.clip(rr - wr + 4, 0, None) / 26.0) * (1 - inside)
-    c.img *= (1.0 - 0.10 * sh)[..., None]
-    # polished silicon: a cool grey that brightens toward a broad reflection
-    streak = np.exp(-(((X - Y * 0.55) - BW * 0.36) / 520.0) ** 2)
-    base = lerp(hexrgb('#cfd5de'), hexrgb('#e9edf3'), (0.25 + 0.75 * streak)[..., None])
-    grain = (c.noise(260, 2, 0.5, seed=9) - 0.5) * 0.012
+    sh = np.exp(-np.clip(rr - wr + 4, 0, None) / 30.0) * (1 - inside)
+    c.img *= (1.0 - 0.13 * sh)[..., None]
+    # polished silicon: a cool grey with one broad reflection lying across it
+    streak = np.exp(-(((X + Y * 0.9) - BW * 1.02) / 620.0) ** 2)
+    base = lerp(hexrgb('#c6cdd8'), hexrgb('#eceff5'), (0.18 + 0.82 * streak)[..., None])
+    grain = (c.noise(260, 2, 0.5, seed=9) - 0.5) * 0.010
     surface = base + grain[..., None]
     # the die grid: only whole dies, as on a wafer map
-    pitch_x, pitch_y, street = 86.0, 74.0, 3.0
+    pitch_x, pitch_y, street = 92.0, 78.0, 3.0
     gx0, gy0 = wx % pitch_x, wy % pitch_y
     ix = np.floor((X - gx0) / pitch_x)
     iy = np.floor((Y - gy0) / pitch_y)
-    # a die is whole when its four corners are inside the exclusion edge
-    edge = wr - 46.0
-    cxs = [gx0 + ix * pitch_x, gx0 + (ix + 1) * pitch_x]
-    cys = [gy0 + iy * pitch_y, gy0 + (iy + 1) * pitch_y]
+    edge = wr - 52.0
     far = np.zeros_like(X)
-    for a in cxs:
-        for b in cys:
+    for a in (gx0 + ix * pitch_x, gx0 + (ix + 1) * pitch_x):
+        for b in (gy0 + iy * pitch_y, gy0 + (iy + 1) * pitch_y):
             far = np.maximum(far, np.sqrt((a - wx) ** 2 + (b - wy) ** 2))
     whole = (far < edge).astype(np.float32)
-    # a drop-in site of two by two dies carries the mark instead of circuits
-    six, siy = math.floor((BW * 0.762 - gx0) / pitch_x), math.floor((BH * 0.800 - gy0) / pitch_y)
+    # a drop-in site of two by two dies carries the mark instead of circuits: beside the instrument column
+    six, siy = math.floor((BW * 0.862 - gx0) / pitch_x), math.floor((BH * 0.345 - gy0) / pitch_y)
     site = ((ix >= six) & (ix <= six + 1) & (iy >= siy) & (iy <= siy + 1))
     whole = whole * (1.0 - site.astype(np.float32))
     fx = (X - gx0) - ix * pitch_x
@@ -381,171 +380,201 @@ def wafer(c):
     aa = 1.0 / c.s
     in_die = smooth((np.minimum(fx, pitch_x - fx) - street) / aa + 0.5) * smooth((np.minimum(fy, pitch_y - fy) - street) / aa + 0.5)
     die = whole * in_die
-    # every die the same faint layout: a core block and a pad row, drawn as tone
-    core = ((fx > 14) & (fx < 50) & (fy > 12) & (fy < 44)).astype(np.float32)
-    mem = ((fx > 56) & (fx < 76) & (fy > 12) & (fy < 62)).astype(np.float32)
-    pads = ((fy > 52) & (fy < 60) & (fx > 14) & (fx < 50) & (np.mod(fx - 14, 6) < 3.4)).astype(np.float32)
-    tone = 1.0 - die * (0.050 + 0.030 * core + 0.018 * mem + 0.050 * pads)
-    # thin-film colour: the hue runs with the angle and the radius, strongest in a band inside the edge
-    film_band = np.exp(-((rr - (wr - 150.0)) / 190.0) ** 2) * 0.85 + 0.15
-    ph = (ang * 2.4 + rr / 310.0)
+    # every die the same layout, as tone: a core, a memory, a row of pads, a seal line
+    core = ((fx > 14) & (fx < 52) & (fy > 12) & (fy < 46)).astype(np.float32)
+    mem = ((fx > 58) & (fx < 80) & (fy > 12) & (fy < 66)).astype(np.float32) * (0.7 + 0.3 * (np.mod(fy, 6.0) < 3.0))
+    pads = ((fy > 55) & (fy < 63) & (fx > 14) & (fx < 52) & (np.mod(fx - 14, 6) < 3.4)).astype(np.float32)
+    seal = die * (1.0 - smooth((np.minimum(np.minimum(fx, pitch_x - fx), np.minimum(fy, pitch_y - fy)) - street - 1.5) / aa))
+    tone = 1.0 - die * (0.070 + 0.040 * core + 0.030 * mem + 0.065 * pads) - 0.05 * seal
+    # thin-film colour: the hue runs with the angle and the radius; strongest in a band inside the edge, and
+    # every die takes a little of it (the film is on the dies, the streets are bare)
+    film_band = np.exp(-((rr - (wr - 170.0)) / 230.0) ** 2) * 0.80 + 0.20
+    ph = (ang * 3.1 + rr / 260.0)
     film = np.stack([0.5 + 0.5 * np.cos(ph + 2.2), 0.5 + 0.5 * np.cos(ph + 0.35), 0.5 + 0.5 * np.cos(ph - 1.5)], axis=-1)
-    film = (film - film.mean(axis=-1, keepdims=True)) * 0.085
-    surface = surface * tone[..., None] + film * (film_band * (0.35 + 0.65 * die))[..., None]
+    film = (film - film.mean(axis=-1, keepdims=True)) * 0.16
+    surface = surface * tone[..., None] + film * (film_band * (0.22 + 0.78 * die))[..., None]
     c.img = c.img * (1 - inside[..., None]) + surface.astype(np.float32) * inside[..., None]
-    # the bevel at the edge: a bright line, then the dark edge
-    c.add(np.array([1.0, 1.0, 1.0]), (np.exp(-((rr - (wr - 5.0)) / 2.2) ** 2) * 0.42).astype(np.float32))
-    c.img *= (1.0 - 0.20 * np.exp(-((rr - (wr - 0.5)) / 1.3) ** 2))[..., None]
-    # the mark, etched in the exclusion zone like a wafer ID (dot-matrix laser marks)
-    ms = 118.0
+    # the edge: a bevel that catches the light, the dark rim, and one fine line of the film's colour inside it
+    c.add(np.array([1.0, 1.0, 1.0]), (np.exp(-((rr - (wr - 6.0)) / 2.6) ** 2) * 0.50).astype(np.float32))
+    c.img *= (1.0 - 0.26 * np.exp(-((rr - (wr - 0.5)) / 1.4) ** 2))[..., None]
+    rim = np.exp(-((rr - (wr - 20.0)) / 3.0) ** 2) * inside
+    c.img += (film * 2.2) * rim[..., None]
+    # the mark, etched on its site like a wafer's identity
+    ms = 128.0
     mx, my = gx0 + (six + 1) * pitch_x - ms / 2, gy0 + (siy + 1) * pitch_y - ms / 2 - 2
 
     def etched(ctx):
-        mark_traces(ctx, mx, my, ms, 3.2)
-        mark_vias(ctx, mx, my, ms, 4.8)
+        mark_traces(ctx, mx, my, ms, 3.4)
+        mark_vias(ctx, mx, my, ms, 5.0)
         mark_pads(ctx, mx, my, ms)
-    c.over(hexrgb('#8b95a6'), c.mask(etched) * 0.62)
-    # dust-free: nothing else
+    c.over(hexrgb('#7d8899'), c.mask(etched) * 0.70)
 
 
 # --- Die Shot -------------------------------------------------------------------------------------
 def dieshot(c):
     X, Y = c.x, c.y
     rng = np.random.default_rng(1977)
-    c.img[:] = hexrgb('#080b10')
+    c.img[:] = hexrgb('#07090d')
     aa = 1.0 / c.s
-    # the die: inside a seal ring; blocks by recursive cuts
-    m = 54.0
-    blocks = []
+    m = 46.0            # the pad ring's distance from the screen's edge
+    core = m + 62.0     # where the blocks begin
+    fine = c.noise(900, 2, 0.5, seed=4)
 
-    def cut(x0, y0, x1, y1, depth):
+    def box(x0, y0, x1, y1, g):
+        """Coverage of a rectangle inset by g, and the distance from its inset edge inward."""
+        inb = smooth((X - x0 - g) / aa + 0.5) * smooth((x1 - g - X) / aa + 0.5) * smooth((Y - y0 - g) / aa + 0.5) * smooth((y1 - g - Y) / aa + 0.5)
+        edge = np.minimum(np.minimum(X - x0, x1 - X), np.minimum(Y - y0, y1 - Y)) - g
+        return inb, edge
+
+    def cut(x0, y0, x1, y1, depth, small, out):
         w, h = x1 - x0, y1 - y0
-        if depth == 0 or (w < 330 and h < 250) or (depth < 3 and rng.random() < 0.12):
-            blocks.append((x0, y0, x1, y1))
+        if depth == 0 or (w < small[0] and h < small[1]) or (depth < 3 and rng.random() < 0.12):
+            out.append((x0, y0, x1, y1))
             return
         if w / h > 1.25 or (w / h > 0.8 and rng.random() < 0.5):
-            s = x0 + w * (0.34 + 0.32 * rng.random())
-            s = round(s / 8) * 8
-            cut(x0, y0, s, y1, depth - 1)
-            cut(s, y0, x1, y1, depth - 1)
+            s = round((x0 + w * (0.34 + 0.32 * rng.random())) / 8) * 8
+            cut(x0, y0, s, y1, depth - 1, small, out)
+            cut(s, y0, x1, y1, depth - 1, small, out)
         else:
-            s = y0 + h * (0.34 + 0.32 * rng.random())
-            s = round(s / 8) * 8
-            cut(x0, y0, x1, s, depth - 1)
-            cut(x0, s, x1, y1, depth - 1)
+            s = round((y0 + h * (0.34 + 0.32 * rng.random())) / 8) * 8
+            cut(x0, y0, x1, s, depth - 1, small, out)
+            cut(x0, s, x1, y1, depth - 1, small, out)
 
-    cut(m + 58, m + 58, BW - m - 58, BH - m - 58, 5)
-    size = 520.0
+    blocks = []
+    cut(core, core, BW - core, BH - core, 5, (330, 250), blocks)
+    size = 500.0
     ox, oy = (BW - size) / 2, (BH - size) / 2 - 8
-    sig_block = (ox - 56, oy - 40, ox + size + 56, oy + size + 48)
-    tints = [hexrgb('#0d1820'), hexrgb('#101626'), hexrgb('#0c1a1c'), hexrgb('#15141f'), hexrgb('#171611'), hexrgb('#0e1318')]
-    fine = c.noise(900, 2, 0.5, seed=4)
-    for (x0, y0, x1, y1) in blocks:
-        g = 7.0  # routing channel between blocks
-        inb = smooth((X - x0 - g) / aa + 0.5) * smooth((x1 - g - X) / aa + 0.5) * smooth((Y - y0 - g) / aa + 0.5) * smooth((y1 - g - Y) / aa + 0.5)
-        if inb.max() <= 0:
-            continue
-        kind = rng.integers(0, 4)
-        tint = tints[rng.integers(0, len(tints))]
-        if kind == 0:      # memory: a fine regular array with word-line bands
+    sig_block = (ox - 60, oy - 44, ox + size + 60, oy + size + 52)
+    # the metals' colours under a thin film: blue-black, teal, violet, bronze
+    tints = [hexrgb('#0f2030'), hexrgb('#141c36'), hexrgb('#0e2428'), hexrgb('#1c1a30'), hexrgb('#231f14'), hexrgb('#121a24')]
+
+    def texture(kind, x0, y0):
+        if kind == 0:      # memory: a fine regular array with word-line bands and a sense-amplifier strip
             px, py = 6.0 + 2 * rng.integers(0, 3), 4.0 + 2 * rng.integers(0, 2)
             cell = (np.mod(X - x0, px) < px * 0.5).astype(np.float32) * (np.mod(Y - y0, py) < py * 0.6).astype(np.float32)
             band = (np.mod(Y - y0, py * 16) < py * 1.2).astype(np.float32)
-            tex = 0.50 + 0.22 * cell - 0.30 * band
-        elif kind == 1:    # standard-cell rows: random run lengths along rows
+            return 0.50 + 0.26 * cell - 0.34 * band
+        if kind == 1:      # standard cells: rows of random run lengths between power rails
             row = 9.0
             ry = np.floor((Y - y0) / row)
             run = np.floor((X - x0) / (5.0 + 3.0 * np.mod(ry * 7.0, 3.0)))
             h = np.mod(np.sin(ry * 127.1 + run * 311.7) * 43758.5453, 1.0)
             rail = (np.mod(Y - y0, row) < 1.6).astype(np.float32)
-            tex = 0.38 + 0.34 * h - 0.22 * rail
-        elif kind == 2:    # data path: vertical bit slices
-            sl = 12.0
-            h = np.mod(np.sin(np.floor((X - x0) / sl) * 91.7) * 15731.7, 1.0)
-            tex = 0.42 + 0.20 * h + 0.12 * (np.mod(Y - y0, 30.0) < 2.0)
-        else:              # analog / IO: a few large plates
-            gx, gy = np.floor((X - x0) / 74.0), np.floor((Y - y0) / 58.0)
-            h = np.mod(np.sin(gx * 12.9898 + gy * 78.233) * 43758.5453, 1.0)
-            plate = smooth((np.minimum(np.mod(X - x0, 74.0), 74.0 - np.mod(X - x0, 74.0)) - 5.0) / aa) * smooth((np.minimum(np.mod(Y - y0, 58.0), 58.0 - np.mod(Y - y0, 58.0)) - 5.0) / aa)
-            tex = 0.40 + 0.30 * h * plate
-        tex = tex + (fine - 0.5) * 0.10
-        # a block's border ring: the detail goes to its edge, its interior stays a quiet tone
-        edge = np.minimum(np.minimum(X - x0, x1 - X), np.minimum(Y - y0, y1 - Y))
-        ring = np.exp(-np.clip(edge - g, 0, None) / 12.0)
-        colour = tint[None, None, :] * (0.95 + 0.80 * tex[..., None]) * (1.0 + 0.55 * ring[..., None])
+            return 0.36 + 0.40 * h - 0.24 * rail
+        if kind == 2:      # data path: bit slices
+            h = np.mod(np.sin(np.floor((X - x0) / 12.0) * 91.7) * 15731.7, 1.0)
+            return 0.42 + 0.24 * h + 0.14 * (np.mod(Y - y0, 30.0) < 2.0)
+        gx, gy = np.floor((X - x0) / 74.0), np.floor((Y - y0) / 58.0)   # analog: plates
+        h = np.mod(np.sin(gx * 12.9898 + gy * 78.233) * 43758.5453, 1.0)
+        plate = smooth((np.minimum(np.mod(X - x0, 74.0), 74.0 - np.mod(X - x0, 74.0)) - 5.0) / aa) * smooth((np.minimum(np.mod(Y - y0, 58.0), 58.0 - np.mod(Y - y0, 58.0)) - 5.0) / aa)
+        return 0.38 + 0.36 * h * plate
+
+    for (x0, y0, x1, y1) in blocks:
+        inb, edge = box(x0, y0, x1, y1, 7.0)
+        if inb.max() <= 0:
+            continue
+        tint = tints[rng.integers(0, len(tints))]
+        # a block is a few macros of its own: each a texture and a shade of the block's metal
+        subs = []
+        cut(x0 + 10, y0 + 10, x1 - 10, y1 - 10, 2, (200, 150), subs)
+        colour = np.zeros_like(c.img) + (tint * 0.55)[None, None, :]
+        for (a0, b0, a1, b1) in subs:
+            sub, sedge = box(a0, b0, a1, b1, 3.0)
+            tex = texture(rng.integers(0, 4), a0, b0) + (fine - 0.5) * 0.10
+            shade = 0.86 + 0.34 * rng.random()
+            # the detail is at a macro's rim; its middle is a quiet tone
+            quiet = 1.0 - 0.45 * smooth((sedge - 10.0) / 46.0)
+            body = tint[None, None, :] * shade * (0.90 + 0.95 * (tex[..., None] - 0.45) * quiet[..., None] + 0.45)
+            # lit from the upper left: a light line on a macro's top and left, a dark one below and right
+            lit = np.exp(-np.clip(np.minimum(X - a0, Y - b0) - 3.0, 0, None) / 1.2) * 0.22 - np.exp(-np.clip(np.minimum(a1 - X, b1 - Y) - 3.0, 0, None) / 1.2) * 0.20
+            body = body * (1.0 + lit[..., None])
+            colour = colour * (1 - sub[..., None]) + body * sub[..., None]
+        ring = np.exp(-np.clip(edge, 0, None) / 10.0)
+        colour = colour * (1.0 + 0.50 * ring[..., None])
         c.img = c.img * (1 - inb[..., None]) + colour.astype(np.float32) * inb[..., None]
 
-    # the signature's own block: bare field oxide with a ring like the others
-    (x0, y0, x1, y1) = sig_block
-    g = 7.0
-    outb = smooth((X - x0 + g) / aa + 0.5) * smooth((x1 + g - X) / aa + 0.5) * smooth((Y - y0 + g) / aa + 0.5) * smooth((y1 + g - Y) / aa + 0.5)
-    c.over(hexrgb('#080b10'), outb)
-    inb = smooth((X - x0 - g) / aa + 0.5) * smooth((x1 - g - X) / aa + 0.5) * smooth((Y - y0 - g) / aa + 0.5) * smooth((y1 - g - Y) / aa + 0.5)
-    edge = np.minimum(np.minimum(X - x0, x1 - X), np.minimum(Y - y0, y1 - Y))
-    ring = np.exp(-np.clip(edge - g, 0, None) / 12.0)
-    field = hexrgb('#0c1117')[None, None, :] * (1.0 + 0.5 * ring[..., None] + (fine[..., None] - 0.5) * 0.12)
-    c.img = c.img * (1 - inb[..., None]) + field.astype(np.float32) * inb[..., None]
-    blocks.append(sig_block)
-    # top metal over the channels: gold-brown routing, thin
+    # routing between the blocks: thin gold
     def routes(ctx):
         ctx.set_line_width(1.2)
-        for (x0, y0, x1, y1) in blocks:
+        for (x0, y0, x1, y1) in blocks + [sig_block]:
             ctx.rectangle(x0 + 3.5, y0 + 3.5, x1 - x0 - 7, y1 - y0 - 7)
         ctx.stroke()
-    c.add(hexrgb('#c9a24a'), c.mask(routes) * 0.16)
-    # thin-film tint drifting across the die
-    drift = c.noise(2.2, 3, 0.5, seed=8)
-    c.add(hexrgb('#1b4a52'), (smooth((drift - 0.45) / 0.5) * 0.045).astype(np.float32))
-    c.add(hexrgb('#3a2a5c'), (smooth((0.55 - drift) / 0.5) * 0.040).astype(np.float32))
+    c.add(hexrgb('#d2a94e'), c.mask(routes) * 0.22)
+    # the signature's own block: bare field with a ring like the others
+    (x0, y0, x1, y1) = sig_block
+    outb, _ = box(x0, y0, x1, y1, -7.0)
+    c.over(hexrgb('#07090d'), outb)
+    inb, edge = box(x0, y0, x1, y1, 7.0)
+    ring = np.exp(-np.clip(edge, 0, None) / 12.0)
+    field = hexrgb('#0d131b')[None, None, :] * (1.0 + 0.55 * ring[..., None] + (fine[..., None] - 0.5) * 0.12)
+    c.img = c.img * (1 - inb[..., None]) + field.astype(np.float32) * inb[..., None]
+    blocks.append(sig_block)
 
-    # the seal ring and the bond pads round it
+    # the top metal: power straps over everything inside the seal ring, two layers a little apart
+    inside_ring, _ = box(core - 8, core - 8, BW - core + 8, BH - core + 8, 0.0)
+    keep = inside_ring * (1.0 - inb)
+    strap_v = (np.mod(X - core, 64.0) < 2.0).astype(np.float32) * keep
+    strap_h = (np.mod(Y - core, 96.0) < 2.0).astype(np.float32) * keep
+    c.img *= (1.0 - 0.30 * np.clip(np.roll(strap_v, int(2 * c.s), axis=1) + np.roll(strap_h, int(2 * c.s), axis=0), 0, 1))[..., None]
+    c.add(hexrgb('#7f95b0'), strap_v * 0.085)
+    c.add(hexrgb('#b89a52'), strap_h * 0.075)
+
+    # the thin film: one reflection lying across the die, its colour turning along it
+    along = (X * 0.8 + Y * 0.6) / (BW * 0.8 + BH * 0.6)
+    across = (Y * 0.8 - X * 0.6) / BH
+    sheen = np.exp(-((across + 0.18) / 0.34) ** 2)
+    film = np.stack([0.5 + 0.5 * np.cos(along * 7.0 + 2.4), 0.5 + 0.5 * np.cos(along * 7.0 + 0.4), 0.5 + 0.5 * np.cos(along * 7.0 - 1.6)], axis=-1)
+    c.img += (film - 0.35) * (sheen * 0.050)[..., None] * inside_ring[..., None]
+    c.img *= (1.0 + 0.16 * sheen * inside_ring)[..., None]
+
+    # the seal ring and the bond pads round it: fine, exact, not loud
     def seal(ctx):
-        ctx.set_line_width(2.0)
-        ctx.rectangle(m + 44, m + 44, BW - 2 * m - 88, BH - 2 * m - 88)
+        ctx.set_line_width(1.5)
+        ctx.rectangle(core - 14, core - 14, BW - 2 * core + 28, BH - 2 * core + 28)
         ctx.stroke()
         ctx.set_line_width(1.0)
-        ctx.rectangle(m + 50, m + 50, BW - 2 * m - 100, BH - 2 * m - 100)
+        ctx.rectangle(core - 9, core - 9, BW - 2 * core + 18, BH - 2 * core + 18)
         ctx.stroke()
-    c.add(hexrgb('#d8b45a'), c.mask(seal) * 0.30)
+    c.add(hexrgb('#d8b45a'), c.mask(seal) * 0.34)
+    pad, pitch = 18.0, 40.0
 
-    def pads(ctx, inner):
-        size, pitch = 22.0, 44.0
-        inset = 9.0 if inner else 0.0
-        n = int((BW - 2 * m - 60) // pitch)
+    def pads(ctx, inset, stroke):
+        def one(x, y):
+            if stroke:
+                ctx.rectangle(x + 0.5, y + 0.5, pad - 1, pad - 1)
+            else:
+                ctx.rectangle(x + inset, y + inset, pad - 2 * inset, pad - 2 * inset)
+        n = int((BW - 2 * m - 80) // pitch)
         x0 = (BW - (n - 1) * pitch) / 2
         for i in range(n):
-            for y in (m, BH - m - size):
-                ctx.rectangle(x0 + i * pitch - size / 2 + inset / 2, y + inset / 2, size - inset, size - inset)
-        n = int((BH - 2 * m - 140) // pitch)
+            for y in (m, BH - m - pad):
+                one(x0 + i * pitch - pad / 2, y)
+        n = int((BH - 2 * m - 150) // pitch)
         y0 = (BH - (n - 1) * pitch) / 2
         for i in range(n):
-            for x in (m, BW - m - size):
-                ctx.rectangle(x + inset / 2, y0 + i * pitch - size / 2 + inset / 2, size - inset, size - inset)
-        ctx.fill()
-    c.over(hexrgb('#4a3f22'), c.mask(lambda ctx: pads(ctx, False)) * 0.9)
-    c.over(hexrgb('#8f783c'), c.mask(lambda ctx: pads(ctx, True)) * 0.8)
+            for x in (m, BW - m - pad):
+                one(x, y0 + i * pitch - pad / 2)
+        if stroke:
+            ctx.set_line_width(1.0)
+            ctx.stroke()
+        else:
+            ctx.fill()
+    c.over(hexrgb('#2c2718'), c.mask(lambda ctx: pads(ctx, 0.0, False)))
+    c.over(hexrgb('#8d7a41'), c.mask(lambda ctx: pads(ctx, 5.0, False)) * 0.75)
+    c.add(hexrgb('#d8b45a'), c.mask(lambda ctx: pads(ctx, 0.0, True)) * 0.30)
 
-    # the signature in the top metal: the mark, centred, a shade above the blocks
-
-    def sig(ctx):
-        mark_traces(ctx, ox, oy, size, 9.0)
-        mark_pads(ctx, ox, oy, size)
-    c.over(hexrgb('#2c2b22'), c.mask(sig))
-
-    def sig_edge(ctx):
-        mark_traces(ctx, ox, oy, size, 1.4)
-    c.add(hexrgb('#e7c15a'), c.mask(sig_edge) * 0.22)
-
-    def sig_via(ctx):
-        mark_vias(ctx, ox, oy, size, 13.0)
-    c.over(hexrgb('#6f5f30'), c.mask(sig_via))
-
-    def sig_hole(ctx):
-        mark_vias(ctx, ox, oy, size, 5.5)
-    c.over(hexrgb('#0a0e13'), c.mask(sig_hole))
+    # the signature in the top metal: the mark, a dark body with a bright core line
+    c.over(hexrgb('#3a3626'), c.mask(lambda ctx: (mark_traces(ctx, ox, oy, size, 10.0), mark_pads(ctx, ox, oy, size))))
+    c.add(hexrgb('#f0cd6a'), c.mask(lambda ctx: mark_traces(ctx, ox, oy, size, 1.6)) * 0.55)
+    c.over(hexrgb('#a48a42'), c.mask(lambda ctx: mark_vias(ctx, ox, oy, size, 13.0)))
+    c.over(hexrgb('#f0cd6a'), c.mask(lambda ctx: mark_vias(ctx, ox, oy, size, 13.0)) * np.clip(1.0 - c.mask(lambda ctx: mark_vias(ctx, ox, oy, size, 11.4)), 0, 1) * 0.6)
+    c.over(hexrgb('#0a0e13'), c.mask(lambda ctx: mark_vias(ctx, ox, oy, size, 5.5)))
     # the microscope's field: darker toward the corners
     v = ((X - BW / 2) / (BW / 2)) ** 2 + ((Y - BH / 2) / (BH / 2)) ** 2
-    c.img *= (1.0 - 0.30 * smooth((v - 0.55) / 1.3))[..., None]
+    c.img *= (1.0 - 0.26 * smooth((v - 0.6) / 1.3))[..., None]
+    # a wallpaper, not a photograph: a little darker and less coloured than the die would be
+    grey = c.img.mean(axis=-1, keepdims=True)
+    c.img = np.clip((grey + (c.img - grey) * 0.86) * 0.88, 0.0, 1.0)
 
 
 WALLPAPERS = {'sf-clearing': (clearing, 101), 'sf-canopy': (canopy, 202), 'sf-wafer': (wafer, 303), 'sf-dieshot': (dieshot, 404)}

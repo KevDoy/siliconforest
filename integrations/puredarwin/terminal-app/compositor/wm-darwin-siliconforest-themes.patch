@@ -1006,10 +1006,10 @@ index 122af12..36465bc 100644
  #[cfg(feature = "desktop-shell")]
 diff --git a/crates/wm-darwin/src/motion.rs b/crates/wm-darwin/src/motion.rs
 new file mode 100644
-index 0000000..1834475
+index 0000000..4c0dd3f
 --- /dev/null
 +++ b/crates/wm-darwin/src/motion.rs
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,145 @@
 +//! How the desk moves (THEME, 17 November 2026): a window fades in while rising a few points
 +//! when it appears, and a change of theme cross-fades, each as the theme in use says
 +//! (`wm_theme::modern::WindowChrome`: `open_ms`, `open_rise`, `open_curve`, `switch_ms`).
@@ -1083,6 +1083,7 @@ index 0000000..1834475
 +                if moving && !first && ms > 0 && self.renderer.fade_begin() {
 +                    self.motion.fade = Some((None, ms));
 +                    self.motion.faded += 1;
++                    eprintln!("WMMOTION theme change cross-fades over {ms} ms (the {}th)", self.motion.faded);
 +                }
 +            }
 +            // windows that have a picture now and had none at the last look appear
@@ -1092,6 +1093,9 @@ index 0000000..1834475
 +                for id in shown.difference(&self.motion.known) {
 +                    self.motion.appear.insert(*id, now);
 +                    self.motion.appeared += 1;
++                    if self.motion.appeared <= 3 || self.motion.appeared % 50 == 0 {
++                        eprintln!("WMMOTION window {id} appears over {} ms rising {} pt (the {}th)", window.open_ms, window.open_rise, self.motion.appeared);
++                    }
 +                }
 +            }
 +            self.motion.known = shown;
@@ -1992,10 +1996,10 @@ index e7aac6a..b263852 100644
              assert_eq!(by_id.appearance, expected, "{id}");
 diff --git a/crates/wm-theme/src/forest.rs b/crates/wm-theme/src/forest.rs
 new file mode 100644
-index 0000000..43dc558
+index 0000000..70e0c35
 --- /dev/null
 +++ b/crates/wm-theme/src/forest.rs
-@@ -0,0 +1,251 @@
+@@ -0,0 +1,256 @@
 +//! The four SiliconForest themes (THEME, 17 November 2026): Clearing, Canopy, Wafer and Die Shot.
 +//! They wear the modern recipe (`styles::modern`) with the window tokens of
 +//! [`crate::modern::WindowChrome`]: controls at the left in a Mac's order, each theme its own
@@ -2170,7 +2174,12 @@ index 0000000..43dc558
 +    let mut menu_font = theme.titlebar.font.clone();
 +    // the resident faces are the titles' weights (Inter 500 and 600, Source Code Pro 500)
 +    menu_font.weight = FontWeight::Medium;
-+    theme.menu.title_font = theme.titlebar.font.clone();
++    if id == "sf-dieshot" {
++        // the monospaced face is the title's alone; menus and the dock's names are in Inter
++        menu_font.family = "Inter".into();
++        menu_font.size = 13.0;
++    }
++    theme.menu.title_font = menu_font.clone();
 +    theme.menu.item_font = menu_font;
 +    theme.menu.title_bar = Fill::Solid(surface);
 +    theme.menu.title_text_color = muted;
@@ -2550,7 +2559,7 @@ index 38297cb..635d06a 100644
  struct TextClip {
      left: i64,
 diff --git a/crates/wm-theme/src/raster.rs b/crates/wm-theme/src/raster.rs
-index 238b9b6..1ca0140 100644
+index 238b9b6..bf0543b 100644
 --- a/crates/wm-theme/src/raster.rs
 +++ b/crates/wm-theme/src/raster.rs
 @@ -24,6 +24,10 @@ pub struct FontState {
@@ -2564,11 +2573,23 @@ index 238b9b6..1ca0140 100644
  }
  
  /// Read-only font/raster cache sizes for explicit diagnostics, not RSS.
-@@ -131,7 +135,23 @@ impl FontState {
+@@ -131,7 +135,38 @@ impl FontState {
  
      fn from_system(mut font_system: cosmic_text::FontSystem) -> Self {
          let system7_fallback = system7::Fallback::prepare(&mut font_system);
 +        let mut system_title_faces: Vec<std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>> = Vec::new();
++        // SiliconForest's session gives the desk two packaged faces and no system scan (the first
++        // run on the M1 drew these titles in DejaVu Sans): the files are read where SiliconForest has them
++        for path in [
++            "/System/Library/Fonts/Inter/Inter-Medium.otf",
++            "/System/Library/Fonts/Inter/Inter-SemiBold.otf",
++            "/System/Library/Fonts/SourceCodePro/SourceCodePro-Medium.otf",
++        ] {
++            if let Ok(bytes) = std::fs::read(path) {
++                system_title_faces.push(std::sync::Arc::new(bytes));
++            }
++        }
++        let found_by_path = !system_title_faces.is_empty();
 +        for (family, weights) in [("Inter", &[500u16, 600][..]), ("Source Code Pro", &[500][..])] {
 +            for &weight in weights {
 +                let query = cosmic_text::fontdb::Query {
@@ -2576,6 +2597,9 @@ index 238b9b6..1ca0140 100644
 +                    weight: cosmic_text::fontdb::Weight(weight),
 +                    ..cosmic_text::fontdb::Query::default()
 +                };
++                if found_by_path {
++                    continue;
++                }
 +                let Some(id) = font_system.db().query(&query) else { continue };
 +                let exact = font_system.db().face(id).is_some_and(|face| face.weight.0 == weight && face.style == cosmic_text::fontdb::Style::Normal);
 +                if let Some(bytes) = exact.then(|| font_system.db().with_face_data(id, |data, _| data.to_vec())).flatten() {
@@ -2588,7 +2612,7 @@ index 238b9b6..1ca0140 100644
              font_system: Rc::new(RefCell::new(font_system)),
              swash_cache: Rc::new(RefCell::new(GlyphCache::new())),
              system7_fallback: Rc::new(RefCell::new(system7_fallback)),
-@@ -179,6 +199,11 @@ impl FontState {
+@@ -179,6 +214,11 @@ impl FontState {
                  general.db_mut().load_font_source(source.clone());
                  resident.db_mut().load_font_source(source);
              }
@@ -2600,7 +2624,7 @@ index 238b9b6..1ca0140 100644
              *fonts = Some(resident);
          }
      }
-@@ -569,6 +594,7 @@ mod tests {
+@@ -569,6 +609,7 @@ mod tests {
      #[test]
      fn font_statistics_observe_payload_capacity_without_triggering_eviction() {
          let fonts = FontState {
@@ -2610,10 +2634,10 @@ index 238b9b6..1ca0140 100644
              system7_fallback: Rc::new(RefCell::new(system7::Fallback::from_db("en-US".into(), cosmic_text::fontdb::Database::new()))),
 diff --git a/crates/wm-theme/src/styles/forest.rs b/crates/wm-theme/src/styles/forest.rs
 new file mode 100644
-index 0000000..df6cd4e
+index 0000000..a4d44d6
 --- /dev/null
 +++ b/crates/wm-theme/src/styles/forest.rs
-@@ -0,0 +1,274 @@
+@@ -0,0 +1,282 @@
 +//! The title band of the SiliconForest themes (THEME): the modern recipe's band with the
 +//! window tokens of [`crate::modern::WindowChrome`]: controls drawn as shapes (discs, vias,
 +//! pads, bond pads) at the left in a Mac's order, the title on a fixed line, centred or after
@@ -2816,15 +2840,23 @@ index 0000000..df6cd4e
 +            }
 +            fill(&mut image, band(0.0, 0.0, wf, hf, r), &p);
 +        }
-+        (TopLine::Interference, true) => {
-+            let rgb = |c: u32| tiny_skia::Color::from_rgba8((c >> 16) as u8, (c >> 8) as u8, c as u8, 255);
-+            let stops = vec![GradientStop::new(0.0, rgb(0x19a3a8)), GradientStop::new(0.55, rgb(0x4a5bd0)), GradientStop::new(1.0, rgb(0x9a5bd6))];
++        (TopLine::Interference, _) => {
++            // the film's colours along the top edge of every window: three points of them at full
++            // strength on the focused one, two points paled toward the hairline on the others (the
++            // first build drew it on the focused window only, two points: in a picture of the whole
++            // desk the theme read as "light with a blue accent")
++            let pale = |c: u32| {
++                let colour = Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
++                let colour = if focused { colour } else { colour.mix(edge, 0.62) };
++                tiny_skia::Color::from_rgba8(colour.r, colour.g, colour.b, 255)
++            };
++            let stops = vec![GradientStop::new(0.0, pale(0x19a3a8)), GradientStop::new(0.55, pale(0x4a5bd0)), GradientStop::new(1.0, pale(0x9a5bd6))];
 +            let mut p = solid(edge);
 +            if let Some(shader) = LinearGradient::new(SkPoint::from_xy(0.0, 0.0), SkPoint::from_xy(wf, 0.0), stops, SpreadMode::Pad, Transform::identity()) {
 +                p.shader = shader;
 +            }
 +            fill(&mut image, band(0.0, 0.0, wf, hf, r), &p);
-+            top = (2.0 * u).round().max(2.0);
++            top = ((if focused { 3.0 } else { 2.0 }) * u).round().max(2.0);
 +            fill(&mut image, band(0.0, top, wf, hf + top, r), &solid(edge));
 +            // the hairline under the colour would make three lines of two: the bar starts at the colour
 +        }
@@ -2981,6 +3013,25 @@ index 0f760ad..a7dbb75 100644
      let border = u32::from(chrome.frame.border.max(1));
      let line = if request.focused {
          theme.border.color_active
+diff --git a/dock/crates/chonk-dock-theme/src/launcher.rs b/dock/crates/chonk-dock-theme/src/launcher.rs
+index 65edb97..03308ce 100644
+--- a/dock/crates/chonk-dock-theme/src/launcher.rs
++++ b/dock/crates/chonk-dock-theme/src/launcher.rs
+@@ -168,9 +168,13 @@ pub fn render_launcher_tile_launching(
+     // a caption under the monogram, same role as the icon tile's
+     // title caption.
+     let label_h = (size as i32 - margin - label_y).max(0) as u32;
++    // THEME: a theme whose menus are set in another face than its titles (Die Shot: a monospaced
++    // title, as a net label) names its tiles in the menus' face: a monospaced name is cut
++    // ("Activity Moni...") where the others fit.
++    let label_face = if theme.menu.item_font.family != theme.titlebar.font.family { &theme.menu.item_font } else { &theme.titlebar.font };
+     let mut label_font = FontSpec {
+         size: (label_h as f32 * 0.60).max(6.0),
+-        ..theme.titlebar.font.clone()
++        ..label_face.clone()
+     };
+     // A name a little too long for the strip ("Activity Monitor") is set smaller, down to three
+     // quarters of the size, before anything is cut; only a longer one is elided.
 diff --git a/dock/crates/chonk-dock/src/runtime.rs b/dock/crates/chonk-dock/src/runtime.rs
 index 96fb6a4..1d71b21 100644
 --- a/dock/crates/chonk-dock/src/runtime.rs
