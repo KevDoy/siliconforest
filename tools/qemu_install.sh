@@ -17,9 +17,15 @@
 #       (e.g. --command 'ls /Users/sf; echo QDINSTALL_DONE')
 #   tools/qemu_install.sh update [--bin FILE] [--terminal FILE]
 #       replaces the compositor/terminal/session files on the existing disk, keeps everything else
-#       (--variant wayland needs SF_PD=pin: upstream's full image is built at the old pin only;
-#       at the tip, the default source, it is a Nix build of about 100 derivations that has not
-#       been run. QD_WAYLAND_TIP=1 starts that build. minimal is made from the tip.)
+#   Source: upstream's tip, the default of integrations/puredarwin/rebase/pd.nix; SF_PD=pin in
+#       the environment of `create` makes the disk from the old pin e7aa00a6 instead. The first
+#       `create --variant wayland` of a source builds upstream's full image (about 100
+#       derivations, an arm64 LLVM among them: hours; QD_NIX_ARGS, default `--max-jobs 1
+#       --cores 6`, are nix-build's limits for it).
+#   The wayland variant also gets what programs built for macOS expect and upstream's image
+#       lacks (QD_EXTRAS=0 leaves it out): the libraries, frameworks' additions and locale
+#       data of integrations/puredarwin/homebrew/build-overlay.nix, /usr/bin/shasum,
+#       /usr/bin/sw_vers and /usr/bin/curl at the macOS paths.
 #   tools/qemu_install.sh reset     deletes the disk (create makes a fresh one)
 #   tools/qemu_install.sh status    where the disk is, its size, the last boot's result
 # Other streams: the disk is runs/qemu-dev/install/disk.img (GPT: 1 = ESP, 2 = ext4 root,
@@ -54,11 +60,23 @@ case "$CMD" in
 create)
   [ ! -e "$DISK" ] || [ "$FORCE" = 1 ] || { echo "$DISK exists (reset first, or --force)" >&2; exit 2; }
   [ -x "$BIN" ] && [ -x "$TERMINAL" ] || { echo "compositor or terminal binary missing" >&2; exit 2; }
-  if [ "$VARIANT" = wayland ] && [ "${SF_PD:-tip}" != pin ] && [ "${QD_WAYLAND_TIP:-0}" != 1 ]; then
-    echo "--variant wayland is built at the pin only: SF_PD=pin tools/qemu_install.sh create --variant wayland" >&2
-    echo "(QD_WAYLAND_TIP=1 builds upstream's full image at the tip first: about 100 derivations)" >&2; exit 2
-  fi
   mkdir -p "$D"; rm -f "$DISK"
+  EXTRAS=()
+  if [ "$VARIANT" = wayland ]; then
+    export PATH=$HOME/.nix-profile/bin:$PATH NIX_CONFIG='build-users-group = '
+    NIXB=(nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link ${QD_NIX_ARGS:---max-jobs 1 --cores 6})
+    # upstream's full image for this source: built here, with limits, before qd_image.py asks for it
+    (cd "$Q" && "${NIXB[@]}" build-image.nix --argstr variant wayland) > "$D/base-build.log" 2>&1 \
+      || { tail -5 "$D/base-build.log" >&2; echo "the full image did not build ($D/base-build.log)" >&2; exit 2; }
+    if [ "${QD_EXTRAS:-1}" = 1 ]; then
+      OVERLAY=$(cd integrations/puredarwin/homebrew && "${NIXB[@]}" build-overlay.nix 2> "$ROOT/$D/overlay-build.log" | tail -1)
+      [ -d "$OVERLAY/usr/lib" ] || { echo "the Homebrew overlay did not build ($D/overlay-build.log)" >&2; exit 2; }
+      # The overlay without its two diagnostics, and without its curl: the full image has its own.
+      rm -rf "$D/extras"; mkdir -p "$D/extras"; cp -a "$OVERLAY/." "$D/extras/"; chmod -R u+w "$D/extras"
+      rm -f "$D/extras/usr/lib/libhbcrash.dylib" "$D/extras/usr/bin/hb-runas" "$D/extras/usr/bin/curl"
+      EXTRAS=(--overlay "$D/extras" --file "$Q/guest/shasum=/usr/bin/shasum" --link /usr/bin/sw_vers=/bin/sw_vers --link /usr/bin/curl=/bin/curl)
+    fi
+  fi
   session 14400
   # Accounts: root as upstream has it, plus `sf` (uid 501, group staff). Passwords are unset
   # (`*`): there is no login program in this userland; the console shell is root's.
@@ -85,8 +103,8 @@ E
     --file "$D/qemu-desktop-session=/usr/bin/qemu-desktop-session" \
     --data "$Q/guest/org.siliconforest.qemu-desktop.plist=/System/Library/LaunchDaemons/org.siliconforest.qemu-desktop.plist" \
     --data "$D/passwd=/etc/passwd" --data "$D/master.passwd=/etc/master.passwd" \
-    --dir /Users/sf:501:20 --data "$D/welcome.txt=/Users/sf/README.txt" "${REMOVE[@]}" > "$D/image.json"
-  echo "$VARIANT" > "$D/variant"
+    --dir /Users/sf:501:20 --data "$D/welcome.txt=/Users/sf/README.txt" "${EXTRAS[@]}" "${REMOVE[@]}" > "$D/image.json"
+  echo "$VARIANT" > "$D/variant"; echo "${SF_PD:-tip}" > "$D/source"
   echo "created $DISK ($(du -h --apparent-size "$DISK" | cut -f1), variant $VARIANT)";;
 update)
   [ -e "$DISK" ] || { echo "no disk: tools/qemu_install.sh create" >&2; exit 2; }
@@ -132,7 +150,7 @@ reset)
   rm -f "$DISK" "$D/variant"; rm -rf "$D/boot"; echo "removed $DISK";;
 status)
   if [ -e "$DISK" ]; then
-    echo "disk: $DISK ($(du -h "$DISK" | cut -f1) used on the host, variant $(cat "$D/variant" 2>/dev/null || echo unknown))"
+    echo "disk: $DISK ($(du -h "$DISK" | cut -f1) used on the host, variant $(cat "$D/variant" 2>/dev/null || echo unknown), source $(cat "$D/source" 2>/dev/null || echo pin))"
     [ -r "$D/boot/result.json" ] && grep -m1 '"status"' "$D/boot/result.json"
   else echo "no disk: tools/qemu_install.sh create"; fi;;
 *) echo "usage: tools/qemu_install.sh create|boot|update|reset|status (see --help)" >&2; exit 2;;

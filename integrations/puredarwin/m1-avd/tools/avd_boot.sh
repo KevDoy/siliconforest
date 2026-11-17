@@ -16,16 +16,15 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-avd}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}; shift
 case "$N" in av*) ;; *) echo "boot names are prefixed av" >&2; exit 2;; esac
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
 KC=${AVD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
 python3 "$ROOT/integrations/puredarwin/m1-rust-kext/tools/kc_overlap.py" "$KC/kernel" | tail -1
-U=$($NP m1-avd build-user.nix)
+U=$("$ROOT/tools/staged.sh" avd-user)
 [ -x "$U/usr/bin/pdavd-replay" ] || { echo "pdavd-replay build failed" >&2; exit 2; }
 RUNTIME=${AVD_RUNTIME:-180}
 [ "$RUNTIME" -ge 120 ] && [ "$RUNTIME" -le 600 ] || { echo "boots run 120 to 600 s" >&2; exit 2; }

@@ -8,8 +8,8 @@
 # ../../m1-touchbar/tools/tb_desktop_boot.sh; the guest script is ../guest/darwin-desktop-scale.in.
 # Queues for the bench itself.
 # Usage: ds_desktop_boot.sh <name, prefix ds> [upper bound in seconds, 120..600, default 480]
-#   DS_DESKTOP_BIN   compositor binary (default: runs/m1-desktop-010/wm-darwin-scale-desktop-build-009)
-#   DS_TERMINAL_BIN  terminal binary (default: runs/m1-desktop-010/terminal-application-build-008)
+#   DS_DESKTOP_BIN   compositor binary (default: tools/staged.sh compositor)
+#   DS_TERMINAL_BIN  terminal binary (default: tools/staged.sh terminal)
 #   DS_SECONDS       length of the desktop session (default 215; 11..14400)
 #   DS_AUTOPILOT=0   no synthetic input: the desktop for a person, DS_SECONDS long
 #   DS_ONLY          autopilot phases to run, comma separated (default: all)
@@ -24,9 +24,8 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-desktop}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}; LIMIT=${2:-480}
 case "$N" in ds*) ;; *) echo "boot names are prefixed ds" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -37,11 +36,11 @@ case "${DS_THEME:-}${DS_ONLY:-}" in *[!a-z0-9,-]*) echo "DS_THEME and DS_ONLY ar
 KC=${DS_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
-T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
-D=${DS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+T=$("$ROOT/tools/staged.sh" mesa)
+D=${DS_DESKTOP_BIN:-$("$ROOT/tools/staged.sh" compositor)}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
-TERM_BIN=${DS_TERMINAL_BIN:-$ROOT/runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
+TERM_BIN=${DS_TERMINAL_BIN:-$("$ROOT/tools/staged.sh" terminal)}
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 TI=$ROOT/integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
@@ -51,7 +50,7 @@ BG=$ROOT/integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 # Sound: the server, its frameworks and the tools (as tools/gpu_desktop.sh).
 SOUND=$ROOT/integrations/puredarwin/m1-sound
-A=$(cd "$SOUND/sysaudio" && $NB build-sysaudio.nix -A all 2>/dev/null | tail -1)
+A=$("$ROOT/tools/staged.sh" sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
 FW=System/Library/Frameworks
 X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume"

@@ -6,6 +6,10 @@
 #   nix-build ... build-kc.nix --argstr kernelConfig development
 # The build prints the collection's layout check: look for "0 overlapping pair(s)".
 { kernelConfig ? "development" }:
+# Since 12 November 2026 the default source is upstream's tip (../../rebase/pd.nix), where this is
+# ../../rebase/build-kc.nix with one more member; what follows builds the pinned revision and is
+# reached with SF_PD=pin.
+if (import ../../rebase/pd.nix).tip then import ../../rebase/build-kc.nix { inherit kernelConfig; more = [ { name = "PDAopAudio"; from = import ./build-kext.nix; } ]; } else
 let
   pins = import ../../m1-rust-kext/pins.nix;
   pkgs = pins.pkgs;

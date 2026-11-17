@@ -93,6 +93,9 @@ bringup() {
         printf 'SA_END_%s\n' "$nonce"; printf '\nPD_BENCH_DONE\n'; exit 0;;
     esac
     sysctl -w kern.pd_sound.volume_db=@VOLUME@ 2>&1
+    # the speakers come up after the headphones say idle: wait for their state before the hold is set
+    n=0
+    while [ -z "$(get kern.pd_speaker.state)" ] && [ "$n" -lt 10 ]; do sleep 1; n=$((n+1)); done
     # unattended: the speakers stay 20 dB under the model's limit (a listening script lifts this)
     sysctl -w kern.pd_speaker.hold_probe=1 2>&1
 }

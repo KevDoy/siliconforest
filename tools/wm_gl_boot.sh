@@ -61,7 +61,7 @@ export PATH=$HOME/.nix-profile/bin:$PATH
 # the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
 export SF_PD=pin
 # The same Mesa bundle the zero-copy demo runs on (DCP_TEST=kms in tools/dcp_boot.sh).
-T=$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
+T=$(tools/staged.sh mesa)
 X="$BIN=/usr/bin/chonkstep-darwin-desktop"
 # The terminal built for sessions longer than two minutes, over the root's own.
 # (build-005: xterm emulation, scrollback, TERM=xterm-256color, selection and clipboard.)
@@ -85,7 +85,7 @@ if [ "$STAGE_DMABUF_CLIENT" = 1 ]; then
 fi
 if [ "$STAGE_WL" = 1 ]; then
   # The GPU client and the Mesa it runs on (Wayland EGL platform), in its own prefix.
-  WL=${WM_GL_WL_BUNDLE:-$(cd integrations/puredarwin/m1-mesa-asahi && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-wl-demo.nix --no-out-link 2>/dev/null | tail -1)}
+  WL=${WM_GL_WL_BUNDLE:-$(tools/staged.sh mesa-wl)}
   [ -x "$WL/usr/local/bin/agx-wl-demo" ] || { echo "no agx-wl-demo bundle (got '$WL')" >&2; exit 2; }
   X="$X;$WL/usr/local/bin/agx-wl-demo=/usr/local/bin/agx-wl-demo"
   for l in "$WL"/usr/local/lib/mesa-asahi-wl/*.dylib; do X="$X;$l=/usr/local/lib/mesa-asahi-wl/$(basename "$l")"; done

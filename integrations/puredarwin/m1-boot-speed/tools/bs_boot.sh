@@ -6,7 +6,10 @@
 # Queues for the bench itself.
 # Usage: bs_boot.sh <name, prefix bs> [upper bound in seconds, 120..600, default 180]
 #   BS_KC            kernel collection (default: ../build-kc.nix, built if it is not in the store)
-#   BS_KC=stock      the current default collection (the "before" kernel)
+#   BS_KC=stock      the "before" kernel: the default collection with a kernel that lacks
+#                    ../kernel-patches/0001 (rebase/build-kc.nix with rebase/kernel.nix
+#                    bootSpeed = false; built on first use). With SF_KC=pin PCIE_PIN=1: the
+#                    pinned revision's collection of before the boot-speed work.
 #   BS_GUEST         guest script template (default ../guest/darwin-gpu-desktop-fast.in)
 #   BS_GUEST=stock   integrations/puredarwin/chonkstep-darwin/darwin-gpu-desktop-interactive.in
 #   BS_SLIM=0        the RAM root as the stager makes it (default 1: ./stage_ramdisk_slim.py)
@@ -26,9 +29,8 @@ main() {
 set -euo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-bootspeed}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}; LIMIT=${2:-180}
 case "$N" in bs*) ;; *) echo "boot names are prefixed bs" >&2; exit 2;; esac
 [ "$LIMIT" -ge 120 ] && [ "$LIMIT" -le 600 ] || { echo "the upper bound is 120..600 seconds" >&2; exit 2; }
@@ -39,16 +41,16 @@ T0=$(date +%s.%N)
 NP="$HERE/tools/bs_nix_path.py"
 STOCK_KC=/nix/store/wadn9g1r46g28gdhh0c4k3qcgnxxpvkr-puredarwin-kc-arm64-0.1
 case "${BS_KC:-}" in
-  stock) KC=$STOCK_KC;;
+  stock) if [ "${SF_KC:-}" = pin ]; then KC=$STOCK_KC; else KC=$("$ROOT/tools/staged.sh" nix rebase build-kc.nix --arg kernel 'import ./kernel.nix { bootSpeed = false; }'); fi;;
   '') KC=$("$ROOT/tools/default_kc.sh");;
   *) KC=$BS_KC;;
 esac
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
-T=$("$NP" m1-mesa-asahi agx-offscreen-test.nix)
+T=$("$ROOT/tools/staged.sh" mesa)
 D=${BS_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-scale-desktop-build-007/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
-TERM_BIN=${BS_TERMINAL_BIN:-$ROOT/runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin}
+TERM_BIN=${BS_TERMINAL_BIN:-$("$ROOT/tools/staged.sh" terminal)}
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 TI=$ROOT/integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
@@ -57,9 +59,9 @@ BG=$ROOT/integrations/puredarwin/chonkstep-darwin/backgrounds/siliconforest.png
 [ -f "$BG" ] && X="$X;$BG=/usr/share/backgrounds/siliconforest/siliconforest.png"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 SOUND=$ROOT/integrations/puredarwin/m1-sound
-A=$("$NP" m1-sound/sysaudio build-sysaudio.nix -A all)
+A=$("$ROOT/tools/staged.sh" sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
-PLAY=$("$NP" m1-sound build-pdplay.nix)
+PLAY=$("$ROOT/tools/staged.sh" pdplay)
 FW=System/Library/Frameworks
 X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume;$PLAY/usr/bin/pdplay=/usr/bin/pdplay"
 for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"; done

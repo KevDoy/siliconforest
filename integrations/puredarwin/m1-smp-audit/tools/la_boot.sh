@@ -13,16 +13,15 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"
 N=${1:?name}; STAGES=${2:-all}; SCALE=${3:-20}; CPUS=${LA_CPUS:-8}
 case "$N" in la*) ;; *) echo "boot names are prefixed la" >&2; exit 2;; esac
 KC=${LA_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
-T=$(cd "$HERE/../m1-mesa-asahi" && $NIX agx-offscreen-test.nix 2>/dev/null | tail -1)
-ST=$(cd "$HERE" && $NIX drm-storm.nix 2>/dev/null | tail -1)
+T=$("$ROOT/tools/staged.sh" mesa)
+ST=$("$ROOT/tools/staged.sh" drm-storm)
 # what the desktop session stages (its dry run names the files), plus the tests
 X=$(WM_GL_STEP=session WM_GL_DRY_RUN=1 tools/wm_gl_boot.sh dry "$KC" | grep '=/' | grep -v '=/usr/bin/darwin-desktop-test$' | paste -sd ';')
 X="$X;$ROOT/integrations/puredarwin/chonkstep-darwin/darwin-wm-gl-session.in=/usr/local/bin/wm-gl-session"

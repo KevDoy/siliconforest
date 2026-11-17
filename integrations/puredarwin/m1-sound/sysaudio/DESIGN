@@ -3,8 +3,13 @@ System audio on the PureDarwin M1 guest: coreaudiod over the PDAppleSound device
 
 What is here
 ------------
-coreaudiod-dev-backend.patch   the tree's coreaudiod with a second kind of engine: a character
-                               device that takes 16-bit frames (applies to the pinned tree, -p1)
+coreaudiod-dev-backend-tip.patch  the tree's coreaudiod with a second kind of engine: a character
+                               device that takes 16-bit frames (applies to upstream's tip
+                               c713d8fb, -p1; what build-sysaudio.nix builds by default)
+coreaudiod-dev-backend.patch   the same change for the pinned tree e7aa00a6 (SF_PD=pin). The tip's
+                               is this one merged over upstream's capture and device-interest
+                               additions (no conflict), plus: a stand-in node is paced by the
+                               host clock even when the real driver's fifo_frames sysctl exists
 build-sysaudio.nix             coreaudiod (patched), CoreAudio/AudioToolbox/AudioUnit and pcmplay
                                (unchanged), pdtone and pdvolume, arm64
 user/pdtone.c                  a tone through an AudioQueue (default output) or, with -u <UID>,
@@ -116,6 +121,11 @@ COREAUDIOD_SPEAKER_DEVICE=<node> names a stand-in for /dev/pdspeaker (/dev/null 
 
 Adding capture
 --------------
+(Written at the pin. At the tip upstream's coreaudiod, CoreAudio and AudioToolbox have the input
+side for IOAudioFamily engines: input rings, deliverInput(), kPDAudioDeviceHasInput, the connect
+message's input word. What is left for the /dev backend is the driver node and a reading thread
+that calls deliverInput(); the framework work listed below is what upstream added (not exercised here).)
+
 Driver: a read-only node, say /dev/pdmic: S16LE at kern.pd_mic.rate, channels fixed and
 told by a sysctl (kern.pd_mic.channels), read() blocking until frames are there, capture
 running only while the node is open; kern.pd_mic.frames (captured) and .overruns. The

@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"; export PATH=$HOME/.nix-profile/bin:$PATH
 N=${1:?name}; EXTRA=${2:-}
 (cd integrations/puredarwin/m1-rust-kext && nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-agx-kc.nix --arg wifi ${AGX_WIFI:-true} -o "$ROOT/runs/m1-desktop-010/bwfm-kc-build-001/result" 2>&1 | tail -1)
-T=$(cd integrations/puredarwin/m1-mesa-asahi && SF_PD=pin nix-build --extra-experimental-features nix-command --extra-experimental-features flakes agx-offscreen-test.nix --no-out-link 2>/dev/null | tail -1)
+T=$(tools/staged.sh mesa)
 X="$T/usr/local/bin/agx-offscreen-test=/usr/local/bin/agx-offscreen-test"
 [ -f "$T/usr/local/bin/agx-panel-demo" ] && X="$X;$T/usr/local/bin/agx-panel-demo=/usr/local/bin/agx-panel-demo"
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done

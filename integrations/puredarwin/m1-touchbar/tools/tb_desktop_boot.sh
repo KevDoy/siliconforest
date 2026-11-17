@@ -15,9 +15,8 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-touchbar}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}
 case "$N" in tb*) ;; *) echo "boot names are prefixed tb" >&2; exit 2;; esac
 SOUND=$ROOT/integrations/puredarwin/m1-sound
@@ -26,10 +25,10 @@ KC=${TB_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
 SPKDB=${SD_SPKDB:-22}
 [ "$SPKDB" -ge 22 ] || { echo "SD_SPKDB: 22 dB below full scale or quieter" >&2; exit 2; }
-A=$(cd "$SOUND/sysaudio" && $NB build-sysaudio.nix -A all 2>/dev/null | tail -1)
+A=$("$ROOT/tools/staged.sh" sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
-PLAY=$(cd "$SOUND" && $NB build-pdplay.nix 2>/dev/null | tail -1)
-T=$(cd integrations/puredarwin/m1-mesa-asahi && $NB agx-offscreen-test.nix 2>/dev/null | tail -1)
+PLAY=$("$ROOT/tools/staged.sh" pdplay)
+T=$("$ROOT/tools/staged.sh" mesa)
 D=${TB_DESKTOP_BIN:-$ROOT/runs/m1-desktop-010/wm-darwin-touchbar-desktop-build-002/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$D=/usr/bin/chonkstep-darwin-desktop"
@@ -48,7 +47,7 @@ for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions
 # the Touch Bar: the digitizer's firmware (this machine's own, never committed) and the test tool
 FW=$ROOT/private/firmware/apple/dfrmtfw-j293.bin
 [ -f "$FW" ] || { echo "no digitizer firmware at $FW" >&2; exit 2; }
-TEST=$(cd "$HERE" && $NB build-pdtbtest.nix 2>/dev/null | tail -1)
+TEST=$("$ROOT/tools/staged.sh" pdtbtest)
 X="$X;$FW=/Library/Firmware/apple/dfrmtfw-j293.bin;$TEST/usr/bin/pdtbtest=/usr/bin/pdtbtest"
 W=$(mktemp -d)
 "$HERE/host-test/run-host-tests.sh" "$W" > "$W/host.log" || { cat "$W/host.log" >&2; echo "host tests failed" >&2; exit 2; }

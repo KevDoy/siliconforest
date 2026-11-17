@@ -1,14 +1,20 @@
 # Keep PDGOP's string-based PDIOKitLib calls bound to the matching static IOKit.
 # libIOKitCF has different matching-function signatures and is not interchangeable.
 let
-  pd = (import ../rebase/pd.nix).pd;
+  source = import ../rebase/pd.nix;
+  pd = source.pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
 in pd.packages.x86_64-linux.libsystem-arm64.overrideAttrs (old: {
   pname = "puredarwin-chonkstep-pdgop-static";
   src = pkgs.applyPatches {
     name = "puredarwin-chonkstep-pdgop-source";
     src = old.src;
-    patches = [ ../m1-wayland/pdgop-fail-closed.patch ];
+    # At the tip upstream's PDGOP.c has only the CoreFoundation form of the IOKit calls; the
+    # first patch puts the string-based branch back (see the note at the top of this file).
+    patches = source.pick {
+      pin = [ ../m1-wayland/pdgop-fail-closed.patch ];
+      tip = [ ../m1-wayland/pdgop-string-iokit-tip.patch ../m1-wayland/pdgop-fail-closed.patch ];
+    };
   };
   postPatch = (old.postPatch or "") + ''
     # These archives are linked later against the already-built libSystem.

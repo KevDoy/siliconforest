@@ -125,6 +125,62 @@ hunk; fail: 0004 (`message.h`, `rpc_wayland.c`), 0005 (`NSWindow.m`, `NSApplicat
 **Overnight:** `integrations/puredarwin/rebase/tools/rb_overnight_smp.sh 30 20` (20 boots of the
 default collection on 8 CPUs, names `rb30`..`rb49`, stops at the first boot not back in Linux).
 
+## Tip leftovers (12 November, second stream; hand-over state, kept current)
+Owner: "I want the things you haven't switched taken care of as well." Three agents: the lead
+(staged user space, wrappers, bring-up tools, clean-up), a fork for the audio server
+(`docs/roadmap/issues/SF-I-sound.md`) and a fork for Homebrew and the QEMU install (their docs).
+
+**One place for staged user space: `tools/staged.sh <piece>`** (as `tools/default_kc.sh` is for the
+collection). Wrappers no longer `export SF_PD=pin`; they ask it for `mesa`, `mesa-wl`, `dcp-flip`,
+`drm-storm`, `sysaudio`, `pdplay`, `pdtbtest`, `netd`, `avd-user`, `pdvideo`, `compositor`,
+`terminal` (or `nix <dir> <recipe>`). Every piece is the tip's build except the list `PIN_ONLY`
+in that script (`sysaudio`, `pdplay`, until the audio fork reports them proven).
+Switch back: `SF_STAGED=pin` (everything as staged before the rebase: pin builds, compositor
+build-009, terminal build-008); `SF_STAGED_PIN="<piece> ..."` for single pieces.
+`GPU_DESKTOP_PIN=1` sets `SF_STAGED=pin` too. `tools/pcie_assemble.py` takes pd-netd from
+`tools/staged.sh netd` (with `PCIE_PIN=1`: the pin's build) instead of the shared link
+`runs/m1-desktop-010/pd-netd-build-001/result`.
+
+**What was wrong with `build-pdgop.nix`:** upstream commit `f8715cf9` removed PDGOP.c's
+`#ifdef _PD_IOKITLIB_H` branch (string-based matching of the static `libIOKit.a`) and kept only
+the CoreFoundation form, which needs IOKit.framework. `m1-wayland/pdgop-string-iokit-tip.patch`
+(tip only, applied before `pdgop-fail-closed.patch`) restores the branch; the patched file is
+byte-identical to the pin's `PDGOP.c`, so the host test of the fail-closed patch still covers it.
+`SF_PD=pin` gives the old derivation (`nqi47vjc…`). Tip: `/nix/store/jja2jds38f6y1s5kgky7nb5gr84v0s8z-…`.
+
+**Built at the tip** (all with the tip SDK, toolchain and `libsystem-default`):
+| Piece | Tip build | Pin build |
+|---|---|---|
+| PDGOP + static IOKit | `jja2jds3…-puredarwin-chonkstep-pdgop-static-0.1` | `nqi47vjc…` |
+| Mesa/AGX bundle (EGL, GLES, gallium, libdrm, tests) | `66jlbv4l…-darwin-lab-agx-offscreen-test-arm64-darwin` (the four libraries: 33 042 942 bytes, as the pin's) | `1wribqgj…` |
+| compositor | `runs/m1-desktop-010/wm-darwin-tip-desktop-build-001` (source: a copy of build-009's; 32 251 574 bytes; the same 217 imports, libSystem only) | `wm-darwin-scale-desktop-build-009` (32 251 798) |
+| terminal | `runs/m1-desktop-010/terminal-application-tip-build-001` (source: build-008's; 2 161 808 bytes, the same 148 imports) | `terminal-application-build-008` |
+| pdtbtest | `vls38qpq…-darwin-lab-pdtbtest-arm64` | |
+| pd-netd, pd-dhcp, pd-net-up | `9i4xfdbp…-darwin-lab-pd-netd-arm64` | `2ka564cg…` |
+
+Recipe for the two Rust binaries: `chonkstep-darwin/tools/build_desktop_binaries.sh
+compositor|terminal <name> [source-dir]` (copies the source into the build directory; link inputs
+from `chonkstep-darwin/link-inputs.nix` through `darwin-linker-inputs.py`; `darwin-linker.py` with
+its literal pin paths is unchanged and `SF_PD=pin nix-build link-inputs.nix` names exactly those
+paths). No source change was needed: no worktree, no branch, nothing in the compositor repository.
+
+**Fast-boot arguments:** `tb_boot.sh`, `mic_boot.sh`, `la_hangrate.sh` pass
+`pd_quiet_wait=0 pd_rtc_wait=0` instead of `PCIE_TIMEWAIT` (`TB_WAITS=stock`/`MIC_WAITS=stock`: the
+kernel's 30 s registry wait as before). The sound wrappers are the audio fork's. `nv_boot.sh`
+(storage stream) still passes `PCIE_TIMEWAIT`, which does nothing at the tip.
+
+**Bring-up tools at the tip** (recipes; boots listed below when run):
+- `tools/pcie_iterate.sh` without `PCIE_SKIP_BUILD`: at the tip builds `rebase/build-kc.nix` and
+  pd-netd from the lab directories into the shared links; `SF_PD=pin`: the pin's chain as before.
+- `tools/pcie_export_patch.sh`: base revision follows `SF_PD` (list files read from the commit);
+  `puredarwin-patches/0001`, `0002` regenerated against `c713d8fb`; `puredarwin-patches/build-kc.nix`
+  at the tip is the default collection with the bridge and the Wi-Fi pair from the patch build
+  (`rebase/build-kc.nix` gained `bridge` and `wifi` arguments; the default derivation is unchanged:
+  `kf45zapn….drv` → `71zynndd…`).
+- `m1-sound/aop/build-kc.nix` (for `mic_boot.sh`): at the tip the default collection plus PDAopAudio.
+- `bs_boot.sh BS_KC=stock`: at the tip the default collection with a kernel without
+  `m1-boot-speed/kernel-patches/0001` (`rebase/kernel.nix { bootSpeed = false; }`).
+
 ## State (before the switch)
 | Step | State |
 |---|---|

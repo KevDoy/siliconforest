@@ -21,7 +21,9 @@
 #   nix-build kernel.nix --no-out-link                       # DEVELOPMENT, as the default collection
 #   nix-build kernel.nix --argstr kernelConfig debug --no-out-link
 #   `upTo` stops the series early, for bisecting: "bringup", "dcp", "smp", "quiet" or "all".
-{ kernelConfig ? "development", upTo ? "all" }:
+#   `bootSpeed = false` leaves out m1-boot-speed's patch alone: the kernel that does not know
+#   pd_quiet_wait/pd_rtc_wait (the "before" kernel of m1-boot-speed/tools/bs_boot.sh BS_KC=stock).
+{ kernelConfig ? "development", upTo ? "all", bootSpeed ? true }:
 let
   source = import ./pd.nix;
   inherit (source) pd pkgs;
@@ -48,8 +50,10 @@ let
       ../m1-quiet-boot/kernel-patches/0001-xnu-noprogress-refuses-user-progress-meter.patch
       ../m1-quiet-boot/kernel-patches/0002-xnu-graphics-boot-replays-early-log-to-uart.patch
     ]
-    ++ pkgs.lib.optionals (through "all") [
+    ++ pkgs.lib.optionals (through "all" && bootSpeed) [
       ../m1-boot-speed/kernel-patches/0001-xnu-registry-quiet-wait-ignores-the-daemon-hold.patch
+    ]
+    ++ pkgs.lib.optionals (through "all") [
       # a safety fix that belongs in every kernel: IOSetRecoveryBoot logs and returns, so no
       # panic or failed boot can ask the machine's firmware for recovery mode
       ../m1-native-boot/kernel-patches/0001-xnu-IOSetRecoveryBoot-does-nothing.patch

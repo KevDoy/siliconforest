@@ -1,17 +1,26 @@
 # SPDX-License-Identifier: MIT
-# The system audio path of the PureDarwin M1 guest, arm64 Mach-O, from the pinned tree:
-#   coreaudiod    the tree's audio server with ./coreaudiod-dev-backend.patch (plays through the
-#                 device nodes of PDAppleSound when there is no IOAudioEngine)
+# The system audio path of the PureDarwin M1 guest, arm64 Mach-O, from the tree ../../rebase/pd.nix
+# selects (the tip; SF_PD=pin: e7aa00a6, the same derivations as before the switch):
+#   coreaudiod    the tree's audio server with the /dev backend (plays through the device nodes of
+#                 PDAppleSound when there is no IOAudioEngine): ./coreaudiod-dev-backend-tip.patch
+#                 at the tip, ./coreaudiod-dev-backend.patch at the pin (the same change; upstream's
+#                 capture and device-interest additions moved the context)
 #   audiotoolbox  the tree's CoreAudio, AudioToolbox and AudioUnit frameworks, unchanged
 #   pcmplay       the tree's test player, unchanged
 #   tools         ./user: pdtone (a tone through an AudioQueue) and pdvolume (the volume keys' command)
 #   all           the four joined as one root
 #   nix-build --extra-experimental-features nix-command --extra-experimental-features flakes build-sysaudio.nix -A all
 let
-  pd = (import ../../rebase/pd.nix).pd;
+  source = import ../../rebase/pd.nix;
+  pd = source.pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   p = pd.packages.x86_64-linux;
-  libSystem = import ../../m1-userspace-diagnostics/build-libsystem-spawnattr.nix;
+  # the libSystem of the RAM root the binaries run on
+  libSystem = source.pick {
+    pin = import ../../m1-userspace-diagnostics/build-libsystem-spawnattr.nix;
+    tip = import ../../libsystem-default/build-libsystem.nix;
+  };
+  backend = source.pick { pin = ./coreaudiod-dev-backend.patch; tip = ./coreaudiod-dev-backend-tip.patch; };
   common = {
     darwinCrossToolchain = p.arm64-cross-toolchain;
     nativeLd = p.native-ld;
@@ -40,7 +49,7 @@ in rec {
     src = pkgs.runCommand "puredarwin-coreaudiod-dev-source" { nativeBuildInputs = [ pkgs.patch ]; } ''
       cp -R ${old.src} "$out"
       chmod -R u+w "$out"
-      patch -d "$out" -p2 < ${./coreaudiod-dev-backend.patch}
+      patch -d "$out" -p2 < ${backend}
     '';
   });
 

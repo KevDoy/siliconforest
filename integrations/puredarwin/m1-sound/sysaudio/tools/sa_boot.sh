@@ -12,13 +12,18 @@
 #   SD_VOLUME    codec attenuation in dB at the start (default 30); SD_TONEDB tone level in dB
 #                below full scale on the headphones (default 20); SD_SPKDB the same for what may
 #                reach the speakers (default 30, not below)
-#   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
+#   SD_AUDIO     tip or pin: the source the audio server and tools are built from
+#   SD_WAITS     fast (default): pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args, the kernel does not
+#                wait for a clock or a quiet registry before the root mounts (the guest scripts poll
+#                for the drivers); stock: the kernel's waits
+#   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (unset by default: its instruction pattern
+#                does not match the tip's kernel; for the pin's with SD_WAITS=stock)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# The audio server, frameworks and tools are built from the source ../../rebase/pd.nix selects (the tip);
+# SD_AUDIO=pin stages the builds of the pinned revision instead (they run on the tip's kernel and libSystem).
+AUDIO_PD=${SD_AUDIO:-pin}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
 N=${1:?name}
 GUEST=${2:-$HERE/guest/darwin-sysaudio-test.in}
 case "$N" in sd2[0-9]|sd3[0-9]) ;; *) echo "boot names for the system audio path are sd20 to sd39" >&2; exit 2;; esac
@@ -30,7 +35,7 @@ SPKDB=${SD_SPKDB:-30}
 [ "$SPKDB" -ge 30 ] || { echo "SD_SPKDB: 30 dB below full scale or quieter" >&2; exit 2; }
 EXTRA=${SD_FILES:-}
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
-A=$(cd "$HERE" && $NIX build-sysaudio.nix -A all --no-out-link 2> "${TMPDIR:-/tmp}/sa-build.$$.log" | tail -1)
+A=$(cd "$HERE" && SF_PD=$AUDIO_PD $NIX build-sysaudio.nix -A all --no-out-link 2> "${TMPDIR:-/tmp}/sa-build.$$.log" | tail -1)
 [ -x "$A/usr/sbin/coreaudiod" ] || { tail -30 "${TMPDIR:-/tmp}/sa-build.$$.log" >&2; echo "build failed" >&2; exit 2; }
 rm -f "${TMPDIR:-/tmp}/sa-build.$$.log"
 RUNTIME=${SD_RUNTIME:-300}
@@ -58,7 +63,8 @@ for f in CoreAudio AudioToolbox AudioUnit; do
     FILES="$FILES;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"
 done
 FILES="$FILES;$W/test.pcm=/usr/share/sysaudio-test.pcm${EXTRA:+;$EXTRA}"
-PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
+FAST="pd_quiet_wait=0 pd_rtc_wait=0"; [ "${SD_WAITS:-fast}" = stock ] && FAST=
+env ${SD_TIMEWAIT:+PCIE_TIMEWAIT="$SD_TIMEWAIT"} PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} $FAST ${SD_BOOTARGS:-}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
   grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space\|BENCH_TIMES" | cut -c1-240 || true

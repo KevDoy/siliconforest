@@ -6,7 +6,7 @@ smoke tests of hb_tests.py in the guest and record exactly what each one did.
 
   hb_qemu.py --prefix first --name r1 [--only jq,tree] [--overlay DIR ...]
 
-  system image   a private copy of the qemu-dev template (runs/qemu-dev/base/template-release-*.img:
+  system image   a private copy of the qemu-dev template (runs/qemu-dev/base/template-<tip|pin>-release-minimal-*.img:
                  upstream's arm64-virt-minimal RELEASE image, the lab's kernel collection, loader and
                  libSystem), plus /usr/bin/hb-guest, the test scripts under /usr/share/hb/, and every
                  file of each --overlay directory (a tree rooted at /: usr/lib/libz.1.dylib ...).
@@ -127,15 +127,25 @@ def main():
     only = set(filter(None, a.only.split(',')))
     tests = [t for t in hb_tests.TESTS if t[1] in poured and (not only or t[0] in only or t[1] in only)]
 
-    base = RUNS / 'qemu/system-base.img'
+    # The system image is the qemu-dev template of the PureDarwin source in use (../rebase/pd.nix:
+    # the tip unless SF_PD=pin). The pin's copy keeps the name it had before the source could be
+    # chosen, so earlier runs' base stays where it was.
+    source = os.environ.get('SF_PD') or 'tip'
+    if source not in ('pin', 'tip'):
+        raise SystemExit('SF_PD=%s: expected pin or tip' % source)
+    stem = 'system-base' if source == 'pin' else 'system-base-' + source
+    base = RUNS / 'qemu' / (stem + '.img')
     if a.refresh_system or not base.exists():
         base_dir = LAB / 'runs/qemu-dev/base'
-        templates = sorted(list(base_dir.glob('template-release-minimal-*.img')) or
-                           [f for f in base_dir.glob('template-release-*.img') if 'wayland' not in f.name], key=lambda f: f.stat().st_mtime)
+        templates = list(base_dir.glob('template-%s-release-minimal-*.img' % source))
+        if source == 'pin' and not templates:   # names from before the switch
+            templates = list(base_dir.glob('template-release-minimal-*.img')) or \
+                [f for f in base_dir.glob('template-release-*.img') if 'wayland' not in f.name]
+        templates.sort(key=lambda f: f.stat().st_mtime)
         if not templates:
-            raise SystemExit('no qemu-dev template; run tools/qemu_desktop.sh once')
+            raise SystemExit('no qemu-dev template for %s; run tools/qemu_desktop.sh once' % source)
         subprocess.run(['cp', '--reflink=auto', str(templates[-1]), str(base)], check=True)
-        (RUNS / 'qemu/system-base.txt').write_text(str(templates[-1]) + '\n')
+        (RUNS / 'qemu' / (stem + '.txt')).write_text(str(templates[-1]) + '\n')
     system = out / 'system.img'
     system.unlink(missing_ok=True)
     subprocess.run(['cp', '--reflink=auto', str(base), str(system)], check=True)

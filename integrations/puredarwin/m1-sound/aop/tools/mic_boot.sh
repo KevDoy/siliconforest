@@ -15,7 +15,9 @@
 #   MIC_CPUS      guest processors (default 8)
 #   MIC_SECONDS   length of each capture of the guest script (default 5)
 #   MIC_FILES     further files for the RAM root: "source=/destination;..."
-#   MIC_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
+#   MIC_WAITS     boot-args for the kernel's two start-up waits (default "pd_quiet_wait=0 pd_rtc_wait=0":
+#                 neither is waited for; MIC_WAITS=stock leaves the kernel's 30 s registry wait in).
+#                 PCIE_TIMEWAIT, which this script used, does not match the tip kernel.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
@@ -27,14 +29,15 @@ NIX="nix-build --extra-experimental-features nix-command --extra-experimental-fe
 KC=${MIC_KC:-$(cd "$HERE" && $NIX build-kc.nix --no-out-link 2> "${TMPDIR:-/tmp}/mic-kc-build.$$.log" | tail -1)}
 [ -f "$KC/kernel" ] || { tail -30 "${TMPDIR:-/tmp}/mic-kc-build.$$.log" >&2; echo "no collection" >&2; exit 2; }
 rm -f "${TMPDIR:-/tmp}/mic-kc-build.$$.log"
-STAT=$(cd "$HERE" && $NIX build-pdmic.nix --no-out-link 2>/dev/null | tail -1)
+STAT=$("$ROOT/tools/staged.sh" nix m1-sound/aop build-pdmic.nix)
 [ -x "$STAT/usr/bin/pdmic-stat" ] || { echo "no pdmic-stat" >&2; exit 2; }
 RUNTIME=${MIC_RUNTIME:-240}
 [ "$RUNTIME" -le 600 ] || { echo "boots are capped at 600 s" >&2; exit 2; }
 W=$(mktemp -d)
 sed -e "s/@SECONDS@/${MIC_SECONDS:-5}/g" "${MIC_GUEST:-$HERE/guest/darwin-mic-test.in}" > "$W/guest"
 FILES="$STAT/usr/bin/pdmic-stat=/usr/bin/pdmic-stat${MIC_FILES:+;$MIC_FILES}"
-PCIE_KC="$KC" PCIE_TIMEWAIT="${MIC_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${MIC_CPUS:-8} ${MIC_BOOTARGS-pdsound=0 pdaop_diag=1}" \
+WAITS=${MIC_WAITS-pd_quiet_wait=0 pd_rtc_wait=0}; [ "$WAITS" = stock ] && WAITS=
+PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${MIC_CPUS:-8} $WAITS ${MIC_BOOTARGS-pdsound=0 pdaop_diag=1}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
   grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space\|BENCH_TIMES" | cut -c1-240 || true

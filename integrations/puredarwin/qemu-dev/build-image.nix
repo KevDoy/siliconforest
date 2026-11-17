@@ -12,8 +12,10 @@
 # without X11 (clang, git, curl, openssl, openssh, python, cmake, ...), a 3 GiB class root.
 { kernelConfig ? "release", variant ? "minimal" }:
 let
-  # the PureDarwin source: ../rebase/pd.nix (the tip by default, SF_PD=pin for e7aa00a6)
-  pd = (import ../rebase/pd.nix).pd;
+  # the PureDarwin source: ../rebase/pd.nix (the tip by default, SF_PD=pin for e7aa00a6). The
+  # full userland comes from ./pd-userland.nix: at the tip upstream's Security package, and so
+  # the wayland image, builds only with the tree patch named there.
+  pd = if variant == "wayland" then import ./pd-userland.nix else (import ../rebase/pd.nix).pd;
   p = pd.packages.x86_64-linux;
   base = if variant == "wayland" then (if kernelConfig == "debug" then p.image-arm64-virt-wayland-debug else p.image-arm64-virt-wayland)
     else if kernelConfig == "debug" then p.image-arm64-virt-minimal else p.image-arm64-virt-minimal-release;

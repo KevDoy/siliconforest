@@ -12,9 +12,8 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}; SOAK=${2:-0}; CPUS=${SMP_CPUS:-8}
 case "$N" in sm*) ;; *) echo "boot names are prefixed sm" >&2; exit 2;; esac
 KC=${SMP_KC:-$("$ROOT/tools/default_kc.sh")}

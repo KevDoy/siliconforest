@@ -27,18 +27,17 @@ RUNTIME=$((MIN * 60 + BOOT)); DESK=$((MIN * 60))
 # the RAM root made from the tip's image. GPU_DESKTOP_PIN=1: the last collection and the RAM root
 # of the pinned revision e7aa00a6, as this script booted them before.
 PIN=${GPU_DESKTOP_PIN:-0}
-[ "$PIN" = 1 ] && export SF_KC=pin PCIE_PIN=1
+[ "$PIN" = 1 ] && export SF_KC=pin PCIE_PIN=1 SF_STAGED=pin
 KC=${GPU_DESKTOP_KC:-$(tools/default_kc.sh)}
-# What is staged from Nix below (Mesa, the audio server and its frameworks, pdplay) are still the
-# builds of the pinned revision, which run on the tip's kernel and libSystem.
-export SF_PD=pin
-# Store paths of the staged builds, without evaluating a recipe whose inputs are unchanged
-# (each evaluation is 20 to 70 s; BS_NIX_CACHE=0 evaluates always).
-NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
+# What is staged below (Mesa, the compositor, the terminal, the audio server and its frameworks,
+# pdplay) comes from tools/staged.sh: built from the tip against its SDK and libSystem, except
+# what that script still takes from the pinned revision. SF_STAGED=pin (set by GPU_DESKTOP_PIN=1):
+# everything as it was staged before the rebase. Store paths are remembered while the recipes
+# are unchanged (BS_NIX_CACHE=0 evaluates always).
 [ -f "$KC/kernel" ] || { echo "no collection at $KC" >&2; exit 2; }
-T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
+T=$(tools/staged.sh mesa)
 # The compositor with display scaling, the settings menu, volume keys and the Touch Bar phase (wm-darwin merge, boot ds06).
-D=${GPU_DESKTOP_BIN:-runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop}
+D=${GPU_DESKTOP_BIN:-$(tools/staged.sh compositor)}; D=${D#$ROOT/}
 [ -x "$D" ] || { echo "no compositor binary at $D" >&2; exit 2; }
 X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # The terminal that accepts lifetimes above 120 s (build-003: --seconds up to 14400, 8 MiB of
@@ -46,7 +45,7 @@ X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop"
 # remaining time, which the RAM root's older terminal refuses.
 # build-004 added the xterm emulation (full-screen programs, scrollback, TERM=xterm-256color),
 # build-005 selection by dragging and copy/paste.
-TERM_BIN=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
+TERM_BIN=${GPU_DESKTOP_TERMINAL:-$(tools/staged.sh terminal)}; TERM_BIN=${TERM_BIN#$ROOT/}
 [ -x "$TERM_BIN" ] || { echo "no terminal binary at $TERM_BIN" >&2; exit 2; }
 X="$X;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 # The terminfo entry for that TERM; the RAM root has none.
@@ -58,9 +57,9 @@ BG=${GPU_DESKTOP_BACKGROUND:-integrations/puredarwin/chonkstep-darwin/background
 for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 # Sound: the audio server, its frameworks and the tools (as m1-sound/tools/sd_desktop_boot.sh).
 SOUND=integrations/puredarwin/m1-sound
-A=$($NP m1-sound/sysaudio build-sysaudio.nix -A all)
+A=$(tools/staged.sh sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
-PLAY=$($NP m1-sound build-pdplay.nix)
+PLAY=$(tools/staged.sh pdplay)
 FW=System/Library/Frameworks
 X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume;$PLAY/usr/bin/pdplay=/usr/bin/pdplay"
 for f in CoreAudio AudioToolbox AudioUnit; do X="$X;$A/$FW/$f.framework/Versions/A/$f=/$FW/$f.framework/Versions/A/$f"; done

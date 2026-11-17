@@ -3,7 +3,7 @@
 # which is what macOS ships under this name, including its readline-compatible entry points.
 # Cross-built against the lab's libSystem and the ncurses of ./build-syslibs.nix.
 let
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  pd = (import ../rebase/pd.nix).pd;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   p = pd.packages.x86_64-linux;
   libSystem = import ./build-libsystem.nix;

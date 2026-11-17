@@ -252,7 +252,9 @@ def linux(boot):
 class Bench:
     """The controller's Ops, scripted. Time advances only through sleep() and through the
     cost of a failed SSH (3 s, its connect timeout)."""
-    def __init__(self, module, directory, linux_back_at, proxy_at, announce=True, native=False):
+    def __init__(self, module, directory, linux_back_at, proxy_at, announce=True, native=False,
+                 worker='HOST_WORKER_EXITED_WITHOUT_BOOT_VERDICT', worker_seconds=60):
+        self.worker, self.worker_seconds = worker, worker_seconds
         self.module, self.base = module, module.base
         self.cycle = Path(directory)/'cycle'
         self.now, self.end = 0.0, None
@@ -316,13 +318,12 @@ class Bench:
             (directory/'vector-ack.json').write_text(json.dumps(dict(
                 status='VECTOR_ACKNOWLEDGED_RUNTIME_UNVERIFIED', runtime_verified=False)))
             return directory
-        (directory/'host-result.json').write_text(json.dumps(dict(
-            status='HOST_WORKER_EXITED_WITHOUT_BOOT_VERDICT', worker_returncode=1)))
+        (directory/'host-result.json').write_text(json.dumps(dict(status=self.worker, worker_returncode=1)))
         (directory/'console.bin').write_bytes(b'sh-3.2# script\r\n' + (b'\r\nPD_BENCH_REBOOT\r\n' if self.announce else b'') +
                                               b'MACH Reboot\r\n')
         if self.native:
             (directory/'native-start.json').write_text(json.dumps(dict(hypervisor=False)))
-        self.now += 60
+        self.now += self.worker_seconds
         self.end = self.now
         return directory
 
@@ -340,11 +341,12 @@ WINDOW = dict(callout='/dev/cu.usbmodemW', IORegistryEntryID=77, sessionID=777)
 @unittest.skipUnless(LAB.is_dir() and shutil.which('patch'), 'no launcher tree here')
 class ControllerRules(unittest.TestCase):
     """What the patched run_attempt does after the guest worker has ended."""
-    def run_attempt(self, words, linux_back_at, proxy_at, self_reboot=True, **kwargs):
+    def run_attempt(self, words, linux_back_at, proxy_at, self_reboot=True, certified=True, **kwargs):
         with tempfile.TemporaryDirectory() as directory:
             copy = patched_tree(directory, self_reboot=self_reboot, words=words)
             module = load(copy, 'reboot_test_cycle', CYCLE)
-            module.console_observation = lambda guest, candidate: True
+            if certified:
+                module.console_observation = lambda guest, candidate: True
             bench = Bench(module, directory, linux_back_at, proxy_at, **kwargs)
             result = module.run_attempt(bench, {}, {})
             return bench, result
@@ -363,6 +365,21 @@ class ControllerRules(unittest.TestCase):
         self.assertTrue(bench.records['self-reboot-return.json']['linux_returned_by_itself'])
         self.assertNotIn('reset-intent.json', bench.saved)
         self.assertFalse(bench.armed)
+
+    def test_a_restart_the_capture_could_not_certify_arms_no_latch(self):
+        # Under the hypervisor the proxy vanishes inside the capture: the worker ends with a
+        # traceback (or is killed at its timeout) and capture-core.json may never be written.
+        # The controller's own console_observation (not replaced here) then says no; that
+        # costs the verdict, never the latch, and never a reset.
+        for worker, seconds, back in (('HOST_WORKER_EXITED_WITHOUT_BOOT_VERDICT', 60, 33),
+                                      ('HOST_WORKER_TIMEOUT', 240, 0)):      # Linux long back when the worker is killed
+            bench, result = self.run_attempt('', *self.own_reboot(back), certified=False,
+                                             worker=worker, worker_seconds=seconds)
+            self.assertEqual(result['status'], 'NO_COMMAND_LINE_OBSERVED_LINUX_VERIFIED', result)
+            self.assertEqual((result['reset_attempts'], bench.resets), (0, []), worker)
+            self.assertTrue(result['linux_verified'])
+            self.assertFalse(bench.armed)
+            self.assertNotIn('reset-intent.json', bench.saved)
 
     def test_the_proxy_window_is_not_reset_whenever_it_is_seen(self):
         for start in (0, 2, 5, 8):                  # the controller's one look falls into the window

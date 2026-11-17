@@ -338,6 +338,33 @@ Checked in the guest (`command -v`): `security` no, `open` no, `pbcopy`/`pbpaste
 6. For Claude Code and Codex: `/usr/bin/shasum`, `git` and `rg`, `pgrep`, `stty`, `tput`, `locale`; `/usr/bin/open` and `pbcopy`/`pbpaste` when there is something for them to talk to; `/usr/bin/security` (at least the generic-password subcommands over a file store) so credential storage does not depend on a fallback; `/dev/fd`; an 8-bit-clean console.
 7. For Codex: `LocalAuthentication` and `CFNetwork` built for arm64, the three Security constants, `NSPasteboardURLReadingFileURLsOnlyKey` in AppKit, `log2`/`exp2` reachable through CoreServices.
 
+## What goes onto the future disk root (12 November)
+The M1 RAM root is not the place for any of this: it has about 15 MB free. The list is for the
+root filesystem on disk (the storage stream's), and the QEMU full install already carries the
+part marked "in the QEMU install".
+
+| Item | Why | State |
+|---|---|---|
+| `/bin/bash` | `bin/brew` is `#!/bin/bash`; install scripts (Anthropic's, most others) | the tree has a recipe (`nix/pkgs/base/bash.nix`, built for x86_64 only: needs the arm64 triple and the lab's libSystem). Not in any image |
+| A user account and a way to become it | brew refuses to run as root; CLI tools keep state per user | account `sf` (uid 501, `/Users/sf`) is in the QEMU install; there is no `login`, `su` or `sudo` (the Homebrew runs use this stream's `hb-runas`, a diagnostic) |
+| `/usr/bin/curl` with TLS and the CA bundle | brew, installer scripts | upstream's full image has `/bin/curl`; **in the QEMU install** as a link at the macOS path. The minimal image has none (the overlay carries the tree's) |
+| `/usr/bin/git` | brew (`HOMEBREW_GIT_PATH` otherwise), Claude Code, Codex | in upstream's full image |
+| `/usr/bin/shasum` | Anthropic's installer stops with "Checksum verification failed" without it | **in the QEMU install**: `qemu-dev/guest/shasum`, a shell script over the userland's `sha1sum`/`sha256sum`/`sha512sum` (`-a 1\|256\|512`, `-c`) |
+| `/usr/bin/sw_vers` | brew calls it by that path | the image has `/bin/sw_vers`; **in the QEMU install** as a link |
+| `/dev/fd` | bash `<(…)`; brew prints an error twice per command without it | not there: the guest's `mount` refuses `-t fdesc`. Kernel/mount work, not a file to copy |
+| `/usr/bin/open` | browser hand-off at sign-in | nothing to open a URL with yet; goes in with a browser (the Cocoa stream's Firefox) |
+| `pbcopy`, `pbpaste` | "press c to copy the login URL" | need a clipboard service to talk to: the compositor's selection (Wayland `wl-copy`/`wl-paste` semantics behind the two names) |
+| `pgrep` | both CLI tools may call it | the tree builds `pkill` for the base userland, not `pgrep`; toybox has an applet (`PGREP`) that upstream's configuration leaves off |
+| `stty` | shell tools, installers | toybox has one (`STTY`, in its pending set), off in upstream's configuration |
+| `tput` | scripts that colour their output | ncurses program; upstream's ncurses package installs the library and `ncursesw6-config` only |
+| `locale` | scripts that test for UTF-8 | no source in the tree; a small program over `setlocale`/`nl_langinfo`. The locale *data* (`/usr/share/locale`) is in the overlay and **in the QEMU install** |
+| An 8-bit-clean console | UTF-8 output of CLI tools on the serial console arrives 7-bit (seen in the Claude Code run) | tty/console setting, not a file; the lab's terminal on the desktop is not affected |
+| The overlay's libraries and framework additions (`/usr/lib/lib{ncurses.5.4,panel.5.4,expat.1,ffi,sqlite3,xml2.2,bz2.1.0,edit.3,util}.dylib`, `Security` with `SecTrustCopyCertificateChain`, `Foundation` `Versions/C`) | what bottles link instead of bringing | **in the QEMU install** (`qemu_install.sh create --variant wayland`; `QD_EXTRAS=0` leaves them out) |
+
+Two of the "symbol additions" changed with the tip: upstream's IOKit now defines
+`kIOMainPortDefault` itself (`build-iokit.nix` is the tree's package at the tip and the relinked
+one only with `SF_PD=pin`); `SecTrustCopyCertificateChain` is still this stream's patch.
+
 ## Framework gaps: the scanner, vim and neovim on the M1 (13 November, issues 45 and 47)
 Everything here is in `integrations/puredarwin/macos-compat/` (recipes, patches, probes, tools) and
 `integrations/puredarwin/homebrew/sf_gapscan.py`. "M1" below means the installed system on the

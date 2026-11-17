@@ -34,7 +34,11 @@
 # the PDCpuPower build (m1-native-boot/reboot passes its own, with restart and power-off)
 , cpupower ? import ../m1-cpufreq/build-kext.nix
 # further kexts by recipe: [ { name = "PDAppleNVMe"; from = <derivation>; } ]
-, more ? [ ] }:
+, more ? [ ]
+# the PCIe bridge and the Wi-Fi pair (IO80211Family, PDBwfm): puredarwin-patches/build-kc.nix passes
+# the builds made from the exported tree patches instead of the lab directories
+, bridge ? import ../m1-apcie-host/build-kext.nix
+, wifi ? import ../m1-bwfm/build-kexts.nix { } }:
 let
   source = import ./pd.nix;
   inherit (source) pd pkgs;
@@ -67,12 +71,11 @@ let
     chmod -R u+w $out
     ${strip} -S $out/${name}.kext/Contents/MacOS/${name}
   '';
-  wifi = import ../m1-bwfm/build-kexts.nix { };
   dcp = import ../m1-dcp/build-kext.nix;
   agx = import ../m1-rust-kext/build-agx-kext.nix;
   added = map (m: "${slim m.name m.from}/${m.name}.kext") ([
     { name = "PDM1SPIHID"; from = import ../m1-touchbar/build-spihid.nix; }
-    { name = "PDApcieT8103Bridge"; from = import ../m1-apcie-host/build-kext.nix; }
+    { name = "PDApcieT8103Bridge"; from = bridge; }
     { name = "IO80211Family"; from = wifi; }
     { name = "PDBwfm"; from = wifi; }
     { name = "PDGpuDT"; from = import ../m1-gpu-dt/build-kext.nix; }

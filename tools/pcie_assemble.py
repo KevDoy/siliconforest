@@ -61,8 +61,10 @@ for e in load(MAPPING)['files']:
  if e['destination']=='/usr/bin/darwin-desktop-test':e['source']=str(SUPERVISOR)
  mapping.append(e)
 if JOIN:
- # pd-dhcp, pd-net-up, pd-netd and its launchd job, all from the pd-netd build
- N=(ROOT/'runs/m1-desktop-010/pd-netd-build-001/result').resolve()
+ # pd-dhcp, pd-net-up, pd-netd and its launchd job, all from the pd-netd build tools/staged.sh
+ # names (the tip's; with PCIE_PIN=1 or SF_STAGED=pin the pinned revision's, as before the rebase)
+ N=Path(subprocess.run([str(ROOT/'tools/staged.sh'),'netd'],env=dict(os.environ,**({'SF_STAGED':'pin'} if PIN else {})),stdout=subprocess.PIPE,text=True,check=True).stdout.strip())
+ assert (N/'usr/sbin/pd-netd').is_file(),N
  for rel,exe in (('usr/bin/pd-dhcp',True),('usr/bin/pd-net-up',True),('usr/sbin/pd-netd',True),('System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist',False)):
   mapping.append({'source':str(N/rel),'destination':'/'+rel,'executable':exe})
 if WIFI:

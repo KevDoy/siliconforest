@@ -15,20 +15,25 @@
 #   SD_SPKDB     level of the speaker test's tone, dB below full scale (default 22, not louder;
 #                the test keeps the amplifiers another 20 dB down)
 #   SD_FILES     further files for the RAM root: "source=/destination;..."
-#   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (default 1,5)
+#   SD_AUDIO     tip or pin: the source pdplay is built from
+#   SD_WAITS     fast (default): pd_quiet_wait=0 pd_rtc_wait=0 in the boot-args, the kernel does not
+#                wait for a clock or a quiet registry before the root mounts (the guest scripts poll
+#                for the drivers); stock: the kernel's waits
+#   SD_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (unset by default: its instruction pattern
+#                does not match the tip's kernel; for the pin's with SD_WAITS=stock)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# pdplay is built from the source ../rebase/pd.nix selects (the tip); SD_AUDIO=pin stages the build of
+# the pinned revision instead (it runs on the tip's kernel and libSystem).
+AUDIO_PD=${SD_AUDIO:-pin}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
 N=${1:?name}
 case "$N" in sd*) ;; *) echo "boot names are prefixed sd" >&2; exit 2;; esac
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
 KC=${SD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { tail -30 "${TMPDIR:-/tmp}/sd-kc-build.$$.log" >&2; echo "no collection" >&2; exit 2; }
 rm -f "${TMPDIR:-/tmp}/sd-kc-build.$$.log"
-PLAY=$(cd "$HERE" && $NIX build-pdplay.nix --no-out-link 2>/dev/null | tail -1)
+PLAY=$(cd "$HERE" && SF_PD=$AUDIO_PD $NIX build-pdplay.nix --no-out-link 2>/dev/null | tail -1)
 RUNTIME=${SD_RUNTIME:-300}
 [ "$RUNTIME" -le 600 ] || { echo "boots are capped at 600 s" >&2; exit 2; }
 # the speaker test's tone level; the script holds the volume another 20 dB down (hold_probe)
@@ -49,7 +54,8 @@ for n in range(2 * 44100):
 w.close()
 PY
 FILES="$PLAY/usr/bin/pdplay=/usr/bin/pdplay;$W/test.wav=/usr/share/pdsound-test.wav${SD_FILES:+;$SD_FILES}"
-PCIE_KC="$KC" PCIE_TIMEWAIT="${SD_TIMEWAIT:-1,5}" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} ${SD_BOOTARGS:-}" \
+FAST="pd_quiet_wait=0 pd_rtc_wait=0"; [ "${SD_WAITS:-fast}" = stock ] && FAST=
+env ${SD_TIMEWAIT:+PCIE_TIMEWAIT="$SD_TIMEWAIT"} PCIE_KC="$KC" PCIE_BOOTARGS="cpus=${SD_CPUS:-8} $FAST ${SD_BOOTARGS:-}" \
   PCIE_GUEST_TEMPLATE="$W/guest" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 PCIE_EXTRA_FILES="$FILES" LINES_MAX=1 \
   tools/pcie_iterate.sh "$N" "$RUNTIME" 2>&1 |
   grep -a "\"status\"\|rror\|delivered\|GUEST_CPUS\|No space\|BENCH_TIMES" | cut -c1-240 || true

@@ -29,8 +29,8 @@ BENCH_WHO=${BENCH_WHO:-smp-audit} tools/bench.sh run bash -c '
   up=0; hung=0
   for i in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
     N=$P$(printf %02d "$i"); R=runs/m1-desktop-010/pcie-enum-attempt-$N/guest
-    PCIE_CHAIN=${LA_CHAIN:-0} PCIE_TIMEWAIT=1,5 PCIE_DONE=marker PCIE_LAB_PATCH="${LA_LAB_PATCH:-}" \
-      PCIE_BOOTARGS="cpus=$CPUS maxmem=4096 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $LA_BOOTARGS" \
+    PCIE_CHAIN=${LA_CHAIN:-0} PCIE_DONE=marker PCIE_LAB_PATCH="${LA_LAB_PATCH:-}" \
+      PCIE_BOOTARGS="cpus=$CPUS maxmem=4096 pd_quiet_wait=0 pd_rtc_wait=0 pdgpudt=2 pdgpudt_stringprops=1 pdagx=1 pddispdt=2 pddcp=2 $LA_BOOTARGS" \
       PCIE_GUEST_TEMPLATE="$S" PCIE_SKIP_BUILD=1 PCIE_WIFI=1 PCIE_WIFI_JOIN=1 LINES_MAX=1 \
       tools/pcie_iterate.sh "$N" "$RUNTIME" > "runs/m1-desktop-010/la-hangrate-$N.log" 2>&1
     if [ ! -s "$R/console.bin" ]; then

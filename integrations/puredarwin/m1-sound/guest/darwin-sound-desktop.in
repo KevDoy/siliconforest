@@ -34,6 +34,15 @@ printf 'SDDESK_SOUND %s | %s\n' "$(get kern.pd_sound.state)" "$(get kern.pd_spea
         printf 'SDDESK_WIFI_SKIPPED\n'
     fi
 ) &
+# the drivers may still be coming up when the root mounts (fast boot): wait for both, bounded
+n=0
+while [ "$n" -lt 40 ]; do
+    case "$(get kern.pd_sound.state)" in idle*|failed*|codec-only*) break;; esac
+    sleep 1; n=$((n+1))
+done
+m=0
+while [ -z "$(get kern.pd_speaker.state)" ] && [ "$m" -lt 10 ]; do sleep 1; m=$((m+1)); done
+printf 'SDDESK_SOUND_READY waited=%s+%s %s | %s\n' "$n" "$m" "$(get kern.pd_sound.state)" "$(get kern.pd_speaker.state | cut -c1-40)"
 # the audio server, as the desktop session starts it
 sysctl -w kern.pd_speaker.hold_probe=1 kern.pd_sound.volume_db=@VOLUME@ > /dev/null 2>&1
 mkdir -p /var/log /Library/Preferences

@@ -21,9 +21,8 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-avd}
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}
 case "$N" in av*) ;; *) echo "boot names are prefixed av" >&2; exit 2;; esac
 if [ "${AVD_INTERACTIVE:-0}" = 1 ]; then
@@ -38,9 +37,9 @@ fi
 NP=integrations/puredarwin/m1-boot-speed/tools/bs_nix_path.py
 KC=${AVD_KC:-$("$ROOT/tools/default_kc.sh")}
 [ -f "$KC/kernel" ] || { echo "no collection" >&2; exit 2; }
-T=$($NP m1-mesa-asahi agx-offscreen-test.nix)
-D=runs/m1-desktop-010/wm-darwin-scale-desktop-build-009/target/aarch64-apple-darwin/release/chonkstep-darwin-desktop
-TERM_BIN=runs/m1-desktop-010/terminal-application-build-008/target/aarch64-apple-darwin/release/chonk-terminal-darwin
+T=$("$ROOT/tools/staged.sh" mesa)
+D=$("$ROOT/tools/staged.sh" compositor); D=${D#$ROOT/}
+TERM_BIN=$("$ROOT/tools/staged.sh" terminal); TERM_BIN=${TERM_BIN#$ROOT/}
 [ -x "$D" ] && [ -x "$TERM_BIN" ] || { echo "no compositor or terminal binary" >&2; exit 2; }
 X="$ROOT/$D=/usr/bin/chonkstep-darwin-desktop;$ROOT/$TERM_BIN=/usr/bin/chonk-terminal-darwin"
 TI=integrations/puredarwin/chonkstep-darwin/terminfo/xterm-256color
@@ -56,7 +55,7 @@ if [ "${AVD_INTERACTIVE:-0}" != 1 ] && grep -q '^pdvideo-gl' "$LIST"; then
 else
   for l in libEGL.1.dylib libGLESv2.2.dylib libgallium-26.3.0-devel.dylib libdrm.2.dylib; do X="$X;$T/usr/local/lib/mesa-asahi/$l=/usr/local/lib/mesa-asahi/$l"; done
 fi
-A=$($NP m1-sound/sysaudio build-sysaudio.nix -A all)
+A=$("$ROOT/tools/staged.sh" sysaudio)
 [ -x "$A/usr/sbin/coreaudiod" ] || { echo "sysaudio build failed" >&2; exit 2; }
 FW=System/Library/Frameworks
 X="$X;$A/usr/sbin/coreaudiod=/usr/sbin/coreaudiod;$A/usr/bin/pdtone=/usr/bin/pdtone;$A/usr/bin/pdvolume=/usr/bin/pdvolume"
@@ -67,12 +66,12 @@ AVFW=private/firmware/apple/avd-fw-v2-t0.bin
 [ -f "$AVFW" ] || { echo "no decoder firmware at $AVFW" >&2; exit 2; }
 X="$X;$ROOT/$AVFW=/Library/Firmware/apple/avd-fw-v2-t0.bin"
 # the player with hardware decode, and its GL variant with the Wayland Mesa bundle it links
-P=$($NP m1-avd build-pdvideo-pdavd.nix)
+P=$("$ROOT/tools/staged.sh" pdvideo)
 [ -x "$P/usr/bin/pdvideo" ] || { echo "pdvideo build failed" >&2; exit 2; }
 # (left out when the play list only runs the GL variant: the RAM root does not hold both with Mesa's second bundle)
 if [ "${AVD_INTERACTIVE:-0}" = 1 ] || grep -q '^pdvideo ' "$LIST"; then X="$X;$P/usr/bin/pdvideo=/usr/local/bin/pdvideo"; fi
 if [ "${AVD_INTERACTIVE:-0}" != 1 ] && grep -q '^pdvideo-gl' "$LIST"; then
-  G=$($NP m1-avd build-pdvideo-pdavd.nix --arg gl true)
+  G=$("$ROOT/tools/staged.sh" pdvideo --arg gl true)
   [ -x "$G/usr/bin/pdvideo-gl" ] || { echo "pdvideo-gl build failed" >&2; exit 2; }
   X="$X;$G/usr/bin/pdvideo-gl=/usr/local/bin/pdvideo-gl"
   for l in "$G"/usr/local/lib/mesa-asahi-wl/*.dylib; do X="$X;$l=/usr/local/lib/mesa-asahi-wl/$(basename "$l")"; done

@@ -209,9 +209,26 @@ def read_root(image, path):
                           capture_output=True, check=True).stdout
 
 
-def write_root(image, files, dirs=(), remove=()):
+def overlay_entries(overlay):
+    """(files, links) of a tree rooted at /: regular files as write_root takes them (a .dylib
+    or a file with an execute bit is executable), symbolic links as (path, target)."""
+    files, links = {}, []
+    overlay = Path(overlay)
+    for dirpath, dirs, names in os.walk(overlay):
+        for n in names + [d for d in dirs if (Path(dirpath) / d).is_symlink()]:
+            src = Path(dirpath) / n
+            dest = '/' + str(src.relative_to(overlay))
+            if src.is_symlink():
+                links.append((dest, os.readlink(src)))
+            else:
+                files[dest] = (src.resolve(), os.access(src, os.X_OK) or n.endswith('.dylib'))
+    return files, links
+
+
+def write_root(image, files, dirs=(), remove=(), links=()):
     """Add or replace regular files in the image's ext4 root with debugfs (no mount).
-    dirs: (path, uid, gid) directories to make; remove: paths to delete."""
+    dirs: (path, uid, gid) directories to make; remove: paths to delete; links: (path, target)
+    symbolic links to make (replacing what is at the path)."""
     offset, _ = partitions(image)[1]
     target = '%s?offset=%d' % (image, offset)
     existing_dirs, commands = set(), []
@@ -219,7 +236,7 @@ def write_root(image, files, dirs=(), remove=()):
     def exists(path):
         r = subprocess.run(['debugfs', '-R', 'stat ' + quote(path), target], capture_output=True, text=True)
         return 'Type:' in r.stdout
-    for dest in sorted(files):
+    for dest in sorted(list(files) + [l[0] for l in links]):
         for parent in reversed(PurePosixPath(dest).parents):
             p = str(parent)
             if p != '/' and p not in existing_dirs:
@@ -238,6 +255,8 @@ def write_root(image, files, dirs=(), remove=()):
     for dest, (source, executable) in sorted(files.items()):
         commands += ['rm ' + quote(dest), 'write %s %s' % (quote(source), quote(dest)),
                      'sif %s mode 0%o' % (quote(dest), 0o100000 | (0o755 if executable else 0o644))]
+    for dest, to in links:
+        commands += ['rm ' + quote(dest), 'symlink %s %s' % (quote(dest), quote(to))]
     r = subprocess.run(['debugfs', '-w', '-f', '-', target], input='\n'.join(commands) + '\n',
                        capture_output=True, text=True, check=True)
     bad = [l for l in (r.stdout + r.stderr).splitlines()
@@ -323,6 +342,9 @@ def main():
     p.add_argument('--data', action='append', default=[], metavar='SOURCE=/DEST', help='file for the run layer (mode 0644)')
     p.add_argument('--dir', action='append', default=[], metavar='/PATH:UID:GID', help='directory to make in the run layer')
     p.add_argument('--remove', action='append', default=[], metavar='/PATH', help='file to delete from the run layer')
+    p.add_argument('--link', action='append', default=[], metavar='/PATH=TARGET', help='symbolic link to make in the run layer')
+    p.add_argument('--overlay', action='append', default=[], type=Path, metavar='DIR',
+                   help='a tree rooted at / copied onto the run layer (files and symbolic links), before --file/--data')
     p.add_argument('--variant', choices=('minimal', 'wayland'), default='minimal',
                    help='upstream image the base is made from: minimal (default) or wayland (the full no-X userland)')
     p.add_argument('--libsystem', choices=('spawnattr', 'homebrew'), default='spawnattr',
@@ -348,14 +370,19 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
     sh(['cp', '--reflink=auto', base, out])
-    files = {}
+    files, links = {}, []
+    for overlay in args.overlay:
+        f, l = overlay_entries(overlay)
+        files.update(f)
+        links += l
+    links += [tuple(item.split('=', 1)) for item in args.link]
     for items, executable in ((args.file, True), (args.data, False)):
         for item in items:
             source, dest = item.split('=', 1)
             files[dest] = (Path(source).resolve(strict=True), executable)
     dirs = [(d.split(':')[0], int(d.split(':')[1]), int(d.split(':')[2])) for d in args.dir]
-    if files or dirs or args.remove:
-        write_root(out, files, dirs, args.remove)
+    if files or dirs or args.remove or links:
+        write_root(out, files, dirs, args.remove, links)
     print(json.dumps(dict(image=str(out), template=str(base), files={d: str(s) for d, (s, _) in files.items()})))
 
 

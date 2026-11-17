@@ -11,16 +11,16 @@
 #   TH_CPUS      guest processors (default 8)
 #   TH_HEAT, TH_FORCED, TH_BELOW, TH_STRESS, TH_SOAK, TH_AUTO, TH_CONTROL   fill the template's placeholders
 #   TH_CONFIGS   for guest/darwin-cpupower-tune.in: "run NAME MODE PERIOD UP HOLD; run ..."
-#   TH_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (e.g. 1,5: 54 s less boot)
+#   TH_TIMEWAIT  PCIE_TIMEWAIT of tools/pcie_iterate.sh (pinned-revision kernels only; at the tip
+#                put pd_quiet_wait=0 pd_rtc_wait=0 into TH_BOOTARGS instead: 30 s less boot)
 #   TH_BEFORE, TH_AFTER   shell commands run inside the bench lock before the boot and after
 #                the M1 is back in Linux (e.g. tools/linux_fan_state.sh)
 #   TH_SUMMARY   option for tools/th_summary.py (--fan, --soak)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
-# What this script stages from Nix besides the collection (tools, libraries, the audio server) are still
-# the builds of the pinned revision, which run on the tip's kernel and libSystem (SF-V-rebase.md).
-export SF_PD=pin
+# What this script stages besides the collection comes from tools/staged.sh: built from the tip
+# (SF_STAGED=pin: the builds of the pinned revision, as before the rebase; SF-V-rebase.md).
 N=${1:?name}
 case "$N" in th*) ;; *) echo "boot names are prefixed th" >&2; exit 2;; esac
 KC=${TH_KC:-$("$ROOT/tools/default_kc.sh")}

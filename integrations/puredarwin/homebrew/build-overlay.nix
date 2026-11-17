@@ -25,7 +25,9 @@
 # Not copied: headers, configd and the launch daemons of the SystemConfiguration package
 # (they would change how the guest configures its network).
 let
-  pd = builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=e7aa00a60f0b56ef35aa24252e81467787bf71ea";
+  # the PureDarwin source: ../qemu-dev/pd-userland.nix (the tip with the one tree patch its
+  # Security package needs to build; SF_PD=pin: the old pin e7aa00a6, the derivations of before)
+  pd = import ../qemu-dev/pd-userland.nix;
   pkgs = import pd.inputs.nixpkgs { system = "x86_64-linux"; };
   p = pd.packages.x86_64-linux;
   libSystem = import ./build-libsystem.nix;
