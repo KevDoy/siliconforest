@@ -17,9 +17,11 @@
 let
   pd = import ./pin.nix;
   pkgs = import (builtins.getFlake "git+file:///home/chrisk/src/darwin-lab/sources/puredarwin-baseline?submodules=1&shallow=1&rev=04b6ecb44f8d6d8c650b8e3e1912bc57b881265d").inputs.nixpkgs { system = "x86_64-linux"; };
+  # upstream's Swift runtime with the Darwin module map of before the rename (../rebase/swift-darwin-module.nix)
+  swiftRuntime = import ../rebase/swift-darwin-module.nix pd."swift-runtime-arm64";
   parts = [
     pd."argon-desktop-msm-arm64"
-    pd."framework-compat-arm64"
+    (pd."framework-compat-arm64".override { swiftRuntime = swiftRuntime; })   # with the corrected Swift runtime below
     pd."freetype2-arm64"
     pd."fontconfig-arm64"
     pd."expat-arm64"
@@ -39,7 +41,7 @@ let
     pd."libjpeg-arm64"
     pd."iokit-arm64"
     pd."llvm-arm64"            # libLLVM.dylib: Mesa's software rasteriser (llvmpipe) links it
-    pd."swift-runtime-arm64"   # framework-compat's Foundation re-exports libswiftFoundation
+    swiftRuntime               # framework-compat's Foundation re-exports libswiftFoundation
   ] ++ extra;
 in pkgs.runCommand "siliconforest-cocoa-root-arm64" { } ''
   mkdir -p $out

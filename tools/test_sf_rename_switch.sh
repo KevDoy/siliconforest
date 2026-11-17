@@ -32,6 +32,7 @@ if [ -z "$STAGE" ]; then
   echo new-netd > $STAGE/root/usr/sbin/sf-netd; echo old-netd > $MOCK/usr/sbin/pd-netd
   echo new-job > $STAGE/root/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist; echo old-job > $MOCK/System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist
   echo notice > $STAGE/root/usr/share/doc/siliconforest/NOTICE
+  mkdir -p $STAGE/root/sbin $MOCK/sbin; echo new-halt > $STAGE/root/sbin/sf-halt; echo old-halt > $MOCK/sbin/sf-halt
   echo new-appkit > $STAGE/root/usr/lib/libAppKit.dylib; echo locally-changed-appkit > $MOCK/usr/lib/libAppKit.dylib
   echo networks > $MOCK/Library/Preferences/org.puredarwin.wifi.known
   printf '<?xml version="1.0"?>\n<plist><dict><key>PDAudio:speakers</key><real>0.4</real></dict></plist>\n' > $MOCK/Library/Preferences/org.puredarwin.audio.plist
@@ -48,7 +49,8 @@ if [ -z "$STAGE" ]; then
     echo "link$T/usr/lib/libLink.dylib${T}link:libOld.dylib${T}libSystem.B.dylib$T-${T}direct${T}t"
     echo "install$T/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist${T}absent$T$(h $STAGE/root/System/Library/LaunchDaemons/org.siliconforest.sf-netd.plist)${T}0644${T}launchd${T}t"
     echo "remove$T/System/Library/LaunchDaemons/org.puredarwin.pd-netd.plist${T}unknown$T-$T-${T}launchd${T}t"
-    echo "install$T/usr/share/doc/siliconforest/NOTICE${T}absent$T$(h $STAGE/root/usr/share/doc/siliconforest/NOTICE)${T}0644${T}direct${T}t"
+    echo "install$T/sbin/sf-halt$T$(h $MOCK/sbin/sf-halt)$T$(h $STAGE/root/sbin/sf-halt)${T}0755${T}kernel${T}t"
+  echo "install$T/usr/share/doc/siliconforest/NOTICE${T}absent$T$(h $STAGE/root/usr/share/doc/siliconforest/NOTICE)${T}0644${T}direct${T}t"
     echo "migrate$T/Library/Preferences/org.siliconforest.wifi.known${T}unknown$T-${T}0644${T}state${T}from=/Library/Preferences/org.puredarwin.wifi.known"
     echo "migrate$T/Library/Preferences/org.siliconforest.audio.plist${T}unknown$T-${T}0644${T}state${T}from=/Library/Preferences/org.puredarwin.audio.plist;sed=s/PDAudio:/SFAudio:/g"
     echo "migrate$T/Library/Preferences/org.siliconforest.none${T}unknown$T-${T}0644${T}state${T}from=/Library/Preferences/org.puredarwin.none"
@@ -68,12 +70,13 @@ rs --dry-run --root $W/r > $W/o 2>&1 && no "restore dry run without a journal sh
 sw --root $W/r $STAGE > $W/sw.out 2>&1 && rc=0 || rc=$?
 bad=0
 while IFS=$T read -r act path old new mode class note; do
+  [ "$class" = kernel ] && continue      # never in a run that does not name it (case 10)
   case "$act" in
     install) [ "$(sha256sum "$W/r$path" | cut -c1-64)" = "$new" ] || { echo "  not new: $path"; bad=1; }
              case "$old" in absent|unknown) ;; *) [ "$(sha256sum "$W/r/private/var/db/sf-rename/old$path" 2>/dev/null | cut -c1-64)" = "$old" ] || [ "$old" = "$new" ] || { echo "  old not kept: $path"; bad=1; };; esac;;
     link) [ "$(readlink "$W/r$path")" = "$new" ] || { echo "  not linked: $path"; bad=1; };;
     remove) [ ! -e "$W/r$path" ] || { echo "  still there: $path"; bad=1; };;
-    migrate) from=${note#from=}; case "$from" in *";sed="*) [ ! -e "$MOCK${from%%;sed=*}" ] || grep -q 'SFAudio:speakers' "$W/r$path" || { echo "  names not rewritten: $path"; bad=1; }; continue;; esac; if [ -e "$MOCK$from" ] && [ ! -e "$MOCK$path" ]; then cmp -s "$W/r$from" "$W/r$path" || { echo "  not carried over: $path"; bad=1; }; cmp -s "$MOCK$from" "$W/r$from" || { echo "  source changed: $from"; bad=1; }; fi;;
+    migrate) from=${note#from=}; case "$from" in *";sed="*) [ ! -e "$MOCK${from%%;sed=*}" ] || case "$path" in *audio.plist) grep -q 'SFAudio:speakers' "$W/r$path";; *) [ -s "$W/r$path" ];; esac || { echo "  names not rewritten: $path"; bad=1; }; continue;; esac; if [ -e "$MOCK$from" ] && [ ! -e "$MOCK$path" ]; then cmp -s "$W/r$from" "$W/r$path" || { echo "  not carried over: $path"; bad=1; }; cmp -s "$MOCK$from" "$W/r$from" || { echo "  source changed: $from"; bad=1; }; fi;;
   esac
 done < <(grep -v '^#' $STAGE/manifest.tsv)
 { [ $rc = 0 ] && [ $bad = 0 ]; } && ok "switch: every row as the manifest says, old files kept ($(tail -1 $W/sw.out))" || { no "switch rc=$rc"; tail -5 $W/sw.out; }
@@ -90,7 +93,7 @@ snap $W/r > $W/now; { [ $rc = 0 ] && cmp -s $W/before $W/now; } && ok "restore: 
 # 5. switch after a restore
 sw --root $W/r $STAGE > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/after $W/now && ok "switch after restore: same result" || no "switch after restore"
 # 6. interrupted after every possible number of changes: restore gives the first root; run again completes
-ibad=0; n=1
+ibad=0; n=1; STRIDE=${SF_TEST_STRIDE:-1}      # a large stage: every STRIDE-th interruption point
 while [ $n -lt $NROWS ]; do
   fresh
   sw --root $W/r --fail-after $n $STAGE > $W/o 2>&1 && break      # fewer changes than n: done
@@ -101,9 +104,9 @@ while [ $n -lt $NROWS ]; do
   sw --root $W/r $STAGE > $W/o 2>&1 || { echo "  resume failed after $n"; tail -2 $W/o; ibad=1; }
   snap $W/r > $W/now; cmp -s $W/after $W/now || { echo "  after $n changes + resume: not the switched root"; ibad=1; }
   rs --root $W/r > $W/o 2>&1; snap $W/r > $W/now; cmp -s $W/before $W/now || { echo "  resumed switch + restore: root differs after $n"; ibad=1; }
-  n=$((n + 1))
+  n=$((n + STRIDE))
 done
-[ $ibad = 0 ] && ok "interrupted after 1..$((n - 1)) changes: restore gives the first root; resumed switch completes and restores" || no "interrupted switch"
+[ $ibad = 0 ] && ok "interrupted after 1..$((n - 1)) changes (every $STRIDE): restore gives the first root; resumed switch completes and restores" || no "interrupted switch"
 # 7. a live file that differs from the record
 fresh
 first=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$1=="install" && $3 ~ /^[0-9a-f]{64}$/ {print $2; exit}')
@@ -125,5 +128,28 @@ rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now && o
 fresh
 sw --root $W/r --name sf-rename-audio-pretest $STAGE > $W/o 2>&1 && [ -f $W/r/private/var/db/sf-rename-audio-pretest/journal ] && [ ! -e $W/r/private/var/db/sf-rename ] \
   && rs --root $W/r --name sf-rename-audio-pretest > $W/o 2>&1 && ok "--name: own directory, switch and restore" || no "--name"
+# 10. class kernel: not in a run unless named; then done and restored
+if grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel"' | grep -q .; then
+  kp=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" {print $2; exit}'); kn=$(grep -v '^#' $STAGE/manifest.tsv | awk -F'\t' '$6=="kernel" && $1=="install" {print $4; exit}')
+  fresh; kb=$(sha256sum "$W/r$kp" 2>/dev/null | cut -c1-64)
+  sw --root $W/r $STAGE > $W/o 2>&1; [ "$(sha256sum "$W/r$kp" 2>/dev/null | cut -c1-64)" = "$kb" ] && ok "class kernel is left alone by a run that does not name it ($kp)" || no "class kernel was touched by the default run"
+  sw --root $W/r --classes kernel $STAGE > $W/o 2>&1 && [ "$(sha256sum "$W/r$kp" | cut -c1-64)" = "$kn" ] && rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now \
+    && ok "--classes kernel puts it in; restore gives the first root" || no "--classes kernel"
+fi
+# 11. a restore stopped before its last step (old files beside their paths), run again
+fresh; sw --root $W/r $STAGE > $W/o 2>&1
+SF_RENAME_TEST_STOP=1 rs --root $W/r > $W/o 2>&1 && rc=0 || rc=$?
+{ [ $rc != 0 ] && rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now && [ -z "$(find $W/r -name '*.sf-old' -o -name '*.sf-new' | head -1)" ]; } \
+  && ok "restore stopped before its last step, run again: first root, nothing left beside the paths" || { no "interrupted restore (rc=$rc)"; tail -2 $W/o; }
+# 12. the one-process renames of the core class and of the restore, each way this host has
+HT=$W/sf-rename-commit; SRC=$HERE/../integrations/siliconforest/m1-storage/userland/sf-rename-commit.c   # the tool, built for this host
+command -v cc > /dev/null 2>&1 && [ -f "$SRC" ] && cc -std=c11 -D_DEFAULT_SOURCE -O1 "$SRC" -o $HT 2>/dev/null && export SF_RENAME_TOOL=$HT
+for m in tool python3 perl zsh; do
+  if [ $m = tool ]; then [ -x $HT ] || continue; else command -v $m > /dev/null 2>&1 || continue; fi
+  [ $m = zsh ] && [ "$(basename "${SH%% *}")" != zsh ] && continue
+  fresh
+  SF_RENAME_COMMIT=$m sw --root $W/r $STAGE > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/after $W/now && SF_RENAME_COMMIT=$m rs --root $W/r > $W/o 2>&1 && snap $W/r > $W/now && cmp -s $W/before $W/now \
+    && ok "renames by one $m process: switch and restore" || { no "renames by $m"; tail -2 $W/o; }
+done
 echo "passed $pass, failed $fail (shell: $SH)"
 [ $fail = 0 ]

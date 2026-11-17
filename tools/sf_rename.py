@@ -165,6 +165,9 @@ EXCEPT_FILES = {
     'docs/design/siliconforest-naming-m1-install.md': 'the install plan: it describes the installed system by its old names',
     'tools/sf_rename_stage.py': 'the stage builder for the installed system: its example names an old path',
     'tools/test_sf_rename_switch.sh': 'the switch test: its mock root is a system under the old names',
+    'tools/sf_rename_scan.sh': 'the scan of an installed system: its pattern is the list of old lookups',
+    'tools/sf_rename_switch.sh': "asks the running kernel by the old sysctl name which halt program fits it",
+    OLD_ROOT + 'rebase/swift-darwin-module.nix': "names the pattern (`pd_`) that upstream's module-map script kept and the header it missed",
     'NOTICE': 'attribution',
     'integrations/puredarwin': 'a symbolic link to siliconforest: the frozen controllers, tests and records name files by the old path',
 }

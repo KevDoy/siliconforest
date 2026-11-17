@@ -94,6 +94,40 @@ and Firefox's sound were not yet heard by the owner. So the new server generatio
 same. The main switch restarts nothing: the session's long-lived children (compositor, dock, `coreaudiod`, `sf-netd`)
 keep the old files until the machine restarts, which the kernel install needs anyway.
 
+## State on 17 November, night (USERSPACE; workstation only, nothing run on the M1)
+
+The runbook the coordinator executes is `runs/rebuild/stage/RUNBOOK.md` (workstation, outside git; it carries the
+counts, the hashes and the test records). What changed in the plan:
+
+- **The core files go in as one step.** libSystem and `/usr/lib/system/libdyld.dylib` name each other's entry points
+  (`pd_libdyld_libkernel_init` and two more; `sf_…` after the rename): with one new and one old no program starts. The
+  switch puts every core file beside its path first and renames them all by one process that starts nothing in between
+  (zsh's own `mv`, else `python3` or `perl`; plain `mv` on a root that is not the running system); the restore does the
+  same for the files it brings back.
+- **`/sbin/sf-halt` has its own class, `kernel`.** It finds the write fence by a sysctl name; under the other kernel it
+  would take the root for an unfenced one and restart without sealing the disk. No run touches it unless `--classes
+  kernel` is given, and that is refused on the running system: it is replaced from Linux with the kernel. After a
+  restore or a switch on a running system the scripts say which halt program fits the running kernel.
+- **`tools/sf_rename_scan.sh`**: every file of a root whose bytes carry an old lookup, against the manifest (`row`, or
+  `OPEN` when the manifest does not know the file). The manifest is made from the lab's records; this scan, run on the
+  M1 before the switch, is what shows whether it is complete.
+- **Rename gap found by building:** upstream's `gen-darwin-modulemap.sh` keeps kernel-private headers out of Swift's
+  Darwin module with the pattern `pd_`, alone in a regular expression; `pd_pthread_sched.h` became
+  `sf_pthread_sched.h`, the pattern stayed, the header (it defines `XNU_KERNEL_PRIVATE`) entered the module and the
+  Swift runtime did not build. Corrected in the lab's recipes (`rebase/swift-darwin-module.nix`, used for the tip's and
+  the pin's runtime); the forks are not regenerated for it. A rule for the tool is still to be written; the next fork
+  takes it.
+- **What is installed, by recipe** (each found through the store: the derivation of the file whose hash a record
+  names): CGL `firefox/perf/tools/term12/cgl.nix`; the Finch providers `CoreMedia/build.nix`,
+  `media/bottle/{videotoolbox,avfoundation,coreimage}.nix`, `AVFAudio/engine/realtime.nix`, `ColorSync/build.nix`,
+  `Accelerate/installed-graphics.nix`, `AudioToolbox/install.nix`, `Metal/build.nix`; Firefox's families
+  `finch/firefox-media/{clocked-providers,clock-family}.nix` and `firefox/sc-network.nix`; its launcher is
+  `firefox/daily-launch.py`. Five of the Finch providers build byte for byte the same from the renamed tree: the
+  rename does not touch them and they are not switched.
+- **Firefox's two maintenance directories** get renamed twins (`maintenance-damage-path-v4-sf`,
+  `maintenance-render-thread-t13-v1-sf`): the installer with the renamed builds' hashes, the previous launchers with
+  the names changed, the receipts carried over with the hashes mapped. The old directories stay for the old system.
+
 ## Tools
 
 - `tools/sf_rename_stage.py SPEC.json DIR`: lays out a staged directory from built trees:
@@ -107,7 +141,9 @@ keep the old files until the machine restarts, which the kernel install needs an
   absent from its path). One journal line per change, written first.
 - `tools/sf_rename_restore.sh [--dry-run] [--root DIR] [--name NAME]`: undoes a complete or an
   interrupted switch from the journal; the renamed files go to `.../new/`.
-- `tools/test_sf_rename_switch.sh [SHELL] [--stage S --mock ROOT]`: 16 cases against a mock root
+- `tools/sf_rename_scan.sh [--root DIR] [--out FILE] [STAGE]`: see above.
+- `tools/test_sf_rename_switch.sh [SHELL] [--stage S --mock ROOT]`: 21 cases against a mock root (the 16 below, class
+  `kernel`, a restore stopped before its last step, the one-process renames by `python3` and `perl`). The 16:
   (dry run changes nothing; switch; second switch does nothing; restore gives the first root byte
   for byte; a switch stopped after each possible number of changes restores and resumes; a
   differing live file stops the switch; classes in two runs; a separate `--name`).

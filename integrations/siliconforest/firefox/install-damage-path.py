@@ -21,18 +21,18 @@ import tempfile
 
 ROOT = Path('/usr/local/lib/siliconforest/firefox/160-system1')
 OPENGL = Path('/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL')
-BACKUP = ROOT / 'maintenance-damage-path-v4'
+BACKUP = ROOT / 'maintenance-damage-path-v4-sf'
 LAUNCHER = Path('/Applications/Firefox.app/Contents/MacOS/firefox-sf')
-CANDIDATE_SHA = 'c4448fe9d989186a6196c2af498681c8458d61dc1c143173aa9524586b72ab36'
-BASELINE_SHA = '52bff2c2dff1cce60362f0e21cd6346a895605ae4f3230087e2cdccb6cc793c0'
-RENDER_BACKUP = ROOT / 'maintenance-render-thread-t13-v1'
+CANDIDATE_SHA = '7fb34d4ea17b68ccd3e62f568aefadd86d81d5a06b389467aef1f1d7e0e04084'
+BASELINE_SHA = '2f792a7fdd452f6e5f8159b534d5cecf5efdc925584ec0c4247d67cd48c16c3e'
+RENDER_BACKUP = ROOT / 'maintenance-render-thread-t13-v1-sf'
 TERM13 = {
     '/System/Library/Frameworks/AppKit.framework/Versions/A/AppKit':
-        '6a2dd27a88828aee8211aeb97db7a47fde32380b3c01f83071295f6a17e7ca04',
+        'dde63492ac6e2f207a4cb1816d663e73ac7950adf3ef1ec135e5d15ca0e0927c',
     '/usr/lib/libWindowServer.dylib':
-        '752999d3d5ce1a46aca801767a39b017c740f93a8eb0cf3af71b4c747ef0877f',
+        'c716364c0cc9b90b4b2f79318e10f54c9c992d121ccd3ee01a6d1617f67dd197',
     '/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore.pd':
-        'ab4f4daf7625f0b614d26a35cf25ff139e40da18364338d603f1d05c4383e7b9',
+        'af3667bff4483fc71911b10e80ecf08d1e42dab25f9d50b79e0cd883cb06af89',
 }
 
 
@@ -104,7 +104,7 @@ def select_render_thread(args, manifest_path, before, manifest, before_launcher)
             cold.get('sha256', {}).get(args.source.name) != sha(launcher)):
         raise ValueError('Cold launcher verification differs')
     compile(launcher, 'firefox-sf', 'exec')
-    if (sha(before_launcher) != 'f18c4fa2f77ad7b5faa35ad2aca64b3f6c8b42b9e36e56e74cfda527d5800f46' or
+    if (sha(before_launcher) != 'ff9a465b316e07e31a6b93e4dbbbdbbcc97a7d7df33dac7e40c86503598117af' or
             sha(before) != '6dfea8c660ceb9a6621e1b9f0a4439c16c9f051735439647244ab9771ce0f0ef' or
             RENDER_BACKUP.exists()):
         raise ValueError('Expected unchanged damage-only selection and fresh backup')

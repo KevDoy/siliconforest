@@ -27,11 +27,16 @@
 #                                                PATH is made as a copy of it when PATH does not exist.
 #                                                The old file stays where it is (the old system needs it).
 #                                                "from=<old path>;sed=<expression>": the copy goes through
-#                                                sed when the old file is text (names inside a property list)
+#                                                sed (names inside an XML property list, hashes inside a
+#                                                receipt); a binary property list is carried over as it is
 #   keep     PATH  ...                           accounted for, not touched (printed by --dry-run)
 # OLD is the SHA-256 the live file is expected to have, "absent", or "unknown" (not in the lab's
 # records: any content is accepted and kept). NEW is the SHA-256 of the staged file.
 # CLASS orders the work: state, direct, launchd, then core (the files every program loads) last.
+# Class kernel is never in a run unless --classes names it: files that must not be in place while
+# the old kernel runs (sf-halt: it finds the write fence by a sysctl name; under the other kernel
+# it would restart the machine without sealing the disk). It is done from Linux on the mounted
+# partition in the same sitting as the kernel install.
 #
 # On the running system the hash of a file in use is not the hash of the file on the disk: the
 # kernel rewrites pointer-authentication instructions in the page cache of an executed signed
@@ -48,6 +53,16 @@
 # the core class (dyld, libSystem ...): every command this script starts loads them.
 # A switch that was interrupted is undone with sf_rename_restore.sh, or simply run again with
 # the same manifest (rows already done are skipped).
+#
+# The core class goes in as one step. libSystem and /usr/lib/system/libdyld.dylib name each
+# other's entry points (sf_libdyld_libkernel_init ...): a program started while one is new and
+# the other old does not load. So every core file is first put beside its target and checked
+# (PATH.sf-new), and then all of them are renamed into place by ONE process that starts no other
+# program in between: STAGE/sf-rename-commit (m1-storage/userland/sf-rename-commit.c; kept beside
+# the journal for the restore), else zsh's own mv (zsh/files, which SiliconForest's zsh is built
+# without), else python3 or perl. A root that is not the running system (--root DIR: the partition mounted from Linux, a
+# mock root) needs none of that and takes plain mv. The dry run says which way it would take;
+# when the running system offers none, the core class is refused before anything is changed.
 # The kernel is not this script's: it is installed from Linux with install/linux/sf-bootbin-install.sh.
 set -u
 NAME=sf-rename; DRY=0; ROOT=/; ALLOW=0; FAILAFTER=0; STAGE=; CLASSES='state direct launchd core'
@@ -89,19 +104,53 @@ state_of() {
   else printf 'absent'; fi
 }
 
+# how the core class's renames are done: one process, nothing started in between (see the head)
+TOOL=${SF_RENAME_TOOL:-$STAGE/sf-rename-commit}     # m1-storage/userland/sf-rename-commit.c, beside the scripts in the stage
+commit_method() {
+  if [ -n "${SF_RENAME_COMMIT:-}" ]; then echo "$SF_RENAME_COMMIT"; return; fi   # for the tests: mv, tool, zsh, python3, perl
+  if [ -n "$ROOT" ]; then echo mv; return; fi           # not the running system
+  if [ -x "$TOOL" ] && "$TOOL" --check 2>/dev/null; then echo tool; return; fi
+  if [ -n "${ZSH_VERSION:-}" ] && (zmodload -F zsh/files b:zf_mv) 2>/dev/null; then echo zsh; return; fi
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import os' 2>/dev/null; then echo python3; return; fi
+  if command -v perl >/dev/null 2>&1 && perl -e 1 2>/dev/null; then echo perl; return; fi
+  echo none
+}
+commit_renames() { # $1: a file of "FROM<tab>TO" lines; every FROM is renamed over its TO
+  case "$COMMIT" in
+    mv) while IFS=$TAB read -r from to; do mv -f "$from" "$to" || return 1; done < "$1";;
+    tool) "$TOOL" "$1";;
+    zsh) zmodload -F zsh/files b:zf_mv || return 1
+         while IFS=$TAB read -r from to; do zf_mv -f "$from" "$to" || return 1; done < "$1";;
+    python3) python3 -c 'import os, sys
+for line in open(sys.argv[1]):
+    a, b = line.rstrip("\n").split("\t")
+    os.rename(a, b)' "$1";;
+    perl) perl -e 'open(F, "<", $ARGV[0]) or die; while (<F>) { chomp; my ($a, $b) = split /\t/; rename($a, $b) or die "$a: $!"; }' "$1";;
+    *) return 1;;
+  esac
+}
 # ---- 1. checks (nothing is changed) ---------------------------------------------------------
 if [ -e "$J" ] && ! cmp -s "$STAGE/manifest.tsv" "$DB/switched"; then
   die "a journal of a switch with another manifest exists at $J. Run sf_rename_restore.sh first"
 fi
-for c in $CLASSES; do case "$c" in state|direct|launchd|core) ;; *) die "--classes: unknown class $c";; esac; done
+for c in $CLASSES; do case "$c" in state|direct|launchd|core|kernel) ;; *) die "--classes: unknown class $c";; esac; done
 inrun() { case " $CLASSES " in *" $1 "*) return 0;; esac; return 1; }
+COMMIT=mv
+if inrun kernel && [ -z "$ROOT" ] && [ "${SF_RENAME_KERNEL_LIVE:-0}" != 1 ]; then
+  die "class kernel on the running system: its files belong to the other kernel (see the head of this script). Do it from Linux on the mounted partition (--root). Nothing was changed"
+fi
+if inrun core; then
+  COMMIT=$(commit_method)
+  say "core class: its files go in together, renamed by $COMMIT"
+  [ "$COMMIT" != none ] || die "the running system offers no way to rename the core files in one step (STAGE/sf-rename-commit, zsh/files, python3, perl); do the core class from Linux on the mounted partition. Nothing was changed"
+fi
 bad=0; nwork=0; nskip=0; nunknown=0
 CHECK=$(mktemp "${TMPDIR:-/tmp}/sf-rename-check.XXXXXX") || die "mktemp"
 grep -v '^#' "$STAGE/manifest.tsv" | grep -v '^$' | while IFS=$TAB read -r act path old new mode class note; do
   live=$ROOT$path
   case "$path" in /*) ;; *) say "BAD  row without an absolute path: $act $path"; echo bad >> "$CHECK"; continue;; esac
   case "$path" in */../*|*/..) say "BAD  path with ..: $path"; echo bad >> "$CHECK"; continue;; esac
-  case "$class" in state|direct|launchd|core|none) ;; *) say "BAD  unknown class '$class': $path"; echo bad >> "$CHECK"; continue;; esac
+  case "$class" in state|direct|launchd|core|kernel|none) ;; *) say "BAD  unknown class '$class': $path"; echo bad >> "$CHECK"; continue;; esac
   is=$(state_of "$live")
   [ "$act" = keep ] || inrun "$class" || { say "later $path (class $class is not in this run)"; continue; }
   case "$act" in
@@ -147,6 +196,7 @@ if [ "$DRY" = 1 ]; then say "dry run: nothing was changed"; exit 0; fi
 # ---- 2. the switch ---------------------------------------------------------------------------
 mkdir -p "$OLD" || die "cannot make $OLD"
 cp "$STAGE/manifest.tsv" "$DB/switched" || die "cannot write $DB/switched"
+if [ -f "$TOOL" ]; then cp "$TOOL" "$DB/sf-rename-commit" && chmod 755 "$DB/sf-rename-commit" || die "cannot keep the rename tool for the restore"; fi
 [ -e "$J" ] || : > "$J" || die "cannot write $J"
 count=0
 step() { # called before each change; the test hook stops here
@@ -163,6 +213,7 @@ keep_old() { # gives the live file PATH a second name, old/PATH; the path itself
 }
 do_class() {
   rows "$1" > "$DB/rows.$1"
+  rm -f "$DB/commit.core"
   while IFS=$TAB read -r act path old new mode class note; do
     live=$ROOT$path; is=$(state_of "$live")
     case "$act" in
@@ -176,7 +227,8 @@ do_class() {
         [ "$(id -u)" = 0 ] && chown 0:0 "$live.sf-new"
         if [ "$is" = absent ]; then printf 'installed\t%s\tnew\n' "$path" >> "$J"
         else printf 'installed\t%s\treplaced\n' "$path" >> "$J"; keep_old "$path" || die "cannot keep the old $path"; fi
-        mv -f "$live.sf-new" "$live" || die "cannot put $path in place (its old file is in old/ as well)";;
+        if [ "$1" = core ]; then printf '%s\t%s\n' "$live.sf-new" "$live" >> "$DB/commit.core"
+        else mv -f "$live.sf-new" "$live" || die "cannot put $path in place (its old file is in old/ as well)"; fi;;
       link)
         [ "$is" = "link:$new" ] && continue
         step
@@ -197,13 +249,25 @@ do_class() {
         printf 'migrated\t%s\t%s\n' "$path" "$from" >> "$J"
         cp -p "$ROOT$from" "$live" || die "cannot copy $from to $path"
         # names inside the file: only in a text file (a binary property list is carried over as it is)
-        if [ -n "$expr" ] && head -c 5 "$live" | grep -q '<?xml'; then
+        if [ -n "$expr" ] && ! head -c 6 "$live" | grep -q 'bplist'; then
           sed "$expr" "$ROOT$from" > "$live" || die "cannot rewrite $path"
         fi;;
     esac
   done < "$DB/rows.$1"
   rm -f "$DB/rows.$1"
+  if [ -s "$DB/commit.core" ]; then
+    sync
+    commit_renames "$DB/commit.core" || die "the core files did not all go in (see $DB/commit.core: FROM is still there for those that did not). Run sf_rename_restore.sh, or this switch again"
+  fi
+  rm -f "$DB/commit.core"
 }
 for c in $CLASSES; do do_class "$c"; done
 sync
 say "switched: $count changes; old files in $OLD; undo with sf_rename_restore.sh --root ${ROOT:-/} --name $NAME"
+# the halt program must be the running kernel's: it finds the write fence by a sysctl name
+if [ -z "$ROOT" ] && sysctl -n kern.pd_nvme.state > /dev/null 2>&1; then
+  if [ -e "$OLD/sbin/sf-halt" ]; then
+    say "NOTE: the old kernel is running and /sbin/sf-halt is the renamed program, which does not find this kernel's write fence."
+    say "      Do not use reboot/halt now. Restart with: $OLD/sbin/sf-halt restart"
+  else say "note: the old kernel is running; /sbin/sf-halt is still its own program (class kernel not done): reboot as usual"; fi
+fi
