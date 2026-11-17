@@ -3,7 +3,7 @@
 # The one place that says which build of a staged user-space piece a boot gets: what the
 # wrappers put into the RAM root besides the kernel collection (tools/default_kc.sh) and the
 # base image. Since the rebase every piece is built from upstream's tip (rebase/pd.nix)
-# against the tip's SDK and the lab's default libSystem, except those in PIN_ONLY below.
+# against the tip's SDK and the lab's default libSystem (PIN_ONLY below is empty).
 #
 # Usage: tools/staged.sh <piece> [nix-build arguments]      prints a store path or a file
 #   mesa        Mesa/AGX bundle: EGL, GLES, gallium, libdrm, the off-screen tests (m1-mesa-asahi/agx-offscreen-test.nix)
@@ -29,9 +29,11 @@ ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd); cd "$ROOT"
 export PATH=$HOME/.nix-profile/bin:$PATH
 NP=integrations/siliconforest/m1-boot-speed/tools/bs_nix_path.py
 RUNS=runs/m1-desktop-010
-# Pieces that are not proven at the tip yet and are staged from the pin's build until they are.
-# sysaudio: upstream rewrote coreaudiod; the lab's device backend is being ported (SF-I-sound.md).
-PIN_ONLY="sysaudio sfplay"
+# Pieces staged from the pin's build whatever SF_STAGED says. Empty since the rename: the audio
+# server and sfplay (the last two) build at the tip with the SiliconForest names, and the pin's
+# builds look for the device nodes and sysctls by their old names, which the renamed kernel does not have (SF-I-sound.md,
+# "The renamed audio server"). The pin itself builds only from the commit before the rename.
+PIN_ONLY=""
 PIECE=${1:?piece}; shift
 from=tip
 if [ "${SF_STAGED:-tip}" = pin ]; then from=pin; fi

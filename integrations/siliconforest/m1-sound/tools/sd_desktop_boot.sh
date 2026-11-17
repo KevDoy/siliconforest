@@ -21,7 +21,7 @@ export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
 # (SF-V-rebase.md). The audio server, frameworks, tools and sfplay are built from the source
 # ../rebase/pd.nix selects (the tip); SD_AUDIO=pin stages the pinned revision's builds of those too.
 export SF_PD=pin
-AUDIO_PD=${SD_AUDIO:-pin}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
+AUDIO_PD=${SD_AUDIO:-tip}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
 N=${1:?name}
 case "$N" in sd*) ;; *) echo "boot names are prefixed sd" >&2; exit 2;; esac
 NB="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes --no-out-link"

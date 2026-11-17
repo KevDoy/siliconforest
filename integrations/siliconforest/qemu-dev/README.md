@@ -30,8 +30,8 @@ apart: every remembered Nix answer in `runs/qemu-dev/base/inputs.json` is keyed 
 templates are named `template-<pin|tip>-<kernel>-<variant>-<hash>.img`, so a run on one source
 replaces only that source's older template. libSystem: a tip run stages the one the M1 RAM
 root's base mapping names; a pin run always stages the pin build of `../libsystem-default`.
-The audio server, its frameworks and `sfplay` are the pin's builds on both sources (our
-coreaudiod backend is not ported to the tip's server yet).
+The audio server, its frameworks and `sfplay` are built from the run's source (at the tip: our
+`/dev` backend on upstream's server, `../m1-sound/sysaudio/tools/sa_qemu.sh` is its check here).
 The `wayland` variant exists at the pin only (at the tip it is about 100 derivations to build):
 `SF_PD=pin tools/qemu_install.sh create --variant wayland`.
 

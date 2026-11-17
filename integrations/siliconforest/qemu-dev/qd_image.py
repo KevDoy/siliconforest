@@ -166,15 +166,12 @@ def stable_payload(mesa, libsystem='spawnattr'):
         files[d] = (cd / 'terminfo/xterm-256color', False)
     files['/usr/share/backgrounds/siliconforest/siliconforest.png'] = (cd / 'backgrounds/siliconforest.png', False)
     sound = 'integrations/siliconforest/m1-sound'
-    # The audio server, its frameworks and tools are the pin's builds on either source: our
-    # coreaudiod backend is not ported to the tip's coreaudiod (owner decision of 11 November,
-    # docs/roadmap/issues/SF-V-rebase.md, "Open, not in this stream").
-    # Since the rename the pin does not build from these recipes (it has upstream's old names), so
-    # the audio server cannot be staged until it builds at the tip: QD_AUDIO=0 leaves it out
-    # (tools/qemu_desktop.sh --no-sound sets it). Without QD_AUDIO=0 this fails at the pin build.
+    # The audio server, its frameworks, tools and sfplay from this run's source (the tip: our
+    # /dev backend on upstream's server, with the SiliconForest names). QD_AUDIO=0 leaves them
+    # out (tools/qemu_desktop.sh --no-sound sets it).
     if os.environ.get('QD_AUDIO', '1') != '0':
-        a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all', source='pin'))
-        play = Path(nix(sound, 'build-sfplay.nix', source='pin'))
+        a = Path(nix(sound + '/sysaudio', 'build-sysaudio.nix', '-A', 'all'))
+        play = Path(nix(sound, 'build-sfplay.nix'))
         for rel in ('usr/sbin/coreaudiod', 'usr/bin/sftone', 'usr/bin/sfvolume'):
             files['/' + rel] = (a / rel, True)
         files['/usr/bin/sfplay'] = (play / 'usr/bin/sfplay', True)

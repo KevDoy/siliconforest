@@ -23,7 +23,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../../.." && pwd); c
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
 # The audio server, frameworks and tools are built from the source ../../rebase/pd.nix selects (the tip);
 # SD_AUDIO=pin stages the builds of the pinned revision instead (they run on the tip's kernel and libSystem).
-AUDIO_PD=${SD_AUDIO:-pin}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
+AUDIO_PD=${SD_AUDIO:-tip}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
 N=${1:?name}
 GUEST=${2:-$HERE/guest/darwin-sysaudio-test.in}
 case "$N" in sd2[0-9]|sd3[0-9]) ;; *) echo "boot names for the system audio path are sd20 to sd39" >&2; exit 2;; esac

@@ -26,7 +26,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd); ROOT=$(cd "$HERE/../../.." && pwd); cd "
 export PATH=$HOME/.nix-profile/bin:$PATH BENCH_WHO=${BENCH_WHO:-sound}
 # sfplay is built from the source ../rebase/pd.nix selects (the tip); SD_AUDIO=pin stages the build of
 # the pinned revision instead (it runs on the tip's kernel and libSystem).
-AUDIO_PD=${SD_AUDIO:-pin}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
+AUDIO_PD=${SD_AUDIO:-tip}; [ "$AUDIO_PD" = tip ] && AUDIO_PD=
 N=${1:?name}
 case "$N" in sd*) ;; *) echo "boot names are prefixed sd" >&2; exit 2;; esac
 NIX="nix-build --extra-experimental-features nix-command --extra-experimental-features flakes"
