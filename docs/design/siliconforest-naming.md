@@ -26,7 +26,10 @@ repository, a checkout of upstream PureDarwin, and the Chonkstep Darwin source.
 | Bundle identifiers | `org.puredarwin.driver.X`, `org.puredarwin.kext.X`, `org.puredarwin.iokit.X` | `org.siliconforest.driver.X`, … | R1 |
 | launchd labels | `org.puredarwin.hostname`, `org.puredarwin.dmesg-save`, … | `org.siliconforest.hostname`, … | R1 |
 | C identifiers and file names | `pd_nvme_gate`, `PD_DART_x`, `_PD_X_H`, `__pd_make` | `sf_nvme_gate`, `SF_DART_x`, `_SF_X_H`, `__sf_make` | R2 |
-| the same inside a longer name, listed prefixes only | `virgl_pd_winsys`, `F_PD_SAMEFILE`, `DYLD_PD_MISSING_OK` | `virgl_sf_winsys`, `F_SF_SAMEFILE`, `DYLD_SF_MISSING_OK` | R2 |
+| the same inside a longer name | `sysctl__kern_pd_avd`, `virgl_pd_winsys`, `F_PD_SAMEFILE`, `DYLD_PD_MISSING_OK` | `sysctl__kern_sf_avd`, `virgl_sf_winsys`, `F_SF_SAMEFILE`, `DYLD_SF_MISSING_OK` | R2: lower case `x_pd_y` always, except behind other people's prefixes (`pf_pd_*`, `usb_pd_*`, …); upper case `X_PD_Y` only behind listed prefixes (`kHIDUsage_PD_*` and register names stay) |
+| compiler definitions | `-DPD_CORECRYPTO_DIR=…`, `-DPDGOP=1` | `-DSF_CORECRYPTO_DIR=…`, `-DSFGOP=1` | all rules also apply after `-D`/`-U` |
+| libraries | `libPDGOP.a`, `-lPDGOP`, `libpdavd`, `-lpdavd`, `libpd_virgl_shim`, `kPDGPU_Present` | `libSFGOP.a`, `-lSFGOP`, `libsfavd`, `-lsfavd`, `libsf_virgl_shim`, `kSFGPU_Present` | R3 to R5 also apply after `lib`, `-l` and the constant prefix `k` |
+| directories named `pd` | `src/Kernel/fbsdkpi/pd/`, `${FBSDKPI_DIR}/pd` | `…/sf/`, `${FBSDKPI_DIR}/sf` | R11 |
 | two-prefix names | `PD_SF_FENCE_FIRST` | `SF_FENCE_FIRST` | R2b |
 | Classes, kexts, frameworks, constants | `PDAppleAVD`, `PDArmPlatformExpert`, `kPDAudioOutputDevice`, `libPDSurface` | `SFAppleAVD`, `SFArmPlatformExpert`, `kSFAudioOutputDevice`, `libSFSurface` | R3 |
 | All-capital names | `PDGOP`, `PDM1SPIHID`, `PDAVD_IOC_DECODE`, `HAVE_PDGOP`, `DTYPE_PDLFILE` | `SFGOP`, `SFM1SPIHID`, `SFAVD_IOC_DECODE`, `HAVE_SFGOP`, `DTYPE_SFLFILE` | R4 |
@@ -40,6 +43,9 @@ repository, a checkout of upstream PureDarwin, and the Chonkstep Darwin source.
 
 `pdm1…` needs no rule of its own: `pdm1kbd` and the other `pdm1…` boot arguments are in the R5
 vocabulary, `PDM1SPIHID` and `PDM1KeyboardHW` fall under R4 and R3.
+
+R10: where a phrase named both ("SiliconForest PureDarwin guest", `puredarwin-siliconforest-boot-kexts`)
+the result says the name once.
 
 Rules R4 to R6 and R8 work from vocabularies in `tools/sf_rename_data.json`, because `pd` followed
 by letters is usually somebody else's word (`pdev`, `pdata`, `pdrv`, `PDE`, `PDPT`). A name that is
@@ -69,6 +75,9 @@ upstream name is classified by a person once and then stays classified.
 | `pdsf`, `PDSF`, `pdsfstop` | the native-boot stage record format and its files; `sfsf` would be the result | rename by hand to `sfstage` if wanted; the stage image on SFBOOT carries the format |
 | 58 files under `m1-thunderbolt/` and `m1-sound/safetyd/tests/upstream-ref/` | Linux and speakersafetyd files taken as they are; their SHA-256 is in a provenance manifest | none: they are not ours |
 | `README.md` | written by hand: it says what is SiliconForest and what is upstream | |
+| `xnu-loader`, `kc-tools`, `iig-tools` (flake inputs `github:PureDarwin/…`, fetched by hash) | upstream's separate repositories. The two tools run on the build host and ship nowhere; the EFI loader is used by the QEMU and PC images, not on the M1 (m1n1 starts the kernel there), and prints upstream's name on QEMU's boot console | fork each the same way (`fork`), point the flake inputs at the local forks. Only worth it if a PC or QEMU image is ever released |
+| `PD_BASE` in upstream's PowerVR driver | Imagination's page-directory field, pasted into `ROGUE_MMUCTRL_PC_DATA_PD_BASE_*` | none |
+| "Redistributable PureDarwin SDK …", the installer's "PureDarwin comes as is, without warranty" strings | lines with redistribution or warranty wording are treated as notices and skipped; neither ships on the M1 | by hand if the installer is ever shipped |
 | `SF_PD`-style collisions | see section 4 | |
 
 Superseded pins: in the release directories the tool renames source files whose SHA-256 an older
@@ -83,6 +92,17 @@ One frozen file is read by the release build: `m1-native-input/revisions/002/can
 its renamed copy `m1-native-input/hid-publication-rev002.patch`, and the recipe uses that copy
 without the manifest's per-file hash comparison (those hashes are of upstream's text before the
 rename). The patch must still apply exactly.
+
+### Numbers (tool output, 17 November)
+
+| Tree | Files | Renamed or moved | Content changed | Distinct names | Occurrences |
+|---|---|---|---|---|---|
+| this repository | 12,013 tracked: 3,573 live, 8,367 frozen, 58 third-party as is, 10 launcher patches, 8 kept by name | 10,826 moved to `integrations/siliconforest/` (the live ones also renamed by the rules) | 1,720 | 3,816 | 33,603 |
+| upstream fork commit | 33,085 + corecrypto's 305 | about 1,600 | about 2,000 | 4,528 (without corecrypto) | 32,249 |
+| Chonkstep Darwin source (`vendor/` left out) | 3,675 | 0 | 20 | 26 | 164 |
+
+Other people's words that match a `pd` pattern and stay: 114 lower-case words, 98 all-capital
+ones, 5 hyphenated, 23 prefixes of `x_pd_y`, Apple's PDFKit family, 4 single identifiers.
 
 ## 4. Collisions
 
@@ -103,6 +123,10 @@ rename). The patch must still apply exactly.
 `tools/sf_rename.py inventory` prints every mapped name that already exists in the tree; the
 table above is that list, read.
 
+Not renamed, knowingly: a name inside a longer camelCase word (`initWithPDSurface:`,
+`isPDKext`). The class it mentions is renamed; the selector or variable keeps its spelling. It
+compiles (definition and use carry the same word) and is visible nowhere outside the source.
+
 ## 5. Upstream: a fork commit made by the tool
 
 Upstream reaches the build as one Git revision of a local clone (`integrations/…/rebase/pd.nix`).
@@ -110,15 +134,21 @@ The SiliconForest tree is that revision plus **one commit**: the rename, made by
 
     tools/sf_rename.py fork sources/puredarwin-rebase c713d8fb9b048a38e2242d67e29b9957ced8c495
 
-which leaves branch `siliconforest/c713d8fb` in the clone (commit
-`3d8ab02142d3d7f10e762825c447003aab65f53a`, tree `890f1410132006a21e25d8d2fc88e23d9df613aa`).
-Author, committer and date are fixed, so the same upstream revision and the same rules give the
-same commit id on any machine; this was observed (two runs, one id). `pd.nix` names that commit.
+which leaves branch `siliconforest/c713d8fb` in the clone; the commit id is `FORK_REV` in the tool
+and the `rev` in `pd.nix`. Author, committer and date are fixed, so the same upstream revision and
+the same rules give the same commit id; this was observed (two runs of one rule set, one id).
 There is no string patching at build time and nothing is patched in a binary: the compiler sees
 SiliconForest names in every file.
 
-Why a generated fork commit and not a hand-kept fork branch: 1,979 of upstream's 33,085 files
-change and 1,590 are renamed. A branch kept by hand would conflict with nearly every upstream
+Upstream's one submodule, `external/corecrypto` (another repository, with upstream's build glue
+in it: `pd/kext.cmake`, `PD_CORECRYPTO_*`), cannot be reached by a rename of the main tree. `fork`
+puts its files, at the commit upstream records, into the fork commit as ordinary files and
+renames them with the rest; `.gitmodules` goes. The flake's `path:./external/corecrypto` input
+then reads those files. corecrypto is under its own licence and is not redistributed: the fork
+commit lives in the local clone only, like the submodule did.
+
+Why a generated fork commit and not a hand-kept fork branch: about 2,000 of upstream's 33,085 files
+change and about 1,600 are renamed. A branch kept by hand would conflict with nearly every upstream
 commit. A generated commit never conflicts, because it is not merged: it is made again.
 
 Taking upstream changes later:
@@ -176,8 +206,14 @@ kernel compiler; the kernel build of the same files is covered by the collection
 ## 8. Attribution
 
 `NOTICE` at the top of the repository names every source with its licence and what was taken.
-The rename never changes a line that carries a copyright or licence notice
-(`tools/sf_rename.py licence-proof 93738b915 HEAD` fails if one did). Plan: the build installs
+The rename never changes a line that carries a copyright or licence notice: the tool skips every
+line with "copyright", "(c) year", ©, an SPDX line, "licen[sc]e", "all rights reserved", author
+and sign-off lines, the permission, redistribution and warranty sentences. The proof compares
+each file before the rename with the file it became, line by line, and fails when a line that
+differs is such a line: `tools/sf_rename.py licence-proof <base> <head>` for this repository and
+`… --tree sources/puredarwin-rebase` for the fork commit. Lines that only name a licence
+identifier inside a description (a kext's `CFBundleGetInfoString`: "GPL-2.0; … at /dev/sfavd")
+are renamed; the proof counts them and checks that the identifier is the same before and after. Plan: the build installs
 `NOTICE` as `/usr/share/doc/siliconforest/NOTICE` with the licence texts beside it, and the
 desktop menu gets "About SiliconForest", which shows it. Neither is built yet.
 
@@ -200,6 +236,8 @@ release collection (`rebase/build-kc.nix`, `omitKexts`), in addition to what is 
 | `IOVirtIOFamily`, `IOVirtIOGPU`, `IOVirtIOBlock`, `IOVirtIONet`, `SFEcamPCI` | QEMU `virt`; the QEMU image has its own collection |
 
 Not dropped without a boot on the M1. The source of all of them stays in the fork, renamed.
+The collection links without these thirteen (`nix-build rebase/build-kc.nix --arg omit '[ … ]'`:
+32.6 MB against 34.6 MB); that variant was built, never booted.
 
 ## 10. Re-running
 
@@ -210,5 +248,15 @@ Not dropped without a boot on the M1. The source of all of them stays in the for
     tools/sf_rename.py licence-proof 93738b915 HEAD
     tools/sf_rename.py safety-proof 93738b915
 
-Work that lands on `main` under old names after this is brought over by merging `main` into
-`sf-rename` and running `apply` again; `check` says when it is clean.
+`sf-rename` is `main` plus two commits: the mechanical one (exactly the output of `apply` on its
+parent) and the hand-written one (`NOTICE`, the README's head, the note in `AGENTS.md`, the M1
+install plan, the link below, the QEMU tool's switch for the audio server). While `main` keeps
+moving under old names, `sf-rename` is not merged into: it is made again from the new `main`
+(`git checkout -B sf-rename main`, `tools/sf_rename.py apply`, commit, cherry-pick the
+hand-written commit). `check` says when the result is clean; a new name it does not know is
+classified once in the vocabularies.
+
+`integrations/puredarwin` remains as a symbolic link to `siliconforest` (in the hand-written
+commit). The frozen recovery controllers under `tools/`, the scaffold's tests and every record
+name files by the old path; with the link they keep working and the required local checks of
+`AGENTS.md` keep passing without a frozen file being edited. It can go when those are retired.

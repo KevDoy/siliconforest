@@ -8,13 +8,15 @@ checkout of upstream PureDarwin and to the Chonkstep Darwin checkout.
     tools/sf_rename.py tree DIR [--skip P]...     rename the checkout DIR in place (tracked files), or a plain
                                                   copy of a source tree (every file); --skip vendor/ leaves
                                                   a path prefix alone (the compositor and terminal sources)
-    tools/sf_rename.py fork DIR REV [--branch B]  make the renamed commit of upstream REV in the clone DIR:
+    tools/sf_rename.py fork DIR REV [--branch B] [--skip P]...
+                                                  make the renamed commit of upstream REV in the clone DIR:
                                                   branch B (default siliconforest/<rev8>) = REV + one commit
                                                   with fixed author and date, so the same REV and the same
                                                   rules always give the same commit id
     tools/sf_rename.py check [--tree DIR]         fail when an old name is left outside the allow-list
-    tools/sf_rename.py licence-proof BASE [HEAD]  fail when a changed line of BASE..HEAD is a copyright or
-                                                  licence line
+    tools/sf_rename.py licence-proof BASE [HEAD] [--tree DIR]
+                                                  each file of BASE against what it became in HEAD: fail when a
+                                                  line that differs is a copyright or licence line
     tools/sf_rename.py safety-proof BASE          the safety-gated files against BASE: names only, same object code
     tools/sf_rename.py classify PATH...           how a path of this repository is treated, and why
 
@@ -58,12 +60,15 @@ INNER_DENY = {'pf', 'td', 'bmode', 'seg0', 'dyn', 'gpu', 'gcc', '__rtw89_phy_dig
 SNAKE_KEEP = {  # not ours: reason
     'pd_entry_t': 'x86 pmap type of XNU', 'PD_ENTRY_NULL': 'x86 pmap constant of XNU',
     'pd_ylmv1': 'a cycle id in a record', 'PD_low': 'rtw phy table name', 'PD_low_bd': 'rtw phy table name',
+    'PD_BASE': 'PowerVR page directory field, pasted into ROGUE_MMUCTRL_PC_DATA_PD_BASE_* (Imagination, Linux)',
 }
 # R2b the two-prefix names: PD_SF_x was "PureDarwin, SiliconForest"; one prefix is enough
 DOUBLE = {'PD_SF_': 'SF_', 'pd_sf_': 'sf_'}
 # R3  PD + CamelCase (class, kext, framework and constant names): PDFoo -> SFFoo, also behind
 #     the usual one-letter constant prefixes and lib/-l
 CAMEL_PREFIX = r'(?:lib|[kgstl])?'
+CAPS_PREFIX = r'(?:lib|k|(?<=-)l)?'          # libPDGOP.a, kPDGPU_Present, -lPDGOP
+LIB_PREFIX = r'(?:lib|(?<=-)l)?'             # libpdavd.a, -lpdavd, libpd_virgl_shim
 CAMEL_KEEP = re.compile(  # Apple's PDFKit API and plurals of PDE/PDEV/PDU: not ours
     r'^(?:lib|[kgstl])?PD(?:F(?:Access|Action|Allows|Annotation|Border|Destination|Display|Document|Kit|Outline|Page|Point|'
     r'Print|Rect|Representation|Selection|Size|Thumbnail|View|Operation|s$)|EVs$|Es$|Us$|Fs$)')
@@ -84,8 +89,8 @@ SUFFIX_VOCAB = ['indium', 'metal', 'libmetal', 'libindium', 'Iindium', 'debugser
 # Lines that are never changed: copyright and licence notices, authorship.
 PROTECTED_LINE = re.compile(
     r'copyright|\(c\)\s*(?:19|20)\d\d|©|spdx-license-identifier|licen[sc]e|all rights reserved|@author|^\s*[#/* ]*authors?:|'
-    r'signed-off-by|co-authored-by|permission is hereby granted|redistribut|warranty|@apple_.*_header_|portions (?:of|copyright)|'
-    r'taken from finch|derived from|ported from|based on',
+    r'signed-off-by|co-authored-by|permission is hereby granted|\bredistribut(?:e|ed|es|ion|ions|ing|able)\b|warranty|'
+    r'@apple_.*_header_|portions (?:of|copyright)',
     re.I)
 # Spans inside a line that are never changed.
 PROTECTED_SPAN = re.compile(
@@ -155,6 +160,9 @@ EXCEPT_FILES = {
     'README.md': 'edited by hand: it says what is SiliconForest and what is upstream PureDarwin',
     'LICENSE_STATUS.md': 'licence statement', 'tools/sf_rename.py': 'the rule table', 'tools/sf_rename_data.json': 'the vocabularies',
     'docs/design/siliconforest-naming.md': 'the naming design: it lists the old names',
+    'docs/design/siliconforest-naming-m1-install.md': 'the install plan: it describes the installed system by its old names',
+    'NOTICE': 'attribution',
+    'integrations/puredarwin': 'a symbolic link to siliconforest: the frozen controllers, tests and records name files by the old path',
 }
 # Patches against the launcher base tree (host side, outside git, hash-pinned lineage): their
 # context is that tree's text, which is not renamed in this phase.
@@ -208,7 +216,7 @@ EDITS = [
      'as the patch'),
 ]
 # The renamed commit of upstream c713d8fb (printed by `fork`).
-FORK_REV = '17aa7809952e3bc0b226f9f0e47f16e442ea5717'
+FORK_REV = 'e7110de8f0d6faa96a00e2306c03c4355dab1ba7'
 # Safety-gated sources: identifier and file-name substitution only; `safety-proof` shows the logic is untouched.
 SAFETY_FILES = [OLD_ROOT + 'm1-storage/kernel/pd_nvme_wgate.c', OLD_ROOT + 'm1-storage/kernel/pd_nvme_wgate.h',
                 OLD_ROOT + 'm1-storage/kernel-rw/pd_nvme_wring.h', OLD_ROOT + 'm1-native-boot/reboot/pd_halt_gate.h']
@@ -229,13 +237,14 @@ TOKEN = re.compile(
     r'|(?P<snake>(?:(?<![A-Za-z0-9_])(?:(?:' + INNER + r')_)?_*|(?<![A-Za-z0-9_])_+|(?<=-[DU])_*)(?:pd|PD)_(?=[A-Za-z0-9_]))'
     r'|(?P<inner>(?<![A-Za-z0-9_])_*(?:[A-Za-z0-9]+_+)+?pd_(?=[A-Za-z0-9_]))'
     r'|(?P<camel>' + START + CAMEL_PREFIX + r'PD(?=[A-Z0-9][A-Za-z0-9]*[a-z]))'
-    r'|(?P<caps>' + START + r'PD(?=[A-Z0-9]{2,}(?![A-Za-z0-9])))'
-    r'|(?P<lower>' + START + r'pd(?=(?:' + LOWER + r')(?![A-Za-z0-9])))'
+    r'|(?P<caps>' + START + CAPS_PREFIX + r'PD(?=[A-Z0-9]{2,}(?![A-Za-z0-9])))'
+    r'|(?P<lower>' + START + LIB_PREFIX + r'pd(?=(?:' + LOWER + r')(?![A-Za-z0-9])))'
+    r'|(?P<libsnake>(?<![A-Za-z0-9_])' + r'(?:lib|(?<=-)l)pd_(?=[A-Za-z0-9_]))'
     r'|(?P<hyphen>(?<![A-Za-z0-9_-])pd-(?=(?:' + HYPH + r')(?![A-Za-z0-9])))'
     r'|(?P<pdcamel>(?<![A-Za-z0-9])_*pd(?=[A-Z][A-Za-z0-9]*[a-z]))'
     r'|(?P<suffix>(?<![A-Za-z0-9])(?:' + _alt(SUFFIX_VOCAB) + r')[-_]pd(?![A-Za-z0-9_]))'
     r'|(?P<numbered>(?<![A-Za-z0-9])[0-9]{4}-pd-(?=[a-z]))'
-    r'|(?P<dir>(?<=/)pd(?=/))')
+    r'|(?P<dir>(?<=/)pd(?![A-Za-z0-9_.-]))')
 IDENT = re.compile(r'[A-Za-z0-9_]*')
 OPAQUE = re.compile(r'^[A-Za-z0-9+/=]{60,}$')          # base64 / base85 payload lines
 
@@ -285,6 +294,8 @@ def transform_line(line, counts=None):
                 if tok.lstrip('_') in SNAKE_KEEP or tok in SNAKE_KEEP:
                     return text
                 out = text[:-3] + ('sf_' if text[-3:] == 'pd_' else 'SF_')
+            elif kind == 'libsnake':
+                out = text[:-3] + 'sf_'
             elif kind == 'inner':
                 if text[:-3].strip('_') in INNER_DENY or text[:-3].rstrip('_') in INNER_DENY:
                     return text
@@ -370,7 +381,7 @@ def residual_line(line):
         bare = tok.lstrip('_')
         if m.lastgroup == 'r_lower' and bare in LOWER_FALSE:
             continue
-        if m.lastgroup == 'r_caps' and (bare in CAPS_FALSE or _garbage(bare)):
+        if m.lastgroup == 'r_caps' and (re.sub(r'^(?:lib|k|l)(?=PD)', '', bare) in CAPS_FALSE or _garbage(bare)):
             continue
         if m.lastgroup == 'r_hyphen' and bare in HYPHEN_FALSE:
             continue
@@ -394,13 +405,14 @@ RESIDUAL = re.compile(
     r'|(?P<r_snake>(?:(?<![A-Za-z0-9_])|(?<=-[DU]))_*(?:pd|PD)_[A-Za-z0-9_]+)'
     r'|(?P<r_inner>(?<![A-Za-z0-9_])_*(?:[A-Za-z0-9]+_+)+?pd_[A-Za-z0-9_]+)'
     r'|(?P<r_camel>' + START + CAMEL_PREFIX + r'PD[A-Z0-9][A-Za-z0-9]*[a-z][A-Za-z0-9_]*)'
-    r'|(?P<r_caps>' + START + r'PD[A-Z0-9]{2,}(?![A-Za-z0-9]))'
+    r'|(?P<r_caps>' + START + CAPS_PREFIX + r'PD[A-Z0-9]{2,}(?![A-Za-z0-9]))'
     r'|(?P<r_lower>' + START + r'pd[a-z0-9]{2,}(?![A-Za-z0-9]))'
+    r'|(?P<r_libsnake>(?<![A-Za-z0-9_])(?:lib|(?<=-)l)pd_[A-Za-z0-9_]+)'
     r'|(?P<r_hyphen>(?<![A-Za-z0-9_-])pd-[a-z][a-z0-9-]*[a-z0-9])'
     r'|(?P<r_pdcamel>(?<![A-Za-z0-9])_*pd[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*)'
     r'|(?P<r_suffix>(?<![A-Za-z0-9])(?:' + _alt(SUFFIX_VOCAB) + r')[-_]pd(?![A-Za-z0-9_]))'
     r'|(?P<r_numbered>(?<![A-Za-z0-9])[0-9]{4}-pd-[a-z])'
-    r'|(?P<r_dir>(?<=/)pd(?=/))')
+    r'|(?P<r_dir>(?<=/)pd(?![A-Za-z0-9_.-]))')
 
 # ---------------------------------------------------------------------------------------------
 # Files
@@ -545,7 +557,13 @@ def cmd_apply(root):
     for path, old_text, new_text, _ in EDITS:
         full = os.path.join(root, path)
         text = read(full)
-        new_text = new_text.replace('@FORK@', FORK_REV)
+        if '@FORK@' in new_text:       # already edited for another fork commit: only the id changes
+            before = re.compile(re.escape(new_text).replace(re.escape('@FORK@'), '[0-9a-f]{40}'))
+            new_text = new_text.replace('@FORK@', FORK_REV)
+            if before.search(text) and new_text not in text:
+                write(full, before.sub(lambda m: new_text, text))
+                news.append(path)
+                continue
         if new_text in text:
             continue
         if old_text not in text:
@@ -557,9 +575,10 @@ def cmd_apply(root):
                         (['add', '-f', '--pathspec-from-file=-', '--pathspec-file-nul'], news)):
         if paths:
             subprocess.run(['git', '-c', 'core.quotepath=off'] + args, cwd=root, check=True, input='\0'.join(paths).encode('utf-8', 'surrogateescape'))
-    for d, _, _ in sorted(os.walk(os.path.join(root, OLD_ROOT)), reverse=True):
-        if not os.listdir(d):
-            os.rmdir(d)
+    if not os.path.islink(os.path.join(root, OLD_ROOT.rstrip('/'))):      # afterwards a link to the new directory
+        for d, _, _ in sorted(os.walk(os.path.join(root, OLD_ROOT)), reverse=True):
+            if not os.listdir(d):
+                os.rmdir(d)
     moved = sum(1 for o, c, n in plan if o != n)
     by = {}
     for o, c, n in plan:
@@ -609,7 +628,7 @@ def cmd_tree(root, skip=()):
     return counts
 
 
-def cmd_fork(root, rev, branch):
+def cmd_fork(root, rev, branch, skip=()):
     """The renamed commit of REV, made in a temporary worktree of the clone (its own checkout is not touched)."""
     import shutil
     import tempfile
@@ -637,7 +656,7 @@ def cmd_fork(root, rev, branch):
                 else:
                     git(['add', '.gitmodules'], work)
                 git(['add', '-f', '--', sub], work)
-        cmd_tree(work)
+        cmd_tree(work, skip)
         git(['add', '-u'], work)
         env = dict(os.environ, GIT_AUTHOR_NAME='SiliconForest rename', GIT_AUTHOR_EMAIL='noreply@siliconforest.invalid',
                    GIT_COMMITTER_NAME='SiliconForest rename', GIT_COMMITTER_EMAIL='noreply@siliconforest.invalid',
@@ -729,24 +748,72 @@ def cmd_inventory(root, tree):
             print(kind + ':', ' '.join(f'{k}:{v}' for k, v in sorted(counts[kind].items(), key=lambda kv: -kv[1])))
 
 
+LICENCE_ID = re.compile(r'\b(?:A?L?GPL-[0-9.]+(?:-only|-or-later)?|Apache-2\.0|BSD-[0-9]-Clause|MPL-[0-9.]+|APSL(?:-[0-9.]+)?|ISC|MIT|OFL-[0-9.]+)\b')
 LICENCE_LINE = re.compile(r'copyright|\(c\)\s*(?:19|20)\d\d|©|spdx-license-identifier|licen[sc]e|all rights reserved', re.I)
 
 
-def cmd_licence_proof(root, base, head):
-    """Every removed/added line pair of the rename: none may be a copyright or licence line."""
-    diff = subprocess.run(['git', 'diff', '-M100%', '--no-color', '-U0', base, head], cwd=root, check=True, capture_output=True).stdout
-    diff = diff.decode('utf-8', 'surrogateescape')
-    bad, changed = [], 0
-    for line in diff.split('\n'):
-        if line.startswith(('+++', '---')) or not line.startswith(('+', '-')):
+def cmd_licence_proof(root, base, head, tree=False):
+    """Every file of BASE against the file it became in HEAD, line by line (the rename keeps the
+    number of lines): no line that differs may be a copyright or licence line, on either side.
+    Files whose line count changed (the scripted edits) are compared as a diff."""
+    import difflib
+    base_files = [l.split('\t', 1)[1] for l in git(['ls-tree', '-r', '-z', base], root).decode('utf-8', 'surrogateescape').split('\0')
+                  if l and not l.startswith('160000')]         # not submodule links
+    if tree:
+        class Plain:
+            files = base_files
+            def classify(self, p): return ('live', '')
+            def new_path(self, p, cls): return '/'.join(transform_name(c) for c in p.split('/')) if cls == 'live' else p
+        repo = Plain()
+    else:
+        repo = Repo(root)
+        repo.files = base_files
+        repo._verbatim = set()      # path mapping only; a verbatim file is compared like any other
+    head_files = set(p for p in git(['ls-tree', '-r', '--name-only', '-z', head], root).decode('utf-8', 'surrogateescape').split('\0') if p)
+
+    def blob(rev, path):
+        return subprocess.run(['git', 'show', f'{rev}:{path}'], cwd=root, capture_output=True).stdout
+
+    files = changed = lines = mentions = 0
+    bad, gone = [], []
+    for old in repo.files:
+        cls = repo.classify(old)[0]
+        new = next((c for c in (repo.new_path(old, 'live'), repo.new_path(old, 'frozen'), repo.new_path(old, 'except'), old) if c in head_files), None)
+        if new is None:
+            gone.append(old)
+            continue
+        if new == old and cls != 'live':
+            continue
+        x, y = blob(base, old), blob(head, new)
+        files += 1
+        if x == y:
             continue
         changed += 1
-        if LICENCE_LINE.search(line[1:]):
-            bad.append(line[:200])
-    for b in bad[:50]:
-        print(b)
-    print(f'licence-proof: {changed} changed lines in {base}..{head}; {len(bad)} of them carry a copyright or licence notice')
-    return 1 if bad else 0
+        if b'\0' in x[:8192]:
+            bad.append(f'{old}: a binary file changed')
+            continue
+        xs, ys = x.decode('utf-8', 'surrogateescape').split('\n'), y.decode('utf-8', 'surrogateescape').split('\n')
+        if len(xs) == len(ys):
+            pairs = [(u, v) for u, v in zip(xs, ys) if u != v]
+        else:
+            pairs = [(l[1:], l[1:]) for l in difflib.unified_diff(xs, ys, lineterm='', n=0) if l[:1] in '+-' and not l.startswith(('+++', '---'))]
+        lines += len(pairs)
+        for u, v in pairs:
+            if LICENCE_LINE.search(u) or LICENCE_LINE.search(v):
+                bad.append(f'{new}: {u[:160]}')
+            elif LICENCE_ID.search(u) or LICENCE_ID.search(v):
+                # a description that names a licence ("GPL-2.0; driver for ... at /dev/sfavd"): the identifiers must be the same
+                mentions += 1
+                if LICENCE_ID.findall(u) != LICENCE_ID.findall(v):
+                    bad.append(f'{new}: licence identifier changed: {u[:160]}')
+    for line in bad[:40]:
+        print(line)
+    if gone:
+        print('no counterpart in', head, ':', ' '.join(gone[:10]))
+    print(f'licence-proof {base}..{head}: {files} files compared with what they became, {changed} with changed content, '
+          f'{lines} changed lines; {len(bad)} of those lines carry a copyright or licence notice; '
+          f'{mentions} others name a licence identifier in a description and the identifier is the same before and after')
+    return 1 if bad or [g for g in gone if g != '.gitmodules'] else 0
 
 
 SAFETY_UNITS = [
@@ -874,11 +941,13 @@ def main():
     elif cmd == 'tree':
         cmd_tree(os.path.abspath(a[1]), [a[i + 1] for i, x in enumerate(a) if x == '--skip'])
     elif cmd == 'fork':
-        cmd_fork(os.path.abspath(a[1]), a[2], a[a.index('--branch') + 1] if '--branch' in a else None)
+        cmd_fork(os.path.abspath(a[1]), a[2], a[a.index('--branch') + 1] if '--branch' in a else None,
+                 [a[i + 1] for i, x in enumerate(a) if x == '--skip'])
     elif cmd == 'check':
         sys.exit(cmd_check(os.path.abspath(tree) if tree else root, bool(tree)))
     elif cmd == 'licence-proof':
-        sys.exit(cmd_licence_proof(root, a[1], a[2] if len(a) > 2 else 'HEAD'))
+        rest = [x for x in a[1:] if x != '--tree' and x != tree]
+        sys.exit(cmd_licence_proof(os.path.abspath(tree) if tree else root, rest[0], rest[1] if len(rest) > 1 else 'HEAD', bool(tree)))
     elif cmd == 'safety-proof':
         sys.exit(cmd_safety_proof(root, a[1]))
     elif cmd == 'classify':
