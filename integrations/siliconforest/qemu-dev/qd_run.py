@@ -48,6 +48,9 @@ class Qmp:
                 return r
 
     def shot(self, path):
+        # QD_NO_SHOTS=1: no QMP screendump (on a host where it hangs QEMU: seen on 17 November 2026 with QEMU 11.1.0)
+        if os.environ.get('QD_NO_SHOTS'):
+            return False
         r = self.cmd('screendump', filename=str(path), format='png')
         return 'return' in r and Path(path).exists()
 

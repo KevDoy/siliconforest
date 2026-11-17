@@ -55,29 +55,85 @@ and the same scan after the switch must print only files that are not ours (Appl
 applications, Firefox's bundled third-party libraries, recorded evidence under
 `/private/var/db`).
 
+## State on 17 November, evening (REBUILD; workstation only, nothing run on the M1)
+
+Four files were already changed on the M1 by hand on 17 November (the files of before kept as
+`.pre-sf`): the host name (`/usr/libexec/pd-set-hostname`, `/etc/hosts`), `SystemVersion.plist`
+ProductName, neofetch accepting both names, a draft `NOTICE` in `/usr/share/doc/siliconforest/`.
+The manifest accounts for them (rows with no recorded old hash, `keep` rows for the `.pre-sf` files).
+
+**The kernel is the open blocker.** The renamed collection built so far
+(`rebase/build-kc.nix`, the from-source default) is not the kernel the M1 runs. Kernel 48 is the
+end of a chain of recipes that each replace one module of a previously qualified collection and
+keep the others as built binaries (`m1-firefox-kernel` -> `m1-devfs-clone` -> ... ->
+`m1-wifi-pm` (47) -> `m1-ext4-journal-cache` (48); pinned store paths of old-name collections and
+a recorded build phase with a pinned hash). Compared by bundle identifier, kernel 48 has
+`PDAppleNVMeRW`, `PDAppleCIO` and `PDAppleTypeC`, which the renamed default collection lacks,
+and the chain's changes of 14 to 16 November (AVD import cache, ext4 journal cache and its
+end-of-file fix, Wi-Fi power management, the Touch Bar and HID readiness changes, killable waits,
+dma-buf fences) are not in `rebase/kernel.nix`. From `sf-rename` that chain does not evaluate (its
+assertions compare against old-name store paths). A renamed kernel equal to 48 needs the chain
+made from source once, under the new names. Until then the user space below has no kernel to run on,
+and the from-source collection must not be installed in its place (no writable-root driver).
+
+## Tools
+
+- `tools/sf_rename_stage.py SPEC.json DIR`: lays out a staged directory from built trees:
+  `DIR/root/<final path>` and `DIR/manifest.tsv` (action, path, SHA-256 expected on the system or
+  `absent`/`unknown`, new SHA-256, mode, class, note).
+- `tools/sf_rename_switch.sh [--dry-run] [--root DIR] [--name NAME] [--classes "..."] STAGE`: checks
+  every row first and changes nothing when a row is bad or a live file is neither the recorded old
+  file nor the new one; then, class by class (`state`, `direct`, `launchd`, `core`), puts each new
+  file beside its target, checks its hash there, keeps the old file under
+  `/private/var/db/<NAME>/old/` and renames the new one over the path (a replaced file is never
+  absent from its path). One journal line per change, written first.
+- `tools/sf_rename_restore.sh [--dry-run] [--root DIR] [--name NAME]`: undoes a complete or an
+  interrupted switch from the journal; the renamed files go to `.../new/`.
+- `tools/test_sf_rename_switch.sh [SHELL] [--stage S --mock ROOT]`: 16 cases against a mock root
+  (dry run changes nothing; switch; second switch does nothing; restore gives the first root byte
+  for byte; a switch stopped after each possible number of changes restores and resumes; a
+  differing live file stops the switch; classes in two runs; a separate `--name`).
+
+Two things about hashes on the running system. This kernel rewrites pointer-authentication
+instructions in the page cache of an executed signed file, and `read(2)` returns those bytes: a
+library in use does not hash to the file on the disk. The switch therefore reports `DIFF` for
+such files when it runs on the live system (`--allow-mismatch` goes on; the old file is kept by a
+hard link, the bytes of the disk). Run against the partition mounted from Linux, the hashes are
+the disk's. And the "old" hashes of the manifest are what the lab's recipes at `main` build, or
+what a hand-over records; where the M1 carries another revision the dry run says so.
+
 ## Order
 
-1. **Build what is installed** (workstation): every staged piece and the Cocoa, Finch, Firefox
-   and Homebrew-overlay builds from `sf-rename`. The audio server builds at the tip from the
-   renamed tree (17 November, SF-I; file list in `runs/m1-coord/done-AUDIO`).
-2. **Launcher** (only if a hypervisor boot is wanted as a rehearsal): the launcher base tree's
-   member gate names the old kexts; change it there and regenerate the launcher patches
-   (`docs/design/siliconforest-naming.md`, exceptions). A disk boot needs none of this.
-3. **QEMU rehearsal** of the core files (dyld, libSystem, libobjc, CoreFoundation, Foundation)
-   as for any core change (`core.lock` pipeline, SF-Y), from `sf-rename`.
-4. **Stage on the M1, running the old system**: copy the renamed user space into
-   `/private/var/db/sf-rename/new/` as a tree of final paths, with a manifest (path, sha256). Nothing
-   live is touched. The M1 keeps running.
-5. **Switch script** on the M1 (`sf-rename-switch`, to be written; run from the text console or
-   over SSH with the desktop stopped): for each file of the manifest, move the live file to
-   `/private/var/db/sf-rename/old/<path>`, move the new one in; move the old launchd plists to
-   `old/`; `sync`. The reverse direction is the same script with `old` and `new` exchanged. Files
-   every program loads (dyld, libSystem) go last and through the guarded installer of SF-Y.
-6. **Kernel**: from the M1's Linux, `sf-bootbin-install.sh <PARTUUID> boot.bin kernel.bin` with the
-   renamed kit. It keeps the present pair as `boot.bin.old`/`kernel.bin.old`.
-7. Boot SiliconForest (`asahi-bless --next`), check the surfaces of the naming note, section 6.
+1. **Audio pre-test** (separate stage `audio-pretest/`, its own journal `--name
+   sf-rename-audio-pretest`): the old-name build of the tip's audio server (12 November) on the
+   present system, to separate "new server generation" from "new names". It replaces
+   `coreaudiod` and `CoreAudio` (the other four files of that build are byte-identical to the
+   pin's); the Finch AudioToolbox family, its provider and Firefox's private family stay. Restore
+   with the restore script before the main switch, or leave it: the main manifest then shows `DIFF`
+   for those two files, which is expected.
+2. **Kernel**: a renamed collection equal to kernel 48 (see above), packed by
+   `m1-native-boot/install/build.sh`, installed from Linux with `sf-bootbin-install.sh` (the present
+   pair becomes `.old`).
+3. **Main switch** (`main/`): dry run first, on the M1 or from Linux on the mounted partition. On
+   the running system: `--classes "state direct launchd"` with the desktop stopped, then `core`
+   (or `core` from Linux: every command the script starts loads the new dyld and libSystem on the
+   old kernel once they are in place; that they run there is inferred, not observed).
+4. Reboot into the renamed kernel; check the surfaces of the naming note, section 6.
+5. After the owner confirms: remove `pdtone`, `pdvolume`, `pdplay` (already taken out by the
+   manifest's `remove` rows and kept in `old/`), `AudioToolbox.output-pd`, and `/private/var/db/sf-rename/old`.
 
-Steps 5 and 6 are done in one sitting, 5 first: between them the machine is in Linux.
+State keyed by old names (carried over by `migrate` rows; the old file stays for the rollback):
+`/Library/Preferences/SystemConfiguration/org.puredarwin.wifi.known` (the remembered Wi-Fi
+networks: without it no network after boot), `/Library/Preferences/org.puredarwin.audio.plist`
+(copied with its device keys `PDAudio:` rewritten to `SFAudio:` when it is an XML property list;
+levels survive only if the file is in the tip server's layout, otherwise the server starts from
+its defaults), `org.puredarwin.loginwindow.plist` and `org.puredarwin.argon.conf` if they exist.
+The launchd jobs `org.puredarwin.*` are replaced by their `org.siliconforest.*` files in the same
+run (`remove` and `install` rows of class `launchd`).
+
+Not rebuilt, so not in the stage: see the hand-over of 17 November in `runs/m1-coord/` and
+issue 60 (the Firefox runtime under `/usr/local/lib/siliconforest/firefox`, the Finch media
+frameworks other than AudioToolbox, Activity Monitor's libraries).
 
 ## The rollback entry
 
