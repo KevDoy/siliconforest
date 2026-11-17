@@ -16,6 +16,9 @@ user/sftone.c                  a tone through an AudioQueue (default output) or,
                                through an IOProc on one device; -l lists the devices
 user/sfvolume.c                get | set <0..100> | up | down | mute | unmute | toggle-mute
 tools/sa_boot.sh               one boot with all of it staged; tools/sa_summary.sh reads a console
+tools/sa_qemu.sh               the names check in QEMU, no M1 (guest/qemu-sysaudio-names.sh): the server
+                               starts, takes stand-in nodes at /dev/sfspeaker and /dev/sfaudio and not at
+                               the old names, clients play to it. Not sound: the machine has none
 guest/darwin-sysaudio-speakers.in  unattended proof on both real devices (no safety daemon)
 guest/darwin-sysaudio-test.in  unattended proof of the headphones alone (jack hook says plugged)
 guest/darwin-sysaudio-jack.in  the switch with /dev/null standing in for the speakers
