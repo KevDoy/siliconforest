@@ -17,7 +17,7 @@
  *     started.
  *
  *     Liveness: while it reports online it sends the lease's router an ICMP echo at every poll.
- *     When no reply has come for --live-after seconds (default 45; 0 turns the check off) it
+ *     When no reply has come for --live-after seconds (default 0: off; S seconds turns the check on) it
  *     says so, drops the association without the "left" marker, stops sf-dhcp and joins again
  *     as after any lost association. A router that stays silent is tried again after twice the
  *     time, up to ten minutes; the first reply resets that.
@@ -988,7 +988,7 @@ int main(int argc, char **argv)
     c.poll_s = 3;
     c.lockfd = -1;
     c.live_fd = -1;
-    c.live_after = 45;
+    c.live_after = 0;   /* off by default: on the M1 (17 November 2026) a second device answered ARP for the router, the echoes went nowhere and the check re-joined once a minute, resetting every connection. Ask for it with --live-after S */
     for (i = 1; i < argc && strncmp(argv[i], "--", 2) == 0; i++) {
         if (strcmp(argv[i], "--once") == 0)
             c.once = 1;
