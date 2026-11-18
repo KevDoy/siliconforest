@@ -1,6 +1,8 @@
 # SF-AB: Finch non-GUI frameworks
 
-Finch source pin: `2d9b1bb1af57e14462e4621d194929188a8845b0`, MIT OR Apache-2.0.
+Finch source pin: `2d9b1bb1af57e14462e4621d194929188a8845b0`, MIT OR Apache-2.0
+(the Finch project, github.com/calebtrueman/finch; these frameworks are Finch's work,
+adopted with its notices: `NOTICE`, `LICENSES/third-party/`).
 Recipes and patches: `integrations/puredarwin/finch/`. Candidate tests execute on the real
 M1 through CLI SSH, under `/private/var/db/sffinch/`; identical Linux-built
 reference programs run on the authorized M5. TERM5 owns screen/input checks.

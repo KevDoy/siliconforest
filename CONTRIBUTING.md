@@ -28,7 +28,7 @@ tested them. A build is compile evidence; "works" means it was observed on the m
 ## Rules for code
 
 - **Names.** New names follow [`docs/design/siliconforest-naming.md`](docs/design/siliconforest-naming.md)
-  (`sf_`, `SF…`, `org.siliconforest.`). "PureDarwin" stays wherever it means upstream.
+  (`sf_`, `SF…`, `org.siliconforest.`). The old name stays only where it means upstream PureDarwin.
 - **Style.** Follow the file you are in. Ported drivers keep the structure and names of
   their Linux or BSD original so that upstream changes can be followed.
 - **No success stubs.** Missing functionality fails or is absent; it does not return success.
@@ -45,7 +45,7 @@ tested them. A build is compile evidence; "works" means it was observed on the m
    licensed under the MIT License in [`LICENSE`](LICENSE). Put
    `SPDX-License-Identifier: MIT` and a copyright line in new files.
 2. **Ported and adopted code keeps its licence.** If your change is derived from another
-   project (a Linux driver, a BSD driver, Mesa, Finch, PureDarwin, an Apple open-source
+   project (a Linux driver, a BSD driver, Mesa, Finch, upstream PureDarwin, an Apple open-source
    release), the file carries that project's SPDX identifier and its original copyright
    notices, unchanged, and says where it came from (project, path, revision). A file ported
    from GPL-2.0 code is GPL-2.0. Add or update the `NOTICE` of the directory and, for a new
@@ -72,7 +72,7 @@ contributor licence agreement.
 
 ## Changes that belong upstream
 
-SiliconForest forks PureDarwin and ports from Asahi Linux, Mesa and others. If a fix applies
+SiliconForest is a fork of PureDarwin and ports from Asahi Linux, Mesa and others. If a fix applies
 to the upstream project as it is, please send it there too (or say so in the pull request and
 we will); we would rather carry fewer patches than more.
 

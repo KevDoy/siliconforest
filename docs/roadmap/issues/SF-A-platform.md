@@ -2,7 +2,7 @@
 One shared kernel layer for the Apple-specific building blocks every other roadmap ticket needs, with fixed interfaces, so feature work does not copy or fork them.
 
 ## Why this is first
-Sound, Bluetooth, sleep, USB-C, display and GPU all need the same pieces. Several already work but live inside the Wi-Fi kexts, hard-wired to one device. Every research report for this roadmap listed them as "exists but trapped" or "missing". If each feature agent lifts its own copy, they diverge within a week.
+Sound, Bluetooth, sleep, USB-C, display and GPU all need the same pieces. Several already work but live inside the Wi-Fi kexts, hard-wired to one device. Every research report for this roadmap listed them as "exists but trapped" or "missing". If each feature keeps its own copy, the copies diverge within a week.
 
 ## Decision
 A new kext, `PDApplePlatform` (GPL-2.0, because the DART and PMGR parts derive from Linux), under `integrations/puredarwin/m1-platform/`, publishing IOKit services that clients find by matching, plus a small C header per service. Native IOKit, ported from m1n1 (MIT) and Omacom Linux where code already exists. No LinuxKPI dependency here: the LinuxKPI-based tickets (GPU, display) get thin adapters on top of these services, not the other way round.

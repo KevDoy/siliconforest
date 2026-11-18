@@ -14,7 +14,7 @@ Useful in a report: what is affected (file, driver, tool), how to reproduce it, 
 attacker gains. There is no bounty. You will get an answer as soon as the maintainer can
 give one; this is a small project.
 
-If the problem is in code that comes from another project (PureDarwin, XNU, Linux, Mesa,
+If the problem is in code that comes from another project (upstream PureDarwin, XNU, Linux, Mesa,
 Firefox and the others in [`NOTICE`](NOTICE)), please report it to that project as well.
 
 ## Also worth reporting privately
