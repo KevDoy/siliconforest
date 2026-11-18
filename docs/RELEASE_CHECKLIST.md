@@ -1,6 +1,7 @@
 # Release checklist: what stands between this repository and "public"
 
-State: 17 November 2026, after the `release-prep` branch. Source: the open-source audit of
+State: 17 November 2026, after the `release-prep` branch. **Route decided by the owner the same
+day: this repository itself becomes public, with its history; there is no fresh repository.** Source: the open-source audit of
 the same day (31 findings, numbered F1 to F31 below) and the work done since. The repository
 is private; only the owner changes that.
 
@@ -20,35 +21,46 @@ Nothing here is legal advice.
 | Personal address in files | F14 | the three vendored packaging files use the noreply address |
 | Issue wording | | titles and bodies reviewed; see the record kept outside git (`runs/public/issue-edits.md`) |
 
+| Continuous integration | F13 | the workflow passes on a source-only checkout: `tools/ci_check.py` runs `tools/check.py` unchanged and accepts exactly one known test that needs untracked build artefacts, reporting it as not run. Passed locally with clang and gcc; **not yet seen green on GitHub's runner** |
+
 All of these are fixed **in the tree only**. Every one is still in the history of this
 repository (see 2).
 
 ## Blockers
 
-### 1. The old pull requests (F1). Owner; GitHub side.
-Pull requests 1 to 22 are from an earlier, unrelated project that used this repository.
-GitHub keeps `refs/pull/N/head` for each; three of them contain a file with the owner's
-personal email address. A repository owner cannot delete these refs, and making the
-repository public publishes them.
-- Options: a fresh repository (removes them by construction; see 2), or a request to GitHub
-  Support to remove the refs.
-- Effort: none of ours for a fresh repository; days of waiting for Support.
+### 1. The old pull requests (F1). Owner; GitHub side. Cannot be fixed in the tree.
+Pull requests 1 to 22 are from an earlier, unrelated project that used this repository (a
+Linux installer). They stay visible as closed pull requests, and GitHub keeps
+`refs/pull/N/head` for each (112 commits reachable only from them). **Three of them contain
+`release/source-reviews/20261021-neo-candidate.json`, which holds the owner's personal-domain
+email address.** Their titles, descriptions and comments were measured by the audit, not read.
+- A repository owner cannot delete a pull request or its ref. Only GitHub Support can remove
+  them (ask for the pull requests and their refs to be deleted because they expose personal
+  data; say which three). Do this **before** the switch: once public, the refs can be
+  fetched and cached by anyone and cannot be recalled.
+- If Support does not act in time, the choice is to accept that address being public or to
+  wait.
+- Effort: one support request; days of waiting.
 
-### 2. History: a fresh repository or this one. Owner.
-In history, and not removable by a commit: the old pull-request refs (1), the removed
-captures, the 110 MiB of build output, the disk identifier, the three address literals, a
-session link in 773 of 788 commit messages, 11 commits authored as `darwin-lab@localhost`,
-and 414 Actions runs with their logs.
-- Recommended by the audit: a new repository started from the cleaned tree (one commit, or a
-  filtered history that keeps blame), with this one kept private as the archive.
-- Cost: public blame and bisect are lost with a single commit; issues must be recreated
-  (GitHub does not move issues from a private to a public repository;
-  `tools/roadmap_create_issues.sh` and `docs/roadmap/issues/` exist for that).
-- Also the owner's: whether `Co-Authored-By` lines and session links stay in commit messages,
-  and whether the `upstream-*` branches (PureDarwin's public history) are published.
-- Local only, never to be pushed: branches with 11 commits under another personal address
-  (F15). Push one branch by name, never `--all` or `--mirror`.
-- Effort: about an hour once the tree is clean; a filtered history, a day.
+### 2. What becomes public with the history, and what can still be done. Owner / coordinator.
+None of this can be changed by a commit. "Irreversible" means: once the repository is
+public, assume it has been cloned.
+
+| What | Where | What can be done on GitHub before the switch | After the switch |
+|---|---|---|---|
+| 22 old pull requests, three with a personal email in a file | pull requests, `refs/pull/*` | GitHub Support only (see 1) | irreversible |
+| About 414 Actions runs, every recent one failed, with logs (runner paths and test output; the audit did not read them) | Actions tab | delete the runs (`gh run delete`, or the API in a loop; a coordinator task of minutes) or disable Actions until the first green run; logs also expire by retention | deletable at any time, but visible until deleted |
+| A `Claude-Session:` link in 773 of 788 commit messages on `main`, and `Co-Authored-By: Claude` lines | history | nothing short of rewriting history (changes every commit id; the owner chose not to). The links open only for the account that owns the sessions (inferred, not tested from another account) | irreversible |
+| 11 commits authored as `darwin-lab@localhost` | history | same | irreversible |
+| The removed Cargo build output (491 files, about 110 MiB; 9 host ELF files and 1 Mach-O of our own build) | history; the repository is about 250 MiB | same; it costs clone size, nothing else known | irreversible |
+| The removed capture images (107 files: Apple System 7.5.3 in Infinite Mac, OS/2 Warp, BeOS) | history | same. **This is the item to weigh**: other vendors' screenshots whose redistribution is not cleared stay fetchable from history | irreversible |
+| The real partition GUID that was in `tests/test_m1_boot_install.py`, and the personal address in three vendored packaging files | history | same. The GUID identifies a partition on one disk and gives no access. The address is the same one as in 1 | irreversible |
+| Branches on origin other than `main`: `pcie-wifi`, `sf-rename`, `sf-rename-audio`, `release-prep`, `ext4-fsck-clean`, `upstream-xnu-12377`, `upstream-20-5-oss`, `upstream-puredarwin-main` | branches | delete the merged or stale ones (`git push origin --delete <name>`; `sf-rename` equals `main`). Keep `ext4-fsck-clean` (unmerged fix, issue #61) and decide on `sf-rename-audio`. The `upstream-*` branches are PureDarwin's public history: harmless, but they make the repository look like a mirror; the audit recommends dropping them. Deleting a branch does not remove commits that other branches reach | deletable, but anything fetched meanwhile stays fetched |
+| Issues 23 to 61 and their 101 comments | issues | titles and bodies were edited; comments left for the owner are listed in `runs/public/issue-edits.md` (not in git) | editable at any time; edit history of a comment stays visible to readers unless the revision is deleted |
+| Repository description, topics, social preview | settings | set before the switch (proposal in the hand-back report) | editable |
+
+Local only, never to be pushed: branches with 11 commits under another personal address
+(F15). Push one branch by name, never `--all` or `--mirror`.
 
 ### 3. The vendored Chonkstep copy (F7, F18, F20, F31). Owner.
 `integrations/siliconforest/chonkstep-darwin/desktop-shell/source/` is a full copy of
@@ -101,31 +113,48 @@ lock for the 25 source checkouts.
 - Effort: three to five days, mostly mechanical, with a review per directory.
 
 ### 7. Home paths and bench addresses (F16, F17, F19). Owner decides the scope; then work.
-`/home/<user>` appears about 8,800 times in 650 files and a macOS home path about 120 times;
-five private-network bench addresses with the SSH user name are in about 90 tracked files
-(the audit counted about 290 before the rename); Linux `boot_id` values are in 43 report
-files; one install note gives the exact free block range of the owner's disk.
-- In live tools and recipes: parametrise (environment variables, a local config file).
-- In frozen reports and attempts: these are records and are not rewritten. Publish as they
-  are, move to an archive branch, or keep private (see 8).
-- Effort: two to three days for the live files.
+Counted on `release-prep`, outside frozen records (`reports/`, `archive/`, `planning/`,
+`attempts/`, `revisions/`, `validation*/`, `AGENTS.md`, the vendored Chonkstep copy):
+
+| Pattern | `tools/` | `docs/` | `integrations/` | `tests/` |
+|---|---|---|---|---|
+| Linux home path of the build machine | 0 files | 8 files, 11 places | 73 files, 346 places | 0 |
+| macOS home path of the controller | 5 files, 8 places | 5 files, 11 places | 15 files, 15 places | 1 file |
+| private-network bench addresses (`10.1.1.x`) | 5 files, 21 places | 3 files, 11 places | 74 files, 119 places | 2 files, 3 places |
+
+- What an outsider reads first (`README.md`, `CONTRIBUTING.md`, `SECURITY.md`,
+  `docs/design/`, `docs/RELEASE_CHECKLIST.md`, `LICENSES/`) contains none of them.
+- The addresses are private-network addresses and the user name is the public account
+  name: an embarrassment, not an exposure. They are nevertheless what makes the tools
+  unusable elsewhere.
+- **Not changed on this branch, on purpose:** the bench tools (`tools/pcie_iterate.sh`,
+  `tools/m1_return_linux.sh`, `tools/gpu_desktop_stop.sh` and the hash-recorded
+  `tools/m1_kernel_cycle.py`, `tools/m1_recovery.py`). They drive the one machine, are in use
+  by other work today, and could not be tested from here. Next step: read host, user and
+  controller directory from the environment (`M5_HOST` already exists in two of them) or
+  from an untracked `config/lab.local.json`, with no default address in git.
+- In `integrations/`, most of the Linux home paths are `file:///home/…` sources in Nix
+  recipes: they go away with the source lock (5), not by search and replace.
+- `docs/M1_KERNEL_CYCLE.md`, `docs/M1_RECOVERY.md` and the other `docs/M1_*.md`,
+  `docs/SPRINT_*.md` files are records of the first bring-up and are not rewritten.
+- Also: Linux `boot_id` values in 43 report files; one install note gives the exact free
+  block range of the owner's disk.
+- Effort: one day for the live tools once the bench is free; the recipes come with 5.
 
 ### 8. Frozen evidence and the agent work log (F11, F30). Owner.
 `reports/` (979 files), 126 `attempts/` files, 336 logs, `archive/`, `planning/`, the parked
 `m1-apcie-bridge` models and `AGENTS.md` (98 KiB of working instructions and log, with bench
 addresses) document how the system was brought up. No credential or device identifier was
 found in them beyond 7.
-- Options: publish, move to an archive branch, or keep in the private repository.
-- `AGENTS.md` is loaded by tools and was not touched. Suggested: keep the full file in the
-  private archive and publish a short one (rules that still hold: truthfulness, boundaries,
+- With this repository going public as it is, they are published (they are in history either
+  way). The remaining choice is whether they stay on `main` or move to an archive branch.
+- `AGENTS.md` is loaded by tools and was not touched. Suggested: move the full file to
+  `docs/history/` and keep a short `AGENTS.md` (rules that still hold: truthfulness, boundaries,
   required checks, naming, licence rules) that points to `CONTRIBUTING.md`.
 
-### 9. Continuous integration (F13). Work.
-Every recent run of the one workflow (`Offline laboratory contracts`) fails; the runs and
-logs become public with the repository (a fresh repository has none).
-- To do: make the workflow pass from a clean clone or remove it, so the first public run is
-  green. One test needs an untracked artefact.
-- Effort: half a day.
+### 9. Continuous integration (F13). Done in the tree; one check left.
+See "Done". Left: confirm the first run on GitHub is green (the runner is Ubuntu 24.04; the
+local run was on Arch), and delete or let expire the old failed runs (2).
 
 ## Medium
 
@@ -141,12 +170,13 @@ logs become public with the repository (a fresh repository has none).
 
 ## Before the switch
 
-1. Re-run the scans on the release tree: gitleaks; the value search for Wi-Fi and disk
-   identifiers; the hash comparison against `private/`; greps for home paths, private
-   addresses, session links and personal email domains; a binary inventory.
-2. Create the public repository private first; push one branch by name; inspect it on GitHub
-   (size, licence detection, no pull-request refs, no Actions runs).
-3. Enable private vulnerability reporting (`SECURITY.md` relies on it).
-4. Recreate the roadmap issues.
-5. The owner reads it as an outsider and changes visibility himself.
-6. Keep the old repository private until the new one has been checked against it.
+1. GitHub Support request for the old pull requests (1), and an answer.
+2. Merge `release-prep`; see the workflow green; delete the old Actions runs and the
+   branches that are not wanted (2).
+3. Re-run the scans on `main`: gitleaks; the value search for Wi-Fi and disk identifiers; the
+   hash comparison against `private/`; greps for session links and personal email domains.
+4. Enable private vulnerability reporting (`SECURITY.md` relies on it); set the description
+   and topics; check that GitHub detects the licence (it may show "Other": `LICENSE` has a
+   preamble before the MIT text).
+5. The owner reads the repository signed out, as an outsider would after the switch, and
+   changes visibility himself.
