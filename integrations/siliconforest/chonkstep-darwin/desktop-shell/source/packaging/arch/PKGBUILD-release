@@ -1,4 +1,4 @@
-# Maintainer: Chris Kearney <chris@kearneymail.com>
+# Maintainer: Chris Kearney <303316+chriskearney@users.noreply.github.com>
 #
 # chonkstep, from a release tarball. `.github/workflows/aur.yml` turns
 # this into the AUR's PKGBUILD on every matching v$pkgver tag, pins the

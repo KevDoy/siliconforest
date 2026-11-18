@@ -1,4 +1,4 @@
-# Maintainer: Chris Kearney <chris@kearneymail.com>
+# Maintainer: Chris Kearney <303316+chriskearney@users.noreply.github.com>
 #
 # chonkstep from the branch head - the recipe a plain `makepkg -si` in
 # this directory builds. It is the default deliberately: upstream has

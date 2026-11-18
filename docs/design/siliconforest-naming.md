@@ -235,8 +235,9 @@ are renamed; the proof counts them and checks that the identifier is the same be
 `NOTICE` as `/usr/share/doc/siliconforest/NOTICE` with the licence texts beside it, and the
 desktop menu gets "About SiliconForest", which shows it. Neither is built yet.
 
-No project licence has been chosen for the lab's own code (`LICENSE_STATUS.md`). That is the
-owner's decision and it blocks a public release, not this rename.
+The licence of SiliconForest's own code is MIT (`LICENSE`, chosen by the owner on 17 November
+2026); adopted code keeps its own (`NOTICE`, `LICENSES/`). What remains before a public release
+is in `docs/RELEASE_CHECKLIST.md`.
 
 ## 9. Kexts for hardware this machine does not have
 

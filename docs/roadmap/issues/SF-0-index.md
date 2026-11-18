@@ -1,4 +1,4 @@
-This is the entry point for anyone (human or agent) picking up SiliconForest work. Each linked ticket is self-contained: it states the architectural decision already made, why, what exists, the references to port from, work items with on-hardware acceptance tests, and what it depends on. Pick a ticket, read it and its research file, and work its items in order.
+This is the entry point for anyone picking up SiliconForest work. The status section below was written on 10 November 2026 and is kept as written; the current state is in the repository's README. Each linked ticket is self-contained: it states the architectural decision already made, why, what exists, the references to port from, work items with on-hardware acceptance tests, and what it depends on. Pick a ticket, read it and its research file, and work its items in order.
 
 SiliconForest is a fork of PureDarwin (Darwin/XNU) for Apple Silicon Macs. First target: 13" M1 MacBook Pro (J293, T8103).
 
@@ -16,9 +16,9 @@ SiliconForest is a fork of PureDarwin (Darwin/XNU) for Apple Silicon Macs. First
 | SF-C | Full CPU speed and all eight cores | m1n1 frequency call now; native core start ported from m1n1 | SF-B (B4) |
 | SF-D | Optimised kernel, quiet boot with logo, multi-user boot | DEVELOPMENT kernel, boot profiles, m1n1 logo payload, session job | SF-B (B5) |
 | SF-E | Responsive desktop on the CPU | Damage tracking and buffer reuse in our own compositor | nothing |
-| SF-F | GPU kernel driver | Omacom's Rust driver on the Rust-for-Linux crate over our Linux compatibility layer | SF-A |
-| SF-G | GPU userspace | Omacom Mesa `147a62f6190`; GL renderer in our compositor | SF-F, SF-E |
-| SF-H | Display controller | Port Omacom's Linux DCP driver (MIT option) onto the compatibility layer's DRM | SF-A |
+| SF-F | GPU kernel driver | The Asahi Linux Rust driver (as carried in Omacom's `linux-aurora`) on the Rust-for-Linux crate over our Linux compatibility layer | SF-A |
+| SF-G | GPU userspace | Mesa's `asahi` driver (Omacom's branch, `147a62f6190`); GL renderer in our compositor | SF-F, SF-E |
+| SF-H | Display controller | Port the Asahi Linux DCP driver (from Omacom's tree; MIT option) onto the compatibility layer's DRM | SF-A |
 | SF-I | Sound | Native IOKit drivers on IOAudioFamily; headphones first; speakers only behind a hard safety cap | SF-A |
 | SF-J | Bluetooth | Port the Linux controller driver (MIT option); host stack in userspace, to be chosen | SF-A (A8), SF-M |
 | SF-K | Sleep and power | Native glue around XNU's power management; idle sleep first, real suspend second | SF-A, SF-H, SF-C |
@@ -58,3 +58,20 @@ Decided per ticket, with reasons there. The pattern so far:
 
 ## Research inputs
 `docs/roadmap/research/` holds the source analysis behind these tickets (CPU and boot; sound and Bluetooth; sleep and Thunderbolt; display and GPU userspace) and `docs/GPU_PLAN_NUMBERS.md` holds the GPU measurements. They are source readings, with inferences marked; nothing in them was run on hardware.
+
+## Upstream and credit
+SiliconForest is a fork of [PureDarwin](https://github.com/PureDarwin/PureDarwin) (BSD-2-Clause for its own files). We build on one revision of its branch `upstream-xnu-12377`, track that branch, and adopt later upstream commits as patches that keep their upstream commit ids, authorship and licence. Where a ticket lists upstream commits, they are PureDarwin's work, not ours. Fixes we make to upstream's code are meant to go back to PureDarwin.
+
+The hardware drivers are ports of the [Asahi Linux](https://asahilinux.org) project's Linux drivers (GPL-2.0; some files GPL-2.0 OR MIT), kept under those licences with their notices. We read them from Omacom's `linux-aurora` integration tree, so where a ticket says "Omacom's driver" or "Omacom Mesa" it means the Asahi driver, or Mesa's `asahi` driver, as carried in that tree. Bring-up sequences come from m1n1 (MIT), the Wi-Fi driver from OpenBSD's `bwfm` (ISC).
+
+Frameworks adopted from the [Finch](https://github.com/calebtrueman/finch) project (MIT OR Apache-2.0) keep Finch's notices; each ticket that uses them carries a "Taken from Finch" table saying exactly what. The desktop is Chonkstep (GPL-3.0-only).
+
+The full record, with revisions and licences, is the `NOTICE` file; licence texts are in `LICENSES/`. If a ticket credits something wrongly, that is a bug: please say so.
+
+## Reading these tickets
+They were written as working notes, so some shorthand needs a key:
+- **The bench**: the one test machine (a 13-inch M1 MacBook Pro) and a second Mac, called "the M5" or "the controller", that starts and resets it over USB-C. Short names such as `sm03`, `dr21` or `nb07` are single boots on the bench; the records behind them are local files.
+- **Streams**: parallel lines of work, several of them carried out by AI coding agents under the owner's direction. Names such as TERM, DESK, FX, FXQA, CODEX-FX, CODEX-TB, EXT4 or "the coordinator" are streams, not people. "The owner" is the maintainer, who owns the machine.
+- **The pin, the tip**: two revisions of upstream PureDarwin (`e7aa00a6`, `c713d8fb`).
+- **Paths**: `runs/`, `private/`, `artifacts/` and `sources/` are local working directories that are not in the repository. Tickets written before 17 November 2026 say `integrations/puredarwin/…` and `PD…`/`pd…`; these are now `integrations/siliconforest/…` and `SF…`/`sf…` (`docs/design/siliconforest-naming.md`).
+- **"Proven on the M1"** means observed in a boot on that machine; "compile evidence" means it only built.

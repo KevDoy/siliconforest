@@ -1,5 +1,12 @@
 # Original BeOS reference images
 
+> **Not in this copy.** The image files this page describes (PNG and GIF captures of
+> another vendor's operating system) were removed from the copy of Chonkstep that is
+> vendored in the SiliconForest repository, because their redistribution has not been
+> cleared. This page and the JSON records beside it are kept as the provenance record.
+> The `wm-theme` tests and the `scripts/*-reference` tools that read those images do
+> not run from this copy.
+
 These are OS screenshots, not modern recreations, CSS themes, Haiku captures,
 or output from ChonkStep. `sources.json` records the original URLs and SHA-256
 of every unmodified download.
