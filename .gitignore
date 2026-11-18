@@ -21,4 +21,4 @@ result-*
 
 # Cargo build output
 target/
-target-*/
+target-host/
