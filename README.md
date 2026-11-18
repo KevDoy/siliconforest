@@ -1,12 +1,53 @@
-# SiliconForest
+<h1 align="center">SiliconForest</h1>
 
-SiliconForest is a Darwin operating system (the XNU kernel and an open-source userland) that
-boots natively on an Apple silicon Mac: today, one 13-inch M1 MacBook Pro. It is a fork of
-[PureDarwin](https://github.com/PureDarwin/PureDarwin) with drivers ported from the
-[Asahi Linux](https://asahilinux.org) project, the Chonkstep desktop, GPU acceleration through
-Mesa, and enough reimplemented system frameworks to run the unmodified Mac build of Firefox.
+<p align="center"><b>An open operating system on Darwin for Apple silicon. It boots natively on an M1 MacBook Pro and runs unmodified Mac apps.</b></p>
+
+<p align="center">
+  <a href="#what-is-this">What is this?</a> ·
+  <a href="#gallery">Gallery</a> ·
+  <a href="#status">Status</a> ·
+  <a href="#hardware">Hardware</a> ·
+  <a href="#safety">Safety</a> ·
+  <a href="#credits-and-lineage">Credits</a> ·
+  <a href="#roadmap">Roadmap</a>
+</p>
 
 ![The SiliconForest desktop in the Canopy theme: Firefox showing a WebGL page, a terminal with system information, and Activity Monitor](docs/images/desktop-canopy.jpg)
+
+> **Early, one machine, not released.** SiliconForest runs on a single 13-inch M1 MacBook Pro.
+> There is no installer or image for anyone else yet. Details under [Status](#status) and
+> [Safety](#safety).
+
+## What is this?
+
+SiliconForest is an open-source operating system built on **Darwin**: Apple's open-source XNU
+kernel with an open userland, the same foundation macOS stands on. It is a fork of
+[PureDarwin](https://github.com/PureDarwin/PureDarwin), brought up on Apple silicon with
+drivers ported from the [Asahi Linux](https://asahilinux.org) project, GPU acceleration
+through Mesa, and the Chonkstep desktop.
+
+Because it is Darwin, it can run software built for the Mac. Today that means exactly three
+applications, all as unmodified binaries on reimplemented open-source frameworks:
+**Mozilla's Firefox**, and **Apple's Terminal** and **Activity Monitor** from the author's own
+copies of macOS. It is not general Mac app compatibility, and nothing of Apple's is in this
+repository ([what that means](#software)).
+
+![A ten-second preview: the desktop changing between its four themes, then Firefox playing a video and a WebGL demo](docs/images/desktop-preview.gif)
+
+## Highlights
+
+- 🌲 **[Boots natively on the M1 MacBook Pro](#hardware)**, from its own partition on the
+  internal disk, beside macOS and Linux. No hypervisor.
+- **[A GPU-accelerated desktop](#software)**: the Chonkstep Wayland compositor on the Apple
+  M1 GPU, through the ported Asahi driver and Mesa, at 2560×1600 and 60 Hz.
+- **[Firefox](#software)**: Mozilla's unmodified Mac build, with WebGL and GPU rendering.
+- **[Hardware video decode](#hardware)**: H.264, HEVC and VP9 on the M1's video decoder.
+- **[Apple's Terminal and Activity Monitor](#software)** run as unmodified binaries.
+- **[Wi-Fi, keyboard, trackpad and the Touch Bar](#hardware)** work.
+- **[Audio](#hardware)**: speakers with speaker protection, and the headphone jack.
+- **[Four themes](#gallery)**: Clearing, Canopy, Wafer and Die Shot.
+
+## Gallery
 
 | | |
 |---|---|
@@ -14,14 +55,17 @@ Mesa, and enough reimplemented system frameworks to run the unmodified Mac build
 | Firefox playing video through the M1's hardware decoder. Video: Big Buck Bunny © Blender Foundation, CC BY 3.0. | The window menu the desktop adds to every title bar. |
 | ![The Clearing theme, a light theme with a pale forest wallpaper](docs/images/desktop-clearing.jpg) | ![The Die Shot theme, a dark theme with square window controls and a chip-layout wallpaper](docs/images/desktop-dieshot.jpg) |
 | Theme: Clearing. | Theme: Die Shot. |
+| ![The Wafer theme, a light theme with a wafer-pattern wallpaper, with Activity Monitor in front](docs/images/desktop-wafer-activity-monitor.jpg) | ![The Canopy theme, a dark theme with a night forest wallpaper](docs/images/desktop-canopy.jpg) |
+| Theme: Wafer. | Theme: Canopy. |
 
-More in [`docs/images/`](docs/images/) (the Wafer theme among them). All were captured on the
-machine on 17 November 2026. A 70-second film of the same session exists; it is not in the
-repository.
+Everything here was captured on the machine on 17 November 2026; the preview above is cut
+from a 70-second film of that session (the film itself is not in the repository; the small
+"Stop" pill at the top right is the desktop's own screen recorder). Input in the film was
+synthetic test input, not someone at the keyboard.
 
 ## Status
 
-**Early, and not released.** Read this before anything else:
+**Early, and not released.**
 
 - It runs on **one machine**: the author's 13-inch M1 MacBook Pro (2020; `MacBookPro17,1`,
   J293, T8103). No other Mac has been tried.
@@ -199,14 +243,40 @@ right matters to us.
 Some per-file licence marking is still incomplete; the open items are in
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
 
-## Following and contributing
+## Roadmap
 
-- State and plans are in the repository's issues (label `roadmap`; start at "Roadmap
-  index") and in [`docs/roadmap/`](docs/roadmap/). They were written as working notes and
-  use some shorthand; the roadmap index explains it.
-- How to contribute, and the licence rules for contributions:
-  [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports: [`SECURITY.md`](SECURITY.md).
-  Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
-- The first README of this repository (7 to 9 November 2026, when it was called
-  `darwin-lab`) is kept as
-  [`docs/history/README-2026-11-09.md`](docs/history/README-2026-11-09.md).
+Plans and state live in the issues: start at the
+[Roadmap index](https://github.com/chriskearney/siliconforest/issues/23) (label `roadmap`),
+which links one ticket per area and explains the shorthand the tickets use. The same material
+is in [`docs/roadmap/`](docs/roadmap/). The nearest goals: a smoother Firefox (a steady 60
+frames a second), the filesystem fixes, and a build other people can reproduce.
+
+What must happen before this repository is called a release is in
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md).
+
+## Get involved
+
+First, the honest part: **you cannot yet build SiliconForest end to end from a clone**, and
+there is nothing to install. The first step toward changing that is a pinned source lock and
+recipes that fetch everything by URL and hash, so that a clean machine can build the kernel
+collection and boot it in QEMU. Help with exactly that is welcome.
+
+Where else help would count:
+
+- **Other M-series Macs.** Only the 13-inch M1 MacBook Pro has run this. If you know another
+  model's hardware from the Asahi Linux side, the differences are worth writing down even
+  before anything boots.
+- **Drivers.** Bluetooth, USB-C and Thunderbolt, external displays, sleep, the camera, the
+  built-in microphones, the hardware video encoder.
+- **Frameworks.** Every Mac app that gets further needs more of AppKit, QuartzCore, CoreText
+  and friends to behave. Much of that work belongs upstream in PureDarwin or Finch, and we
+  would rather send it there.
+- **Reviews.** Of the code, and of the credits and licences. If we have credited your work
+  wrongly, tell us.
+
+How to contribute, and the licence rules for contributions:
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports: [`SECURITY.md`](SECURITY.md).
+Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
+The first README of this repository (7 to 9 November 2026, when it was called `darwin-lab`)
+is kept as [`docs/history/README-2026-11-09.md`](docs/history/README-2026-11-09.md).
