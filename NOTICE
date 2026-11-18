@@ -8,8 +8,10 @@ with the licence each declares and what SiliconForest takes from it.
 The licences are as the sources declare them; this file is a provenance record, not a legal
 review. Every file taken from another project keeps its own copyright and licence notice, and
 the SiliconForest rename never changes such a line (docs/design/siliconforest-naming.md).
-No licence has been chosen yet for the code written in this lab (LICENSE_STATUS.md); files
-ported from GPL sources are GPL as marked in each file.
+The code written for SiliconForest itself is under the MIT License (LICENSE, "Copyright (c)
+2026 Chris Kearney and the SiliconForest contributors"). That licence covers nothing else:
+files ported from GPL sources are GPL as marked in each file, and every adopted file keeps
+the licence it came with.
 
 How to read the licence statements below. "Read from" names the licence file the statement
 was read from (in this repository, or in the local clone the build uses). "Not verified"
@@ -26,8 +28,11 @@ m1-trackpad-child/multitouch/NOTICE, m1-typec/NOTICE, m1-usb-dwc3/NOTICE. Ten di
 with GPL-derived code have no NOTICE file yet (m1-rust-kext, m1-gpu-rtkit, m1-dcp,
 m1-dcp-dart, m1-lkpi-extras, m1-cpufreq, m1-thermal, m1-drm72, m1-native-boot,
 m1-avd-capacity); there the SPDX line and notices of each file are the record.
-Licence texts: upstream PureDarwin's tree carries PUREDARWIN_LICENSE.txt, APPLE_LICENSE.txt
-and APPLE_DRIVER_LICENSE.txt at its top; the vendored Chonkstep copy carries its LICENSE files;
+Licence texts: LICENSES/ holds the full text of every licence that files in this repository
+are under, and LICENSES/README.md says where each copy came from. LICENSES/third-party/ holds
+the licence files of PureDarwin, Finch, m1n1 and Indium with their copyright lines. Upstream
+PureDarwin's tree carries PUREDARWIN_LICENSE.txt, APPLE_LICENSE.txt and
+APPLE_DRIVER_LICENSE.txt at its top; the vendored Chonkstep copy carries its LICENSE files;
 each font recipe installs the font's licence text beside the font.
 
 On an installed system this text is /usr/share/doc/siliconforest/NOTICE. The licence texts
@@ -38,9 +43,11 @@ PureDarwin
 ----------
 The PureDarwin Project, https://www.puredarwin.org, https://github.com/PureDarwin/PureDarwin
 Licence: BSD-2-Clause for PureDarwin's own files ("Copyright (c) 2007-Present The PureDarwin
-Project. All rights reserved."; read from PUREDARWIN_LICENSE.txt). APPLE_LICENSE.txt (Apple
-Public Source License; its version was not read here: not verified) for the Apple-derived
-source; each file's own notice.
+Project. All rights reserved."; read from PUREDARWIN_LICENSE.txt, copied to
+LICENSES/third-party/PureDarwin-LICENSE.txt). APPLE_LICENSE.txt (Apple Public Source License,
+Version 2.0, August 6, 2003; read from the file, copied to LICENSES/APSL-2.0.txt) for the
+Apple-derived source; each file's own notice. Some of PureDarwin's newer files are
+"MPL-2.0 OR BSD-2-Clause" as their own notices say.
 APPLE_DRIVER_LICENSE.txt, also in upstream's tree, is NOT an open-source licence: it is
 Apple's "Binary Driver Software License Agreement", a restrictive licence for Apple driver
 binaries (read from the file's head). Which components of PureDarwin it covers has not been
@@ -62,10 +69,13 @@ not verified beyond each file's own notice.
 What we take: through PureDarwin: xnu-12377, IOKit families, libSystem components, dyld,
 CoreFoundation, Security, corecrypto (under its own corecrypto licence; not redistributed by
 this repository), mDNSResponder, and the other Darwin components PureDarwin builds.
-No Apple binary, framework, font, sound or resource is in this repository (the screenshots
-of Apple System 7 inside the vendored Chonkstep copy are the one exception known; see
-Chonkstep). The Apple applications run on SiliconForest (Terminal, Activity Monitor) are the
-owner's copies and are not part of it.
+No Apple binary, framework, font, sound or resource is in this repository. (Screenshots of
+Apple System 7 that were inside the vendored Chonkstep copy were removed from the tree on
+17 November 2026; they remain in the history of this repository: docs/RELEASE_CHECKLIST.md.)
+Source files of Apple's open-source releases appear only as patches against them and as five
+copies of IOHIDEventService.cpp under m1-native-input/ with the APSL 2.0 header intact.
+The Apple applications run on SiliconForest (Terminal, Activity Monitor) are the owner's
+copies and are not part of it.
 
 Asahi Linux and the Linux kernel (through Omacom linux-aurora)
 ---------------------------------------------------------------
@@ -130,8 +140,12 @@ What we take: the speaker protection model and daemon, ported to Darwin
 
 Finch
 -----
-The Finch authors (local reference clone at 2d9b1bb1)
-Licence: MIT OR Apache-2.0 (confirmed from the local clone's licence files by the audit of 17 November 2026).
+The Finch Project contributors, https://github.com/calebtrueman/finch (local clone at 2d9b1bb1)
+Licence: MIT OR Apache-2.0, "Copyright (c) 2026 The Finch Project contributors" (confirmed from
+the local clone's licence files by the audit of 17 November 2026; both files are copied to
+LICENSES/third-party/). Not every file under integrations/siliconforest/finch/ carries Finch's
+copyright line yet, and the files do not yet say which are Finch's and which are our glue:
+until that is done, treat everything in that directory as Finch's unless a file says otherwise.
 What we take: single files and functions, and whole frameworks where they fit (owner's
 decision), each with Finch's copyright and SPDX notice kept: libsysmon's model, CoreUI
 (CUIStore, CUIRendition, CUIDeepmap, CUICatalog), Foundation additions (NSDecimal, pointer
@@ -157,9 +171,12 @@ e0fe3a00), and the Darwin changes are kept as patches derived from it
 (chonkstep-source.patch.gz, integrations/siliconforest/terminal-app/compositor/*.patch, two
 patches under m1-touchbar, keyboard-only/pdhid-keyboard.patch): all of these are GPL-3.0-only
 as derived work. Whether the copy stays vendored is the owner's decision.
-That copy also holds reference screenshots of other systems (Apple System 7.5.3 taken in
-Infinite Mac, OS/2 Warp, BeOS) under docs/decoration-styles/; they are not ours and their
-redistribution has not been cleared.
+That copy held reference screenshots of other systems (Apple System 7.5.3 taken in Infinite
+Mac, OS/2 Warp, BeOS) under docs/decoration-styles/*/reference/. The 107 image files were
+removed from the tree on 17 November 2026 because their redistribution has not been cleared;
+the pages that record where they came from are kept. Tests and scripts of that copy that read
+them (crates/wm-theme/tests/beos.rs and os2warp.rs, scripts/system7-reference,
+scripts/os2warp-reference) do not run from this copy.
 
 smithay
 -------
@@ -170,9 +187,14 @@ What we take: the Wayland compositor library the desktop is built on, with chang
 Darling
 -------
 The Darling developers, https://www.darlinghq.org
-Licence: GPL-3.0 for Darling; darling-metal MPL-2.0 (not verified: no licence file read here).
-What we take: reference for framework behaviour; the Metal implementation (darling-metal,
-Indium, through PureDarwin's packaging) for the Metal work in progress.
+Licence: GPL-3.0 for the main Darling repository (not verified: no licence file read here;
+nothing of it is used). darling-metal MPL-2.0 per file, with some files CC0-1.0, ISC and MIT
+(read from the LICENSES directory of the local clone). Indium and Iridium 0BSD (read from the
+local clone's LICENSE, copied to LICENSES/third-party/). mslc MIT (as
+integrations/siliconforest/m1-metal/NOTICE records).
+What we take: the Metal implementation (darling-metal, Indium, Iridium, mslc), fetched by the
+recipes at pinned revisions for the Metal experiment; none of it is copied into this
+repository apart from one patch to Indium. Details: integrations/siliconforest/m1-metal/NOTICE.
 
 FFmpeg and x264
 ---------------
@@ -231,7 +253,8 @@ licences in this paragraph are not verified: no licence file was read for them h
 Reference material in the tree that is not ours
 ------------------------------------------------
 Retro68 and Infinite Mac were used to study and capture the classic systems the Chonkstep
-decoration styles follow; the captures are named under Chonkstep above. Linux and
+decoration styles follow; the captures themselves are no longer in the tree (see Chonkstep
+above). Linux and
 speakersafetyd reference files kept unchanged for comparison are hash-recorded in their
 directories (m1-thunderbolt/upstream, m1-sound/safetyd/tests/upstream-ref). Licences of
 Retro68 and Infinite Mac: not verified.
