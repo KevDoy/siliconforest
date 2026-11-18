@@ -9,7 +9,6 @@ wm-darwin; working tree only, not committed there. It replaces
 wm-darwin-touchbar-phase.patch's last step; that file is what 3944e53 committed.
 
 Co-Authored-By: Claude <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012FWTLisyx9BEeVrrTjgTa8
 ---
 diff --git i/crates/wm-darwin/src/autopilot.rs w/crates/wm-darwin/src/autopilot.rs
 index 2a691af..fc623ee 100644

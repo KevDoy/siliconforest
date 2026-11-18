@@ -1,5 +1,12 @@
 # Genuine System 7 reference captures
 
+> **Not in this copy.** The image files this page describes (PNG and GIF captures of
+> another vendor's operating system) were removed from the copy of Chonkstep that is
+> vendored in the SiliconForest repository, because their redistribution has not been
+> cleared. This page and the JSON records beside it are kept as the provenance record.
+> The `wm-theme` tests and the `scripts/*-reference` tools that read those images do
+> not run from this copy.
+
 Captured2026-09-11 using [Infinite Mac, System7.5.3](https://infinitemac.org/1996/System%207.5.3).
 `about-system.png` verifies **System Software7.5.3 Revision2**,128MiB RAM.
 `provenance.json` records the source, dimensions, settings and fixture/toolchain

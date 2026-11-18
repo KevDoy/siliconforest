@@ -184,7 +184,7 @@ class InstallTests(unittest.TestCase):
             self.plan()
 
     def test_live_esp_and_stage2_identity_must_match(self):
-        uuid = '159ecdaa-1ad2-4307-a721-44d69c3cb159'
+        uuid = '00000000-0000-4000-8000-0000feedface'
         install.validate_boot_identity(uuid + '\n', uuid.upper().encode() + b'\0', b'f5a82fdb-dirty\0')
         install.validate_boot_identity(uuid, uuid.encode(), install.TAG[len(b'##m1n1_ver##'):])
         with self.assertRaisesRegex(ValueError, 'ESP differs'):

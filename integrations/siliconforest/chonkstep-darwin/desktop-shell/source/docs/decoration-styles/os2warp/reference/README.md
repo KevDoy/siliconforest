@@ -1,5 +1,12 @@
 # OS/2 Warp 4 (1996) original references
 
+> **Not in this copy.** The image files this page describes (PNG and GIF captures of
+> another vendor's operating system) were removed from the copy of Chonkstep that is
+> vendored in the SiliconForest repository, because their redistribution has not been
+> cleared. This page and the JSON records beside it are kept as the provenance record.
+> The `wm-theme` tests and the `scripts/*-reference` tools that read those images do
+> not run from this copy.
+
 These are original operating-system captures and IBM bitmap resources, not
 modern themes or ChonkStep output. `sources.json` pins source URLs, the font
 archive commit, and SHA-256 hashes. The historical test oracle must never be

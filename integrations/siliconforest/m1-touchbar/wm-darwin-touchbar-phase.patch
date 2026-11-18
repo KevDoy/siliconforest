@@ -14,7 +14,6 @@ wm-darwin-volume-keys.commit) in sources/chonkstep-darwin, branch wm-darwin, com
 d92ac89; working tree only, not committed there.
 
 Co-Authored-By: Claude <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_012FWTLisyx9BEeVrrTjgTa8
 ---
 --- a/crates/wm-darwin/src/autopilot.rs
 +++ b/crates/wm-darwin/src/autopilot.rs

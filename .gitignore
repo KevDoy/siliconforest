@@ -18,3 +18,7 @@ result-*
 *.o
 *.exe
 *.bundle
+
+# Cargo build output
+target/
+target-*/

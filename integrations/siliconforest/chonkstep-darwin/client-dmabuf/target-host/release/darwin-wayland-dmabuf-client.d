@@ -1,1 +1,0 @@
-/home/chrisk/src/darwin-lab/integrations/puredarwin/chonkstep-darwin/client-dmabuf/target-host/release/darwin-wayland-dmabuf-client: /home/chrisk/src/darwin-lab/integrations/puredarwin/chonkstep-darwin/client-dmabuf/src/main.rs
