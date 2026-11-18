@@ -233,7 +233,7 @@ right matters to us.
 
 ## Licence
 
-- The original SiliconForest code is under the **MIT License**: [`LICENSE`](LICENSE).
+- The original SiliconForest code is under the **MIT License**: [`LICENSE`](LICENSE). What it covers and what keeps its own licence: [`LICENSING.md`](LICENSING.md).
 - Ported and adopted code **keeps its own licence**, marked per file and per directory:
   GPL-2.0 for the Linux-derived drivers, GPL-3.0-only for Chonkstep and its patches,
   ISC, BSD-2-Clause, MPL-2.0, APSL-2.0, MIT OR Apache-2.0 and others.
