@@ -13,7 +13,7 @@ Nothing here is legal advice.
 | Item | Audit | What was done |
 |---|---|---|
 | Licence for our own code | F2 | `LICENSE` (MIT), `LICENSES/` with every licence text in use and its source, `NOTICE` corrected, `LICENSE_STATUS.md` now a pointer |
-| Outsider documentation | F9 | `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, screenshots in `docs/images/` |
+| Outsider documentation | F9 | `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, screenshots in `docs/images/` |
 | Disk identifier in a test | F6 | the literal in `tests/test_m1_boot_install.py` is synthetic |
 | Build output in the tree | F5 | `chonkstep-darwin/client-dmabuf/target*/` removed, ignored |
 | Session links inside files | F10 (files) | removed from two `m1-touchbar` patches and one `m1-sound` commit text |

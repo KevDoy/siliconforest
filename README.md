@@ -276,7 +276,6 @@ Where else help would count:
 
 How to contribute, and the licence rules for contributions:
 [`CONTRIBUTING.md`](CONTRIBUTING.md). Security reports: [`SECURITY.md`](SECURITY.md).
-Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 The first README of this repository (7 to 9 November 2026, when it was called `darwin-lab`)
 is kept as [`docs/history/README-2026-11-09.md`](docs/history/README-2026-11-09.md).
