@@ -5,6 +5,7 @@
  *
  *   fsck-load <mounted scratch directory> <step> <seed>
  *     pair    two inode allocations in one journal transaction (the smallest reproduction)
+ *     htree   a create, a delete and a rename in two directories indexed by Linux
  *     small   many small files in several directories, half of them deleted again
  *     cache   a browser-profile-like cache: writes, atomic replacements by rename, deletes,
  *             files deleted while open
@@ -115,6 +116,21 @@ int main(int argc, char **argv)
 			if (put(path, 0)) fail("pair", path);
 		}
 		printf("FSCK_LOAD pair files=4\n");
+	} else if (!strcmp(step, "htree")) {
+		/* two directories that Linux made and indexed (run-qemu.py): h1 one index level, h2 two.
+		 * Names as the runner made them: eNNNNN, in h2 padded with 'x' to 250 characters. */
+		for (int d = 1; d <= 2; d++) {
+			char pad[256] = "";
+			if (d == 2) { memset(pad, 'x', 244); pad[244] = 0; }
+			snprintf(path, sizeof(path), "%s/h%d/new-%u", root, d, rnd() % 1000);
+			if (put(path, 100)) fail("htree create", path);
+			snprintf(path, sizeof(path), "%s/h%d/e%05u%s", root, d, 1 + rnd() % 100, pad);
+			if (unlink(path)) fail("htree unlink", path);
+			snprintf(path, sizeof(path), "%s/h%d/e%05u%s", root, d, 101 + rnd() % 100, pad);
+			snprintf(other, sizeof(other), "%s/h%d/moved", root, d);
+			if (rename(path, other)) fail("htree rename", path);
+		}
+		printf("FSCK_LOAD htree directories=2\n");
 	} else if (!strcmp(step, "small")) {
 		unsigned made = 0, gone = 0;
 		snprintf(path, sizeof(path), "%s/small", root);

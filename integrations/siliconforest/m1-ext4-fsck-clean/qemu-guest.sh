@@ -31,7 +31,7 @@ again() {
     echo "FSCK_GUEST remount unmount=$urc mount=$mrc"
     [ "$urc" = 0 ] && [ "$mrc" = 0 ] || bad=1
 }
-for step in pair small cache fill purge; do
+for step in pair htree small cache fill purge; do
     /usr/bin/fsck-load $m $step @SEED@ || bad=1
     seal $step
     again

@@ -1,7 +1,7 @@
 # ext4: a filesystem Linux's e2fsck accepts after every halt (issue 61)
 
-Kernel 48 (and 49, the same kernel under the new names) leaves two things on the disk that Linux
-`e2fsck -fn` rejects. `fsck-clean.patch` corrects both; `../m1-kernel50/build-kc.nix` is kernel 48
+Kernel 48 (and 49, the same kernel under the new names) leaves three things on the disk that Linux
+`e2fsck -fn` rejects. `fsck-clean.patch` corrects them; `../m1-kernel50/build-kc.nix` is kernel 48
 with that one member rebuilt.
 
 ## What was wrong
@@ -22,12 +22,25 @@ with that one member rebuilt.
    the blocks the failed step had already allocated stayed behind the end of the file
    (`e2fsck`: "i_size is N, should be N", rc 4). Found by the `fill` step below, not seen on the M1.
 
+3. **An indexed directory that stops being indexed keeps its index root.** Directories that Linux
+   made and indexed (HTREE: the larger system directories of the install) lose the index flag when
+   this driver changes them (`ext4_dir_drop_htree()`), but block 0 stayed an index root: ".", ".."
+   and the index behind it, with no checksum tail (interior index blocks likewise). e2fsck:
+   "directory corrupted", "directory has no checksum"; Linux's kernel refuses such a block
+   (`ext4_dirblock_csum_verify`: no space for the leaf checksum; read from its source, not run).
+   This driver read them normally. Seen on the M1 after the update of 17 November (two directories,
+   salvaged by `e2fsck -fy` on a snapshot without loss).
+
 ## The patch
 
 - the count is taken while the buffer is still held (`ext4_subr.c`);
 - the downgrade to read-only (the halt) and the unmount recompute all groups before their last
   commit (`ext4_jbd.c`), so what Linux reads does not depend on which allocation came last;
-- a write cut short by ENOSPC covers every block that was backed (`ext4_vnops.c`).
+- a write cut short by ENOSPC covers every block that was backed (`ext4_vnops.c`);
+- when a directory's index is dropped, every block of it that has no checksum tail gets one: its
+  last entry gives up 12 bytes, the old index bytes are cleared (`ext4_vnops.c`). Directories
+  that kernel 48/49 already left without a tail are not found again by this (their flag is gone):
+  `e2fsck -fy` repairs those.
 
 Nothing of the journal's order, the allocator's choices, the NVMe driver, its write gate, the fence
 or the halt gate changes.
@@ -39,27 +52,33 @@ patch against a buffer layer that frees an invalid buffer on release: 8192 befor
 control of the source text, not of the kernel.
 
 `python3 run-qemu.py --output <new dir> --phase kernel48|fixed [--runs N]` (QEMU, no M1): a fresh
-96 MiB ext4 with the M1 root's features, and in the guest `fsck-load` (`fsck-load.c`): `pair` (four
-creates in one transaction), `small` (2,000 small files, half deleted), `cache` (3,000 writes,
+128 MiB ext4 with the M1 root's features and two directories made and indexed with Linux tools
+(`debugfs`, `e2fsck -D`: one with one index level, one with two), and in the guest `fsck-load`
+(`fsck-load.c`): `pair` (four creates in one transaction), `htree` (a create, a delete and a rename
+in each indexed directory), `small` (2,000 small files, half deleted), `cache` (3,000 writes,
 replacements by rename, deletes, deletes of open files), `fill` (to ENOSPC, then 200 more attempts),
 `purge` (everything deleted), `orphans` (sealed while a process holds four deleted files open),
 `after-orphans` (mounted again and sealed). After every step the guest downgrades the filesystem
 to read-only as `/sbin/sf-halt` does and copies it to a second disk; the host runs Linux
 `e2fsck -fn` (1.47.4) on each copy.
 
-| step | kernel 48's ext4 (4 runs) | with the patch (13 runs) |
+| step | kernel 48's ext4 | with the patch (13 runs of 13) |
 |---|---|---|
-| pair | rc 12: invalid unused inodes count, root inode not allocated | rc 0 |
-| small | rc 12, the same | rc 0 |
-| cache | rc 0 | rc 0 |
-| fill | rc 4: i_size is N, should be N | rc 0 |
-| purge | rc 0 | rc 0 |
-| orphans | rc 12, as pair | rc 4 (see below) |
-| after-orphans | rc 0 | rc 0 |
+| pair | dirty in 7 runs of 7 (rc 12 or 4): invalid unused inodes count, root inode not allocated | rc 0 |
+| htree | rc 12 in 3 of 3: directory corrupted, no checksum | rc 0 |
+| small | dirty (descriptor again; after `htree` the directory stays corrupted to the end) | rc 0 |
+| cache | rc 0 without the `htree` step (4 runs) | rc 0 |
+| fill | rc 4 in 4 of 4 without the `htree` step: i_size is N, should be N | rc 0 |
+| purge | rc 0 without the `htree` step | rc 0 |
+| orphans | dirty | rc 4 (see below) |
+| after-orphans | rc 0 without the `htree` step | rc 0 |
 
 The first step that dirties the filesystem with kernel 48's driver is the first one, in every run.
-One further run of the patched driver gave no result: the harness did not start the guest command
-(the system was at its prompt; no test ran); it was repeated with the same seed.
+Kernel 48's seven runs: four before the `htree` step existed (96 MiB, seven steps), three with it.
+The patch as it is here ran 13 times with all eight steps; an earlier state of it (without the
+directory part) ran 13 times clean on the seven steps. One further run gave no result: the harness
+did not start the guest command (the system was at its prompt; no test ran); repeated with the
+same seed.
 
 `orphans` is recorded, not judged: a filesystem sealed while deleted files are open carries them on
 the on-disk orphan list (`s_last_orphan`), which is valid ext4; our next mount and Linux's free

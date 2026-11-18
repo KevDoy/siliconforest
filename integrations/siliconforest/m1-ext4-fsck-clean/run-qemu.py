@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """QEMU scratch ext4 under M1-shaped workloads; Linux e2fsck -fn on a copy after every step.
 
-  run-qemu.py --output <new directory> --phase kernel48|fixed [--runs N] [--mib 96] [--seed S]
+  run-qemu.py --output <new directory> --phase kernel48|fixed [--runs N] [--mib 128] [--seed S]
 
 kernel48: the ext4.kext of kernel 48/49. fixed: the same with fsck-clean.patch. Each run is one
 boot on a fresh filesystem; the guest (qemu-guest.sh) seals the filesystem after every step as
@@ -16,11 +16,11 @@ repo = Path(__file__).resolve().parents[3]; here = Path(__file__).resolve().pare
 nix = str(Path.home() / '.nix-profile/bin/nix-build')
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output', type=Path, required=True); p.add_argument('--phase', choices=['kernel48', 'fixed'], required=True)
-p.add_argument('--runs', type=int, default=1); p.add_argument('--mib', type=int, default=96); p.add_argument('--seed', type=int, default=1)
+p.add_argument('--runs', type=int, default=1); p.add_argument('--mib', type=int, default=128); p.add_argument('--seed', type=int, default=1)
 p.add_argument('--keep', action='store_true', help='keep the snapshot images of clean steps too')
 a = p.parse_args()
 w = a.output.resolve(); w.mkdir(parents=True, exist_ok=False)
-STEPS = ['pair', 'small', 'cache', 'fill', 'purge', 'orphans', 'after-orphans']
+STEPS = ['pair', 'htree', 'small', 'cache', 'fill', 'purge', 'orphans', 'after-orphans']
 
 def command(argv, name, timeout=900, env=None, allowed=(0,)):
     with (w / name).open('wb') as f:
@@ -50,8 +50,19 @@ for run in range(a.runs):
     with fs.open('wb') as f:
         f.truncate(a.mib << 20)
     # the features and geometry of the M1's root (dumpe2fs -h), small inode ratio so that groups fill up
-    command(['mke2fs', '-q', '-t', 'ext4', '-b', '4096', '-I', '256', '-i', '8192', '-g', '8192', '-L', 'fsckscratch',
+    command(['mke2fs', '-q', '-t', 'ext4', '-b', '4096', '-I', '256', '-i', '4096', '-g', '8192', '-L', 'fsckscratch',
              '-O', 'metadata_csum,64bit,metadata_csum_seed,^orphan_file', str(fs)], tag + '-mkfs.txt')
+    # two directories made and indexed by Linux tools, as the M1's system directories were: h1 with one
+    # index level, h2 (long names) with two. e2fsck -D builds the indexes.
+    script = w / (tag + '-htree-commands.txt')
+    script.write_text('mkdir /h1\nmkdir /h2\n' + ''.join('write /dev/null /h1/e%05d\n' % n for n in range(1, 401))
+                      + ''.join('write /dev/null /h2/e%05d%s\n' % (n, 'x' * 244) for n in range(1, 9001)))
+    command(['debugfs', '-w', '-f', str(script), str(fs)], tag + '-htree.txt', timeout=300)
+    script.unlink(); (w / (tag + '-htree.txt')).unlink()
+    command(['e2fsck', '-fyD', str(fs)], tag + '-index.txt', allowed=(0, 1))
+    flags = subprocess.run(['debugfs', '-R', 'htree_dump /h2', str(fs)], capture_output=True, text=True).stdout
+    levels = re.search(r'Indirect levels: (\d+)', flags); assert levels and int(levels[1]) >= 1, flags[:300]
+    assert 'Indirect levels: 0' in subprocess.run(['debugfs', '-R', 'htree_dump /h1', str(fs)], capture_output=True, text=True).stdout
     command(['e2fsck', '-fn', str(fs)], tag + '-precheck.txt')
     command(['python3', str(repo / 'integrations/siliconforest/m1-storage/tools/dr_qemu_disk.py'), str(fs), str(disk)], tag + '-disk.txt')
     layout = re.search(r'first=(\d+) blocks=(\d+)', (w / (tag + '-disk.txt')).read_text()); assert layout

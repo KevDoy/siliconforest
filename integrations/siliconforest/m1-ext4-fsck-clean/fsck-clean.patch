@@ -41,7 +41,86 @@
  		error = e4j_write_jsb(emp, j, 0, j->j_sequence);
 --- a/src/Kernel/Extensions/ext4/ext4_vnops.c
 +++ b/src/Kernel/Extensions/ext4/ext4_vnops.c
-@@ -1206,11 +1206,15 @@
+@@ -451,6 +451,70 @@
+ }
+ 
+ /*
++ * SiliconForest: the index blocks of a directory that stops being indexed. An HTREE root is
++ * ".", ".." and the index in the rest of the block; an interior node is one empty entry over
++ * the whole block. Neither has the checksum tail of an ordinary directory block (the index
++ * carries its own), so with metadata_csum a directory left like that is "corrupted" for
++ * e2fsck and unreadable for Linux (no space for the leaf checksum). The last entry of every
++ * such block gives up 12 bytes for the tail, the old index bytes are cleared, the block is
++ * checksummed as the plain directory block it now is. The caller holds em_fs_lock.
++ */
++static void
++ext4_dir_unindex_blocks(struct ext4node *dep)
++{
++	struct ext4mount *emp = dep->e_mount;
++	uint32_t bs = emp->em_blocksize;
++	uint64_t off;
++
++	if (!emp->em_has_metadata_csum)
++		return;
++	for (off = 0; off < dep->e_size; off += bs) {
++		struct ext4_dir_entry_2 *de = NULL;
++		uint64_t pblk = 0;
++		buf_t bp = NULL;
++		uint32_t p = 0, keep;
++		uint16_t reclen = 0;
++		char *data;
++
++		if (ext4_bmap(emp, dep->e_ino, &dep->e_raw, (uint32_t)(off / bs), &pblk) != 0 || pblk == 0)
++			continue;
++		if (ext4_blkread(emp, pblk, &bp) != 0)
++			continue;
++		data = (char *)buf_dataptr(bp);
++		if (ext4_dir_block_has_tail(emp, data)) {
++			buf_brelse(bp);
++			continue;
++		}
++		// the last entry of the chain: the one that ends with the block
++		while (p < bs) {
++			de = (struct ext4_dir_entry_2 *)(data + p);
++			reclen = le16(de->rec_len);
++			if (reclen < 8 || (reclen & 3) != 0 || p + reclen > bs) {
++				de = NULL;
++				break;
++			}
++			if (p + reclen == bs)
++				break;
++			p += reclen;
++		}
++		keep = de == NULL ? 0 : de->inode == 0 ? 12 : ext4_dir_rec_len(de->name_len);
++		if (de == NULL || p + reclen != bs || reclen < keep + EXT4_DIR_ENTRY_TAIL_SIZE) {
++			E4LOG("unindex: directory %llu block %llu has no room for a checksum tail, left as it is",
++			    (unsigned long long)dep->e_ino, (unsigned long long)(off / bs));
++			buf_brelse(bp);
++			continue;
++		}
++		if (de->inode == 0)
++			de->name_len = 0;
++		memset((char *)de + (de->inode == 0 ? 8 : keep), 0, reclen - (de->inode == 0 ? 8 : keep));
++		de->rec_len = le16((uint16_t)(reclen - EXT4_DIR_ENTRY_TAIL_SIZE));
++		ext4_dir_block_init_tail(emp, data);
++		ext4_dir_block_csum_set(emp, dep->e_ino, &dep->e_raw, data);
++		(void)ext4_meta_bwrite(emp, bp);
++	}
++}
++
++/*
+  * Give up a directory's HTREE index before changing its contents.
+  */
+ static void
+@@ -462,6 +526,7 @@
+ 		return;
+ 	dep->e_raw.i_flags = le32(flags & ~EXT4_INDEX_FL);
+ 	(void)ext4_write_inode(dep->e_mount, dep->e_ino, &dep->e_raw);
++	ext4_dir_unindex_blocks(dep);
+ }
+ 
+ static int
+@@ -1206,11 +1271,15 @@
  	return ext4_ensure_block_alloc(ep, lblk, pblk_out, NULL);
  }
  
@@ -59,7 +138,7 @@
  
  	while (count > 0) {
  		uint64_t pblk = 0;
-@@ -1234,10 +1238,12 @@
+@@ -1234,10 +1303,12 @@
  				if (error)
  					return error;
  				*grew = true;
@@ -72,7 +151,7 @@
  	}
  	return 0;
  }
-@@ -1290,18 +1296,24 @@
+@@ -1290,18 +1361,24 @@
  	last_lblk = (uint32_t)((end - 1) / bs);
  	mapped_end = (uint64_t)offset;
  	while (lblk <= last_lblk) {
@@ -100,7 +179,7 @@
  		lblk += n;
  		mapped_end = (uint64_t)lblk * bs;
  		if (lblk == 0)
-@@ -2261,10 +2273,11 @@
+@@ -2261,10 +2338,11 @@
  		return error;
  	if ((pblk == 0 || unwritten) && (ap->a_flags & VNODE_WRITE)) {
  		bool grew = false;
