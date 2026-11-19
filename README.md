@@ -21,10 +21,10 @@
 
 <a id="licensing-warning"></a>
 
-> **Warning: this tree is a licensing mess.** It is not licensed as a whole under the MIT
-> License. Licences are mixed across directories, and there are no reliable per-file headers
-> or SPDX tags. A credits list does not tell you which terms apply to which file. Read
-> [`LICENSE`](LICENSE) before copying anything.
+> SiliconForest contains code under several licenses. Original SiliconForest code is
+> MIT-licensed ([`LICENSE-SILICONFOREST-MIT`](LICENSE-SILICONFOREST-MIT)). Third-party code
+> retains its existing terms. Some files still need provenance review. The repository is not
+> licensed as a whole under MIT. Read [`LICENSE`](LICENSE) before copying anything.
 
 ## What is this?
 
@@ -194,8 +194,9 @@ backup and a second computer. SiliconForest does not replace Apple's firmware, s
 own restore from a second Mac should remain possible (not tested here); it erases the disk.
 
 The software is provided **as is, without warranty of any kind**. [`LICENSE`](LICENSE) is a
-notice, not one licence for the tree; the texts that were copied in are in
-[`LICENSES/`](LICENSES/).
+notice for the tree. The MIT grant for original SiliconForest code is
+[`LICENSE-SILICONFOREST-MIT`](LICENSE-SILICONFOREST-MIT). Other texts that were copied in are
+in [`LICENSES/`](LICENSES/).
 
 ## Credits and lineage
 
@@ -204,9 +205,9 @@ licences and what was taken from each, is [`NOTICE`](NOTICE); the short version:
 
 Crediting a project in this list does not satisfy its licence. GPL-2.0 and APSL-2.0 code,
 and the other licences in this tree, carry their own terms: the licence text, copyright
-notices, source availability, and the APSL's modification notices. The code is mixed
-together without per-file separation, so this list cannot tell you which terms apply to
-which file. See the [licensing warning](#licensing-warning) above and [`LICENSE`](LICENSE).
+notices, source availability, and the APSL's modification notices. Files from different
+sources sit in the same directories, so this list does not say which terms apply to which
+file. See the [licensing note](#licensing-warning) above and [`LICENSE`](LICENSE).
 
 - **[PureDarwin](https://www.puredarwin.org)** is the base this project forks: a buildable,
   bootable Darwin with a Nix build, its own drivers, a Linux/FreeBSD compatibility layer
@@ -254,46 +255,25 @@ right matters to us.
 ## Licence
 
 This repository is **not** licensed as a whole under the MIT License.
-[`LICENSE`](LICENSE) is a notice. The same warning as at the top of this file:
-the tree is not organized by licence, and headers and SPDX tags are not reliable.
-Check each file's provenance before reuse.
+[`LICENSE`](LICENSE) is the notice. Original SiliconForest code is MIT-licensed
+under [`LICENSE-SILICONFOREST-MIT`](LICENSE-SILICONFOREST-MIT). Third-party code
+retains its existing terms. Some files still need provenance review. See the
+note at the top of this file.
 
-- MIT applies only where a file really is original SiliconForest code under that
-  licence. The text is [`LICENSES/MIT.txt`](LICENSES/MIT.txt). That has not been
-  shown file by file. See [`LICENSING.md`](LICENSING.md).
+- The MIT grant and copyright notice:
+  [`LICENSE-SILICONFOREST-MIT`](LICENSE-SILICONFOREST-MIT). It covers original
+  SiliconForest code only. [`LICENSES/MIT.txt`](LICENSES/MIT.txt) is a template
+  with placeholders, not that grant. Scope: [`LICENSING.md`](LICENSING.md).
 - Other code keeps the licence of the code it derives from: APSL-2.0, GPL-2.0,
   GPL-3.0-only, and the others named in [`LICENSES/`](LICENSES/) and
-  [`NOTICE`](NOTICE). Those names are not a map. Full texts:
+  [`NOTICE`](NOTICE). Those names are not a per-file map. Full texts:
   [`LICENSES/`](LICENSES/).
 - Crediting a source in [Credits](#credits-and-lineage) does not satisfy its
-  licence. GPL-2.0 and APSL-2.0 carry their own terms, and this tree does not
-  separate files by those terms.
-- What this repository left unfinished, including the release to-do note:
-  [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) (items 4 and 6) and
-  the pending-licence line in [`AGENTS.md`](AGENTS.md). Status:
-  [`LICENSE_STATUS.md`](LICENSE_STATUS.md).
-
-### Unresolved: distribution of combined binaries
-
-Open question. Not legal advice. This repository has no answer.
-
-GPL-2.0-only kexts ported from Asahi Linux are linked into the same kernel
-collection as APSL-2.0 XNU. The FSF's licence list describes APSL 2.0 as
-incompatible with the GPL
-([#apsl2](https://www.gnu.org/licenses/license-list.html#apsl2)). Distributing
-that collection may not be possible under both licences at once. A PureDarwin
-maintainer asked this on
-[issue 23](https://github.com/chriskearney/siliconforest/issues/23#issuecomment-6984090313).
-[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) item 4 already left it
-open.
-
-The same list describes Apache-2.0 as incompatible with GPL version 2
-([#apache2](https://www.gnu.org/licenses/license-list.html#apache2)). Finch is
-MIT OR Apache-2.0. No build here was found that links Finch into a GPL-2.0-only
-kext, and no file records a choice of the MIT side or the Apache-2.0 side. A
-binary that takes the Apache-2.0 side together with GPL-2.0-only code is
-unresolved as well. So is the GPL-3.0-only desktop linking the APSL libSystem,
-which item 4 also notes. Detail is in [`LICENSE`](LICENSE).
+  licence. GPL-2.0 and APSL-2.0 carry their own terms.
+- Provenance still to review, and the open questions about distributing a
+  combined kernel collection, are in
+  [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) (items 4 and 6).
+  Status: [`LICENSE_STATUS.md`](LICENSE_STATUS.md).
 
 ## Roadmap
 

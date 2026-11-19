@@ -3,20 +3,22 @@
 Copies of licence texts. They are not a map of which file is under which text.
 
 The root [`LICENSE`](../LICENSE) is a notice: this repository is not licensed as a
-whole under MIT, and the tree is not organized by licence. **Warning: this tree is
-a licensing mess.** Headers and SPDX tags are not reliable, and a directory
+whole under MIT. Original SiliconForest code is MIT-licensed under
+[`LICENSE-SILICONFOREST-MIT`](../LICENSE-SILICONFOREST-MIT), which carries the
+project's copyright notice. `MIT.txt` in this directory is a generic template
+with `<year>` and `<copyright holders>` placeholders. It is not that grant.
+Third-party code retains its existing terms. Some files still need provenance
+review ([`docs/RELEASE_CHECKLIST.md`](../docs/RELEASE_CHECKLIST.md)). A directory
 `NOTICE` does not assign a licence to every file under it. Which licence a file
-is under is the licence of the code that file derives from, which you have to
-check in the file. Provenance, with its own "not verified" marks, is the
-top-level [`NOTICE`](../NOTICE). What this repository left unfinished is
-[`docs/RELEASE_CHECKLIST.md`](../docs/RELEASE_CHECKLIST.md).
+is under is the licence of the code that file derives from. Provenance, with its
+own "not verified" marks, is the top-level [`NOTICE`](../NOTICE).
 
 These are unmodified copies. Each was taken from a copy that was already on the build
 machine on 17 November 2026; none was typed in or fetched for this purpose.
 
 | File | SPDX identifier | Used here by | Copied from |
 |---|---|---|---|
-| `MIT.txt` | MIT | original SiliconForest code; m1n1, speakersafetyd, Mesa patches, smithay, dual-licensed Asahi files | the Rust distribution's licence set (`/usr/share/doc/rustc/licenses/MIT.txt`, Arch package `rust` 1.98.0) |
+| `MIT.txt` | MIT | template text also used by m1n1, speakersafetyd, Mesa patches, smithay, and dual-licensed Asahi files. The named SiliconForest grant is [`LICENSE-SILICONFOREST-MIT`](../LICENSE-SILICONFOREST-MIT), not this placeholder file | the Rust distribution's licence set (`/usr/share/doc/rustc/licenses/MIT.txt`, Arch package `rust` 1.98.0) |
 | `GPL-2.0-only.txt` | GPL-2.0-only (also the text of GPL-2.0-or-later) | drivers ported from Linux and Asahi Linux, the AVE driver, FFmpeg/VLC glue | SPDX licence list as packaged by Arch (`/usr/share/licenses/spdx/`, package `licenses` 20240728) |
 | `Linux-syscall-note.txt` | Linux-syscall-note (exception) | two UAPI headers taken from Linux | same package, `exceptions/` |
 | `GPL-3.0-only.txt` | GPL-3.0-only | the vendored Chonkstep source and the patches derived from it | same package |

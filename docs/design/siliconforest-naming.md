@@ -235,10 +235,11 @@ are renamed; the proof counts them and checks that the identifier is the same be
 `NOTICE` as `/usr/share/doc/siliconforest/NOTICE` with the licence texts beside it, and the
 desktop menu gets "About SiliconForest", which shows it. Neither is built yet.
 
-MIT was chosen for SiliconForest's own original code on 17 November 2026. The text is
-`LICENSES/MIT.txt`. The root `LICENSE` is a notice: the repository is not under that
-licence as a whole, adopted code keeps the licence it came with (`NOTICE`, `LICENSES/`),
-and per-file marking was not finished. What remains is in `docs/RELEASE_CHECKLIST.md`
+MIT was chosen for SiliconForest's own original code on 17 November 2026. The grant
+and copyright notice are `LICENSE-SILICONFOREST-MIT`. `LICENSES/MIT.txt` is a template
+with placeholders. The root `LICENSE` is a notice: the repository is not under that
+licence as a whole, and adopted code keeps the licence it came with (`NOTICE`, `LICENSES/`).
+Some files still need provenance review. What remains is in `docs/RELEASE_CHECKLIST.md`
 and `LICENSE_STATUS.md`.
 
 ## 9. Kexts for hardware this machine does not have

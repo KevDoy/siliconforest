@@ -43,11 +43,13 @@ tested them. A build is compile evidence; "works" means it was observed on the m
 
 1. **New original code is offered as MIT.** By contributing new code that you wrote,
    and that is not derived from another project, you agree it is licensed under the
-   MIT License. The text is [`LICENSES/MIT.txt`](LICENSES/MIT.txt). Put
+   MIT License. The text, with the project's copyright notice, is
+   [`LICENSE-SILICONFOREST-MIT`](LICENSE-SILICONFOREST-MIT). Put
    `SPDX-License-Identifier: MIT` and a copyright line in new files. The tree as it
-   stands is not under that licence as a whole: [`LICENSE`](LICENSE) is a notice,
-   and headers already in the tree are not reliable. This rule does not relicense
-   existing files.
+   stands is not under that licence as a whole: [`LICENSE`](LICENSE) is a notice.
+   Some existing files still need provenance review
+   ([`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)). This rule does not
+   relicense existing files.
 2. **Ported and adopted code keeps its licence.** If your change is derived from another
    project (a Linux driver, a BSD driver, Mesa, Finch, upstream PureDarwin, an Apple open-source
    release), the file carries that project's SPDX identifier and its original copyright
