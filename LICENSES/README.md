@@ -1,9 +1,15 @@
 # Licence texts
 
-The full text of each licence that files in this repository are under. Which licence a
-file is under is stated in the file (SPDX line and notices), then in the `NOTICE` of its
-directory, then in the top-level [`NOTICE`](../NOTICE). The original SiliconForest code is
-MIT: see [`LICENSE`](../LICENSE).
+Copies of licence texts. They are not a map of which file is under which text.
+
+The root [`LICENSE`](../LICENSE) is a notice: this repository is not licensed as a
+whole under MIT, and the tree is not organized by licence. **Warning: this tree is
+a licensing mess.** Headers and SPDX tags are not reliable, and a directory
+`NOTICE` does not assign a licence to every file under it. Which licence a file
+is under is the licence of the code that file derives from, which you have to
+check in the file. Provenance, with its own "not verified" marks, is the
+top-level [`NOTICE`](../NOTICE). What this repository left unfinished is
+[`docs/RELEASE_CHECKLIST.md`](../docs/RELEASE_CHECKLIST.md).
 
 These are unmodified copies. Each was taken from a copy that was already on the build
 machine on 17 November 2026; none was typed in or fetched for this purpose.
@@ -29,7 +35,7 @@ copyright lines, as those projects publish them:
 
 | File | Project | Copied from |
 |---|---|---|
-| `third-party/PureDarwin-LICENSE.txt` | PureDarwin (BSD-2-Clause, "Copyright (c) 2007-Present The PureDarwin Project") | `PUREDARWIN_LICENSE.txt` at upstream `c713d8fb` |
+| `third-party/PureDarwin-LICENSE.txt` | PureDarwin's own licence file only (BSD-2-Clause, "Copyright (c) 2007-Present The PureDarwin Project"). The PureDarwin tree is mixed: MPL-2.0, MPL-2.0 OR MIT, tri-licensed files, and APSL-2.0 Darwin code, per the maintainer comment linked from [`LICENSE`](../LICENSE). Per-file terms are PureDarwin's headers. | `PUREDARWIN_LICENSE.txt` at PureDarwin `c713d8fb` |
 | `third-party/Finch-LICENSE-MIT.txt`, `third-party/Finch-LICENSE-APACHE.txt` | Finch ("Copyright (c) 2026 The Finch Project contributors") | the local clone at `2d9b1bb` |
 | `third-party/m1n1-LICENSE.txt` | m1n1 (MIT, "Copyright The Asahi Linux Contributors") | the local clone at `121fcbf`; m1n1's bundled third-party parts have further licence files in its own tree |
 | `third-party/Indium-LICENSE-0BSD.txt` | Indium and Iridium (0BSD) | the local clone at `e3a1f22`; only one patch to Indium is in this repository |

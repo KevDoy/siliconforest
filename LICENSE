@@ -1,21 +1,242 @@
-MIT License
+SILICONFOREST LICENSING NOTICE
 
-Copyright (c) 2026 Chris Kearney and the SiliconForest contributors
+Warning: this tree is a licensing mess.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The code is not organized by licence. Different licences are mixed across
+directories. There are no reliable per-file headers or SPDX tags. A directory
+name, a NOTICE file, a credits list, or an SPDX line on a neighbouring file
+does not tell you the licence of the file in front of you. Anyone reusing any
+of this code has to check that file's own provenance: what the file itself
+says, if it says anything, and where the text came from.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+This repository is not licensed as a whole under the MIT License.
+
+This file is a notice. It is not a grant of rights in the tree, and it does
+not change the licence of any file. The plain MIT text that used to be the
+whole of this file applied, on this repository's own statement, only to original
+SiliconForest code. Putting that text here made the repository look as if one
+MIT grant covered everything in it. It does not.
+
+Each file or component is governed by the licence of the code it derives from,
+on that code's own terms. Where it is unclear what a file derives from, or
+which licence that source used, this notice does not decide. Do not guess.
+
+
+Crediting a source does not satisfy its licence.
+
+README.md ("Credits and lineage") and NOTICE name upstream projects. That is
+attribution. It is not compliance. GPL-2.0 and APSL-2.0 code, and the other
+licences in this tree, carry their own terms: the licence text, copyright
+notices, source-availability conditions, and the APSL's modification notices.
+Because the code is mixed together without per-file separation, a credits list
+cannot tell you which terms apply to which file.
+
+
+Licences named in this tree
+---------------------------
+
+Full texts that were copied into the repository are in LICENSES/. LICENSES/README.md
+says where each copy was taken from. Those files are the texts. They are not a
+map of which source file is under which text.
+
+Present as texts in LICENSES/, and named by NOTICE or by LICENSES/README.md as
+used by some code here:
+
+  MIT                  LICENSES/MIT.txt
+  APSL-2.0             LICENSES/APSL-2.0.txt
+  GPL-2.0-only         LICENSES/GPL-2.0-only.txt
+                       (also the text of GPL-2.0-or-later, as that README notes)
+  GPL-3.0-only         LICENSES/GPL-3.0-only.txt
+  LGPL-2.1-or-later    LICENSES/LGPL-2.1-or-later.txt
+  Apache-2.0           LICENSES/Apache-2.0.txt
+  MPL-2.0              LICENSES/MPL-2.0.txt
+  BSD-2-Clause         LICENSES/BSD-2-Clause.txt
+  ISC                  LICENSES/ISC.txt
+  OFL-1.1              LICENSES/OFL-1.1.txt
+  Linux-syscall-note   LICENSES/Linux-syscall-note.txt
+  0BSD                 LICENSES/third-party/Indium-LICENSE-0BSD.txt
+
+LICENSES/third-party/ also holds licence files copied with their copyright
+lines: PureDarwin's own PUREDARWIN_LICENSE.txt (BSD-2-Clause, "Copyright (c)
+2007-Present The PureDarwin Project"), Finch (MIT and Apache-2.0, "Copyright
+(c) 2026 The Finch Project contributors"), and m1n1 (MIT, "Copyright The Asahi
+Linux Contributors"). The PureDarwin file is the project's licence file. It
+is not the licence of every file in PureDarwin. See "The PureDarwin base is
+itself mixed" below.
+
+Named by LICENSES/README.md as used by a file here, with no template text in
+LICENSES/:
+
+  BSD-3-Clause         one header is (GPL-2.0+ WITH Linux-syscall-note) OR BSD-3-Clause
+  Swift-exception      Apache-2.0 WITH Swift-exception, one file
+
+Apple's "Binary Driver Software License Agreement" is named in NOTICE. It is
+not an open-source licence. Its text is not in this repository. NOTICE says
+which PureDarwin components it covers has not been established here. Nothing
+in this repository is offered under it.
+
+Other licences are named in NOTICE and marked there as not verified, because
+no licence file was read for them in this repository (Mesa, parts of
+drm-kmod and FreeBSD, Firefox as run here, neofetch, several fonts, and
+components reached only through the build). Those statements are leads, not
+assignments.
+
+
+What "MIT for original SiliconForest code" does and does not mean
+-----------------------------------------------------------------
+
+LICENSING.md says the MIT License covers files written for
+SiliconForest that were not ported, adopted, or copied. The copyright line
+that stood in this file was:
+
+  Copyright (c) 2026 Chris Kearney and the SiliconForest contributors
+
+That line is the notice this repository attached to that claim. It is not a copyright
+notice for the rest of the tree. The MIT terms, where they actually apply to a
+file, are the text in LICENSES/MIT.txt together with that file's own copyright
+notice.
+
+The claim is not established file by file:
+
+  - AGENTS.md still says: "License selection for original code is pending;
+    do not relicense upstream code."
+  - docs/RELEASE_CHECKLIST.md item 6 says about 1,975 files carry
+    SPDX-License-Identifier: MIT with no copyright line, and that those tags
+    were not confirmed as this project's to apply. The same item says many
+    GPL, ISC, BSD, and MPL files have no copyright or author line, and that
+    ten directories with GPL-derived code have no NOTICE file.
+  - Many PROVENANCE notes under integrations/siliconforest/ still say
+    original-code licence selection is pending.
+  - A large part of the tree has no SPDX line at all. core/, contracts/,
+    probe/, userspace/, specs/, most of tools/ and tests/, and many
+    integrations/siliconforest/ leaves are in that set. Their licence is
+    unclear from the file.
+
+Where a file is in fact original SiliconForest code and was in fact placed
+under MIT, MIT applies to that file. Where you cannot show both, do not treat
+the file as MIT. An SPDX MIT tag with no copyright line is not that showing.
+
+
+Other facts the tree itself records
+-----------------------------------
+
+NOTICE is a provenance record. Its own header says it is not a legal review,
+and many of its entries are marked "not verified". Per-directory NOTICE files
+are more specific where they exist, and NOTICE says ten directories with
+GPL-derived code do not have one: m1-rust-kext, m1-gpu-rtkit, m1-dcp,
+m1-dcp-dart, m1-lkpi-extras, m1-cpufreq, m1-thermal, m1-drm72, m1-native-boot,
+m1-avd-capacity.
+
+Code taken from Linux and Asahi Linux is recorded as GPL-2.0-only, or as a
+dual licence where the file says so (GPL-2.0-only OR MIT, and similar). The
+vendored Chonkstep copy's LICENSE file and its Cargo.toml
+(`license = "GPL-3.0-only"`) are GPL-3.0-only; NOTICE also records MIT
+licence files inside that copy (dock/bindings and examples). Patches to
+Apple's open-source releases and the copies of IOHIDEventService.cpp under
+m1-native-input/ carry the APSL-2.0 header. Finch is recorded as
+MIT OR Apache-2.0. OpenBSD bwfm is recorded as ISC. m1n1 is recorded as MIT.
+These are the statements in NOTICE and in the licence files. They are not a
+substitute for opening the file. Directories mix these together.
+
+
+The PureDarwin base is itself mixed
+------------------------------------
+
+SiliconForest's base tree is PureDarwin (NOTICE: branch upstream-xnu-12377 at
+c713d8fb). That tree is not BSD-2-Clause as a whole.
+
+PUREDARWIN_LICENSE.txt, copied to LICENSES/third-party/PureDarwin-LICENSE.txt,
+is BSD-2-Clause for the PureDarwin Project's own licence file. A PureDarwin
+maintainer wrote, on this repository's roadmap issue, that not all of PureDarwin
+is BSD-2-Clause: it is a mix of several licences, including pure MPL-2.0,
+MPL-2.0 OR MIT, and some tri-licensed files:
+
+  https://github.com/chriskearney/siliconforest/issues/23#issuecomment-6984090313
+
+This repository has not listed those tri-licences, and it does not assign
+them to files from that sentence. NOTICE had already recorded a further case
+from files' own notices: some newer PureDarwin files are MPL-2.0 OR
+BSD-2-Clause. Apple's XNU and the other Darwin code PureDarwin builds are
+APSL-2.0, or the other licence that file's own header names (NOTICE's Apple
+section; LICENSES/APSL-2.0.txt, from upstream's APPLE_LICENSE.txt).
+
+The licence of a PureDarwin file is the notice on that file in upstream
+PureDarwin, not this paragraph and not PUREDARWIN_LICENSE.txt:
+
+  https://github.com/PureDarwin/PureDarwin
+
+docs/roadmap/issues/SF-0-index.md, and issue 23, which carries the
+same text, still say "BSD-2-Clause for its own files". That line is too
+small. The maintainer's comment and the per-file headers are the correction.
+
+
+Unresolved: distribution of combined binaries
+---------------------------------------------
+
+This is an open question. It is not legal advice. This repository does not
+answer it.
+
+GPL-2.0-only kernel extensions ported from Asahi Linux are built as kexts
+and prelinked into the same kernel collection as XNU. XNU in this tree is
+Apple code under APSL-2.0. docs/RELEASE_CHECKLIST.md item 4 records that
+combination and leaves it open: on what terms a built collection or system
+image may be distributed. The same maintainer comment asks how distribution
+of kernel collections with GPL-2.0 and APSL-2.0 code is supposed to work.
+
+The FSF's licence list describes the Apple Public Source License, version
+2.0, as a free software licence that is incompatible with the GPL:
+
+  https://www.gnu.org/licenses/license-list.html#apsl2
+
+If that view applies here, distributing that kernel collection may not be
+possible under both licences at once. Nothing in this tree chooses a way
+through that. The checklist says that publishing the sources side by side,
+each under its own licence, is common practice. It does not say that this
+makes the combined binary distributable. No decision is recorded.
+
+A second incompatibility, where the combination exists. The FSF's licence
+list describes the Apache License, version 2.0, as incompatible with GPL
+version 2:
+
+  https://www.gnu.org/licenses/license-list.html#apache2
+
+Finch is recorded as MIT OR Apache-2.0 (NOTICE, and issue 23). The
+GPL-2.0-only code this tree identifies is the Asahi-derived kexts and the
+other GPL-2.0-only ports (the AVE driver among them). Those are kernel
+extensions. Finch is recorded as userspace frameworks. This notice does not
+find a build that links a Finch object into a GPL-2.0-only kext, and it does
+not record an election of Finch's MIT side or its Apache-2.0 side. The MIT
+option and the Apache-2.0 option are different terms. If a binary takes Finch
+code under Apache-2.0 and combines it with GPL-2.0-only code, that is the
+incompatibility the FSF describes, and this repository has no answer for that
+either. The files are not separated by licence, so a credits line is not
+proof they were kept apart.
+
+The checklist also notes that the GPL-3.0-only desktop links the APSL
+libSystem. That combination is not answered here either.
+
+
+Notes left in the tree
+----------------------
+
+The release checklist in this repository, which still lists the licensing work that was
+not finished:
+
+  docs/RELEASE_CHECKLIST.md
+
+Item 4 is the GPL-2.0 / APSL kernel-collection question. Item 6 is per-file
+headers. The checklist records that the owner later chose to make the
+repository public with that work unfinished. Making the repository public
+did not finish it.
+
+The standing instruction in AGENTS.md is unchanged: "License selection for
+original code is pending; do not relicense upstream code."
+
+The README of 7 to 9 November 2026, kept as a record, said that no
+project-wide distribution licence had been selected:
+
+  docs/history/README-2026-11-09.md
+
+How the texts and the provenance record fit together is in LICENSING.md.
+What is still unresolved is in LICENSE_STATUS.md.
